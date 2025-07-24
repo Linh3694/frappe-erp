@@ -1,0 +1,98 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 42.96.40.246 >> ~/.ssh/known_hosts
+          ssh-keyscan -H 172.16.20.111 >> ~/.ssh/known_hosts
+
+      - name: Deploy to Production
+        env:
+          LB_HOST: ${{ secrets.LB_HOST || '42.96.40.246' }}
+          BACKEND_HOST: ${{ secrets.BACKEND_HOST || '172.16.20.111' }}
+          SSH_USER: ${{ secrets.SSH_USER || 'frappe' }}
+          SITE_NAME: ${{ secrets.SITE_NAME || 'admin.erp.wellspring.edu.vn' }}
+        run: |
+          echo "🚀 Starting deployment to production..."
+
+          ssh -o StrictHostKeyChecking=no $SSH_USER@$LB_HOST << 'EOF'
+          echo "📡 Connecting to backend server..."
+          ssh -o StrictHostKeyChecking=no $SSH_USER@172.16.20.111 << 'BACKEND_EOF'
+            echo "🔄 Navigating to frappe-bench directory..."
+            cd /srv/app/frappe-bench
+            
+            echo "📋 Current app status:"
+            bench --version
+            bench --site admin.erp.wellspring.edu.vn get-app-list || true
+            
+            echo "🔧 Backing up before update..."
+            bench --site admin.erp.wellspring.edu.vn backup --with-files || true
+            
+            echo "⏸️ Enabling maintenance mode..."
+            bench --site admin.erp.wellspring.edu.vn set-maintenance-mode on
+            
+            echo "📥 Updating ERP app code..."
+            cd apps/erp
+            git stash push -m "Auto-stash before deployment $(date)" || true
+            git fetch origin
+            git reset --hard origin/main
+            echo "✅ App code updated to latest version"
+            git log --oneline -3
+            cd /srv/app/frappe-bench
+            
+            echo "🔄 Running database migration..."
+            bench --site admin.erp.wellspring.edu.vn migrate
+            
+            echo "🏗️ Building assets..."
+            bench build --app erp || true
+            
+            echo "🔄 Restarting services..."
+            bench restart || true
+            
+            echo "▶️ Disabling maintenance mode..."
+            bench --site admin.erp.wellspring.edu.vn set-maintenance-mode off
+            
+            echo "✅ Deployment completed successfully!"
+            echo "📊 Final status:"
+            bench --site admin.erp.wellspring.edu.vn get-app-list
+          BACKEND_EOF
+          EOF
+
+          echo "🎉 Production deployment completed!"
+
+      - name: Notify on Success
+        if: success()
+        run: |
+          echo "✅ ERP App đã được deploy thành công lên production!"
+          echo "🌐 Site: admin.erp.wellspring.edu.vn"
+          echo "📦 Commit: ${{ github.sha }}"
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment thất bại!"
+          echo "🔍 Hãy kiểm tra logs để tìm nguyên nhân."
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
