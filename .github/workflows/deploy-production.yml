@@ -1,0 +1,123 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Cho phép chạy thủ công
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 42.96.40.246 >> ~/.ssh/known_hosts
+          ssh-keyscan -H 172.16.20.111 >> ~/.ssh/known_hosts
+
+      - name: Deploy to Production
+        env:
+          LB_HOST: ${{ secrets.LB_HOST || '42.96.40.246' }}
+          BACKEND_HOST: ${{ secrets.BACKEND_HOST || '172.16.20.111' }}
+          SSH_USER: ${{ secrets.SSH_USER || 'frappe' }}
+          SITE_NAME: ${{ secrets.SITE_NAME || 'admin.sis.localhost' }}
+        run: |
+          echo "🚀 Starting deployment to production..."
+
+          # Tạo deployment script tạm thời
+          cat > deploy_script.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          echo "📡 Connecting to backend server..."
+          ssh -o StrictHostKeyChecking=no $SSH_USER@$BACKEND_HOST << 'BACKEND_EOF'
+            echo "🔄 Navigating to frappe-bench directory..."
+            cd /srv/app/frappe-bench
+            
+            echo "📋 Current status:"
+            bench --version
+            bench --site $SITE_NAME get-app-list
+            
+            echo "🔧 Backing up before update..."
+            bench --site $SITE_NAME backup --with-files
+            
+            echo "⏸️ Enabling maintenance mode..."
+            bench --site $SITE_NAME set-maintenance-mode on
+            
+            echo "📥 Getting latest app version..."
+            if [ -d "apps/erp" ]; then
+              echo "🔄 Updating existing app..."
+              cd apps/erp
+              git fetch origin
+              git reset --hard origin/main
+              cd /srv/app/frappe-bench
+            else
+              echo "📦 Installing app for first time..."
+              bench get-app erp https://github.com/Linh3694/frappe-erp.git
+            fi
+            
+            echo "🔧 Installing/updating app on site..."
+            if bench --site $SITE_NAME list-apps | grep -q "erp"; then
+              echo "♻️ App already installed, migrating..."
+              bench --site $SITE_NAME migrate
+            else
+              echo "📦 Installing app..."
+              bench install-app erp --site $SITE_NAME
+            fi
+            
+            echo "🏗️ Building assets..."
+            bench build --app erp
+            
+            echo "🔄 Restarting services..."
+            bench restart
+            
+            echo "▶️ Disabling maintenance mode..."
+            bench --site $SITE_NAME set-maintenance-mode off
+            
+            echo "✅ Deployment completed successfully!"
+            echo "📊 Final status:"
+            bench --site $SITE_NAME get-app-list
+          BACKEND_EOF
+          EOF
+
+          chmod +x deploy_script.sh
+
+          # Thực thi deployment qua Load Balancer
+          echo "🌐 Connecting through Load Balancer to Backend..."
+          scp -o StrictHostKeyChecking=no deploy_script.sh $SSH_USER@$LB_HOST:~/
+          ssh -o StrictHostKeyChecking=no $SSH_USER@$LB_HOST "
+            chmod +x ~/deploy_script.sh
+            ~/deploy_script.sh
+            rm ~/deploy_script.sh
+          "
+
+          echo "🎉 Production deployment completed!"
+
+      - name: Notify on Success
+        if: success()
+        run: |
+          echo "✅ ERP App đã được deploy thành công lên production!"
+          echo "🌐 Site: ${{ env.SITE_NAME }}"
+          echo "📦 Commit: ${{ github.sha }}"
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment thất bại!"
+          echo "🔍 Hãy kiểm tra logs để tìm nguyên nhân."
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
+          rm -f deploy_script.sh
