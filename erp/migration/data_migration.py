@@ -100,7 +100,7 @@ class MongoToFrappeDataMigration:
     def get_collection_stats(self):
         """Get statistics of all MongoDB collections"""
         try:
-            if not self.mongo_db:
+            if self.mongo_db is None:
                 logger.error("MongoDB database not connected")
                 return {}
                 
