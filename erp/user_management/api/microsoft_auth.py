@@ -1,0 +1,583 @@
+"""
+Microsoft Authentication API
+Handles Microsoft Azure AD authentication and user sync
+"""
+
+import frappe
+from frappe import _
+import requests
+import json
+from datetime import datetime
+import secrets
+import base64
+import urllib.parse
+
+
+@frappe.whitelist(allow_guest=True)
+def microsoft_login_redirect():
+    """Get Microsoft login redirect URL"""
+    try:
+        # Get Microsoft auth config
+        config = get_microsoft_config()
+        
+        # Generate state parameter for security
+        state = secrets.token_urlsafe(32)
+        frappe.cache().set_value(f"ms_auth_state_{state}", True, expires_in_sec=600)  # 10 minutes
+        
+        # Build authorization URL
+        auth_url = "https://login.microsoftonline.com/{}/oauth2/v2.0/authorize".format(config["tenant_id"])
+        
+        params = {
+            "client_id": config["client_id"],
+            "response_type": "code",
+            "redirect_uri": config["redirect_uri"],
+            "response_mode": "query",
+            "scope": "openid profile email User.Read",
+            "state": state
+        }
+        
+        redirect_url = f"{auth_url}?{urllib.parse.urlencode(params)}"
+        
+        return {
+            "status": "success",
+            "redirect_url": redirect_url,
+            "state": state
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft login redirect error: {str(e)}", "Microsoft Auth")
+        frappe.throw(_("Error generating Microsoft login URL: {0}").format(str(e)))
+
+
+@frappe.whitelist(allow_guest=True)
+def microsoft_callback(code, state):
+    """Handle Microsoft authentication callback"""
+    try:
+        # Verify state parameter
+        if not frappe.cache().get_value(f"ms_auth_state_{state}"):
+            frappe.throw(_("Invalid state parameter"))
+        
+        # Clear state
+        frappe.cache().delete_value(f"ms_auth_state_{state}")
+        
+        # Get access token
+        token_data = get_microsoft_access_token(code)
+        
+        # Get user info from Microsoft Graph
+        user_info = get_microsoft_user_info(token_data["access_token"])
+        
+        # Create or update Microsoft user
+        ms_user = create_or_update_microsoft_user(user_info)
+        
+        # Login or create Frappe user
+        frappe_user = handle_microsoft_user_login(ms_user)
+        
+        # Generate JWT token
+        from erp.user_management.api.auth import generate_jwt_token
+        jwt_token = generate_jwt_token(frappe_user.email)
+        
+        return {
+            "status": "success",
+            "message": _("Microsoft login successful"),
+            "user": {
+                "email": frappe_user.email,
+                "full_name": frappe_user.full_name,
+                "provider": "microsoft"
+            },
+            "token": jwt_token
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft callback error: {str(e)}", "Microsoft Auth")
+        frappe.throw(_("Microsoft authentication failed: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def sync_microsoft_users():
+    """Sync users from Microsoft Graph API"""
+    try:
+        # Get app-only access token
+        token = get_microsoft_app_token()
+        
+        # Get all users from Microsoft Graph
+        users = get_all_microsoft_users(token)
+        
+        synced_count = 0
+        failed_count = 0
+        
+        for user_data in users:
+            try:
+                # Create or update Microsoft user
+                ms_user = create_or_update_microsoft_user(user_data)
+                synced_count += 1
+                
+            except Exception as e:
+                failed_count += 1
+                frappe.log_error(f"Error syncing Microsoft user {user_data.get('id')}: {str(e)}", "Microsoft Sync")
+        
+        return {
+            "status": "success",
+            "message": _("Microsoft users sync completed"),
+            "synced_count": synced_count,
+            "failed_count": failed_count,
+            "total_users": len(users)
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft users sync error: {str(e)}", "Microsoft Sync")
+        frappe.throw(_("Error syncing Microsoft users: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def map_microsoft_user(microsoft_user_id, frappe_user_email=None, create_new=False):
+    """Map Microsoft user to Frappe user"""
+    try:
+        # Get Microsoft user
+        ms_user = frappe.get_doc("ERP Microsoft User", microsoft_user_id)
+        
+        if create_new:
+            # Create new Frappe user
+            success = ms_user.map_to_frappe_user()
+        else:
+            # Map to existing user
+            if not frappe_user_email:
+                frappe.throw(_("Frappe user email is required"))
+            
+            success = ms_user.map_to_frappe_user(frappe_user_email)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": _("Microsoft user mapped successfully"),
+                "mapped_user": ms_user.mapped_user_id
+            }
+        else:
+            return {
+                "status": "failed",
+                "message": _("Failed to map Microsoft user"),
+                "error": ms_user.sync_error
+            }
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft user mapping error: {str(e)}", "Microsoft Mapping")
+        frappe.throw(_("Error mapping Microsoft user: {0}").format(str(e)))
+
+
+def get_microsoft_config():
+    """Get Microsoft authentication configuration from site_config.json or frappe.conf"""
+    config = {
+        "tenant_id": frappe.conf.get("microsoft_tenant_id") or frappe.get_site_config().get("microsoft_tenant_id"),
+        "client_id": frappe.conf.get("microsoft_client_id") or frappe.get_site_config().get("microsoft_client_id"),
+        "client_secret": frappe.conf.get("microsoft_client_secret") or frappe.get_site_config().get("microsoft_client_secret"),
+        "redirect_uri": frappe.conf.get("microsoft_redirect_uri") or frappe.get_site_config().get("microsoft_redirect_uri") or f"{frappe.utils.get_url()}/api/method/erp.user_management.api.microsoft_auth.microsoft_callback",
+        "hourly_sync": frappe.conf.get("microsoft_hourly_sync") or frappe.get_site_config().get("microsoft_hourly_sync", False)
+    }
+    
+    # Validate required fields
+    required_fields = ["tenant_id", "client_id", "client_secret"]
+    missing_fields = [field for field in required_fields if not config.get(field)]
+    
+    if missing_fields:
+        frappe.throw(_(f"Missing Microsoft configuration: {', '.join(missing_fields)}. Please check your site_config.json"))
+    
+    return config
+
+
+def get_microsoft_access_token(code):
+    """Exchange authorization code for access token"""
+    config = get_microsoft_config()
+    
+    token_url = f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token"
+    
+    data = {
+        "client_id": config["client_id"],
+        "client_secret": config["client_secret"],
+        "code": code,
+        "redirect_uri": config["redirect_uri"],
+        "grant_type": "authorization_code"
+    }
+    
+    response = requests.post(token_url, data=data)
+    
+    if response.status_code != 200:
+        raise Exception(f"Token request failed: {response.text}")
+    
+    return response.json()
+
+
+def get_microsoft_app_token():
+    """Get app-only access token for Microsoft Graph"""
+    config = get_microsoft_config()
+    
+    token_url = f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token"
+    
+    data = {
+        "client_id": config["client_id"],
+        "client_secret": config["client_secret"],
+        "scope": "https://graph.microsoft.com/.default",
+        "grant_type": "client_credentials"
+    }
+    
+    response = requests.post(token_url, data=data)
+    
+    if response.status_code != 200:
+        raise Exception(f"App token request failed: {response.text}")
+    
+    return response.json()["access_token"]
+
+
+def get_microsoft_user_info(access_token):
+    """Get user information from Microsoft Graph"""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+    
+    response = requests.get("https://graph.microsoft.com/v1.0/me", headers=headers)
+    
+    if response.status_code != 200:
+        raise Exception(f"User info request failed: {response.text}")
+    
+    return response.json()
+
+
+def get_all_microsoft_users(access_token):
+    """Get all users from Microsoft Graph"""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+    
+    users = []
+    url = "https://graph.microsoft.com/v1.0/users"
+    
+    while url:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            raise Exception(f"Users request failed: {response.text}")
+        
+        data = response.json()
+        users.extend(data.get("value", []))
+        
+        # Get next page
+        url = data.get("@odata.nextLink")
+    
+    return users
+
+
+def create_or_update_microsoft_user(user_data):
+    """Create or update Microsoft user in Frappe"""
+    try:
+        # Check if user already exists
+        existing = frappe.db.get_value("ERP Microsoft User", {"microsoft_id": user_data["id"]})
+        
+        if existing:
+            # Update existing user
+            ms_user = frappe.get_doc("ERP Microsoft User", existing)
+        else:
+            # Create new user
+            ms_user = frappe.get_doc({
+                "doctype": "ERP Microsoft User",
+                "microsoft_id": user_data["id"]
+            })
+        
+        # Update fields
+        ms_user.display_name = user_data.get("displayName")
+        ms_user.given_name = user_data.get("givenName")
+        ms_user.surname = user_data.get("surname")
+        ms_user.user_principal_name = user_data.get("userPrincipalName")
+        ms_user.mail = user_data.get("mail")
+        ms_user.job_title = user_data.get("jobTitle")
+        ms_user.department = user_data.get("department")
+        ms_user.office_location = user_data.get("officeLocation")
+        ms_user.mobile_phone = user_data.get("mobilePhone")
+        ms_user.employee_id = user_data.get("employeeId")
+        ms_user.employee_type = user_data.get("employeeType")
+        ms_user.account_enabled = user_data.get("accountEnabled", True)
+        ms_user.preferred_language = user_data.get("preferredLanguage")
+        ms_user.usage_location = user_data.get("usageLocation")
+        
+        # Handle business phones (array)
+        if user_data.get("businessPhones"):
+            ms_user.business_phones = ", ".join(user_data["businessPhones"])
+        
+        ms_user.last_sync_at = datetime.now()
+        ms_user.sync_status = "synced"
+        ms_user.sync_error = ""
+        
+        ms_user.save()
+        
+        return ms_user
+        
+    except Exception as e:
+        # Mark as failed sync
+        if 'ms_user' in locals():
+            ms_user.sync_status = "failed"
+            ms_user.sync_error = str(e)
+            ms_user.save()
+        
+        raise e
+
+
+def handle_microsoft_user_login(ms_user):
+    """Handle Microsoft user login"""
+    try:
+        # Check if already mapped to Frappe user
+        if ms_user.mapped_user_id:
+            frappe_user = frappe.get_doc("User", ms_user.mapped_user_id)
+            
+            # Update user profile
+            update_user_profile_from_microsoft(frappe_user.email, ms_user)
+            
+            return frappe_user
+        
+        # Check if Frappe user exists with same email
+        email = ms_user.mail or ms_user.user_principal_name
+        if frappe.db.exists("User", email):
+            # Map to existing user
+            ms_user.map_to_frappe_user(email)
+            frappe_user = frappe.get_doc("User", email)
+            
+            # Update user profile
+            update_user_profile_from_microsoft(email, ms_user)
+            
+            return frappe_user
+        
+        # Create new Frappe user
+        ms_user.map_to_frappe_user()
+        frappe_user = frappe.get_doc("User", ms_user.mapped_user_id)
+        
+        # Create user profile
+        create_user_profile_from_microsoft(frappe_user.email, ms_user)
+        
+        return frappe_user
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft user login error: {str(e)}", "Microsoft Login")
+        raise e
+
+
+def update_user_profile_from_microsoft(user_email, ms_user):
+    """Update user profile with Microsoft data"""
+    try:
+        # Get or create user profile
+        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
+        
+        if profile_name:
+            profile = frappe.get_doc("ERP User Profile", profile_name)
+        else:
+            profile = frappe.get_doc({
+                "doctype": "ERP User Profile",
+                "user": user_email
+            })
+        
+        # Update fields from Microsoft data
+        profile.provider = "microsoft"
+        profile.microsoft_id = ms_user.microsoft_id
+        profile.job_title = ms_user.job_title
+        profile.department = ms_user.department
+        profile.employee_code = ms_user.employee_id
+        
+        # Generate username if not set
+        if not profile.username and ms_user.user_principal_name:
+            profile.username = ms_user.user_principal_name.split('@')[0]
+        
+        profile.save()
+        
+        return profile
+        
+    except Exception as e:
+        frappe.log_error(f"User profile update error: {str(e)}", "Microsoft Profile Update")
+        raise e
+
+
+def create_user_profile_from_microsoft(user_email, ms_user):
+    """Create user profile from Microsoft data"""
+    try:
+        profile = frappe.get_doc({
+            "doctype": "ERP User Profile",
+            "user": user_email,
+            "provider": "microsoft",
+            "microsoft_id": ms_user.microsoft_id,
+            "job_title": ms_user.job_title,
+            "department": ms_user.department,
+            "employee_code": ms_user.employee_id,
+            "username": ms_user.user_principal_name.split('@')[0] if ms_user.user_principal_name else None,
+            "active": ms_user.account_enabled
+        })
+        
+        profile.insert()
+        
+        return profile
+        
+    except Exception as e:
+        frappe.log_error(f"User profile creation error: {str(e)}", "Microsoft Profile Creation")
+        raise e
+
+
+@frappe.whitelist()
+def get_microsoft_sync_stats():
+    """Get Microsoft sync statistics"""
+    try:
+        stats = {
+            "total_microsoft_users": frappe.db.count("ERP Microsoft User"),
+            "synced_users": frappe.db.count("ERP Microsoft User", {"sync_status": "synced"}),
+            "pending_users": frappe.db.count("ERP Microsoft User", {"sync_status": "pending"}),
+            "failed_users": frappe.db.count("ERP Microsoft User", {"sync_status": "failed"}),
+            "mapped_users": frappe.db.count("ERP Microsoft User", {"mapped_user_id": ["!=", ""]}),
+            "unmapped_users": frappe.db.count("ERP Microsoft User", {"mapped_user_id": ["in", ["", None]]})
+        }
+        
+        return {
+            "status": "success",
+            "stats": stats
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft sync stats error: {str(e)}", "Microsoft Stats")
+        frappe.throw(_("Error getting Microsoft sync stats: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def test_microsoft_config():
+    """Test Microsoft configuration"""
+    try:
+        config = get_microsoft_config()
+        
+        # Test if all required fields are present
+        required_fields = ["tenant_id", "client_id", "client_secret"]
+        config_status = {}
+        
+        for field in required_fields:
+            if config.get(field):
+                config_status[field] = "✓ Configured"
+            else:
+                config_status[field] = "✗ Missing"
+        
+        # Mask sensitive data
+        display_config = {
+            "tenant_id": config.get("tenant_id", "Not configured"),
+            "client_id": config.get("client_id", "Not configured"),
+            "client_secret": "***" + config.get("client_secret", "")[-4:] if config.get("client_secret") else "Not configured",
+            "redirect_uri": config.get("redirect_uri", "Not configured"),
+            "hourly_sync": config.get("hourly_sync", False)
+        }
+        
+        return {
+            "status": "success",
+            "message": "Microsoft configuration test completed",
+            "config": display_config,
+            "config_status": config_status,
+            "all_configured": all(config.get(field) for field in required_fields)
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft config test error: {str(e)}", "Microsoft Config Test")
+        return {
+            "status": "error",
+            "message": str(e),
+            "config": {},
+            "config_status": {},
+            "all_configured": False
+        }
+
+
+@frappe.whitelist()
+def test_microsoft_connection():
+    """Test connection to Microsoft Graph API"""
+    try:
+        # Get app-only token to test connection
+        token = get_microsoft_app_token()
+        
+        # Test basic Graph API call
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        # Try to get basic organization info
+        response = requests.get("https://graph.microsoft.com/v1.0/organization", headers=headers)
+        
+        if response.status_code == 200:
+            org_data = response.json()
+            org_info = org_data.get("value", [{}])[0] if org_data.get("value") else {}
+            
+            return {
+                "status": "success",
+                "message": "Microsoft Graph API connection successful",
+                "connection_test": "✓ Connected",
+                "organization": {
+                    "display_name": org_info.get("displayName", "Unknown"),
+                    "id": org_info.get("id", "Unknown"),
+                    "verified_domains": len(org_info.get("verifiedDomains", []))
+                }
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Microsoft Graph API connection failed: {response.text}",
+                "connection_test": "✗ Failed",
+                "status_code": response.status_code
+            }
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft connection test error: {str(e)}", "Microsoft Connection Test")
+        return {
+            "status": "error",
+            "message": str(e),
+            "connection_test": "✗ Failed"
+        }
+
+
+@frappe.whitelist()
+def get_microsoft_test_users(limit=5):
+    """Get a few Microsoft users for testing"""
+    try:
+        # Get app-only token
+        token = get_microsoft_app_token()
+        
+        # Get first few users
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(f"https://graph.microsoft.com/v1.0/users?$top={limit}", headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json()
+            users = data.get("value", [])
+            
+            # Clean up user data for display
+            clean_users = []
+            for user in users:
+                clean_users.append({
+                    "id": user.get("id"),
+                    "displayName": user.get("displayName"),
+                    "userPrincipalName": user.get("userPrincipalName"),
+                    "mail": user.get("mail"),
+                    "jobTitle": user.get("jobTitle"),
+                    "department": user.get("department"),
+                    "accountEnabled": user.get("accountEnabled")
+                })
+            
+            return {
+                "status": "success",
+                "message": f"Retrieved {len(clean_users)} test users",
+                "users": clean_users,
+                "total_found": len(clean_users)
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Failed to get test users: {response.text}",
+                "status_code": response.status_code
+            }
+        
+    except Exception as e:
+        frappe.log_error(f"Microsoft test users error: {str(e)}", "Microsoft Test Users")
+        return {
+            "status": "error",
+            "message": str(e)
+        }

@@ -1,0 +1,277 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "field:microsoft_id",
+ "beta": 0,
+ "creation": "2024-12-19 15:00:00.000000",
+ "custom": 0,
+ "description": "Microsoft User for sync with Azure AD",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "microsoft_id",
+  "display_name",
+  "given_name",
+  "surname",
+  "column_break_1",
+  "user_principal_name",
+  "mail",
+  "account_enabled",
+  "section_break_2",
+  "job_information",
+  "job_title",
+  "department",
+  "office_location",
+  "column_break_2",
+  "employee_id",
+  "employee_type",
+  "section_break_3",
+  "contact_information",
+  "business_phones",
+  "mobile_phone",
+  "column_break_3",
+  "preferred_language",
+  "usage_location",
+  "section_break_4",
+  "sync_information",
+  "sync_status",
+  "last_sync_at",
+  "column_break_4",
+  "sync_error",
+  "mapped_user_id",
+  "section_break_5",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "microsoft_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Microsoft ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "display_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Display Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "given_name",
+   "fieldtype": "Data",
+   "label": "Given Name"
+  },
+  {
+   "fieldname": "surname",
+   "fieldtype": "Data",
+   "label": "Surname"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "user_principal_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "User Principal Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "mail",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "account_enabled",
+   "fieldtype": "Check",
+   "label": "Account Enabled",
+   "default": 1
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "job_information",
+   "fieldtype": "Section Break",
+   "label": "Job Information"
+  },
+  {
+   "fieldname": "job_title",
+   "fieldtype": "Data",
+   "label": "Job Title"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Data",
+   "label": "Department"
+  },
+  {
+   "fieldname": "office_location",
+   "fieldtype": "Data",
+   "label": "Office Location"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "employee_id",
+   "fieldtype": "Data",
+   "label": "Employee ID"
+  },
+  {
+   "fieldname": "employee_type",
+   "fieldtype": "Data",
+   "label": "Employee Type"
+  },
+  {
+   "fieldname": "section_break_3",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "contact_information",
+   "fieldtype": "Section Break",
+   "label": "Contact Information"
+  },
+  {
+   "fieldname": "business_phones",
+   "fieldtype": "Small Text",
+   "label": "Business Phones"
+  },
+  {
+   "fieldname": "mobile_phone",
+   "fieldtype": "Data",
+   "label": "Mobile Phone",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "preferred_language",
+   "fieldtype": "Data",
+   "label": "Preferred Language"
+  },
+  {
+   "fieldname": "usage_location",
+   "fieldtype": "Data",
+   "label": "Usage Location"
+  },
+  {
+   "fieldname": "section_break_4",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "sync_information",
+   "fieldtype": "Section Break",
+   "label": "Sync Information"
+  },
+  {
+   "fieldname": "sync_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Sync Status",
+   "options": "pending\nsynced\nfailed\ndeleted",
+   "default": "pending"
+  },
+  {
+   "fieldname": "last_sync_at",
+   "fieldtype": "Datetime",
+   "label": "Last Sync At"
+  },
+  {
+   "fieldname": "column_break_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sync_error",
+   "fieldtype": "Text",
+   "label": "Sync Error"
+  },
+  {
+   "fieldname": "mapped_user_id",
+   "fieldtype": "Link",
+   "label": "Mapped User",
+   "options": "User"
+  },
+  {
+   "fieldname": "section_break_5",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text Editor",
+   "label": "Notes"
+  }
+ ],
+ "has_web_view": 0,
+ "hide_heading": 0,
+ "hide_toolbar": 0,
+ "idx": 0,
+ "image_view": 0,
+ "in_create": 0,
+ "is_submittable": 0,
+ "issingle": 0,
+ "istable": 0,
+ "max_attachments": 0,
+ "modified": "2024-12-19 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "User Management",
+ "name": "ERP Microsoft User",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Administrator",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 0,
+ "read_only": 0,
+ "read_only_onload": 0,
+ "show_name_in_global_search": 0,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "track_seen": 0,
+ "track_views": 0
+}
