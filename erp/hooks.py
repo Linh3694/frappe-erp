@@ -185,6 +185,8 @@ app_license = "mit"
 # 	"Task": "erp.task.get_dashboard_data"
 # }
 
+# Inventory API endpoints are automatically exposed via @frappe.whitelist() decorator
+
 # exempt linked doctypes from being automatically cancelled
 #
 # auto_cancel_exempted_doctypes = ["Auto Repeat"]
@@ -241,4 +243,8 @@ app_license = "mit"
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
+
+# File upload system setup
+# ------------------------
+after_install = "erp.inventory.utils.file_utils.setup_upload_directories"
 

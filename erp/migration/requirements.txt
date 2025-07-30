@@ -1,0 +1,3 @@
+# Migration dependencies
+pymongo>=4.0.0
+bson>=0.5.10
