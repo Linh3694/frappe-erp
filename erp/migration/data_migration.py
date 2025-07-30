@@ -44,10 +44,37 @@ class MongoToFrappeDataMigration:
             return False
             
         try:
-            self.mongo_client = MongoClient(self.mongo_uri)
+            # Parse MongoDB URI to extract database name if not provided separately
+            if not self.mongo_db_name or self.mongo_db_name == "workspace":
+                # Try to extract database name from URI
+                if "/" in self.mongo_uri and "?" in self.mongo_uri:
+                    # Format: mongodb://user:pass@host:port/database?options
+                    parts = self.mongo_uri.split("/")
+                    if len(parts) >= 4:
+                        db_part = parts[3].split("?")[0]
+                        if db_part:
+                            self.mongo_db_name = db_part
+            
+            # Connect with proper timeout and authentication
+            self.mongo_client = MongoClient(
+                self.mongo_uri,
+                serverSelectionTimeoutMS=5000,  # 5 second timeout
+                connectTimeoutMS=5000,
+                socketTimeoutMS=5000
+            )
+            
+            # Test connection
+            self.mongo_client.admin.command('ping')
+            
+            # Get database
             self.mongo_db = self.mongo_client[self.mongo_db_name]
+            
+            # Test database access
+            _ = self.mongo_db.list_collection_names()
+            
             logger.info(f"Connected to MongoDB: {self.mongo_db_name}")
             return True
+            
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB: {str(e)}")
             return False
@@ -73,12 +100,25 @@ class MongoToFrappeDataMigration:
     def get_collection_stats(self):
         """Get statistics of all MongoDB collections"""
         try:
+            if not self.mongo_db:
+                logger.error("MongoDB database not connected")
+                return {}
+                
+            logger.info(f"Getting collection stats for database: {self.mongo_db_name}")
+            
             collections = self.mongo_db.list_collection_names()
+            logger.info(f"Found collections: {collections}")
+            
             stats = {}
             
             for collection_name in collections:
-                count = self.mongo_db[collection_name].count_documents({})
-                stats[collection_name] = count
+                try:
+                    count = self.mongo_db[collection_name].count_documents({})
+                    stats[collection_name] = count
+                    logger.info(f"Collection {collection_name}: {count} documents")
+                except Exception as e:
+                    logger.error(f"Error counting documents in {collection_name}: {str(e)}")
+                    stats[collection_name] = 0
                 
             return stats
         except Exception as e:
@@ -377,6 +417,9 @@ def start_migration(mongo_uri=None, mongo_db_name=None):
 def get_migration_stats(mongo_uri=None, mongo_db_name=None):
     """Get migration statistics and preview"""
     try:
+        # Debug logging
+        logger.info(f"get_migration_stats called with mongo_uri: {mongo_uri}, mongo_db_name: {mongo_db_name}")
+        
         migrator = MongoToFrappeDataMigration(mongo_uri, mongo_db_name)
         
         if not migrator.connect_mongodb():
@@ -429,6 +472,7 @@ def test_mongodb_connection(mongo_uri=None, mongo_db_name=None):
             return {
                 "status": "success",
                 "message": "Connected to MongoDB successfully",
+                "database": migrator.mongo_db_name,
                 "collections": stats
             }
         else:
@@ -438,6 +482,93 @@ def test_mongodb_connection(mongo_uri=None, mongo_db_name=None):
             }
             
     except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+@frappe.whitelist()
+def test_mongodb_simple(mongo_uri):
+    """Simple MongoDB connection test with just URI"""
+    try:
+        logger.info(f"test_mongodb_simple called with URI: {mongo_uri}")
+        
+        migrator = MongoToFrappeDataMigration(mongo_uri, None)  # Let it extract DB name from URI
+        logger.info(f"Migrator created with URI: {migrator.mongo_uri}, DB: {migrator.mongo_db_name}")
+        
+        if migrator.connect_mongodb():
+            stats = migrator.get_collection_stats()
+            migrator.disconnect_mongodb()
+            
+            return {
+                "status": "success",
+                "message": f"Connected to MongoDB database '{migrator.mongo_db_name}' successfully",
+                "database": migrator.mongo_db_name,
+                "total_collections": len(stats),
+                "collections": stats
+            }
+        else:
+            return {
+                "status": "failed", 
+                "message": "Cannot connect to MongoDB"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in test_mongodb_simple: {str(e)}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+@frappe.whitelist()
+def test_direct_connection():
+    """Test direct MongoDB connection without parameters"""
+    try:
+        if not MONGODB_AVAILABLE:
+            return {
+                "status": "error",
+                "message": "MongoDB dependencies not available. Please install: pip install pymongo"
+            }
+        
+        # Hardcode URI for testing
+        mongo_uri = "mongodb://app:wellspring@172.16.20.130:27017/workspace?authSource=workspace"
+        
+        logger.info(f"Testing direct connection to: {mongo_uri}")
+        
+        # Test direct pymongo connection
+        client = MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=5000
+        )
+        
+        # Test connection
+        client.admin.command('ping')
+        
+        # Get database
+        db = client['workspace']
+        collections = db.list_collection_names()
+        
+        stats = {}
+        for collection_name in collections:
+            count = db[collection_name].count_documents({})
+            stats[collection_name] = count
+        
+        client.close()
+        
+        return {
+            "status": "success",
+            "message": "Direct MongoDB connection successful",
+            "database": "workspace",
+            "total_collections": len(stats),
+            "collections": stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in direct connection test: {str(e)}")
         return {
             "status": "error",
             "message": str(e)
