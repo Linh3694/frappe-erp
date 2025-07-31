@@ -123,7 +123,13 @@ def full_microsoft_sync_scheduler():
         results["user_profiles"] = profile_result
         frappe.logger().info(f"✅ User profiles sync: {profile_result}")
         
-        # 3. Get final counts
+        # 3. Fix missing employee codes
+        frappe.logger().info("🔧 Step 3: Fixing missing employee codes...")
+        fix_result = fix_missing_employee_codes()
+        results["employee_code_fix"] = fix_result
+        frappe.logger().info(f"✅ Employee code fix: {fix_result}")
+        
+        # 4. Get final counts
         ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
         profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
         user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
@@ -568,7 +574,7 @@ def create_or_update_user_profile(frappe_user, ms_user, user_data):
         profile.email = user_data.get("mail") or user_data.get("userPrincipalName") or frappe_user.email
         
         # Microsoft-specific fields
-        profile.employee_id = user_data.get("employeeId")
+        profile.employee_code = user_data.get("employeeId")  # Fixed: Use employee_code not employee_id
         profile.department = user_data.get("department")
         profile.job_title = user_data.get("jobTitle")
         profile.office_location = user_data.get("officeLocation")
@@ -687,7 +693,12 @@ def full_microsoft_sync():
         profile_result = sync_existing_users_to_profiles()
         results["user_profiles"] = profile_result
         
-        # 3. Get final counts
+        # 3. Fix missing employee codes
+        frappe.logger().info("Fixing missing employee codes...")
+        fix_result = fix_missing_employee_codes()
+        results["employee_code_fix"] = fix_result
+        
+        # 4. Get final counts
         ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
         profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
         user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
@@ -803,6 +814,65 @@ def create_user_profile_from_microsoft(user_email, ms_user):
     except Exception as e:
         frappe.log_error(f"User profile creation error: {str(e)}", "Microsoft Profile Creation")
         raise e
+
+
+@frappe.whitelist()
+def fix_missing_employee_codes():
+    """Fix missing employee codes in User Profiles from Microsoft Users"""
+    try:
+        frappe.logger().info("🔧 Starting fix for missing employee codes...")
+        
+        # Get all User Profiles missing employee_code but have microsoft_user_id
+        profiles_missing_code = frappe.db.sql("""
+            SELECT up.name, up.user, up.microsoft_user_id, ms.employee_id, ms.display_name
+            FROM `tabERP User Profile` up
+            LEFT JOIN `tabERP Microsoft User` ms ON ms.microsoft_id = up.microsoft_user_id
+            WHERE (up.employee_code IS NULL OR up.employee_code = '')
+            AND up.microsoft_user_id IS NOT NULL
+            AND ms.employee_id IS NOT NULL
+            AND ms.employee_id != ''
+        """, as_dict=True)
+        
+        if not profiles_missing_code:
+            return {
+                "status": "success",
+                "message": "No profiles missing employee codes",
+                "updated_count": 0
+            }
+        
+        updated_count = 0
+        failed_count = 0
+        
+        for profile_data in profiles_missing_code:
+            try:
+                # Update profile with employee_code
+                profile_doc = frappe.get_doc("ERP User Profile", profile_data.name)
+                profile_doc.employee_code = profile_data.employee_id
+                profile_doc.save()
+                
+                updated_count += 1
+                frappe.logger().info(f"✅ Updated {profile_data.display_name}: {profile_data.employee_id}")
+                
+            except Exception as e:
+                failed_count += 1
+                frappe.log_error(f"Error updating profile {profile_data.name}: {str(e)}", "Employee Code Fix")
+                frappe.logger().error(f"❌ Failed to update {profile_data.display_name}: {str(e)}")
+        
+        result = {
+            "status": "success",
+            "message": f"Fixed {updated_count} missing employee codes",
+            "updated_count": updated_count,
+            "failed_count": failed_count,
+            "total_found": len(profiles_missing_code)
+        }
+        
+        frappe.logger().info(f"🎉 Employee code fix completed: {result}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error fixing employee codes: {str(e)}"
+        frappe.log_error(error_msg, "Employee Code Fix")
+        frappe.throw(_(error_msg))
 
 
 @frappe.whitelist()
