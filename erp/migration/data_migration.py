@@ -573,3 +573,143 @@ def test_direct_connection():
             "status": "error",
             "message": str(e)
         }
+
+
+# =============================================================================
+# FRAPPE WHITELIST FUNCTIONS - API Endpoints
+# =============================================================================
+
+@frappe.whitelist()
+def get_migration_stats(mongo_uri=None, mongo_db_name=None):
+    """Get migration statistics from MongoDB"""
+    try:
+        migrator = MongoToFrappeDataMigration(mongo_uri, mongo_db_name)
+        
+        if not migrator.connect_mongodb():
+            return {
+                "status": "error",
+                "message": "Failed to connect to MongoDB"
+            }
+        
+        stats = migrator.get_collection_stats()
+        migrator.disconnect_mongodb()
+        
+        return {
+            "status": "success",
+            "message": "Migration stats retrieved successfully",
+            "data": stats
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error getting migration stats: {str(e)}", "Migration Stats")
+        return {
+            "status": "error", 
+            "message": str(e)
+        }
+
+
+@frappe.whitelist()
+def migrate_users(mongo_uri=None, mongo_db_name=None):
+    """Migrate users from MongoDB to Frappe"""
+    try:
+        migrator = MongoToFrappeDataMigration(mongo_uri, mongo_db_name)
+        
+        if not migrator.connect_mongodb():
+            return {
+                "status": "error",
+                "message": "Failed to connect to MongoDB"
+            }
+        
+        # Run user migration
+        result = migrator.migrate_users()
+        migrator.disconnect_mongodb()
+        
+        return {
+            "status": "success",
+            "message": "User migration completed",
+            "data": result
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error migrating users: {str(e)}", "User Migration")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+@frappe.whitelist()
+def migrate_devices(mongo_uri=None, mongo_db_name=None):
+    """Migrate inventory devices from MongoDB to Frappe"""
+    try:
+        migrator = MongoToFrappeDataMigration(mongo_uri, mongo_db_name)
+        
+        if not migrator.connect_mongodb():
+            return {
+                "status": "error", 
+                "message": "Failed to connect to MongoDB"
+            }
+        
+        # Run device migration
+        result = migrator.migrate_inventory_devices()
+        migrator.disconnect_mongodb()
+        
+        return {
+            "status": "success",
+            "message": "Device migration completed",
+            "data": result
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error migrating devices: {str(e)}", "Device Migration")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+@frappe.whitelist()
+def start_migration(mongo_uri=None, mongo_db_name=None):
+    """Start complete data migration"""
+    try:
+        migrator = MongoToFrappeDataMigration(mongo_uri, mongo_db_name)
+        
+        if not migrator.connect_mongodb():
+            return {
+                "status": "error",
+                "message": "Failed to connect to MongoDB"
+            }
+        
+        results = {
+            "users": None,
+            "devices": None,
+            "activities": None
+        }
+        
+        # Migrate users
+        frappe.publish_progress(25, "Migrating users...")
+        results["users"] = migrator.migrate_users()
+        
+        # Migrate devices
+        frappe.publish_progress(50, "Migrating devices...")
+        results["devices"] = migrator.migrate_inventory_devices()
+        
+        # Migrate activities
+        frappe.publish_progress(75, "Migrating activities...")
+        results["activities"] = migrator.migrate_activities()
+        
+        frappe.publish_progress(100, "Migration completed!")
+        migrator.disconnect_mongodb()
+        
+        return {
+            "status": "success",
+            "message": "Complete migration finished",
+            "data": results
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error in migration: {str(e)}", "Complete Migration")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
