@@ -148,23 +148,21 @@ app_license = "mit"
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"erp.tasks.all"
-# 	],
-# 	"daily": [
-# 		"erp.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"erp.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"erp.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"erp.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"daily": [
+		"erp.api.erp_common_user.microsoft_auth.sync_microsoft_users_scheduler"
+	],
+	"cron": {
+		# Chạy Microsoft sync mỗi ngày lúc 2:00 AM
+		"0 2 * * *": [
+			"erp.api.erp_common_user.microsoft_auth.sync_microsoft_users_scheduler"
+		],
+		# Chạy Microsoft sync mỗi 4 giờ (nếu cần sync thường xuyên hơn)
+		"0 */4 * * *": [
+			"erp.api.erp_common_user.microsoft_auth.sync_microsoft_users_scheduler"
+		]
+	}
+}
 
 # Testing
 # -------

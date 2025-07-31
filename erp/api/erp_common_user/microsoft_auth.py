@@ -92,40 +92,56 @@ def microsoft_callback(code, state):
         frappe.throw(_("Microsoft authentication failed: {0}").format(str(e)))
 
 
+def sync_microsoft_users_scheduler():
+    """Sync users from Microsoft Graph API - For Scheduler (no throw exceptions)"""
+    try:
+        result = sync_microsoft_users_internal()
+        frappe.logger().info(f"Scheduled Microsoft sync completed: {result}")
+        return result
+    except Exception as e:
+        frappe.log_error(f"Scheduled Microsoft users sync error: {str(e)}", "Microsoft Sync Scheduler")
+        frappe.logger().error(f"Microsoft sync scheduler failed: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
 @frappe.whitelist()
 def sync_microsoft_users():
-    """Sync users from Microsoft Graph API"""
+    """Sync users from Microsoft Graph API - For API calls"""
     try:
-        # Get app-only access token
-        token = get_microsoft_app_token()
-        
-        # Get all users from Microsoft Graph
-        users = get_all_microsoft_users(token)
-        
-        synced_count = 0
-        failed_count = 0
-        
-        for user_data in users:
-            try:
-                # Create or update Microsoft user
-                ms_user = create_or_update_microsoft_user(user_data)
-                synced_count += 1
-                
-            except Exception as e:
-                failed_count += 1
-                frappe.log_error(f"Error syncing Microsoft user {user_data.get('id')}: {str(e)}", "Microsoft Sync")
-        
-        return {
-            "status": "success",
-            "message": _("Microsoft users sync completed"),
-            "synced_count": synced_count,
-            "failed_count": failed_count,
-            "total_users": len(users)
-        }
-        
+        return sync_microsoft_users_internal()
     except Exception as e:
         frappe.log_error(f"Microsoft users sync error: {str(e)}", "Microsoft Sync")
         frappe.throw(_("Error syncing Microsoft users: {0}").format(str(e)))
+
+
+def sync_microsoft_users_internal():
+    """Internal sync function - shared logic"""
+    # Get app-only access token
+    token = get_microsoft_app_token()
+    
+    # Get all users from Microsoft Graph
+    users = get_all_microsoft_users(token)
+    
+    synced_count = 0
+    failed_count = 0
+    
+    for user_data in users:
+        try:
+            # Create or update Microsoft user
+            ms_user = create_or_update_microsoft_user(user_data)
+            synced_count += 1
+            
+        except Exception as e:
+            failed_count += 1
+            frappe.log_error(f"Error syncing Microsoft user {user_data.get('id')}: {str(e)}", "Microsoft Sync")
+    
+    return {
+        "status": "success",
+        "message": _("Microsoft users sync completed"),
+        "synced_count": synced_count,
+        "failed_count": failed_count,
+        "total_users": len(users)
+    }
 
 
 @frappe.whitelist()
