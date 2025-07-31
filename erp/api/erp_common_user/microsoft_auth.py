@@ -265,7 +265,9 @@ def get_all_microsoft_users(access_token):
     }
     
     users = []
-    url = "https://graph.microsoft.com/v1.0/users"
+    # Include all fields we need for sync
+    fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+    url = f"https://graph.microsoft.com/v1.0/users?$select={fields}"
     
     while url:
         response = requests.get(url, headers=headers)
