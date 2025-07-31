@@ -123,13 +123,19 @@ def full_microsoft_sync_scheduler():
         results["user_profiles"] = profile_result
         frappe.logger().info(f"✅ User profiles sync: {profile_result}")
         
-        # 3. Fix missing employee codes
-        frappe.logger().info("🔧 Step 3: Fixing missing employee codes...")
+        # 3. Force create missing users
+        frappe.logger().info("🔨 Step 3: Force creating missing users...")
+        force_create_result = force_create_missing_users()
+        results["force_create_users"] = force_create_result
+        frappe.logger().info(f"✅ Force create users: {force_create_result}")
+        
+        # 4. Fix missing employee codes
+        frappe.logger().info("🔧 Step 4: Fixing missing employee codes...")
         fix_result = fix_missing_employee_codes()
         results["employee_code_fix"] = fix_result
         frappe.logger().info(f"✅ Employee code fix: {fix_result}")
         
-        # 4. Get final counts
+        # 5. Get final counts
         ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
         profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
         user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
@@ -693,12 +699,17 @@ def full_microsoft_sync():
         profile_result = sync_existing_users_to_profiles()
         results["user_profiles"] = profile_result
         
-        # 3. Fix missing employee codes
+        # 3. Force create missing users
+        frappe.logger().info("Force creating missing users...")
+        force_create_result = force_create_missing_users()
+        results["force_create_users"] = force_create_result
+        
+        # 4. Fix missing employee codes
         frappe.logger().info("Fixing missing employee codes...")
         fix_result = fix_missing_employee_codes()
         results["employee_code_fix"] = fix_result
         
-        # 4. Get final counts
+        # 5. Get final counts
         ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
         profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
         user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
@@ -814,6 +825,91 @@ def create_user_profile_from_microsoft(user_email, ms_user):
     except Exception as e:
         frappe.log_error(f"User profile creation error: {str(e)}", "Microsoft Profile Creation")
         raise e
+
+
+@frappe.whitelist()
+def force_create_missing_users():
+    """Force create Frappe users for unmapped Microsoft users"""
+    try:
+        frappe.logger().info("🔨 Starting force create for unmapped Microsoft users...")
+        
+        # Get Microsoft users with employee_id but no mapping
+        unmapped_users = frappe.db.sql("""
+            SELECT name, microsoft_id, display_name, user_principal_name, 
+                   given_name, surname, mail, employee_id, job_title, department
+            FROM `tabERP Microsoft User`
+            WHERE employee_id IS NOT NULL 
+            AND employee_id != ''
+            AND (mapped_user_id IS NULL OR mapped_user_id = '')
+        """, as_dict=True)
+        
+        if not unmapped_users:
+            return {
+                "status": "success",
+                "message": "No unmapped Microsoft users found",
+                "created_count": 0
+            }
+        
+        created_count = 0
+        failed_count = 0
+        
+        for ms_user_data in unmapped_users:
+            try:
+                # Get full Microsoft user doc
+                ms_user = frappe.get_doc("ERP Microsoft User", ms_user_data.name)
+                
+                # Reconstruct user_data for create process
+                user_data = {
+                    "id": ms_user.microsoft_id,
+                    "displayName": ms_user.display_name,
+                    "givenName": ms_user.given_name,
+                    "surname": ms_user.surname,
+                    "userPrincipalName": ms_user.user_principal_name,
+                    "mail": ms_user.mail,
+                    "jobTitle": ms_user.job_title,
+                    "department": ms_user.department,
+                    "employeeId": ms_user.employee_id,
+                    "accountEnabled": ms_user.account_enabled
+                }
+                
+                # Force create Frappe user 
+                frappe_user = find_or_create_frappe_user(ms_user, user_data)
+                
+                if frappe_user:
+                    # Update mapping
+                    ms_user.mapped_user_id = frappe_user.name
+                    ms_user.sync_status = "mapped"
+                    ms_user.save()
+                    
+                    # Create User Profile
+                    create_or_update_user_profile(frappe_user, ms_user, user_data)
+                    
+                    created_count += 1
+                    frappe.logger().info(f"✅ Force created: {ms_user.display_name} -> {frappe_user.name}")
+                else:
+                    failed_count += 1
+                    frappe.logger().error(f"❌ Failed to create: {ms_user.display_name}")
+                
+            except Exception as e:
+                failed_count += 1
+                frappe.log_error(f"Error force creating user {ms_user_data.display_name}: {str(e)}", "Force Create User")
+                frappe.logger().error(f"❌ Force create failed for {ms_user_data.display_name}: {str(e)}")
+        
+        result = {
+            "status": "success",
+            "message": f"Force created {created_count} users",
+            "created_count": created_count,
+            "failed_count": failed_count,
+            "total_attempted": len(unmapped_users)
+        }
+        
+        frappe.logger().info(f"🎉 Force create completed: {result}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error force creating users: {str(e)}"
+        frappe.log_error(error_msg, "Force Create Users")
+        frappe.throw(_(error_msg))
 
 
 @frappe.whitelist()
