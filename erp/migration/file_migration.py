@@ -36,7 +36,7 @@ class FileMigration(MongoToFrappeDataMigration):
             logger.info(f"Starting migration of files from {self.old_uploads_path}")
             
             # Create folder structure in Frappe first
-            from erp.inventory.utils.file_utils import setup_upload_directories
+            from erp.it.utils.file_utils import setup_upload_directories
             setup_upload_directories()
             
             # Walk through old uploads directory
@@ -121,7 +121,7 @@ class FileMigration(MongoToFrappeDataMigration):
     def get_or_create_folder(self, folder_name):
         """Get or create folder in Frappe"""
         try:
-            from erp.inventory.utils.file_utils import create_folder_if_not_exists
+            from erp.it.utils.file_utils import create_folder_if_not_exists
             folder_doc = create_folder_if_not_exists(folder_name)
             return folder_doc.name
         except Exception as e:

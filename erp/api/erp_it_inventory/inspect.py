@@ -198,7 +198,7 @@ def get_device_inspections(device_id, limit=10):
     """Get inspection history for a device - equivalent to getLatestInspectionByDeviceId"""
     try:
         return frappe.call(
-            "erp.inventory.doctype.erp_it_inventory_inspect.erp_it_inventory_inspect.get_device_inspections",
+            "erp.it.doctype.erp_it_inventory_inspect.erp_it_inventory_inspect.get_device_inspections",
             device_id=device_id,
             limit=limit
         )
@@ -212,7 +212,7 @@ def get_latest_inspection(device_id):
     """Get latest inspection for a device"""
     try:
         return frappe.call(
-            "erp.inventory.doctype.erp_it_inventory_inspect.erp_it_inventory_inspect.get_latest_inspection",
+            "erp.it.doctype.erp_it_inventory_inspect.erp_it_inventory_inspect.get_latest_inspection",
             device_id=device_id
         )
     except Exception as e:
@@ -244,7 +244,7 @@ def get_inspection_report(inspection_id):
     """Generate inspection report data"""
     try:
         return frappe.call(
-            "erp.inventory.doctype.erp_it_inventory_inspect.erp_it_inventory_inspect.create_inspection_report",
+            "erp.it.doctype.erp_it_inventory_inspect.erp_it_inventory_inspect.create_inspection_report",
             inspection_id=inspection_id
         )
     except Exception as e:
@@ -257,7 +257,7 @@ def get_inspection_stats():
     """Get inspection statistics"""
     try:
         return frappe.call(
-            "erp.inventory.doctype.erp_it_inventory_inspect.erp_it_inventory_inspect.get_inspection_stats"
+            "erp.it.doctype.erp_it_inventory_inspect.erp_it_inventory_inspect.get_inspection_stats"
         )
     except Exception as e:
         frappe.log_error(f"Error in get_inspection_stats: {str(e)}", "Inspect API Error")

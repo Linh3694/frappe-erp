@@ -247,7 +247,7 @@ app_license = "mit"
 # File upload system setup
 # ------------------------
 after_install = [
-    "erp.common.common_user.hooks.setup_user_management_hooks"
+    "erp.common.hooks.setup_user_management_hooks"
 ]
 
 # User Management Hooks
@@ -255,16 +255,16 @@ after_install = [
 doc_events = {
     "User": {
         "after_insert": [
-            "erp.common.common_user.hooks.create_user_profile_on_user_creation"
+            "erp.common.hooks.create_user_profile_on_user_creation"
         ],
         "on_update": [
-            "erp.common.common_user.hooks.update_user_profile_on_user_update"
+            "erp.common.hooks.update_user_profile_on_user_update"
         ],
         "before_delete": [
-            "erp.common.common_user.hooks.delete_user_profile_on_user_deletion"
+            "erp.common.hooks.delete_user_profile_on_user_deletion"
         ],
         "validate": [
-            "erp.common.common_user.hooks.validate_user_permissions"
+            "erp.common.hooks.validate_user_permissions"
         ]
     }
 }
@@ -272,10 +272,10 @@ doc_events = {
 # Login/Logout Hooks
 # ------------------
 on_login = [
-    "erp.common.common_user.hooks.on_login"
+    "erp.common.hooks.on_login"
 ]
 
 on_logout = [
-    "erp.common.common_user.hooks.on_logout"
+    "erp.common.hooks.on_logout"
 ]
 

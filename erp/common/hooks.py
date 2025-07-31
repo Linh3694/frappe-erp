@@ -117,17 +117,17 @@ def setup_user_management_hooks():
         frappe.get_hooks("doc_events")["User"].setdefault("validate", [])
         
         # Add our hooks
-        if "erp.common.common_user.hooks.create_user_profile_on_user_creation" not in frappe.get_hooks("doc_events")["User"]["after_insert"]:
-            frappe.get_hooks("doc_events")["User"]["after_insert"].append("erp.common.common_user.hooks.create_user_profile_on_user_creation")
+        if "erp.common.hooks.create_user_profile_on_user_creation" not in frappe.get_hooks("doc_events")["User"]["after_insert"]:
+            frappe.get_hooks("doc_events")["User"]["after_insert"].append("erp.common.hooks.create_user_profile_on_user_creation")
         
-        if "erp.common.common_user.hooks.update_user_profile_on_user_update" not in frappe.get_hooks("doc_events")["User"]["on_update"]:
-            frappe.get_hooks("doc_events")["User"]["on_update"].append("erp.common.common_user.hooks.update_user_profile_on_user_update")
+        if "erp.common.hooks.update_user_profile_on_user_update" not in frappe.get_hooks("doc_events")["User"]["on_update"]:
+            frappe.get_hooks("doc_events")["User"]["on_update"].append("erp.common.hooks.update_user_profile_on_user_update")
         
-        if "erp.common.common_user.hooks.delete_user_profile_on_user_deletion" not in frappe.get_hooks("doc_events")["User"]["before_delete"]:
-            frappe.get_hooks("doc_events")["User"]["before_delete"].append("erp.common.common_user.hooks.delete_user_profile_on_user_deletion")
+        if "erp.common.hooks.delete_user_profile_on_user_deletion" not in frappe.get_hooks("doc_events")["User"]["before_delete"]:
+            frappe.get_hooks("doc_events")["User"]["before_delete"].append("erp.common.hooks.delete_user_profile_on_user_deletion")
         
-        if "erp.common.common_user.hooks.validate_user_permissions" not in frappe.get_hooks("doc_events")["User"]["validate"]:
-            frappe.get_hooks("doc_events")["User"]["validate"].append("erp.common.common_user.hooks.validate_user_permissions")
+        if "erp.common.hooks.validate_user_permissions" not in frappe.get_hooks("doc_events")["User"]["validate"]:
+            frappe.get_hooks("doc_events")["User"]["validate"].append("erp.common.hooks.validate_user_permissions")
         
         frappe.logger().info("User management hooks setup completed")
         

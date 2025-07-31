@@ -218,7 +218,7 @@ def delete_device(device_id):
 def assign_device(device_id, user_id, notes=None):
     """Assign device to user - equivalent to assignLaptop"""
     try:
-        return frappe.call("erp.inventory.doctype.erp_it_inventory_device.erp_it_inventory_device.assign_device",
+        return frappe.call("erp.it.doctype.erp_it_inventory_device.erp_it_inventory_device.assign_device",
                           device_name=device_id, user_id=user_id, notes=notes)
     except Exception as e:
         frappe.log_error(f"Error in assign_device: {str(e)}", "Device API Error")
@@ -231,7 +231,7 @@ def assign_device_with_handover(device_id, user_id, notes=None, handover_file_co
     try:
         # First, assign the device
         device_type = get_device_type_from_id(device_id)
-        result = frappe.call("erp.inventory.doctype.erp_it_inventory_device.erp_it_inventory_device.assign_device",
+        result = frappe.call("erp.it.doctype.erp_it_inventory_device.erp_it_inventory_device.assign_device",
                           device_name=device_id, user_id=user_id, notes=notes)
         
         # If handover document is provided, upload it
@@ -273,7 +273,7 @@ def get_device_type_from_id(device_id):
 def revoke_device(device_id, user_id, reason=None):
     """Revoke device from user - equivalent to revokeLaptop"""
     try:
-        return frappe.call("erp.inventory.doctype.erp_it_inventory_device.erp_it_inventory_device.revoke_device",
+        return frappe.call("erp.it.doctype.erp_it_inventory_device.erp_it_inventory_device.revoke_device",
                           device_name=device_id, user_id=user_id, reason=reason)
     except Exception as e:
         frappe.log_error(f"Error in revoke_device: {str(e)}", "Device API Error")
@@ -286,7 +286,7 @@ def revoke_device_with_handover(device_id, user_id, reason=None, handover_file_c
     try:
         # First, revoke the device
         device_type = get_device_type_from_id(device_id)
-        result = frappe.call("erp.inventory.doctype.erp_it_inventory_device.erp_it_inventory_device.revoke_device",
+        result = frappe.call("erp.it.doctype.erp_it_inventory_device.erp_it_inventory_device.revoke_device",
                           device_name=device_id, user_id=user_id, reason=reason)
         
         # If handover document is provided, upload it
@@ -423,7 +423,7 @@ def bulk_upload_devices(devices_data):
 def get_device_stats():
     """Get device statistics - dashboard data"""
     try:
-        return frappe.call("erp.inventory.doctype.erp_it_inventory_device.erp_it_inventory_device.get_device_stats")
+        return frappe.call("erp.it.doctype.erp_it_inventory_device.erp_it_inventory_device.get_device_stats")
     except Exception as e:
         frappe.log_error(f"Error in get_device_stats: {str(e)}", "Device API Error")
         frappe.throw(_("Error fetching device statistics: {0}").format(str(e)))

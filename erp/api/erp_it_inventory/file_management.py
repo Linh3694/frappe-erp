@@ -2,7 +2,7 @@ import frappe
 from frappe import _
 import os
 from frappe.utils.response import build_response
-from erp.inventory.utils.file_utils import (
+from erp.it.utils.file_utils import (
     setup_upload_directories, 
     get_files_by_doctype_and_name,
     cleanup_old_files,
