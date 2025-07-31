@@ -153,12 +153,8 @@ scheduler_events = {
 		"erp.api.erp_common_user.microsoft_auth.sync_microsoft_users_scheduler"
 	],
 	"cron": {
-		# Chạy Microsoft sync mỗi ngày lúc 2:00 AM
-		"0 2 * * *": [
-			"erp.api.erp_common_user.microsoft_auth.sync_microsoft_users_scheduler"
-		],
-		# Chạy Microsoft sync mỗi 4 giờ (nếu cần sync thường xuyên hơn)
-		"0 */4 * * *": [
+		# Chạy Microsoft sync mỗi ngày lúc 4:00 AM
+		"0 4 * * *": [
 			"erp.api.erp_common_user.microsoft_auth.sync_microsoft_users_scheduler"
 		]
 	}

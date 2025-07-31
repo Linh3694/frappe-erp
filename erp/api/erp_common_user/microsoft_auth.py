@@ -186,7 +186,8 @@ def get_microsoft_config():
         "client_id": frappe.conf.get("microsoft_client_id") or frappe.get_site_config().get("microsoft_client_id"),
         "client_secret": frappe.conf.get("microsoft_client_secret") or frappe.get_site_config().get("microsoft_client_secret"),
         "redirect_uri": frappe.conf.get("microsoft_redirect_uri") or frappe.get_site_config().get("microsoft_redirect_uri") or f"{frappe.utils.get_url()}/api/method/erp.user_management.api.microsoft_auth.microsoft_callback",
-        "hourly_sync": frappe.conf.get("microsoft_hourly_sync") or frappe.get_site_config().get("microsoft_hourly_sync", False)
+        "hourly_sync": frappe.conf.get("microsoft_hourly_sync") or frappe.get_site_config().get("microsoft_hourly_sync", False),
+        "group_ids": frappe.conf.get("microsoft_group_ids") or frappe.get_site_config().get("microsoft_group_ids", "dd475730-881b-4c7e-8c8b-13f2160da442,989da314-610e-4be4-9f67-1d6d63e2fc34")
     }
     
     # Validate required fields
@@ -258,36 +259,62 @@ def get_microsoft_user_info(access_token):
 
 
 def get_all_microsoft_users(access_token):
-    """Get all users from Microsoft Graph"""
+    """Get users from Microsoft Graph groups (not all users)"""
+    config = get_microsoft_config()
+    group_ids = config.get("group_ids", "").split(",")
+    group_ids = [gid.strip() for gid in group_ids if gid.strip()]
+    
+    if not group_ids:
+        raise Exception("No Microsoft group IDs configured")
+    
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
     
     users = []
-    # Include all fields we need for sync
+    # Include all fields we need for sync  
     fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
-    url = f"https://graph.microsoft.com/v1.0/users?$select={fields}"
     
-    while url:
-        response = requests.get(url, headers=headers)
+    # Get users from each group
+    for group_id in group_ids:
+        frappe.logger().info(f"Syncing users from group: {group_id}")
         
-        if response.status_code != 200:
-            raise Exception(f"Users request failed: {response.text}")
+        url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/members?$select={fields}&$top=100"
         
-        data = response.json()
-        users.extend(data.get("value", []))
-        
-        # Get next page
-        url = data.get("@odata.nextLink")
+        while url:
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code != 200:
+                frappe.log_error(f"Group {group_id} members request failed: {response.text}", "Microsoft Group Sync")
+                break  # Skip this group but continue with others
+            
+            data = response.json()
+            group_members = data.get("value", [])
+            
+            # Filter only user objects (exclude groups, devices, etc.)
+            user_members = [member for member in group_members if member.get("@odata.type") == "#microsoft.graph.user"]
+            users.extend(user_members)
+            
+            # Get next page
+            url = data.get("@odata.nextLink")
     
-    return users
+    # Remove duplicates based on user ID (in case user is in multiple groups)
+    seen_ids = set()
+    unique_users = []
+    for user in users:
+        if user["id"] not in seen_ids:
+            seen_ids.add(user["id"])
+            unique_users.append(user)
+    
+    frappe.logger().info(f"Found {len(unique_users)} unique users from {len(group_ids)} groups")
+    return unique_users
 
 
 def create_or_update_microsoft_user(user_data):
-    """Create or update Microsoft user in Frappe"""
+    """Create or update Microsoft user in Frappe with local user mapping"""
     try:
-        # Check if user already exists
+        # 1. Create/Update Microsoft User record
         existing = frappe.db.get_value("ERP Microsoft User", {"microsoft_id": user_data["id"]})
         
         if existing:
@@ -300,7 +327,7 @@ def create_or_update_microsoft_user(user_data):
                 "microsoft_id": user_data["id"]
             })
         
-        # Update fields
+        # Update Microsoft user fields
         ms_user.display_name = user_data.get("displayName")
         ms_user.given_name = user_data.get("givenName")
         ms_user.surname = user_data.get("surname")
@@ -324,6 +351,14 @@ def create_or_update_microsoft_user(user_data):
         ms_user.sync_status = "synced"
         ms_user.sync_error = ""
         
+        # 2. Find or create corresponding Frappe User
+        local_user = find_or_create_frappe_user(ms_user, user_data)
+        
+        # 3. Update mapping
+        if local_user:
+            ms_user.mapped_user_id = local_user.name
+            ms_user.sync_status = "synced"
+        
         ms_user.save()
         
         return ms_user
@@ -336,6 +371,128 @@ def create_or_update_microsoft_user(user_data):
             ms_user.save()
         
         raise e
+
+
+def find_or_create_frappe_user(ms_user, user_data):
+    """Find existing Frappe user or create new one based on Microsoft data"""
+    try:
+        local_user = None
+        
+        # 1. First try to find by existing mapping
+        if hasattr(ms_user, 'mapped_user_id') and ms_user.mapped_user_id:
+            try:
+                local_user = frappe.get_doc("User", ms_user.mapped_user_id)
+                if local_user.enabled:
+                    # Update existing user
+                    update_frappe_user(local_user, ms_user, user_data)
+                    return local_user
+            except frappe.DoesNotExistError:
+                pass
+        
+        # 2. Try to find by email
+        email = user_data.get("mail") or user_data.get("userPrincipalName")
+        if email:
+            existing_user = frappe.db.get_value("User", {"email": email})
+            if existing_user:
+                local_user = frappe.get_doc("User", existing_user)
+                if local_user.enabled:
+                    # Update existing user
+                    update_frappe_user(local_user, ms_user, user_data)
+                    return local_user
+        
+        # 3. Try to find by userPrincipalName if different from email
+        upn = user_data.get("userPrincipalName")
+        if upn and upn != email:
+            existing_user = frappe.db.get_value("User", {"email": upn})
+            if existing_user:
+                local_user = frappe.get_doc("User", existing_user)
+                if local_user.enabled:
+                    # Update existing user
+                    update_frappe_user(local_user, ms_user, user_data)
+                    return local_user
+        
+        # 4. Create new user if not found
+        if not local_user and email:
+            local_user = create_frappe_user(ms_user, user_data)
+            return local_user
+            
+        return None
+        
+    except Exception as e:
+        frappe.log_error(f"Error in find_or_create_frappe_user: {str(e)}", "Microsoft User Mapping")
+        return None
+
+
+def create_frappe_user(ms_user, user_data):
+    """Create new Frappe user from Microsoft data"""
+    try:
+        email = user_data.get("mail") or user_data.get("userPrincipalName")
+        if not email:
+            return None
+            
+        # Create new user
+        user_doc = frappe.get_doc({
+            "doctype": "User",
+            "email": email,
+            "first_name": user_data.get("givenName") or "",
+            "last_name": user_data.get("surname") or "",
+            "full_name": user_data.get("displayName") or email,
+            "enabled": user_data.get("accountEnabled", True),
+            "user_type": "System User",
+            "send_welcome_email": 0,
+            # Custom fields for Microsoft data
+            "employee_id": user_data.get("employeeId"),
+            "department": user_data.get("department"),
+            "designation": user_data.get("jobTitle"),
+            "location": user_data.get("officeLocation"),
+            "mobile_no": user_data.get("mobilePhone"),
+            "phone": ", ".join(user_data.get("businessPhones", [])) if user_data.get("businessPhones") else None
+        })
+        
+        user_doc.flags.ignore_permissions = True
+        user_doc.insert()
+        
+        frappe.logger().info(f"Created Frappe user: {email}")
+        return user_doc
+        
+    except Exception as e:
+        frappe.log_error(f"Error creating Frappe user: {str(e)}", "Microsoft User Creation")
+        return None
+
+
+def update_frappe_user(user_doc, ms_user, user_data):
+    """Update existing Frappe user with Microsoft data"""
+    try:
+        # Update basic info
+        user_doc.first_name = user_data.get("givenName") or user_doc.first_name
+        user_doc.last_name = user_data.get("surname") or user_doc.last_name
+        user_doc.full_name = user_data.get("displayName") or user_doc.full_name
+        user_doc.enabled = user_data.get("accountEnabled", True)
+        
+        # Update Microsoft-specific fields (if they exist)
+        if hasattr(user_doc, 'employee_id'):
+            user_doc.employee_id = user_data.get("employeeId") or user_doc.employee_id
+        if hasattr(user_doc, 'department'):
+            user_doc.department = user_data.get("department") or user_doc.department
+        if hasattr(user_doc, 'designation'):
+            user_doc.designation = user_data.get("jobTitle") or user_doc.designation
+        if hasattr(user_doc, 'location'):
+            user_doc.location = user_data.get("officeLocation") or user_doc.location
+        if hasattr(user_doc, 'mobile_no'):
+            user_doc.mobile_no = user_data.get("mobilePhone") or user_doc.mobile_no
+        if hasattr(user_doc, 'phone'):
+            business_phones = ", ".join(user_data.get("businessPhones", [])) if user_data.get("businessPhones") else None
+            user_doc.phone = business_phones or user_doc.phone
+        
+        user_doc.flags.ignore_permissions = True
+        user_doc.save()
+        
+        frappe.logger().info(f"Updated Frappe user: {user_doc.email}")
+        return user_doc
+        
+    except Exception as e:
+        frappe.log_error(f"Error updating Frappe user {user_doc.email}: {str(e)}", "Microsoft User Update")
+        return user_doc
 
 
 def handle_microsoft_user_login(ms_user):
