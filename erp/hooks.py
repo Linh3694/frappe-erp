@@ -149,13 +149,14 @@ app_license = "mit"
 # ---------------
 
 scheduler_events = {
-	"daily": [
-		"erp.api.erp_common_user.microsoft_auth.sync_microsoft_users_scheduler"
-	],
 	"cron": {
-		# Chạy Microsoft sync mỗi ngày lúc 4:00 AM
-		"0 4 * * *": [
-			"erp.api.erp_common_user.microsoft_auth.sync_microsoft_users_scheduler"
+		# Microsoft sync mỗi 2 tiếng (lúc :00 phút của giờ chẵn)
+		"0 */2 * * *": [
+			"erp.api.erp_common_user.microsoft_auth.full_microsoft_sync_scheduler"
+		],
+		# Backup sync hàng ngày lúc 2:00 AM (phòng trường hợp lỗi)
+		"0 2 * * *": [
+			"erp.api.erp_common_user.microsoft_auth.full_microsoft_sync_scheduler"
 		]
 	}
 }

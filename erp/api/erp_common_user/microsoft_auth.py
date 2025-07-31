@@ -104,6 +104,52 @@ def sync_microsoft_users_scheduler():
         return {"status": "error", "message": str(e)}
 
 
+def full_microsoft_sync_scheduler():
+    """Complete Microsoft sync for scheduler - Users + Profiles (no throw exceptions)"""
+    try:
+        frappe.logger().info("🚀 Starting scheduled full Microsoft sync...")
+        
+        results = {}
+        
+        # 1. Sync Microsoft users from Graph API
+        frappe.logger().info("📥 Step 1: Syncing Microsoft users from Graph API...")
+        ms_result = sync_microsoft_users_internal()
+        results["microsoft_users"] = ms_result
+        frappe.logger().info(f"✅ Microsoft users sync: {ms_result}")
+        
+        # 2. Sync User Profiles (tạo profiles cho users chưa có)
+        frappe.logger().info("👤 Step 2: Syncing User Profiles...")
+        profile_result = sync_existing_users_to_profiles()
+        results["user_profiles"] = profile_result
+        frappe.logger().info(f"✅ User profiles sync: {profile_result}")
+        
+        # 3. Get final counts
+        ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
+        profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
+        user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
+        
+        results["final_counts"] = {
+            "microsoft_users": ms_count,
+            "user_profiles": profile_count,
+            "frappe_users": user_count
+        }
+        
+        frappe.logger().info(f"📊 Final counts: MS Users: {ms_count}, Profiles: {profile_count}, Frappe Users: {user_count}")
+        frappe.logger().info("🎉 Scheduled full Microsoft sync completed successfully")
+        
+        return {
+            "status": "success",
+            "message": "Full Microsoft sync completed successfully",
+            "results": results
+        }
+        
+    except Exception as e:
+        error_msg = f"Scheduled full Microsoft sync error: {str(e)}"
+        frappe.log_error(error_msg, "Full Microsoft Sync Scheduler")
+        frappe.logger().error(f"❌ {error_msg}")
+        return {"status": "error", "message": str(e)}
+
+
 @frappe.whitelist()
 def sync_microsoft_users():
     """Sync users from Microsoft Graph API - For API calls"""
