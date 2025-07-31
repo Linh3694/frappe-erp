@@ -29,9 +29,9 @@ class MigrationManager:
     def get_default_config(self):
         """Get default migration configuration"""
         return {
-            "mongo_uri": "mongodb://localhost:27017",
+            "mongo_uri": "mongodb://app:wellspring@172.16.20.130:27017/workspace?authSource=workspace",
             "mongo_db_name": "workspace",
-            "old_uploads_path": "/path/to/workspace-backend/uploads",
+            "old_uploads_path": "/srv/app/workspace-backend/uploads",
             "migration_steps": [
                 "pre_migration_check",
                 "migrate_users",
