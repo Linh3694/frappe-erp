@@ -7,7 +7,6 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from datetime import datetime
-import bcrypt
 import secrets
 
 

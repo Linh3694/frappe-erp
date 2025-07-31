@@ -6,7 +6,6 @@ Handles user login, logout, password reset, etc.
 import frappe
 from frappe import _
 from frappe.auth import LoginManager
-import bcrypt
 import secrets
 import jwt
 from datetime import datetime, timedelta
