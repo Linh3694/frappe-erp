@@ -592,7 +592,7 @@ def create_or_update_user_profile(frappe_user, ms_user, user_data):
         profile.usage_location = user_data.get("usageLocation")
         
         # Sync info
-        profile.microsoft_user_id = ms_user.microsoft_id
+        profile.microsoft_id = ms_user.microsoft_id  # Fixed: Use microsoft_id not microsoft_user_id
         profile.last_microsoft_sync = datetime.now()
         profile.sync_source = "Microsoft 365"
         
@@ -822,13 +822,13 @@ def fix_missing_employee_codes():
     try:
         frappe.logger().info("🔧 Starting fix for missing employee codes...")
         
-        # Get all User Profiles missing employee_code but have microsoft_user_id
+        # Get all User Profiles missing employee_code but have microsoft_id
         profiles_missing_code = frappe.db.sql("""
-            SELECT up.name, up.user, up.microsoft_user_id, ms.employee_id, ms.display_name
+            SELECT up.name, up.user, up.microsoft_id, ms.employee_id, ms.display_name
             FROM `tabERP User Profile` up
-            LEFT JOIN `tabERP Microsoft User` ms ON ms.microsoft_id = up.microsoft_user_id
+            LEFT JOIN `tabERP Microsoft User` ms ON ms.microsoft_id = up.microsoft_id
             WHERE (up.employee_code IS NULL OR up.employee_code = '')
-            AND up.microsoft_user_id IS NOT NULL
+            AND up.microsoft_id IS NOT NULL
             AND ms.employee_id IS NOT NULL
             AND ms.employee_id != ''
         """, as_dict=True)
