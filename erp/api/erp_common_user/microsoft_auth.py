@@ -129,13 +129,19 @@ def full_microsoft_sync_scheduler():
         results["force_create_users"] = force_create_result
         frappe.logger().info(f"✅ Force create users: {force_create_result}")
         
-        # 4. Fix missing employee codes
-        frappe.logger().info("🔧 Step 4: Fixing missing employee codes...")
+        # 4. Fix user providers 
+        frappe.logger().info("🔧 Step 4: Fixing user providers...")
+        provider_fix_result = fix_user_providers()
+        results["provider_fix"] = provider_fix_result
+        frappe.logger().info(f"✅ Provider fix: {provider_fix_result}")
+        
+        # 5. Fix missing employee codes
+        frappe.logger().info("🔧 Step 5: Fixing missing employee codes...")
         fix_result = fix_missing_employee_codes()
         results["employee_code_fix"] = fix_result
         frappe.logger().info(f"✅ Employee code fix: {fix_result}")
         
-        # 5. Get final counts
+        # 6. Get final counts
         ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
         profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
         user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
@@ -599,6 +605,7 @@ def create_or_update_user_profile(frappe_user, ms_user, user_data):
         
         # Sync info
         profile.microsoft_id = ms_user.microsoft_id  # Fixed: Use microsoft_id not microsoft_user_id
+        profile.provider = "microsoft"  # Set provider to show Microsoft fields in UI
         profile.last_microsoft_sync = datetime.now()
         profile.sync_source = "Microsoft 365"
         
@@ -704,12 +711,17 @@ def full_microsoft_sync():
         force_create_result = force_create_missing_users()
         results["force_create_users"] = force_create_result
         
-        # 4. Fix missing employee codes
+        # 4. Fix user providers
+        frappe.logger().info("Fixing user providers...")
+        provider_fix_result = fix_user_providers()
+        results["provider_fix"] = provider_fix_result
+        
+        # 5. Fix missing employee codes
         frappe.logger().info("Fixing missing employee codes...")
         fix_result = fix_missing_employee_codes()
         results["employee_code_fix"] = fix_result
         
-        # 5. Get final counts
+        # 6. Get final counts
         ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
         profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
         user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
@@ -909,6 +921,62 @@ def force_create_missing_users():
     except Exception as e:
         error_msg = f"Error force creating users: {str(e)}"
         frappe.log_error(error_msg, "Force Create Users")
+        frappe.throw(_(error_msg))
+
+
+@frappe.whitelist()
+def fix_user_providers():
+    """Fix provider field for User Profiles with Microsoft IDs"""
+    try:
+        frappe.logger().info("🔧 Starting fix for user providers...")
+        
+        # Get User Profiles with Microsoft ID but provider = 'local'
+        profiles_to_fix = frappe.db.sql("""
+            SELECT name, user, microsoft_id
+            FROM `tabERP User Profile`
+            WHERE microsoft_id IS NOT NULL 
+            AND microsoft_id != ''
+            AND (provider IS NULL OR provider = 'local')
+        """, as_dict=True)
+        
+        if not profiles_to_fix:
+            return {
+                "status": "success",
+                "message": "No profiles need provider fix",
+                "updated_count": 0
+            }
+        
+        updated_count = 0
+        failed_count = 0
+        
+        for profile_data in profiles_to_fix:
+            try:
+                profile_doc = frappe.get_doc("ERP User Profile", profile_data.name)
+                profile_doc.provider = "microsoft"
+                profile_doc.save()
+                
+                updated_count += 1
+                frappe.logger().info(f"✅ Fixed provider for: {profile_data.user}")
+                
+            except Exception as e:
+                failed_count += 1
+                frappe.log_error(f"Error fixing provider for {profile_data.name}: {str(e)}", "Provider Fix")
+                frappe.logger().error(f"❌ Failed to fix provider for {profile_data.user}: {str(e)}")
+        
+        result = {
+            "status": "success",
+            "message": f"Fixed provider for {updated_count} profiles",
+            "updated_count": updated_count,
+            "failed_count": failed_count,
+            "total_found": len(profiles_to_fix)
+        }
+        
+        frappe.logger().info(f"🎉 Provider fix completed: {result}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error fixing providers: {str(e)}"
+        frappe.log_error(error_msg, "Provider Fix")
         frappe.throw(_(error_msg))
 
 

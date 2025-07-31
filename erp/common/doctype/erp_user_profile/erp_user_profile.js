@@ -80,6 +80,15 @@ function set_field_properties(frm) {
 	// Toggle auth fields based on provider
 	toggle_auth_fields(frm);
 	
+	// Employee code description
+	if (frm.doc.employee_code) {
+		frm.set_df_property('employee_code', 'description', 
+			`<span style="color: green; font-weight: bold;">Employee ID: ${frm.doc.employee_code}</span>`);
+	} else if (frm.doc.provider === 'microsoft') {
+		frm.set_df_property('employee_code', 'description', 
+			'<span style="color: orange;">⚠️ Employee ID missing - check Microsoft sync</span>');
+	}
+	
 	// Format timestamps
 	if (frm.doc.last_login) {
 		frm.set_df_property('last_login', 'description', 
@@ -96,6 +105,17 @@ function toggle_auth_fields(frm) {
 	// Show/hide auth fields based on provider
 	frm.toggle_display('microsoft_id', frm.doc.provider === 'microsoft');
 	frm.toggle_display('apple_id', frm.doc.provider === 'apple');
+	
+	// Add descriptions for Microsoft fields
+	if (frm.doc.provider === 'microsoft') {
+		frm.set_df_property('microsoft_id', 'description', 
+			'<span style="color: blue;">🔗 Linked to Microsoft 365</span>');
+		
+		if (frm.doc.employee_code) {
+			frm.set_df_property('employee_code', 'description', 
+				`<span style="color: green;">✅ Employee ID: ${frm.doc.employee_code}</span>`);
+		}
+	}
 }
 
 function load_user_info(frm) {
