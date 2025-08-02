@@ -102,7 +102,7 @@
    "fieldname": "room",
    "fieldtype": "Link",
    "label": "Room",
-   "options": "Room"
+   "options": "ERP Administrative Room"
   },
   {
    "fieldname": "section_break_2",

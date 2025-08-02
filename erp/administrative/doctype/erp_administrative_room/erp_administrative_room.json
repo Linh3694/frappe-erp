@@ -1,0 +1,143 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:ROOM-{#####}",
+ "beta": 0,
+ "creation": "2024-12-19 15:00:00.000000",
+ "custom": 0,
+ "description": "Administrative Room Management",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "room_name",
+  "room_name_en",
+  "room_type",
+  "capacity",
+  "column_break_1",
+  "periods_per_day",
+  "is_homeroom",
+  "building_id",
+  "section_break_2",
+  "description",
+  "section_break_3",
+  "created_at",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "room_name",
+   "fieldtype": "Data",
+   "label": "Room Name (VN)",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "room_name_en",
+   "fieldtype": "Data",
+   "label": "Room Name (EN)",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "room_type",
+   "fieldtype": "Select",
+   "label": "Room Type",
+   "options": "classroom\nlab\nlibrary\nother\noffice",
+   "reqd": 1
+  },
+  {
+   "fieldname": "capacity",
+   "fieldtype": "Int",
+   "label": "Capacity"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "periods_per_day",
+   "fieldtype": "Int",
+   "label": "Periods Per Day",
+   "default": "10"
+  },
+  {
+   "fieldname": "is_homeroom",
+   "fieldtype": "Check",
+   "label": "Is Homeroom",
+   "default": "0"
+  },
+  {
+   "fieldname": "building_id",
+   "fieldtype": "Link",
+   "label": "Building",
+   "options": "ERP Administrative Building"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "Description"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "section_break_3",
+   "fieldtype": "Section Break",
+   "label": "Timestamps"
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Created At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Updated At",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-12-19 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Administrative",
+ "name": "ERP Administrative Room",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "room_name",
+ "track_changes": 1
+}
