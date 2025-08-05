@@ -108,36 +108,30 @@ def microsoft_callback(code, state):
                 frappe.logger().error(f"DEBUG: Failed to create user profile: {str(create_error)}")
                 pass
         
-        # Get Frappe roles for the user (try multiple approaches)
+        # Get Frappe roles for the user (simplified approach)
         frappe_roles = []
         try:
-            # Method 1: Direct call with email (user name in Frappe)
-            frappe_roles = frappe.get_roles(frappe_user.email)
-            frappe.logger().info(f"DEBUG: Method 1 - frappe.get_roles({frappe_user.email}): {frappe_roles}")
+            # Try direct approach first
+            frappe_roles = frappe.get_roles(frappe_user.email) or []
+            frappe.logger().info(f"DEBUG: frappe.get_roles({frappe_user.email}) returned: {frappe_roles}")
+            
+            # If empty, try querying Has Role table directly  
+            if not frappe_roles or frappe_roles == ["Guest"]:
+                has_roles = frappe.get_all("Has Role", 
+                                         filters={"parent": frappe_user.email, "parenttype": "User"}, 
+                                         pluck="role") or []
+                frappe.logger().info(f"DEBUG: Direct Has Role query returned: {has_roles}")
+                if has_roles:
+                    frappe_roles = has_roles + ["All"]  # Add default roles
+                
         except Exception as e:
-            frappe.logger().error(f"DEBUG: Method 1 failed: {str(e)}")
+            frappe.logger().error(f"DEBUG: Error getting Frappe roles: {str(e)}")
+            frappe_roles = ["All"]  # Fallback to basic role
         
-        try:
-            # Method 2: Direct permissions call
-            from frappe import permissions as frappe_permissions
-            frappe_roles_alt = frappe_permissions.get_roles(frappe_user.email)
-            frappe.logger().info(f"DEBUG: Method 2 - frappe_permissions.get_roles({frappe_user.email}): {frappe_roles_alt}")
-            if not frappe_roles:
-                frappe_roles = frappe_roles_alt
-        except Exception as e:
-            frappe.logger().error(f"DEBUG: Method 2 failed: {str(e)}")
-        
-        try:
-            # Method 3: Query Has Role table directly
-            has_roles = frappe.get_all("Has Role", 
-                                     filters={"parent": frappe_user.email, "parenttype": "User"}, 
-                                     pluck="role")
-            frappe.logger().info(f"DEBUG: Method 3 - Direct Has Role query: {has_roles}")
-            if not frappe_roles:
-                frappe_roles = has_roles
-        except Exception as e:
-            frappe.logger().error(f"DEBUG: Method 3 failed: {str(e)}")
-        
+        # Ensure we always have at least basic roles
+        if not frappe_roles:
+            frappe_roles = ["All", "Guest"]
+            
         frappe.logger().info(f"DEBUG: Final frappe_roles for {frappe_user.email}: {frappe_roles}")
         
         # Create comprehensive user data for frontend
