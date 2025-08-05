@@ -44,6 +44,16 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         all_params = frappe.request.args.to_dict() if hasattr(frappe.request, 'args') else {}
         frappe.logger().info(f"get_users all params: {json.dumps(all_params, default=str)}")
         
+        # Đọc tham số từ URL parameters (ưu tiên) hoặc function parameters
+        page = all_params.get('page', page)
+        limit = all_params.get('limit', limit)
+        search = all_params.get('search', search)
+        role = all_params.get('role', role)
+        department = all_params.get('department', department)
+        active = all_params.get('active', active)
+        
+        frappe.logger().info(f"Final parameters after reading from URL: page={page}, limit={limit}, search={search}, role={role}, department={department}, active={active}")
+        
         # Convert parameters to proper types
         try:
             page = int(page) if page else 1
