@@ -88,10 +88,10 @@ def microsoft_callback(code, state):
         user_encoded = base64.b64encode(user_json.encode()).decode()
         
         # Get frontend URL (adjust this based on your frontend URL)
-        frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "https://wellspring.edu.vn"
+        frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
         
         # Redirect to frontend callback with token and user data in URL fragment (for security)
-        callback_url = f"{frontend_url}/microsoft-callback?success=true#token={jwt_token}&user={user_encoded}"
+        callback_url = f"{frontend_url}/auth/microsoft/callback?success=true#token={jwt_token}&user={user_encoded}"
         
         # Set redirect response
         frappe.local.response["type"] = "redirect"
@@ -103,11 +103,11 @@ def microsoft_callback(code, state):
         frappe.log_error(f"Microsoft callback error: {str(e)}", "Microsoft Auth")
         
         # Get frontend URL for error redirect
-        frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "https://wellspring.edu.vn"
+        frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
         
         # Redirect to frontend with error
         error_message = urllib.parse.quote(str(e))
-        callback_url = f"{frontend_url}/microsoft-callback?success=false&error={error_message}"
+        callback_url = f"{frontend_url}/auth/microsoft/callback?success=false&error={error_message}"
         
         # Set redirect response
         frappe.local.response["type"] = "redirect"
