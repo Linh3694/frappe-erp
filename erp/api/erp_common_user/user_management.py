@@ -26,6 +26,29 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         # Debug: Log parameters
         frappe.logger().info(f"get_users called with: page={page}, limit={limit}, search={search}, role={role}, department={department}, active={active}")
         
+        # Debug: Log request data
+        import json
+        request_data = frappe.request.get_json() if frappe.request.is_json else {}
+        frappe.logger().info(f"get_users request data: {json.dumps(request_data, default=str)}")
+        
+        # Debug: Log request form data
+        form_data = frappe.request.form.to_dict() if hasattr(frappe.request, 'form') else {}
+        frappe.logger().info(f"get_users form data: {json.dumps(form_data, default=str)}")
+        
+        # Debug: Log all request parameters
+        all_params = frappe.request.args.to_dict() if hasattr(frappe.request, 'args') else {}
+        frappe.logger().info(f"get_users all params: {json.dumps(all_params, default=str)}")
+        
+        # Convert parameters to proper types
+        try:
+            page = int(page) if page else 1
+            limit = int(limit) if limit else 20
+            frappe.logger().info(f"Converted parameters: page={page} (type: {type(page)}), limit={limit} (type: {type(limit)})")
+        except (ValueError, TypeError) as e:
+            frappe.logger().error(f"Error converting parameters: {e}")
+            page = 1
+            limit = 20
+        
         # Build filters
         filters = {}
         
@@ -34,7 +57,7 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         if department:
             filters["department"] = department
         if active is not None:
-            filters["active"] = int(active)
+            filters["active"] = active
         
         # Build search conditions
         search_conditions = []
