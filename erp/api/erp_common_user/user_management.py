@@ -302,10 +302,14 @@ def create_user(user_data=None, **kwargs):
         profile = frappe.get_doc(profile_data)
         profile.insert(ignore_permissions=True)
         
-        # Assign roles if provided
+        # Assign roles if provided - sử dụng Frappe system roles
         if user_data.get("roles"):
+            valid_frappe_roles = ["System Manager", "Administrator", "All", "User", "Guest"]
             for role in user_data["roles"]:
-                user_doc.append("roles", {"role": role})
+                if role in valid_frappe_roles:
+                    user_doc.append("roles", {"role": role})
+                else:
+                    frappe.logger().warning(f"Invalid role '{role}' provided, skipping")
             user_doc.save()
         
         return {
@@ -404,14 +408,18 @@ def update_user(user_email=None, user_data=None, **kwargs):
         
         profile.save()
         
-        # Update roles if provided
+        # Update roles if provided - sử dụng Frappe system roles
         if user_data.get("roles"):
             # Clear existing roles
             user_doc.roles = []
             
-            # Add new roles
+            # Add new roles - chỉ cho phép Frappe system roles
+            valid_frappe_roles = ["System Manager", "Administrator", "All", "User", "Guest"]
             for role in user_data["roles"]:
-                user_doc.append("roles", {"role": role})
+                if role in valid_frappe_roles:
+                    user_doc.append("roles", {"role": role})
+                else:
+                    frappe.logger().warning(f"Invalid role '{role}' provided, skipping")
             
             user_doc.save()
         
@@ -527,22 +535,13 @@ def reset_user_password(user_email):
 def get_user_roles():
     """Get available user roles"""
     try:
+        # Sử dụng Frappe system roles thay vì custom roles
         roles = [
-            {"value": "admin", "label": "Admin"},
-            {"value": "teacher", "label": "Teacher"},
-            {"value": "parent", "label": "Parent"},
-            {"value": "registrar", "label": "Registrar"},
-            {"value": "admission", "label": "Admission"},
-            {"value": "bos", "label": "Board of Studies"},
-            {"value": "principal", "label": "Principal"},
-            {"value": "service", "label": "Service"},
-            {"value": "superadmin", "label": "Super Admin"},
-            {"value": "technical", "label": "Technical"},
-            {"value": "marcom", "label": "Marketing Communications"},
-            {"value": "hr", "label": "Human Resources"},
-            {"value": "bod", "label": "Board of Directors"},
-            {"value": "user", "label": "User"},
-            {"value": "librarian", "label": "Librarian"}
+            {"value": "System Manager", "label": "System Manager"},
+            {"value": "Administrator", "label": "Administrator"},
+            {"value": "All", "label": "All"},
+            {"value": "User", "label": "User"},
+            {"value": "Guest", "label": "Guest"}
         ]
         
         return {
