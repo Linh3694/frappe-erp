@@ -1,0 +1,162 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:NOTIF-{#####}",
+ "creation": "2024-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "message",
+  "notification_type",
+  "priority",
+  "recipient_type",
+  "recipients",
+  "sender",
+  "status",
+  "read_status",
+  "sent_at",
+  "read_at",
+  "push_tokens",
+  "data",
+  "channel",
+  "reference_doctype",
+  "reference_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tiêu đề",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Text Editor",
+   "label": "Nội dung",
+   "reqd": 1
+  },
+  {
+   "fieldname": "notification_type",
+   "fieldtype": "Select",
+   "label": "Loại thông báo",
+   "options": "system\nuser\nalert\nreminder\ninfo",
+   "default": "system",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "label": "Độ ưu tiên",
+   "options": "low\nmedium\nhigh\nurgent",
+   "default": "medium"
+  },
+  {
+   "fieldname": "recipient_type",
+   "fieldtype": "Select",
+   "label": "Loại người nhận",
+   "options": "user\nrole\nall\nspecific",
+   "default": "user"
+  },
+  {
+   "fieldname": "recipients",
+   "fieldtype": "JSON",
+   "label": "Danh sách người nhận"
+  },
+  {
+   "fieldname": "sender",
+   "fieldtype": "Link",
+   "label": "Người gửi",
+   "options": "User"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "draft\nsent\nfailed\ndelivered",
+   "default": "draft",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "read_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái đọc",
+   "options": "unread\nread\narchived",
+   "default": "unread"
+  },
+  {
+   "fieldname": "sent_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian gửi"
+  },
+  {
+   "fieldname": "read_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian đọc"
+  },
+  {
+   "fieldname": "push_tokens",
+   "fieldtype": "JSON",
+   "label": "Push Tokens"
+  },
+  {
+   "fieldname": "data",
+   "fieldtype": "JSON",
+   "label": "Dữ liệu bổ sung"
+  },
+  {
+   "fieldname": "channel",
+   "fieldtype": "Select",
+   "label": "Kênh gửi",
+   "options": "push\nemail\nsms\nsystem",
+   "default": "system"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Loại tài liệu tham chiếu",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Data",
+   "label": "Tên tài liệu tham chiếu"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Notification",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}
