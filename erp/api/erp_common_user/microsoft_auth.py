@@ -69,16 +69,15 @@ def microsoft_callback(code, state):
         
         if not user_email:
             frappe.throw(_("No email found in Microsoft account"))
-        
-        frappe.logger().info(f"DEBUG: Microsoft user email: {user_email}")
+
         
         # Check if user profile exists (email-centric approach)
         user_profile = None
         try:
             user_profile = frappe.get_doc("ERP User Profile", {"email": user_email})
-            frappe.logger().info(f"DEBUG: Found existing user profile for {user_email}")
+
         except Exception as e:
-            frappe.logger().info(f"DEBUG: No user profile found for {user_email}: {str(e)}")
+
             # Redirect to frontend with error - account not registered
             frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
             error_message = urllib.parse.quote("Tài khoản chưa được đăng ký trong hệ thống")
@@ -108,9 +107,9 @@ def microsoft_callback(code, state):
                 user_profile.microsoft_id = ms_user.microsoft_id
                 user_profile.provider = "microsoft"
                 user_profile.save()
-                frappe.logger().info(f"DEBUG: Updated user profile with Microsoft data")
+
             except Exception as update_error:
-                frappe.logger().error(f"DEBUG: Failed to update user profile: {str(update_error)}")
+                pass
         
         # Commit any changes before querying roles
         frappe.db.commit()
@@ -125,15 +124,15 @@ def microsoft_callback(code, state):
         try:
             # Get all roles (including automatic ones)
             frappe_roles = frappe.get_roles(frappe_user.email) or []
-            frappe.logger().info(f"DEBUG: All frappe roles: {frappe_roles}")
+
             
             # Get only manual/assigned roles (without automatic ones)
             from frappe import permissions as frappe_permissions
             manual_roles = frappe_permissions.get_roles(frappe_user.email, with_standard=False) or []
-            frappe.logger().info(f"DEBUG: Manual roles only: {manual_roles}")
+
                 
         except Exception as e:
-            frappe.logger().error(f"DEBUG: Error getting Frappe roles: {str(e)}")
+
             frappe_roles = ["All", "Guest"]  # Fallback
             manual_roles = []
         
@@ -141,7 +140,7 @@ def microsoft_callback(code, state):
         if not frappe_roles:
             frappe_roles = ["All", "Guest"]
             
-        frappe.logger().info(f"DEBUG: Final - All roles: {frappe_roles}, Manual roles: {manual_roles}")
+
         
         # Create comprehensive user data for frontend (prioritize user_profile data)
         user_data = {
@@ -162,8 +161,7 @@ def microsoft_callback(code, state):
             "username": user_email,  # Use email as username
             "account_enabled": user_info.get("accountEnabled", True)
         }
-        
-        frappe.logger().info(f"DEBUG: Complete user_data: {user_data}")
+
         
         # Encode data for URL (base64 encode to avoid URL encoding issues)
         user_json = json.dumps(user_data)
@@ -202,50 +200,64 @@ def sync_microsoft_users_scheduler():
     """Sync users from Microsoft Graph API - For Scheduler (no throw exceptions)"""
     try:
         result = sync_microsoft_users_internal()
-        frappe.logger().info(f"Scheduled Microsoft sync completed: {result}")
+
         return result
     except Exception as e:
         frappe.log_error(f"Scheduled Microsoft users sync error: {str(e)}", "Microsoft Sync Scheduler")
-        frappe.logger().error(f"Microsoft sync scheduler failed: {str(e)}")
+
+        return {"status": "error", "message": str(e)}
+
+
+def hourly_microsoft_sync_scheduler():
+    """Hourly Microsoft sync for scheduler - optimized and clean"""
+    try:
+        # Simple hourly sync - just update existing profiles with fresh Microsoft data
+        results = sync_microsoft_users_internal()
+        
+        # Get final counts
+        ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
+        profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
+        
+        results["final_counts"] = {
+            "microsoft_users": ms_count,
+            "user_profiles": profile_count
+        }
+        
+        return {
+            "status": "success", 
+            "message": "Hourly Microsoft sync completed",
+            "results": results
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Hourly Microsoft sync error: {str(e)}", "Hourly Microsoft Sync")
         return {"status": "error", "message": str(e)}
 
 
 def full_microsoft_sync_scheduler():
-    """Complete Microsoft sync for scheduler - Users + Profiles (no throw exceptions)"""
+    """Complete Microsoft sync for manual runs - Users + Profiles (no throw exceptions)"""
     try:
-        frappe.logger().info("🚀 Starting scheduled full Microsoft sync...")
-        
         results = {}
         
         # 1. Sync Microsoft users from Graph API
-        frappe.logger().info("📥 Step 1: Syncing Microsoft users from Graph API...")
         ms_result = sync_microsoft_users_internal()
         results["microsoft_users"] = ms_result
-        frappe.logger().info(f"✅ Microsoft users sync: {ms_result}")
         
-        # 2. Sync User Profiles (tạo profiles cho users chưa có)
-        frappe.logger().info("👤 Step 2: Syncing User Profiles...")
+        # 2. Sync User Profiles
         profile_result = sync_existing_users_to_profiles()
         results["user_profiles"] = profile_result
-        frappe.logger().info(f"✅ User profiles sync: {profile_result}")
         
         # 3. Force create missing users
-        frappe.logger().info("🔨 Step 3: Force creating missing users...")
         force_create_result = force_create_missing_users()
         results["force_create_users"] = force_create_result
-        frappe.logger().info(f"✅ Force create users: {force_create_result}")
         
         # 4. Fix user providers 
-        frappe.logger().info("🔧 Step 4: Fixing user providers...")
         provider_fix_result = fix_user_providers()
         results["provider_fix"] = provider_fix_result
-        frappe.logger().info(f"✅ Provider fix: {provider_fix_result}")
         
         # 5. Fix missing employee codes
-        frappe.logger().info("🔧 Step 5: Fixing missing employee codes...")
         fix_result = fix_missing_employee_codes()
         results["employee_code_fix"] = fix_result
-        frappe.logger().info(f"✅ Employee code fix: {fix_result}")
         
         # 6. Get final counts
         ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
@@ -258,9 +270,6 @@ def full_microsoft_sync_scheduler():
             "frappe_users": user_count
         }
         
-        frappe.logger().info(f"📊 Final counts: MS Users: {ms_count}, Profiles: {profile_count}, Frappe Users: {user_count}")
-        frappe.logger().info("🎉 Scheduled full Microsoft sync completed successfully")
-        
         return {
             "status": "success",
             "message": "Full Microsoft sync completed successfully",
@@ -268,9 +277,8 @@ def full_microsoft_sync_scheduler():
         }
         
     except Exception as e:
-        error_msg = f"Scheduled full Microsoft sync error: {str(e)}"
-        frappe.log_error(error_msg, "Full Microsoft Sync Scheduler")
-        frappe.logger().error(f"❌ {error_msg}")
+        error_msg = f"Full Microsoft sync error: {str(e)}"
+        frappe.log_error(error_msg, "Full Microsoft Sync")
         return {"status": "error", "message": str(e)}
 
 
@@ -340,11 +348,11 @@ def sync_microsoft_users_internal():
                     
                     profile.save()
                     profiles_updated += 1
-                    frappe.logger().info(f"Updated profile for {profile_email}")
+
                 
                 synced_count += 1
             else:
-                frappe.logger().info(f"No Microsoft user found for profile email: {profile_email}")
+                pass
                 
         except Exception as e:
             failed_count += 1
@@ -510,7 +518,7 @@ def get_all_microsoft_users(access_token):
     
     # Get users from each group
     for group_id in group_ids:
-        frappe.logger().info(f"Syncing users from group: {group_id}")
+
         
         url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/members?$select={fields}&$top=100"
         
@@ -539,7 +547,7 @@ def get_all_microsoft_users(access_token):
             seen_ids.add(user["id"])
             unique_users.append(user)
     
-    frappe.logger().info(f"Found {len(unique_users)} unique users from {len(group_ids)} groups")
+
     return unique_users
 
 
@@ -657,7 +665,7 @@ def find_or_create_frappe_user(ms_user, user_data):
                 return local_user
             else:
                 # Don't create user if no profile exists - this should be managed manually
-                frappe.logger().info(f"Skipping user creation for {email} - no ERP User Profile found")
+
                 return None
             
         return None
@@ -696,7 +704,6 @@ def create_frappe_user(ms_user, user_data):
         user_doc.flags.ignore_permissions = True
         user_doc.insert()
         
-        frappe.logger().info(f"Created Frappe user: {email}")
         return user_doc
         
     except Exception as e:
@@ -731,7 +738,6 @@ def update_frappe_user(user_doc, ms_user, user_data):
         user_doc.flags.ignore_permissions = True
         user_doc.save()
         
-        frappe.logger().info(f"Updated Frappe user: {user_doc.email}")
         return user_doc
         
     except Exception as e:
@@ -795,7 +801,7 @@ def create_or_update_user_profile(frappe_user, ms_user, user_data):
         else:
             profile.insert()
         
-        frappe.logger().info(f"Created/Updated ERP User Profile for: {frappe_user.email}")
+
         return profile
         
     except Exception as e:
@@ -877,27 +883,27 @@ def full_microsoft_sync():
         results = {}
         
         # 1. Sync Microsoft users
-        frappe.logger().info("Starting Microsoft users sync...")
+
         ms_result = sync_microsoft_users_internal()
         results["microsoft_users"] = ms_result
         
         # 2. Sync User Profiles
-        frappe.logger().info("Starting User Profiles sync...")
+
         profile_result = sync_existing_users_to_profiles()
         results["user_profiles"] = profile_result
         
         # 3. Force create missing users
-        frappe.logger().info("Force creating missing users...")
+
         force_create_result = force_create_missing_users()
         results["force_create_users"] = force_create_result
         
         # 4. Fix user providers
-        frappe.logger().info("Fixing user providers...")
+
         provider_fix_result = fix_user_providers()
         results["provider_fix"] = provider_fix_result
         
         # 5. Fix missing employee codes
-        frappe.logger().info("Fixing missing employee codes...")
+
         fix_result = fix_missing_employee_codes()
         results["employee_code_fix"] = fix_result
         
@@ -1023,7 +1029,7 @@ def create_user_profile_from_microsoft(user_email, ms_user):
 def force_create_missing_users():
     """Force create Frappe users for unmapped Microsoft users"""
     try:
-        frappe.logger().info("🔨 Starting force create for unmapped Microsoft users...")
+
         
         # Get Microsoft users with employee_id but no mapping
         unmapped_users = frappe.db.sql("""
@@ -1077,15 +1083,15 @@ def force_create_missing_users():
                     create_or_update_user_profile(frappe_user, ms_user, user_data)
                     
                     created_count += 1
-                    frappe.logger().info(f"✅ Force created: {ms_user.display_name} -> {frappe_user.name}")
+
                 else:
                     failed_count += 1
-                    frappe.logger().error(f"❌ Failed to create: {ms_user.display_name}")
+
                 
             except Exception as e:
                 failed_count += 1
                 frappe.log_error(f"Error force creating user {ms_user_data.display_name}: {str(e)}", "Force Create User")
-                frappe.logger().error(f"❌ Force create failed for {ms_user_data.display_name}: {str(e)}")
+
         
         result = {
             "status": "success",
@@ -1095,7 +1101,7 @@ def force_create_missing_users():
             "total_attempted": len(unmapped_users)
         }
         
-        frappe.logger().info(f"🎉 Force create completed: {result}")
+
         return result
         
     except Exception as e:
@@ -1108,7 +1114,7 @@ def force_create_missing_users():
 def fix_user_providers():
     """Fix provider field for User Profiles with Microsoft IDs"""
     try:
-        frappe.logger().info("🔧 Starting fix for user providers...")
+
         
         # Get User Profiles with Microsoft ID but provider = 'local'
         profiles_to_fix = frappe.db.sql("""
@@ -1136,12 +1142,12 @@ def fix_user_providers():
                 profile_doc.save()
                 
                 updated_count += 1
-                frappe.logger().info(f"✅ Fixed provider for: {profile_data.user}")
+
                 
             except Exception as e:
                 failed_count += 1
                 frappe.log_error(f"Error fixing provider for {profile_data.name}: {str(e)}", "Provider Fix")
-                frappe.logger().error(f"❌ Failed to fix provider for {profile_data.user}: {str(e)}")
+
         
         result = {
             "status": "success",
@@ -1151,7 +1157,7 @@ def fix_user_providers():
             "total_found": len(profiles_to_fix)
         }
         
-        frappe.logger().info(f"🎉 Provider fix completed: {result}")
+
         return result
         
     except Exception as e:
@@ -1164,7 +1170,7 @@ def fix_user_providers():
 def fix_missing_employee_codes():
     """Fix missing employee codes in User Profiles from Microsoft Users"""
     try:
-        frappe.logger().info("🔧 Starting fix for missing employee codes...")
+
         
         # Get all User Profiles missing employee_code but have microsoft_id
         profiles_missing_code = frappe.db.sql("""
@@ -1195,12 +1201,12 @@ def fix_missing_employee_codes():
                 profile_doc.save()
                 
                 updated_count += 1
-                frappe.logger().info(f"✅ Updated {profile_data.display_name}: {profile_data.employee_id}")
+
                 
             except Exception as e:
                 failed_count += 1
                 frappe.log_error(f"Error updating profile {profile_data.name}: {str(e)}", "Employee Code Fix")
-                frappe.logger().error(f"❌ Failed to update {profile_data.display_name}: {str(e)}")
+
         
         result = {
             "status": "success",
@@ -1210,7 +1216,7 @@ def fix_missing_employee_codes():
             "total_found": len(profiles_missing_code)
         }
         
-        frappe.logger().info(f"🎉 Employee code fix completed: {result}")
+
         return result
         
     except Exception as e:

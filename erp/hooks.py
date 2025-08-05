@@ -150,13 +150,9 @@ app_license = "mit"
 
 scheduler_events = {
 	"cron": {
-		# Microsoft sync mỗi 2 tiếng (lúc :00 phút của giờ chẵn)
-		"0 */2 * * *": [
-			"erp.api.erp_common_user.microsoft_auth.full_microsoft_sync_scheduler"
-		],
-		# Backup sync hàng ngày lúc 2:00 AM (phòng trường hợp lỗi)
-		"0 2 * * *": [
-			"erp.api.erp_common_user.microsoft_auth.full_microsoft_sync_scheduler"
+		# Microsoft sync mỗi tiếng
+		"0 * * * *": [
+			"erp.api.erp_common_user.microsoft_auth.hourly_microsoft_sync_scheduler"
 		]
 	}
 }
@@ -228,9 +224,9 @@ scheduler_events = {
 # Authentication and authorization
 # --------------------------------
 
-# auth_hooks = [
-# 	"erp.auth.validate"
-# ]
+auth_hooks = [
+	"erp.common.jwt_auth.validate_jwt_auth"
+]
 
 # Automatically update python controller files with type annotations for this app.
 # export_python_type_annotations = True

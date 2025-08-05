@@ -1,1 +1,1 @@
-# User Management module for ERP app
+# Common utilities and handlers for ERP app

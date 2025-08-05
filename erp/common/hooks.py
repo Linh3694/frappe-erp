@@ -28,7 +28,7 @@ def create_user_profile_on_user_creation(doc, method):
         
         profile.insert(ignore_permissions=True)
         
-        frappe.logger().info(f"Auto-created user profile for {doc.email}")
+
         
     except Exception as e:
         frappe.log_error(f"Error auto-creating user profile for {doc.email}: {str(e)}", "User Profile Creation")
@@ -73,7 +73,7 @@ def delete_user_profile_on_user_deletion(doc, method):
         profile_name = frappe.db.get_value("ERP User Profile", {"user": doc.email})
         if profile_name:
             frappe.delete_doc("ERP User Profile", profile_name, ignore_permissions=True)
-            frappe.logger().info(f"Auto-deleted user profile for {doc.email}")
+    
         
     except Exception as e:
         frappe.log_error(f"Error deleting user profile for {doc.email}: {str(e)}", "User Profile Deletion")
@@ -129,7 +129,7 @@ def setup_user_management_hooks():
         if "erp.common.hooks.validate_user_permissions" not in frappe.get_hooks("doc_events")["User"]["validate"]:
             frappe.get_hooks("doc_events")["User"]["validate"].append("erp.common.hooks.validate_user_permissions")
         
-        frappe.logger().info("User management hooks setup completed")
+    
         
     except Exception as e:
         frappe.log_error(f"Error setting up user management hooks: {str(e)}", "Hook Setup")
