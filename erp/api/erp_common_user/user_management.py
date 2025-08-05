@@ -93,7 +93,7 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         profiles = frappe.db.sql("""
             SELECT 
                 p.name,
-                p.user,
+                p.user as id,
                 p.username,
                 p.employee_code,
                 p.job_title,
@@ -107,7 +107,8 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
                 u.full_name,
                 u.email,
                 u.enabled,
-                u.creation as user_created
+                u.creation as user_created,
+                COALESCE(u.email, p.user) as display_email
             FROM 
                 `tabERP User Profile` p
             LEFT JOIN 
@@ -228,11 +229,34 @@ def get_user_by_id(user_email):
 
 
 @frappe.whitelist()
-def create_user(user_data):
-    """Create new user with profile"""
+def create_user(user_data=None, **kwargs):
+    """Create user and profile"""
     try:
+        # Debug logging
+        frappe.logger().info(f"create_user called with: user_data={user_data}, kwargs={kwargs}")
+        
+        # Lấy dữ liệu từ request body nếu không có trong tham số
+        if not user_data and frappe.request.is_json:
+            try:
+                user_data = frappe.request.get_json()
+                frappe.logger().info(f"Request JSON data: {user_data}")
+            except Exception as e:
+                frappe.logger().error(f"Error parsing JSON request: {e}")
+                frappe.throw(_("Invalid JSON data in request"))
+        
+        # Nếu user_data là string, parse JSON
         if isinstance(user_data, str):
-            user_data = json.loads(user_data)
+            try:
+                user_data = json.loads(user_data)
+            except json.JSONDecodeError as e:
+                frappe.logger().error(f"Error parsing user_data JSON: {e}")
+                frappe.throw(_("Invalid JSON in user_data"))
+        
+        # Nếu không có user_data, sử dụng kwargs
+        if not user_data:
+            user_data = kwargs
+        
+        frappe.logger().info(f"Final user_data: {user_data}")
         
         # Validate required fields
         if not user_data.get("email"):
@@ -296,11 +320,46 @@ def create_user(user_data):
 
 
 @frappe.whitelist()
-def update_user(user_email, user_data):
+def update_user(user_email=None, user_data=None, **kwargs):
     """Update user and profile"""
     try:
+        # Debug logging
+        frappe.logger().info(f"update_user called with: user_email={user_email}, user_data={user_data}, kwargs={kwargs}")
+        
+        # Lấy dữ liệu từ request body nếu không có trong tham số
+        if not user_data and frappe.request.is_json:
+            try:
+                request_data = frappe.request.get_json()
+                frappe.logger().info(f"Request JSON data: {request_data}")
+                
+                # Nếu user_email không được truyền qua tham số, lấy từ request data
+                if not user_email and 'user_email' in request_data:
+                    user_email = request_data['user_email']
+                
+                # Lấy user_data từ request data
+                user_data = {k: v for k, v in request_data.items() if k != 'user_email'}
+                
+            except Exception as e:
+                frappe.logger().error(f"Error parsing JSON request: {e}")
+                frappe.throw(_("Invalid JSON data in request"))
+        
+        # Nếu user_data là string, parse JSON
         if isinstance(user_data, str):
-            user_data = json.loads(user_data)
+            try:
+                user_data = json.loads(user_data)
+            except json.JSONDecodeError as e:
+                frappe.logger().error(f"Error parsing user_data JSON: {e}")
+                frappe.throw(_("Invalid JSON in user_data"))
+        
+        # Nếu không có user_data, sử dụng kwargs
+        if not user_data:
+            user_data = kwargs
+        
+        frappe.logger().info(f"Final user_email: {user_email}, user_data: {user_data}")
+        
+        # Validate required parameters
+        if not user_email:
+            frappe.throw(_("user_email is required"))
         
         # Check if user exists
         if not frappe.db.exists("User", user_email):
