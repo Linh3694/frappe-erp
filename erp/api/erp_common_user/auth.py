@@ -214,7 +214,7 @@ def change_password(current_password, new_password):
         frappe.throw(_("Error changing password: {0}").format(str(e)))
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_current_user():
     """Get current user information"""
     try:

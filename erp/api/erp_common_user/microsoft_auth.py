@@ -73,7 +73,7 @@ def microsoft_callback(code, state):
         frappe_user = handle_microsoft_user_login(ms_user)
         
         # Generate JWT token
-        from erp.user_management.api.auth import generate_jwt_token
+        from erp.api.erp_common_user.auth import generate_jwt_token
         jwt_token = generate_jwt_token(frappe_user.email)
         
         return {
