@@ -76,20 +76,44 @@ def microsoft_callback(code, state):
         from erp.api.erp_common_user.auth import generate_jwt_token
         jwt_token = generate_jwt_token(frappe_user.email)
         
-        return {
-            "status": "success",
-            "message": _("Microsoft login successful"),
-            "user": {
-                "email": frappe_user.email,
-                "full_name": frappe_user.full_name,
-                "provider": "microsoft"
-            },
-            "token": jwt_token
+        # Create user data for frontend
+        user_data = {
+            "email": frappe_user.email,
+            "full_name": frappe_user.full_name,
+            "provider": "microsoft"
         }
+        
+        # Encode data for URL (base64 encode to avoid URL encoding issues)
+        user_json = json.dumps(user_data)
+        user_encoded = base64.b64encode(user_json.encode()).decode()
+        
+        # Get frontend URL (adjust this based on your frontend URL)
+        frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "https://wellspring.edu.vn"
+        
+        # Redirect to frontend callback with token and user data in URL fragment (for security)
+        callback_url = f"{frontend_url}/microsoft-callback?success=true#token={jwt_token}&user={user_encoded}"
+        
+        # Set redirect response
+        frappe.local.response["type"] = "redirect"
+        frappe.local.response["location"] = callback_url
+        
+        return
         
     except Exception as e:
         frappe.log_error(f"Microsoft callback error: {str(e)}", "Microsoft Auth")
-        frappe.throw(_("Microsoft authentication failed: {0}").format(str(e)))
+        
+        # Get frontend URL for error redirect
+        frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "https://wellspring.edu.vn"
+        
+        # Redirect to frontend with error
+        error_message = urllib.parse.quote(str(e))
+        callback_url = f"{frontend_url}/microsoft-callback?success=false&error={error_message}"
+        
+        # Set redirect response
+        frappe.local.response["type"] = "redirect"
+        frappe.local.response["location"] = callback_url
+        
+        return
 
 
 def sync_microsoft_users_scheduler():
@@ -249,7 +273,7 @@ def get_microsoft_config():
         "tenant_id": frappe.conf.get("microsoft_tenant_id") or frappe.get_site_config().get("microsoft_tenant_id"),
         "client_id": frappe.conf.get("microsoft_client_id") or frappe.get_site_config().get("microsoft_client_id"),
         "client_secret": frappe.conf.get("microsoft_client_secret") or frappe.get_site_config().get("microsoft_client_secret"),
-        "redirect_uri": frappe.conf.get("microsoft_redirect_uri") or frappe.get_site_config().get("microsoft_redirect_uri") or f"{frappe.utils.get_url()}/api/method/erp.user_management.api.microsoft_auth.microsoft_callback",
+        "redirect_uri": frappe.conf.get("microsoft_redirect_uri") or frappe.get_site_config().get("microsoft_redirect_uri") or f"{frappe.utils.get_url()}/api/method/erp.api.erp_common_user.microsoft_auth.microsoft_callback",
         "hourly_sync": frappe.conf.get("microsoft_hourly_sync") or frappe.get_site_config().get("microsoft_hourly_sync", False),
         "group_ids": frappe.conf.get("microsoft_group_ids") or frappe.get_site_config().get("microsoft_group_ids", "dd475730-881b-4c7e-8c8b-13f2160da442,989da314-610e-4be4-9f67-1d6d63e2fc34")
     }
