@@ -302,7 +302,7 @@ def create_user(user_data=None, **kwargs):
         profile = frappe.get_doc(profile_data)
         profile.insert(ignore_permissions=True)
         
-        # Assign roles if provided - sử dụng Frappe system roles
+        # Assign roles if provided - chỉ sử dụng Frappe system roles
         if user_data.get("roles"):
             valid_frappe_roles = ["System Manager", "Administrator", "All", "User", "Guest"]
             for role in user_data["roles"]:
@@ -408,7 +408,7 @@ def update_user(user_email=None, user_data=None, **kwargs):
         
         profile.save()
         
-        # Update roles if provided - sử dụng Frappe system roles
+        # Update roles if provided - chỉ sử dụng Frappe system roles
         if user_data.get("roles"):
             # Clear existing roles
             user_doc.roles = []
@@ -535,7 +535,7 @@ def reset_user_password(user_email):
 def get_user_roles():
     """Get available user roles"""
     try:
-        # Sử dụng Frappe system roles thay vì custom roles
+        # Chỉ sử dụng Frappe system roles
         roles = [
             {"value": "System Manager", "label": "System Manager"},
             {"value": "Administrator", "label": "Administrator"},
