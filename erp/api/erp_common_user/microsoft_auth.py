@@ -119,9 +119,9 @@ def microsoft_callback(code, state):
         
         try:
             # Method 2: Direct permissions call
-            import frappe.permissions
-            frappe_roles_alt = frappe.permissions.get_roles(frappe_user.email)
-            frappe.logger().info(f"DEBUG: Method 2 - frappe.permissions.get_roles({frappe_user.email}): {frappe_roles_alt}")
+            from frappe import permissions as frappe_permissions
+            frappe_roles_alt = frappe_permissions.get_roles(frappe_user.email)
+            frappe.logger().info(f"DEBUG: Method 2 - frappe_permissions.get_roles({frappe_user.email}): {frappe_roles_alt}")
             if not frappe_roles:
                 frappe_roles = frappe_roles_alt
         except Exception as e:
