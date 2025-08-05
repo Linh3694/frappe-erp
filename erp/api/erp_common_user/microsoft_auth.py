@@ -65,12 +65,52 @@ def microsoft_callback(code, state):
         
         # Get user info from Microsoft Graph
         user_info = get_microsoft_user_info(token_data["access_token"])
+        user_email = user_info.get("mail") or user_info.get("userPrincipalName")
         
-        # Create or update Microsoft user
+        if not user_email:
+            frappe.throw(_("No email found in Microsoft account"))
+        
+        frappe.logger().info(f"DEBUG: Microsoft user email: {user_email}")
+        
+        # Check if user profile exists (email-centric approach)
+        user_profile = None
+        try:
+            user_profile = frappe.get_doc("ERP User Profile", {"email": user_email})
+            frappe.logger().info(f"DEBUG: Found existing user profile for {user_email}")
+        except Exception as e:
+            frappe.logger().info(f"DEBUG: No user profile found for {user_email}: {str(e)}")
+            # Redirect to frontend with error - account not registered
+            frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
+            error_message = urllib.parse.quote("Tài khoản chưa được đăng ký trong hệ thống")
+            callback_url = f"{frontend_url}/auth/microsoft/callback?success=false&error={error_message}"
+            
+            frappe.local.response["type"] = "redirect"
+            frappe.local.response["location"] = callback_url
+            return
+        
+        # Create or update Microsoft user record
         ms_user = create_or_update_microsoft_user(user_info)
         
         # Login or create Frappe user
         frappe_user = handle_microsoft_user_login(ms_user)
+        
+        # Update user profile with latest Microsoft data if available
+        if user_profile and user_info:
+            try:
+                # Update profile with fresh data from Microsoft
+                if user_info.get("jobTitle"):
+                    user_profile.job_title = user_info.get("jobTitle")
+                if user_info.get("department"):
+                    user_profile.department = user_info.get("department")
+                if user_info.get("employeeId"):
+                    user_profile.employee_code = user_info.get("employeeId")
+                
+                user_profile.microsoft_id = ms_user.microsoft_id
+                user_profile.provider = "microsoft"
+                user_profile.save()
+                frappe.logger().info(f"DEBUG: Updated user profile with Microsoft data")
+            except Exception as update_error:
+                frappe.logger().error(f"DEBUG: Failed to update user profile: {str(update_error)}")
         
         # Commit any changes before querying roles
         frappe.db.commit()
@@ -78,35 +118,6 @@ def microsoft_callback(code, state):
         # Generate JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
         jwt_token = generate_jwt_token(frappe_user.email)
-        
-        # Get or create user profile for additional data
-        user_profile = None
-        try:
-            user_profile = frappe.get_doc("ERP User Profile", {"user": frappe_user.email})
-            frappe.logger().info(f"DEBUG: Found user profile for {frappe_user.email}: {user_profile.name}")
-            frappe.logger().info(f"DEBUG: Profile user_role: {getattr(user_profile, 'user_role', 'NOT_FOUND')}")
-        except Exception as e:
-            frappe.logger().info(f"DEBUG: No user profile found for {frappe_user.email}: {str(e)}")
-            # Create user profile if it doesn't exist
-            try:
-                user_profile = frappe.get_doc({
-                    "doctype": "ERP User Profile",
-                    "user": frappe_user.email,
-                    "username": frappe_user.email.split('@')[0],
-                    "provider": "microsoft",
-                    "microsoft_id": ms_user.microsoft_id,
-                    "job_title": user_info.get("jobTitle"),
-                    "department": user_info.get("department"),
-                    "employee_code": user_info.get("employeeId"),
-                    "user_role": "user",  # Default role, can be set manually later
-                    "active": 1
-                })
-                user_profile.flags.ignore_permissions = True
-                user_profile.insert()
-                frappe.logger().info(f"DEBUG: Created new user profile with default role: user")
-            except Exception as create_error:
-                frappe.logger().error(f"DEBUG: Failed to create user profile: {str(create_error)}")
-                pass
         
         # Get Frappe roles for the user
         frappe_roles = []
@@ -132,22 +143,23 @@ def microsoft_callback(code, state):
             
         frappe.logger().info(f"DEBUG: Final - All roles: {frappe_roles}, Manual roles: {manual_roles}")
         
-        # Create comprehensive user data for frontend
+        # Create comprehensive user data for frontend (prioritize user_profile data)
         user_data = {
-            "email": frappe_user.email,
+            "email": user_email,  # Use Microsoft email as primary
             "full_name": frappe_user.full_name,
             "first_name": frappe_user.first_name or "",
             "last_name": frappe_user.last_name or "",
             "provider": "microsoft",
             "microsoft_id": ms_user.microsoft_id if ms_user else None,
-            "job_title": user_profile.job_title if user_profile else user_info.get("jobTitle"),
-            "department": user_profile.department if user_profile else user_info.get("department"),
-            "employee_code": user_profile.employee_code if user_profile else user_info.get("employeeId"),
+            # Prioritize user_profile data since it's been updated with fresh Microsoft data
+            "job_title": user_profile.job_title if user_profile and user_profile.job_title else "",
+            "department": user_profile.department if user_profile and user_profile.department else "",
+            "employee_code": user_profile.employee_code if user_profile and user_profile.employee_code else "",
             "user_role": user_profile.user_role if user_profile else "user",  # ERP custom role
             "frappe_roles": frappe_roles,  # All Frappe roles (including automatic)
             "manual_roles": manual_roles,  # Only manually assigned roles
             "active": frappe_user.enabled,
-            "username": user_profile.username if user_profile else frappe_user.email.split('@')[0],
+            "username": user_email,  # Use email as username
             "account_enabled": user_info.get("accountEnabled", True)
         }
         
@@ -409,7 +421,10 @@ def get_microsoft_user_info(access_token):
         "Content-Type": "application/json"
     }
     
-    response = requests.get("https://graph.microsoft.com/v1.0/me", headers=headers)
+    # Include all fields we need for sync (same as get_all_microsoft_users)
+    fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+    
+    response = requests.get(f"https://graph.microsoft.com/v1.0/me?$select={fields}", headers=headers)
     
     if response.status_code != 200:
         raise Exception(f"User info request failed: {response.text}")
@@ -661,8 +676,10 @@ def update_frappe_user(user_doc, ms_user, user_data):
 def create_or_update_user_profile(frappe_user, ms_user, user_data):
     """Create or update ERP User Profile from Microsoft data"""
     try:
-        # Check if ERP User Profile already exists
-        existing_profile = frappe.db.get_value("ERP User Profile", {"user": frappe_user.name})
+        user_email = user_data.get("mail") or user_data.get("userPrincipalName") or frappe_user.email
+        
+        # Check if ERP User Profile already exists by email (email-centric approach)
+        existing_profile = frappe.db.get_value("ERP User Profile", {"email": user_email})
         
         if existing_profile:
             # Update existing profile
@@ -671,14 +688,16 @@ def create_or_update_user_profile(frappe_user, ms_user, user_data):
             # Create new profile
             profile = frappe.get_doc({
                 "doctype": "ERP User Profile",
-                "user": frappe_user.name
+                "user": frappe_user.name,
+                "email": user_email
             })
         
         # Update profile fields with Microsoft data
         profile.full_name = user_data.get("displayName") or frappe_user.full_name
         profile.first_name = user_data.get("givenName") or frappe_user.first_name
         profile.last_name = user_data.get("surname") or frappe_user.last_name
-        profile.email = user_data.get("mail") or user_data.get("userPrincipalName") or frappe_user.email
+        profile.email = user_email
+        profile.username = user_email  # Use email as username
         
         # Microsoft-specific fields
         profile.employee_code = user_data.get("employeeId")  # Fixed: Use employee_code not employee_id
