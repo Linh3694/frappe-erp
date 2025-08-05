@@ -23,6 +23,9 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         active: Filter by active status
     """
     try:
+        # Debug: Log parameters
+        frappe.logger().info(f"get_users called with: page={page}, limit={limit}, search={search}, role={role}, department={department}, active={active}")
+        
         # Build filters
         filters = {}
         
@@ -44,6 +47,9 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         
         # Calculate offset
         offset = (int(page) - 1) * int(limit)
+        
+        # Debug: Log SQL parameters
+        frappe.logger().info(f"SQL parameters: limit={int(limit)}, offset={offset}")
         
         # Get user profiles with joins
         profiles = frappe.db.sql("""
@@ -86,6 +92,9 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
             offset=offset
         ), as_dict=True)
         
+        # Debug: Log result count
+        frappe.logger().info(f"Query returned {len(profiles)} users")
+        
         # Get total count
         total_count = frappe.db.sql("""
             SELECT COUNT(*)
@@ -102,6 +111,9 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
             active_filter=f"AND p.active = {int(active)}" if active is not None else "",
             search_filter=f"AND (p.user LIKE '%{search}%' OR p.username LIKE '%{search}%' OR u.full_name LIKE '%{search}%')" if search else ""
         ))[0][0]
+        
+        # Debug: Log total count
+        frappe.logger().info(f"Total users in database: {total_count}")
         
         return {
             "status": "success",
