@@ -76,11 +76,27 @@ def microsoft_callback(code, state):
         from erp.api.erp_common_user.auth import generate_jwt_token
         jwt_token = generate_jwt_token(frappe_user.email)
         
-        # Create user data for frontend
+        # Get user profile for additional data
+        user_profile = None
+        try:
+            user_profile = frappe.get_doc("ERP User Profile", {"user": frappe_user.email})
+        except:
+            pass
+        
+        # Create comprehensive user data for frontend
         user_data = {
             "email": frappe_user.email,
             "full_name": frappe_user.full_name,
-            "provider": "microsoft"
+            "first_name": frappe_user.first_name or "",
+            "last_name": frappe_user.last_name or "",
+            "provider": "microsoft",
+            "microsoft_id": ms_user.microsoft_id if ms_user else None,
+            "job_title": user_profile.job_title if user_profile else None,
+            "department": user_profile.department if user_profile else None,
+            "employee_code": user_profile.employee_code if user_profile else None,
+            "role": user_profile.user_role if user_profile else "user",
+            "active": frappe_user.enabled,
+            "username": user_profile.username if user_profile else frappe_user.email.split('@')[0]
         }
         
         # Encode data for URL (base64 encode to avoid URL encoding issues)
