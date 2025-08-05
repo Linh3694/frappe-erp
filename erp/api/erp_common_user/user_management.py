@@ -26,9 +26,14 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         # Debug: Log parameters
         frappe.logger().info(f"get_users called with: page={page}, limit={limit}, search={search}, role={role}, department={department}, active={active}")
         
-        # Debug: Log request data
+        # Debug: Log request data (an toàn, không crash nếu không có JSON)
         import json
-        request_data = frappe.request.get_json() if frappe.request.is_json else {}
+        request_data = {}
+        try:
+            if frappe.request.is_json:
+                request_data = frappe.request.get_json()
+        except Exception as e:
+            frappe.logger().info(f"Ignore JSON decode error: {e}")
         frappe.logger().info(f"get_users request data: {json.dumps(request_data, default=str)}")
         
         # Debug: Log request form data
