@@ -285,32 +285,90 @@ def sync_microsoft_users():
 
 
 def sync_microsoft_users_internal():
-    """Internal sync function - shared logic"""
+    """Internal sync function - email-centric approach"""
     # Get app-only access token
     token = get_microsoft_app_token()
     
     # Get all users from Microsoft Graph
-    users = get_all_microsoft_users(token)
+    ms_users_data = get_all_microsoft_users(token)
     
     synced_count = 0
     failed_count = 0
+    profiles_updated = 0
     
-    for user_data in users:
+    # Create index of Microsoft users by email for fast lookup
+    ms_users_by_email = {}
+    for user_data in ms_users_data:
+        email = user_data.get("mail") or user_data.get("userPrincipalName")
+        if email:
+            ms_users_by_email[email.lower()] = user_data
+    
+    # Get all existing ERP User Profiles
+    existing_profiles = frappe.db.sql("""
+        SELECT name, email, user, microsoft_id 
+        FROM `tabERP User Profile` 
+        WHERE email IS NOT NULL AND email != ''
+    """, as_dict=True)
+    
+    for profile_data in existing_profiles:
         try:
-            # Create or update Microsoft user
-            ms_user = create_or_update_microsoft_user(user_data)
-            synced_count += 1
+            profile_email = profile_data.email.lower()
             
+            # Find corresponding Microsoft user data
+            if profile_email in ms_users_by_email:
+                user_data = ms_users_by_email[profile_email]
+                
+                # Create or update Microsoft user record
+                ms_user = create_or_update_microsoft_user(user_data)
+                
+                # Update the ERP User Profile with latest Microsoft data
+                if ms_user:
+                    profile = frappe.get_doc("ERP User Profile", profile_data.name)
+                    
+                    # Update with fresh Microsoft data
+                    if user_data.get("jobTitle"):
+                        profile.job_title = user_data.get("jobTitle")
+                    if user_data.get("department"):
+                        profile.department = user_data.get("department")
+                    if user_data.get("employeeId"):
+                        profile.employee_code = user_data.get("employeeId")
+                    
+                    profile.microsoft_id = ms_user.microsoft_id
+                    profile.provider = "microsoft"
+                    profile.last_microsoft_sync = datetime.now()
+                    profile.sync_source = "Microsoft 365"
+                    
+                    profile.save()
+                    profiles_updated += 1
+                    frappe.logger().info(f"Updated profile for {profile_email}")
+                
+                synced_count += 1
+            else:
+                frappe.logger().info(f"No Microsoft user found for profile email: {profile_email}")
+                
         except Exception as e:
             failed_count += 1
-            frappe.log_error(f"Error syncing Microsoft user {user_data.get('id')}: {str(e)}", "Microsoft Sync")
+            frappe.log_error(f"Error syncing profile {profile_data.email}: {str(e)}", "Microsoft Profile Sync")
+    
+    # Also sync any new Microsoft users that don't have profiles yet (just create MS User records)
+    for user_data in ms_users_data:
+        try:
+            email = user_data.get("mail") or user_data.get("userPrincipalName")
+            if email and not frappe.db.get_value("ERP User Profile", {"email": email.lower()}):
+                # Create Microsoft user record for future reference
+                create_or_update_microsoft_user(user_data)
+                
+        except Exception as e:
+            frappe.log_error(f"Error creating MS user record for {user_data.get('id')}: {str(e)}", "Microsoft Sync")
     
     return {
         "status": "success",
-        "message": _("Microsoft users sync completed"),
+        "message": _("Email-centric Microsoft sync completed"),
         "synced_count": synced_count,
         "failed_count": failed_count,
-        "total_users": len(users)
+        "profiles_updated": profiles_updated,
+        "total_ms_users": len(ms_users_data),
+        "total_profiles": len(existing_profiles)
     }
 
 
@@ -589,10 +647,18 @@ def find_or_create_frappe_user(ms_user, user_data):
                     update_frappe_user(local_user, ms_user, user_data)
                     return local_user
         
-        # 4. Create new user if not found
+        # 4. Check if ERP User Profile exists for this email before creating new user
         if not local_user and email:
-            local_user = create_frappe_user(ms_user, user_data)
-            return local_user
+            # Check if there's a User Profile for this email
+            profile_exists = frappe.db.get_value("ERP User Profile", {"email": email})
+            if profile_exists:
+                # Create Frappe user since profile exists but user might not exist
+                local_user = create_frappe_user(ms_user, user_data)
+                return local_user
+            else:
+                # Don't create user if no profile exists - this should be managed manually
+                frappe.logger().info(f"Skipping user creation for {email} - no ERP User Profile found")
+                return None
             
         return None
         
