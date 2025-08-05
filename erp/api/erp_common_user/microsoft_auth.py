@@ -108,31 +108,29 @@ def microsoft_callback(code, state):
                 frappe.logger().error(f"DEBUG: Failed to create user profile: {str(create_error)}")
                 pass
         
-        # Get Frappe roles for the user (simplified approach)
+        # Get Frappe roles for the user
         frappe_roles = []
+        manual_roles = []
         try:
-            # Try direct approach first
+            # Get all roles (including automatic ones)
             frappe_roles = frappe.get_roles(frappe_user.email) or []
-            frappe.logger().info(f"DEBUG: frappe.get_roles({frappe_user.email}) returned: {frappe_roles}")
+            frappe.logger().info(f"DEBUG: All frappe roles: {frappe_roles}")
             
-            # If empty, try querying Has Role table directly  
-            if not frappe_roles or frappe_roles == ["Guest"]:
-                has_roles = frappe.get_all("Has Role", 
-                                         filters={"parent": frappe_user.email, "parenttype": "User"}, 
-                                         pluck="role") or []
-                frappe.logger().info(f"DEBUG: Direct Has Role query returned: {has_roles}")
-                if has_roles:
-                    frappe_roles = has_roles + ["All"]  # Add default roles
+            # Get only manual/assigned roles (without automatic ones)
+            from frappe import permissions as frappe_permissions
+            manual_roles = frappe_permissions.get_roles(frappe_user.email, with_standard=False) or []
+            frappe.logger().info(f"DEBUG: Manual roles only: {manual_roles}")
                 
         except Exception as e:
             frappe.logger().error(f"DEBUG: Error getting Frappe roles: {str(e)}")
-            frappe_roles = ["All"]  # Fallback to basic role
+            frappe_roles = ["All", "Guest"]  # Fallback
+            manual_roles = []
         
-        # Ensure we always have at least basic roles
+        # Ensure we have fallback roles
         if not frappe_roles:
             frappe_roles = ["All", "Guest"]
             
-        frappe.logger().info(f"DEBUG: Final frappe_roles for {frappe_user.email}: {frappe_roles}")
+        frappe.logger().info(f"DEBUG: Final - All roles: {frappe_roles}, Manual roles: {manual_roles}")
         
         # Create comprehensive user data for frontend
         user_data = {
@@ -146,7 +144,8 @@ def microsoft_callback(code, state):
             "department": user_profile.department if user_profile else user_info.get("department"),
             "employee_code": user_profile.employee_code if user_profile else user_info.get("employeeId"),
             "user_role": user_profile.user_role if user_profile else "user",  # ERP custom role
-            "frappe_roles": frappe_roles,  # Frappe system roles
+            "frappe_roles": frappe_roles,  # All Frappe roles (including automatic)
+            "manual_roles": manual_roles,  # Only manually assigned roles
             "active": frappe_user.enabled,
             "username": user_profile.username if user_profile else frappe_user.email.split('@')[0],
             "account_enabled": user_info.get("accountEnabled", True)
