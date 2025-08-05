@@ -18,6 +18,7 @@
  "field_order": [
   "basic_information",
   "user",
+  "email",
   "username",
   "employee_code",
   "column_break_1",
@@ -59,6 +60,14 @@
    "in_list_view": 1,
    "label": "User",
    "options": "User",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Email",
    "reqd": 1,
    "unique": 1
   },
@@ -216,7 +225,7 @@
  "issingle": 0,
  "istable": 0,
  "max_attachments": 0,
- "modified": "2024-12-19 16:00:00.000000",
+ "modified": "2025-01-08 11:00:00.000000",
  "modified_by": "Administrator",
  "module": "Common",
  "name": "ERP User Profile",
