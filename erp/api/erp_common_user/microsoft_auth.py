@@ -72,16 +72,73 @@ def microsoft_callback(code, state):
         # Login or create Frappe user
         frappe_user = handle_microsoft_user_login(ms_user)
         
+        # Commit any changes before querying roles
+        frappe.db.commit()
+        
         # Generate JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
         jwt_token = generate_jwt_token(frappe_user.email)
         
-        # Get user profile for additional data
+        # Get or create user profile for additional data
         user_profile = None
         try:
             user_profile = frappe.get_doc("ERP User Profile", {"user": frappe_user.email})
-        except:
-            pass
+            frappe.logger().info(f"DEBUG: Found user profile for {frappe_user.email}: {user_profile.name}")
+            frappe.logger().info(f"DEBUG: Profile user_role: {getattr(user_profile, 'user_role', 'NOT_FOUND')}")
+        except Exception as e:
+            frappe.logger().info(f"DEBUG: No user profile found for {frappe_user.email}: {str(e)}")
+            # Create user profile if it doesn't exist
+            try:
+                user_profile = frappe.get_doc({
+                    "doctype": "ERP User Profile",
+                    "user": frappe_user.email,
+                    "username": frappe_user.email.split('@')[0],
+                    "provider": "microsoft",
+                    "microsoft_id": ms_user.microsoft_id,
+                    "job_title": user_info.get("jobTitle"),
+                    "department": user_info.get("department"),
+                    "employee_code": user_info.get("employeeId"),
+                    "user_role": "user",  # Default role, can be set manually later
+                    "active": 1
+                })
+                user_profile.flags.ignore_permissions = True
+                user_profile.insert()
+                frappe.logger().info(f"DEBUG: Created new user profile with default role: user")
+            except Exception as create_error:
+                frappe.logger().error(f"DEBUG: Failed to create user profile: {str(create_error)}")
+                pass
+        
+        # Get Frappe roles for the user (try multiple approaches)
+        frappe_roles = []
+        try:
+            # Method 1: Direct call with email (user name in Frappe)
+            frappe_roles = frappe.get_roles(frappe_user.email)
+            frappe.logger().info(f"DEBUG: Method 1 - frappe.get_roles({frappe_user.email}): {frappe_roles}")
+        except Exception as e:
+            frappe.logger().error(f"DEBUG: Method 1 failed: {str(e)}")
+        
+        try:
+            # Method 2: Direct permissions call
+            import frappe.permissions
+            frappe_roles_alt = frappe.permissions.get_roles(frappe_user.email)
+            frappe.logger().info(f"DEBUG: Method 2 - frappe.permissions.get_roles({frappe_user.email}): {frappe_roles_alt}")
+            if not frappe_roles:
+                frappe_roles = frappe_roles_alt
+        except Exception as e:
+            frappe.logger().error(f"DEBUG: Method 2 failed: {str(e)}")
+        
+        try:
+            # Method 3: Query Has Role table directly
+            has_roles = frappe.get_all("Has Role", 
+                                     filters={"parent": frappe_user.email, "parenttype": "User"}, 
+                                     pluck="role")
+            frappe.logger().info(f"DEBUG: Method 3 - Direct Has Role query: {has_roles}")
+            if not frappe_roles:
+                frappe_roles = has_roles
+        except Exception as e:
+            frappe.logger().error(f"DEBUG: Method 3 failed: {str(e)}")
+        
+        frappe.logger().info(f"DEBUG: Final frappe_roles for {frappe_user.email}: {frappe_roles}")
         
         # Create comprehensive user data for frontend
         user_data = {
@@ -91,13 +148,17 @@ def microsoft_callback(code, state):
             "last_name": frappe_user.last_name or "",
             "provider": "microsoft",
             "microsoft_id": ms_user.microsoft_id if ms_user else None,
-            "job_title": user_profile.job_title if user_profile else None,
-            "department": user_profile.department if user_profile else None,
-            "employee_code": user_profile.employee_code if user_profile else None,
-            "role": user_profile.user_role if user_profile else "user",
+            "job_title": user_profile.job_title if user_profile else user_info.get("jobTitle"),
+            "department": user_profile.department if user_profile else user_info.get("department"),
+            "employee_code": user_profile.employee_code if user_profile else user_info.get("employeeId"),
+            "user_role": user_profile.user_role if user_profile else "user",  # ERP custom role
+            "frappe_roles": frappe_roles,  # Frappe system roles
             "active": frappe_user.enabled,
-            "username": user_profile.username if user_profile else frappe_user.email.split('@')[0]
+            "username": user_profile.username if user_profile else frappe_user.email.split('@')[0],
+            "account_enabled": user_info.get("accountEnabled", True)
         }
+        
+        frappe.logger().info(f"DEBUG: Complete user_data: {user_data}")
         
         # Encode data for URL (base64 encode to avoid URL encoding issues)
         user_json = json.dumps(user_data)
@@ -281,6 +342,7 @@ def map_microsoft_user(microsoft_user_id, frappe_user_email=None, create_new=Fal
     except Exception as e:
         frappe.log_error(f"Microsoft user mapping error: {str(e)}", "Microsoft Mapping")
         frappe.throw(_("Error mapping Microsoft user: {0}").format(str(e)))
+
 
 
 def get_microsoft_config():
