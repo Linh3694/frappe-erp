@@ -13,8 +13,35 @@ from erp.api.erp_common_user.microsoft_auth import (
     get_microsoft_access_token, 
     get_microsoft_user_info,
     create_or_update_microsoft_user,
-    handle_microsoft_user_login
+    handle_microsoft_user_login,
+    get_microsoft_config
 )
+import requests
+
+
+def get_microsoft_access_token_with_redirect(code, redirect_uri):
+    """Exchange authorization code for access token with custom redirect URI"""
+    config = get_microsoft_config()
+    
+    token_url = f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token"
+    
+    data = {
+        "client_id": config["client_id"],
+        "client_secret": config["client_secret"],
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code"
+    }
+    
+    frappe.logger().info(f"Token exchange request: client_id={config['client_id']}, redirect_uri={redirect_uri}")
+    
+    response = requests.post(token_url, data=data)
+    
+    if response.status_code != 200:
+        frappe.logger().error(f"Token exchange failed: {response.text}")
+        raise Exception(f"Token request failed: {response.text}")
+    
+    return response.json()
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
@@ -44,9 +71,11 @@ def mobile_microsoft_callback(code, state=None):
                 frappe.logger().warning(f"Invalid or expired state parameter: {state}")
                 # Continue anyway for mobile compatibility
         
-        # Exchange code for access token
+        # Exchange code for access token (with mobile redirect URI)
         try:
-            token_data = get_microsoft_access_token(code)
+            # Use special redirect URI for mobile (this is registered in Azure AD)
+            mobile_redirect_uri = "urn:ietf:wg:oauth:2.0:oob"  # Standard mobile redirect URI
+            token_data = get_microsoft_access_token_with_redirect(code, mobile_redirect_uri)
             frappe.logger().info("Successfully got Microsoft access token")
         except Exception as e:
             frappe.logger().error(f"Failed to get Microsoft access token: {str(e)}")
