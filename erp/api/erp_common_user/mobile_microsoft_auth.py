@@ -73,9 +73,8 @@ def mobile_microsoft_callback(code, state=None):
         
         # Exchange code for access token (with mobile redirect URI)
         try:
-            # Use special redirect URI for mobile (this is registered in Azure AD)
-            mobile_redirect_uri = "urn:ietf:wg:oauth:2.0:oob"  # Standard mobile redirect URI
-            token_data = get_microsoft_access_token_with_redirect(code, mobile_redirect_uri)
+            # Use the same redirect URI as regular web authentication
+            token_data = get_microsoft_access_token(code)
             frappe.logger().info("Successfully got Microsoft access token")
         except Exception as e:
             frappe.logger().error(f"Failed to get Microsoft access token: {str(e)}")
