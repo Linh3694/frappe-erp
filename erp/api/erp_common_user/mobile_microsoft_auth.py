@@ -75,6 +75,8 @@ def mobile_microsoft_callback(code, state=None):
         try:
             # Get redirect URI from request parameters (sent by mobile app)
             mobile_redirect_uri = frappe.request.args.get('redirect_uri')
+            frappe.logger().info(f"DEBUG: mobile_redirect_uri parameter = {mobile_redirect_uri}")
+            frappe.logger().info(f"DEBUG: All request args = {dict(frappe.request.args)}")
             if mobile_redirect_uri:
                 frappe.logger().info(f"Using mobile redirect URI for token exchange: {mobile_redirect_uri}")
                 try:
