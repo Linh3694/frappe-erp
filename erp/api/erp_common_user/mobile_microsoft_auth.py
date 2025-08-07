@@ -172,11 +172,26 @@ def mobile_microsoft_callback(code, state=None):
         # Create or update Microsoft user record
         try:
             ms_user = create_or_update_microsoft_user(user_info)
-            frappe.logger().info(f"Microsoft user record updated")
+            frappe.logger().info(f"Microsoft user record updated: {ms_user.name if ms_user else 'None'}")
         except Exception as e:
-            frappe.logger().warning(f"Failed to update Microsoft user record: {str(e)}")
-            # Continue anyway, this is not critical
-            ms_user = None
+            frappe.logger().error(f"Failed to create/update Microsoft user record: {str(e)}")
+            # Return error since this is critical for mobile flow
+            return {
+                "success": False,
+                "error": "Failed to create user record",
+                "error_code": "USER_RECORD_FAILED",
+                "details": str(e)
+            }
+        
+        # Ensure ms_user is valid
+        if not ms_user:
+            frappe.logger().error("Microsoft user record is None after creation")
+            return {
+                "success": False,
+                "error": "Failed to create Microsoft user record",
+                "error_code": "USER_RECORD_NONE",
+                "details": "Microsoft user record returned None"
+            }
         
         # Login or create Frappe user
         try:
