@@ -77,14 +77,21 @@ def mobile_microsoft_callback(code, state=None):
             mobile_redirect_uri = frappe.request.args.get('redirect_uri')
             if mobile_redirect_uri:
                 frappe.logger().info(f"Using mobile redirect URI for token exchange: {mobile_redirect_uri}")
-                token_data = get_microsoft_access_token_with_redirect(code, mobile_redirect_uri)
+                try:
+                    token_data = get_microsoft_access_token_with_redirect(code, mobile_redirect_uri)
+                except Exception as redirect_error:
+                    frappe.logger().error(f"Mobile redirect URI failed: {str(redirect_error)}")
+                    frappe.logger().info("Falling back to default web redirect URI")
+                    token_data = get_microsoft_access_token(code)
             else:
                 # Fallback to web redirect URI
                 frappe.logger().info("Using default web redirect URI for token exchange")
                 token_data = get_microsoft_access_token(code)
             frappe.logger().info("Successfully got Microsoft access token")
+            frappe.logger().info(f"Token data keys: {list(token_data.keys()) if token_data else 'None'}")
         except Exception as e:
             frappe.logger().error(f"Failed to get Microsoft access token: {str(e)}")
+            frappe.logger().error(f"Exception type: {type(e).__name__}")
             return {
                 "success": False,
                 "error": "Failed to exchange authorization code for access token",
