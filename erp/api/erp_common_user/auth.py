@@ -234,7 +234,8 @@ def get_current_user():
             "full_name": user_doc.full_name,
             "first_name": user_doc.first_name,
             "last_name": user_doc.last_name,
-            "enabled": user_doc.enabled
+            "enabled": user_doc.enabled,
+            "user_image": user_doc.user_image or ""
         }
         
         if profile_name:
@@ -248,8 +249,12 @@ def get_current_user():
                 "provider": profile.provider,
                 "active": profile.active,
                 "last_login": profile.last_login,
-                "last_seen": profile.last_seen
+                "last_seen": profile.last_seen,
+                "avatar_url": profile.avatar_url or user_doc.user_image or ""
             })
+        else:
+            # If no profile exists, still provide avatar from user_image
+            user_data["avatar_url"] = user_doc.user_image or ""
         
         return {
             "status": "success",
@@ -393,6 +398,12 @@ def update_profile(profile_data):
         
         profile.save()
         
+        # Sync avatar_url to User.user_image if avatar_url is updated
+        if "avatar_url" in profile_data:
+            user_doc = frappe.get_doc("User", frappe.session.user)
+            user_doc.user_image = profile_data["avatar_url"]
+            user_doc.save()
+        
         return {
             "status": "success",
             "message": _("Profile updated successfully"),
@@ -402,3 +413,83 @@ def update_profile(profile_data):
     except Exception as e:
         frappe.log_error(f"Update profile error: {str(e)}", "Authentication")
         frappe.throw(_("Error updating profile: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def upload_avatar():
+    """Upload user avatar"""
+    try:
+        if frappe.session.user == "Guest":
+            frappe.throw(_("Please login to upload avatar"))
+        
+        # Get uploaded file
+        files = frappe.request.files
+        if not files or 'avatar' not in files:
+            frappe.throw(_("No avatar file provided"))
+        
+        avatar_file = files['avatar']
+        
+        # Validate file type
+        allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+        file_extension = avatar_file.filename.rsplit('.', 1)[1].lower() if '.' in avatar_file.filename else ''
+        
+        if file_extension not in allowed_extensions:
+            frappe.throw(_("Invalid file type. Allowed types: {0}").format(', '.join(allowed_extensions)))
+        
+        # Validate file size (max 5MB)
+        avatar_file.seek(0, 2)  # Move to end
+        file_size = avatar_file.tell()
+        avatar_file.seek(0)  # Reset to beginning
+        
+        max_size = 5 * 1024 * 1024  # 5MB
+        if file_size > max_size:
+            frappe.throw(_("File size too large. Maximum allowed: 5MB"))
+        
+        # Create filename
+        import uuid
+        import os
+        file_id = str(uuid.uuid4())
+        filename = f"{file_id}.{file_extension}"
+        
+        # Create Avatar directory if it doesn't exist
+        from frappe.utils.file_manager import get_file_path
+        upload_dir = frappe.get_site_path("public", "files", "Avatar")
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+        
+        # Save file
+        file_path = os.path.join(upload_dir, filename)
+        avatar_file.save(file_path)
+        
+        # Create file URL
+        avatar_url = f"/files/Avatar/{filename}"
+        
+        # Update user profile
+        profile_name = frappe.db.get_value("ERP User Profile", {"user": frappe.session.user})
+        
+        if profile_name:
+            profile = frappe.get_doc("ERP User Profile", profile_name)
+        else:
+            profile = frappe.get_doc({
+                "doctype": "ERP User Profile",
+                "user": frappe.session.user
+            })
+        
+        # Update avatar_url
+        profile.avatar_url = avatar_url
+        profile.save()
+        
+        # Also update User.user_image for compatibility
+        user_doc = frappe.get_doc("User", frappe.session.user)
+        user_doc.user_image = avatar_url
+        user_doc.save()
+        
+        return {
+            "status": "success",
+            "message": _("Avatar uploaded successfully"),
+            "avatar_url": avatar_url
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Upload avatar error: {str(e)}", "Authentication")
+        frappe.throw(_("Error uploading avatar: {0}").format(str(e)))

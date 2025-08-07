@@ -45,6 +45,14 @@ class ERPUserProfile(Document):
             if self.job_title and not user_doc.get("desk_theme"):  # Use available field
                 pass  # Can't easily add custom fields to User, will handle in hooks
             
+            # Sync avatar_url with user_image
+            if self.avatar_url != user_doc.user_image:
+                if self.avatar_url:
+                    user_doc.user_image = self.avatar_url
+                elif user_doc.user_image and not self.avatar_url:
+                    self.avatar_url = user_doc.user_image
+                user_doc.save()
+            
             # Update last seen if changed
             if self.last_seen:
                 user_doc.db_set("last_active", self.last_seen, update_modified=False)
