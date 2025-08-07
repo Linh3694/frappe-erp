@@ -532,6 +532,34 @@ def reset_user_password(user_email):
 
 
 @frappe.whitelist()
+def set_user_password(user_email, new_password):
+    """Set user password directly (Admin function)"""
+    try:
+        # Check if user exists
+        if not frappe.db.exists("User", user_email):
+            frappe.throw(_("User not found"))
+        
+        # Get user document
+        user_doc = frappe.get_doc("User", user_email)
+        
+        # Set new password
+        user_doc.new_password = new_password
+        
+        # Force save and commit
+        user_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return {
+            "status": "success",
+            "message": _("Password updated successfully")
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Set user password error: {str(e)}", "User Management")
+        frappe.throw(_("Error setting user password: {0}").format(str(e)))
+
+
+@frappe.whitelist()
 def get_user_roles():
     """Get available user roles"""
     try:
