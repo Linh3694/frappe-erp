@@ -147,7 +147,7 @@ def mobile_microsoft_callback(code, state=None):
                 "error_code": "NO_EMAIL"
             }
         
-        # Check if user profile exists in ERP
+        # Check if user profile exists in ERP (simple approach)
         user_profile = None
         try:
             user_profile = frappe.get_doc("ERP User Profile", {"email": user_email})
@@ -169,71 +169,40 @@ def mobile_microsoft_callback(code, state=None):
                 "details": str(e)
             }
         
-        # Create or update Microsoft user record
+        # Get corresponding Frappe user
+        frappe_user = None
         try:
-            ms_user = create_or_update_microsoft_user(user_info)
-            frappe.logger().info(f"Microsoft user record updated: {ms_user.name if ms_user else 'None'}")
+            if user_profile.user:
+                # User profile has linked Frappe user
+                frappe_user = frappe.get_doc("User", user_profile.user)
+                frappe.logger().info(f"Found linked Frappe user: {frappe_user.email}")
+            else:
+                # Try to find Frappe user by email
+                if frappe.db.exists("User", user_email):
+                    frappe_user = frappe.get_doc("User", user_email)
+                    frappe.logger().info(f"Found Frappe user by email: {frappe_user.email}")
+                else:
+                    frappe.logger().error(f"No Frappe user found for email: {user_email}")
+                    return {
+                        "success": False,
+                        "error": "User account not found in system",
+                        "error_code": "FRAPPE_USER_NOT_FOUND",
+                        "user_email": user_email
+                    }
         except Exception as e:
-            frappe.logger().error(f"Failed to create/update Microsoft user record: {str(e)}")
-            # Return error since this is critical for mobile flow
+            frappe.logger().error(f"Error getting Frappe user: {str(e)}")
             return {
                 "success": False,
-                "error": "Failed to create user record",
-                "error_code": "USER_RECORD_FAILED",
+                "error": "Error retrieving user account",
+                "error_code": "USER_RETRIEVAL_FAILED",
                 "details": str(e)
             }
-        
-        # Ensure ms_user is valid
-        if not ms_user:
-            frappe.logger().error("Microsoft user record is None after creation")
-            return {
-                "success": False,
-                "error": "Failed to create Microsoft user record",
-                "error_code": "USER_RECORD_NONE",
-                "details": "Microsoft user record returned None"
-            }
-        
-        # Login or create Frappe user
-        try:
-            frappe_user = handle_microsoft_user_login(ms_user)
-            frappe.logger().info(f"Frappe user login handled: {frappe_user.email}")
-        except Exception as e:
-            frappe.logger().error(f"Failed to handle Frappe user login: {str(e)}")
-            return {
-                "success": False,
-                "error": "Failed to login user",
-                "error_code": "LOGIN_FAILED",
-                "details": str(e)
-            }
-        
-        # Update user profile with latest Microsoft data
-        if user_profile and user_info:
-            try:
-                # Update profile with fresh data from Microsoft
-                if user_info.get("jobTitle"):
-                    user_profile.job_title = user_info.get("jobTitle")
-                if user_info.get("department"):
-                    user_profile.department = user_info.get("department")
-                if user_info.get("employeeId"):
-                    user_profile.employee_code = user_info.get("employeeId")
-                
-                if ms_user:
-                    user_profile.microsoft_id = ms_user.microsoft_id
-                user_profile.provider = "microsoft"
-                user_profile.save(ignore_permissions=True)
-                frappe.logger().info(f"User profile updated with Microsoft data")
-            except Exception as e:
-                frappe.logger().warning(f"Failed to update user profile: {str(e)}")
-                # Continue anyway, this is not critical
-        
-        # Commit changes
-        frappe.db.commit()
         
         # Generate JWT token for API access
         try:
             from erp.api.erp_common_user.auth import generate_jwt_token
             jwt_token = generate_jwt_token(frappe_user.email)
-            frappe.logger().info(f"JWT token generated")
+            frappe.logger().info(f"JWT token generated for: {frappe_user.email}")
         except Exception as e:
             frappe.logger().error(f"Failed to generate JWT token: {str(e)}")
             return {
@@ -250,14 +219,13 @@ def mobile_microsoft_callback(code, state=None):
         except Exception:
             frappe_roles = ["Guest"]
         
-        # Create user data for mobile app
+        # Create user data for mobile app (simple approach)
         user_data = {
             "email": user_email,
             "full_name": frappe_user.full_name,
             "first_name": frappe_user.first_name or "",
             "last_name": frappe_user.last_name or "",
             "provider": "microsoft",
-            "microsoft_id": ms_user.microsoft_id if ms_user else None,
             "job_title": user_profile.job_title if user_profile and user_profile.job_title else "",
             "department": user_profile.department if user_profile and user_profile.department else "",
             "employee_code": user_profile.employee_code if user_profile and user_profile.employee_code else "",
