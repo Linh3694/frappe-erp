@@ -103,53 +103,16 @@ def mobile_microsoft_callback(code, state=None):
             frappe.logger().info(f"DEBUG: mobile_redirect_uri parameter = {mobile_redirect_uri}")
             frappe.logger().info(f"DEBUG: All request args = {dict(frappe.request.args)}")
             
-            # For mobile_microsoft_callback endpoint, always try mobile redirect URI first
-            # Try common mobile redirect URI patterns
+            # For mobile app, use public client authentication with provided redirect URI
+            # Mobile app ALWAYS sends redirect_uri parameter, so use it directly
             if mobile_redirect_uri:
-                frappe.logger().info(f"Using provided mobile redirect URI: {mobile_redirect_uri}")
-                redirect_uri_to_use = mobile_redirect_uri
+                frappe.logger().info(f"Mobile app provided redirect URI: {mobile_redirect_uri}")
+                frappe.logger().info(f"Using public client token exchange with mobile redirect URI")
+                token_data = get_microsoft_access_token_public_client(code, mobile_redirect_uri)
             else:
-                # Auto-detect mobile redirect URI from the authorization code error
-                # Since we know the authorization was made with exp://... URI, try to use it
-                frappe.logger().info("No redirect_uri parameter, trying common mobile patterns")
-                
-                # Try to extract the actual redirect URI from the authorization request
-                # For now, use a common pattern - we'll improve this
-                user_agent = frappe.request.headers.get('User-Agent', '')
-                if 'WellspringMobile' in user_agent:
-                    # This is a mobile request, try to get mobile redirect URI
-                    # We need to use the same redirect URI that was used for authorization
-                    # Since we can't easily get it, we'll try the URL from the error message if available
-                    redirect_uri_to_use = "staffportal://auth"  # Try custom scheme first
-                    frappe.logger().info(f"Detected mobile request, using custom scheme: {redirect_uri_to_use}")
-                else:
-                    redirect_uri_to_use = None
-            
-            # Try to exchange token with mobile redirect URI using public client method
-            if redirect_uri_to_use:
-                try:
-                    frappe.logger().info(f"Attempting public client token exchange with mobile redirect URI: {redirect_uri_to_use}")
-                    token_data = get_microsoft_access_token_public_client(code, redirect_uri_to_use)
-                except Exception as redirect_error:
-                    frappe.logger().error(f"Public client mobile redirect URI failed: {str(redirect_error)}")
-                    
-                    # If custom scheme failed, try exp:// scheme pattern
-                    if redirect_uri_to_use == "staffportal://auth":
-                        try:
-                            # Try a common exp:// pattern
-                            exp_redirect_uri = "exp://10.1.32.175:8081/--/auth"
-                            frappe.logger().info(f"Retrying public client with exp:// scheme: {exp_redirect_uri}")
-                            token_data = get_microsoft_access_token_public_client(code, exp_redirect_uri)
-                        except Exception as exp_error:
-                            frappe.logger().error(f"Public client exp:// scheme also failed: {str(exp_error)}")
-                            frappe.logger().info("Falling back to confidential client with default web redirect URI")
-                            token_data = get_microsoft_access_token(code)
-                    else:
-                        frappe.logger().info("Falling back to confidential client with default web redirect URI")
-                        token_data = get_microsoft_access_token(code)
-            else:
-                # Fallback to web redirect URI
-                frappe.logger().info("Using default web redirect URI for token exchange")
+                # If no mobile redirect URI provided, this might be a web request
+                # Use standard confidential client flow
+                frappe.logger().info("No mobile redirect URI provided, using confidential client flow")
                 token_data = get_microsoft_access_token(code)
             frappe.logger().info("Successfully got Microsoft access token")
             frappe.logger().info(f"Token data keys: {list(token_data.keys()) if token_data else 'None'}")
