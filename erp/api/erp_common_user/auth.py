@@ -31,7 +31,7 @@ def login(email=None, username=None, password=None, provider="local"):
             frappe.throw(_("Email or username is required"))
         
         # Get user profile
-        from erp.user_management.doctype.erp_user_profile.erp_user_profile import ERPUserProfile
+        from erp.common.doctype.erp_user_profile.erp_user_profile import ERPUserProfile
         profile = ERPUserProfile.find_by_login_identifier(identifier)
         
         if not profile:
@@ -99,7 +99,7 @@ def logout():
     try:
         # Update last seen
         if frappe.session.user != "Guest":
-            from erp.user_management.doctype.erp_user_profile.erp_user_profile import update_last_seen
+            from erp.common.doctype.erp_user_profile.erp_user_profile import update_last_seen
             update_last_seen(frappe.session.user)
         
         # Use Frappe's logout
