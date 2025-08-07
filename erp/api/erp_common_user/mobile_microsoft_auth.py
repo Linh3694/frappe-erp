@@ -44,6 +44,31 @@ def get_microsoft_access_token_with_redirect(code, redirect_uri):
     return response.json()
 
 
+def get_microsoft_access_token_public_client(code, redirect_uri):
+    """Exchange authorization code for access token - Public Client (Mobile) version"""
+    config = get_microsoft_config()
+    
+    token_url = f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token"
+    
+    # For public clients, don't send client_secret
+    data = {
+        "client_id": config["client_id"],
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code"
+    }
+    
+    frappe.logger().info(f"Public client token exchange: client_id={config['client_id']}, redirect_uri={redirect_uri}")
+    
+    response = requests.post(token_url, data=data)
+    
+    if response.status_code != 200:
+        frappe.logger().error(f"Public client token exchange failed: {response.text}")
+        raise Exception(f"Token request failed: {response.text}")
+    
+    return response.json()
+
+
 @frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
 def mobile_microsoft_callback(code, state=None):
     """
@@ -100,27 +125,27 @@ def mobile_microsoft_callback(code, state=None):
                 else:
                     redirect_uri_to_use = None
             
-            # Try to exchange token with mobile redirect URI
+            # Try to exchange token with mobile redirect URI using public client method
             if redirect_uri_to_use:
                 try:
-                    frappe.logger().info(f"Attempting token exchange with mobile redirect URI: {redirect_uri_to_use}")
-                    token_data = get_microsoft_access_token_with_redirect(code, redirect_uri_to_use)
+                    frappe.logger().info(f"Attempting public client token exchange with mobile redirect URI: {redirect_uri_to_use}")
+                    token_data = get_microsoft_access_token_public_client(code, redirect_uri_to_use)
                 except Exception as redirect_error:
-                    frappe.logger().error(f"Mobile redirect URI failed: {str(redirect_error)}")
+                    frappe.logger().error(f"Public client mobile redirect URI failed: {str(redirect_error)}")
                     
                     # If custom scheme failed, try exp:// scheme pattern
                     if redirect_uri_to_use == "staffportal://auth":
                         try:
                             # Try a common exp:// pattern
                             exp_redirect_uri = "exp://10.1.32.175:8081/--/auth"
-                            frappe.logger().info(f"Retrying with exp:// scheme: {exp_redirect_uri}")
-                            token_data = get_microsoft_access_token_with_redirect(code, exp_redirect_uri)
+                            frappe.logger().info(f"Retrying public client with exp:// scheme: {exp_redirect_uri}")
+                            token_data = get_microsoft_access_token_public_client(code, exp_redirect_uri)
                         except Exception as exp_error:
-                            frappe.logger().error(f"exp:// scheme also failed: {str(exp_error)}")
-                            frappe.logger().info("Falling back to default web redirect URI")
+                            frappe.logger().error(f"Public client exp:// scheme also failed: {str(exp_error)}")
+                            frappe.logger().info("Falling back to confidential client with default web redirect URI")
                             token_data = get_microsoft_access_token(code)
                     else:
-                        frappe.logger().info("Falling back to default web redirect URI")
+                        frappe.logger().info("Falling back to confidential client with default web redirect URI")
                         token_data = get_microsoft_access_token(code)
             else:
                 # Fallback to web redirect URI
