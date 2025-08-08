@@ -416,6 +416,51 @@ def update_profile(profile_data):
 
 
 @frappe.whitelist()
+def delete_avatar():
+    """Delete user avatar"""
+    try:
+        if frappe.session.user == "Guest":
+            frappe.throw(_("Please login to delete avatar"))
+        
+        # Get current avatar
+        profile_name = frappe.db.get_value("ERP User Profile", {"user": frappe.session.user})
+        current_avatar = None
+        
+        if profile_name:
+            current_avatar = frappe.db.get_value("ERP User Profile", profile_name, "avatar_url")
+        
+        if not current_avatar:
+            current_avatar = frappe.db.get_value("User", frappe.session.user, "user_image")
+        
+        # Delete file if exists
+        if current_avatar and current_avatar.startswith("/files/Avatar/"):
+            file_path = frappe.get_site_path("public", current_avatar.lstrip("/"))
+            import os
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        
+        # Update profile
+        if profile_name:
+            profile = frappe.get_doc("ERP User Profile", profile_name)
+            profile.avatar_url = ""
+            profile.save()
+        
+        # Update User
+        user_doc = frappe.get_doc("User", frappe.session.user)
+        user_doc.user_image = ""
+        user_doc.save()
+        
+        return {
+            "status": "success",
+            "message": _("Avatar deleted successfully")
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Delete avatar error: {str(e)}", "Authentication")
+        frappe.throw(_("Error deleting avatar: {0}").format(str(e)))
+
+
+@frappe.whitelist()
 def upload_avatar():
     """Upload user avatar"""
     try:
