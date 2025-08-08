@@ -490,11 +490,11 @@ def upload_avatar():
         if file_size > max_size:
             frappe.throw(_("File size too large. Maximum allowed: 5MB"))
         
-        # Create filename
+        # Create filename & ensure extension
         import uuid
         import os
         file_id = str(uuid.uuid4())
-        filename = f"{file_id}.{file_extension}"
+        filename = f"{file_id}.{file_extension or 'jpg'}"
         
         # Create Avatar directory if it doesn't exist
         from frappe.utils.file_manager import get_file_path
@@ -502,9 +502,11 @@ def upload_avatar():
         if not os.path.exists(upload_dir):
             os.makedirs(upload_dir)
         
-        # Save file
+        # Save file (read stream safely)
         file_path = os.path.join(upload_dir, filename)
-        avatar_file.save(file_path)
+        avatar_file.stream.seek(0)
+        with open(file_path, 'wb') as f:
+            f.write(avatar_file.stream.read())
         
         # Create file URL
         avatar_url = f"/files/Avatar/{filename}"
@@ -536,5 +538,10 @@ def upload_avatar():
         }
         
     except Exception as e:
-        frappe.log_error(f"Upload avatar error: {str(e)}", "Authentication")
+        # Tránh dùng log_error (ghi DB) khi DB connection có vấn đề; log ra file thay thế
+        try:
+            frappe.logger("avatar_upload").exception(f"Upload avatar error: {str(e)}")
+        except Exception:
+            # Fallback cuối cùng
+            print("Upload avatar error:", str(e))
         frappe.throw(_("Error uploading avatar: {0}").format(str(e)))
