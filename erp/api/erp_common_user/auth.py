@@ -511,25 +511,12 @@ def upload_avatar():
         # Create file URL
         avatar_url = f"/files/Avatar/{filename}"
         
-        # Update user profile
+        # Update avatar via lightweight DB operations to avoid triggering heavy hooks
         profile_name = frappe.db.get_value("ERP User Profile", {"user": frappe.session.user})
-        
         if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-        else:
-            profile = frappe.get_doc({
-                "doctype": "ERP User Profile",
-                "user": frappe.session.user
-            })
-        
-        # Update avatar_url
-        profile.avatar_url = avatar_url
-        profile.save()
-        
-        # Also update User.user_image for compatibility
-        user_doc = frappe.get_doc("User", frappe.session.user)
-        user_doc.user_image = avatar_url
-        user_doc.save()
+            frappe.db.set_value("ERP User Profile", profile_name, "avatar_url", avatar_url)
+        # Update User.user_image for compatibility (avoid full save to skip hooks)
+        frappe.db.set_value("User", frappe.session.user, "user_image", avatar_url)
         
         return {
             "status": "success",
