@@ -59,7 +59,10 @@ def update_user_profile_on_user_update(doc, method):
         profile.save(ignore_permissions=True)
         
     except Exception as e:
-        frappe.log_error(f"Error updating user profile for {doc.email}: {str(e)}", "User Profile Update")
+        try:
+            frappe.logger("user_profile").exception(f"Error updating user profile for {doc.email}: {str(e)}")
+        except Exception:
+            print("User Profile Update error:", str(e))
 
 
 def delete_user_profile_on_user_deletion(doc, method):

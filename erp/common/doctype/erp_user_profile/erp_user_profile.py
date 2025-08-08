@@ -58,7 +58,10 @@ class ERPUserProfile(Document):
                 user_doc.db_set("last_active", self.last_seen, update_modified=False)
                 
         except Exception as e:
-            frappe.log_error(f"Error syncing user profile with user doc: {str(e)}", "User Profile Sync")
+            try:
+                frappe.logger("user_profile").exception(f"Error syncing user profile with user doc: {str(e)}")
+            except Exception:
+                print("User Profile Sync error:", str(e))
     
     def before_save(self):
         """Before save operations"""
