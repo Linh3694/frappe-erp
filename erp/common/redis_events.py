@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import frappe
 
@@ -19,18 +19,56 @@ def _get_conf(key: str, default: Optional[str] = None) -> Optional[str]:
     return os.environ.get(key, default)
 
 
+def _parse_redis_url(url: str) -> Tuple[str, int, Optional[str], Optional[int]]:
+    # Supports formats like: redis://:password@host:port/db
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(url)
+        host = u.hostname or "localhost"
+        port = u.port or 6379
+        password = u.password
+        db = None
+        if u.path and len(u.path) > 1:
+            try:
+                db = int(u.path.lstrip("/"))
+            except Exception:
+                db = None
+        return host, int(port), password, db
+    except Exception:
+        return "localhost", 6379, None, None
+
+
 def _get_redis_client():
     try:
         import redis
     except Exception:
         return None
 
-    host = _get_conf("REDIS_HOST", "localhost")
-    port = int(_get_conf("REDIS_PORT", "6379"))
+    # Preferred: explicit host/port/password
+    host = _get_conf("REDIS_HOST")
+    port = _get_conf("REDIS_PORT")
     password = _get_conf("REDIS_PASSWORD")
+    db = None
+
+    # Fallback: parse from redis_socketio / redis_cache / redis_queue URIs
+    if not host or not port:
+        uri = (
+            _get_conf("redis_socketio")
+            or _get_conf("redis_cache")
+            or _get_conf("redis_queue")
+        )
+        if uri:
+            p_host, p_port, p_password, p_db = _parse_redis_url(uri)
+            host = host or p_host
+            port = port or p_port
+            password = password or p_password
+            db = p_db
+
+    host = host or "localhost"
+    port = int(port or 6379)
 
     try:
-        client = redis.Redis(host=host, port=port, password=password, decode_responses=True)
+        client = redis.Redis(host=host, port=port, password=password, db=db, decode_responses=True)
         client.ping()
         return client
     except Exception:
@@ -45,11 +83,19 @@ def is_user_events_enabled() -> bool:
 def publish(channel: str, message: Dict[str, Any]) -> bool:
     client = _get_redis_client()
     if client is None:
+        try:
+            frappe.log_error("Redis client not available for user_events publish", "redis_events.publish")
+        except Exception:
+            pass
         return False
     try:
         client.publish(channel, json.dumps(message, default=str))
         return True
     except Exception:
+        try:
+            frappe.log_error(f"Failed to publish to {channel}", "redis_events.publish")
+        except Exception:
+            pass
         return False
 
 
@@ -112,5 +158,12 @@ def publish_user_event(event_type: str, user_email: str) -> None:
     }
 
     publish(channel, message)
+
+
+# Simple ping to verify wiring end-to-end
+def ping_user_events(channel: Optional[str] = None) -> Dict[str, Any]:
+    ch = channel or _get_conf("REDIS_USER_CHANNEL", "user_events")
+    ok = publish(ch, {"type": "user_events_ping", "source": "frappe", "ts": frappe.utils.now()})
+    return {"channel": ch, "published": ok}
 
 
