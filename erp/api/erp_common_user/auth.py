@@ -517,6 +517,8 @@ def upload_avatar():
             frappe.db.set_value("ERP User Profile", profile_name, "avatar_url", avatar_url)
         # Update User.user_image for compatibility (avoid full save to skip hooks)
         frappe.db.set_value("User", frappe.session.user, "user_image", avatar_url)
+        # Ensure changes are flushed immediately
+        frappe.db.commit()
         
         return {
             "status": "success",
