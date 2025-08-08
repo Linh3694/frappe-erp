@@ -167,3 +167,49 @@ def ping_user_events(channel: Optional[str] = None) -> Dict[str, Any]:
     return {"channel": ch, "published": ok}
 
 
+# One-off: publish all users for initial sync (safe, idempotent)
+def publish_all_users(batch_size: int = 500, only_active: bool = True, event_type: str = "user_updated") -> Dict[str, Any]:
+    """
+    Gửi sự kiện user cho toàn bộ người dùng hiện có để microservices đồng bộ lần đầu.
+    - Chạy theo lô để tránh tốn bộ nhớ.
+    - Bỏ qua Guest/Administrator.
+    - Mặc định dùng event_type = 'user_updated' để đảm bảo idempotent.
+    """
+    if not is_user_events_enabled():
+        return {"published": 0, "skipped": 0, "note": "FRAPPE_USER_EVENTS_ENABLED is false"}
+
+    ch = _get_conf("REDIS_USER_CHANNEL", "user_events")
+
+    # Build base filters
+    filters = {}
+    if only_active:
+        filters["enabled"] = 1
+
+    total = frappe.db.count("User", filters)
+    published = 0
+    skipped = 0
+
+    page = 0
+    while True:
+        users = frappe.get_all(
+            "User",
+            fields=["email"],
+            filters=filters,
+            limit=batch_size,
+            start=page * batch_size,
+            order_by="name asc",
+        )
+        if not users:
+            break
+        for u in users:
+            email = (u.get("email") or "").strip()
+            if not email or email in ("Guest", "Administrator"):
+                skipped += 1
+                continue
+            publish_user_event(event_type, email)
+            published += 1
+        page += 1
+
+    return {"channel": ch, "total": total, "published": published, "skipped": skipped}
+
+
