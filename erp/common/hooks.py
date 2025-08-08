@@ -27,7 +27,14 @@ def create_user_profile_on_user_creation(doc, method):
         })
         
         profile.insert(ignore_permissions=True)
-        
+
+        # Publish user_created event (feature-flagged)
+        try:
+            from .redis_events import publish_user_event, is_user_events_enabled
+            if is_user_events_enabled():
+                publish_user_event('user_created', doc.email)
+        except Exception:
+            pass
 
         
     except Exception as e:
@@ -57,6 +64,14 @@ def update_user_profile_on_user_update(doc, method):
             profile.active = doc.enabled
         
         profile.save(ignore_permissions=True)
+
+        # Publish user_updated event (feature-flagged)
+        try:
+            from .redis_events import publish_user_event, is_user_events_enabled
+            if is_user_events_enabled():
+                publish_user_event('user_updated', doc.email)
+        except Exception:
+            pass
         
     except Exception as e:
         try:
@@ -76,6 +91,14 @@ def delete_user_profile_on_user_deletion(doc, method):
         profile_name = frappe.db.get_value("ERP User Profile", {"user": doc.email})
         if profile_name:
             frappe.delete_doc("ERP User Profile", profile_name, ignore_permissions=True)
+
+        # Publish user_deleted event (feature-flagged)
+        try:
+            from .redis_events import publish_user_event, is_user_events_enabled
+            if is_user_events_enabled():
+                publish_user_event('user_deleted', doc.email)
+        except Exception:
+            pass
     
         
     except Exception as e:
