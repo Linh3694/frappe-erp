@@ -596,10 +596,6 @@ def create_or_update_microsoft_user(user_data):
         
         ms_user.save()
         
-        # 4. Create or update ERP User Profile
-        if local_user:
-            create_or_update_user_profile(local_user, ms_user, user_data)
-        
         return ms_user
         
     except Exception as e:
@@ -756,188 +752,31 @@ def update_frappe_user(user_doc, ms_user, user_data):
         return user_doc
 
 
-def create_or_update_user_profile(frappe_user, ms_user, user_data):
-    """Create or update ERP User Profile from Microsoft data"""
-    try:
-        user_email = user_data.get("mail") or user_data.get("userPrincipalName") or frappe_user.email
-        
-        # Check if ERP User Profile already exists by email (email-centric approach)
-        existing_profile = frappe.db.get_value("ERP User Profile", {"email": user_email})
-        
-        if existing_profile:
-            # Update existing profile
-            profile = frappe.get_doc("ERP User Profile", existing_profile)
-        else:
-            # Create new profile
-            profile = frappe.get_doc({
-                "doctype": "ERP User Profile",
-                "user": frappe_user.name,
-                "email": user_email
-            })
-        
-        # Update profile fields with Microsoft data
-        profile.full_name = user_data.get("displayName") or frappe_user.full_name
-        profile.first_name = user_data.get("givenName") or frappe_user.first_name
-        profile.last_name = user_data.get("surname") or frappe_user.last_name
-        profile.email = user_email
-        profile.username = user_email  # Use email as username
-        
-        # Microsoft-specific fields
-        profile.employee_code = user_data.get("employeeId")  # Fixed: Use employee_code not employee_id
-        profile.department = user_data.get("department")
-        profile.job_title = user_data.get("jobTitle")
-        profile.office_location = user_data.get("officeLocation")
-        profile.mobile_phone = user_data.get("mobilePhone")
-        profile.company_name = user_data.get("companyName")
-        
-        # Handle business phones
-        if user_data.get("businessPhones"):
-            profile.business_phones = ", ".join(user_data["businessPhones"])
-        
-        # Additional info
-        profile.account_enabled = user_data.get("accountEnabled", True)
-        profile.employee_type = user_data.get("employeeType")
-        profile.preferred_language = user_data.get("preferredLanguage")
-        profile.usage_location = user_data.get("usageLocation")
-        
-        # Sync info
-        profile.microsoft_id = ms_user.microsoft_id  # Fixed: Use microsoft_id not microsoft_user_id
-        profile.provider = "microsoft"  # Set provider to show Microsoft fields in UI
-        profile.last_microsoft_sync = datetime.now()
-        profile.sync_source = "Microsoft 365"
-        
-        profile.flags.ignore_permissions = True
-        if existing_profile:
-            profile.save()
-        else:
-            profile.insert()
-        
-
-        return profile
-        
-    except Exception as e:
-        frappe.log_error(f"Error creating/updating ERP User Profile for {frappe_user.email}: {str(e)}", "ERP User Profile Sync")
-        return None
+def create_or_update_user_profile(*args, **kwargs):
+    """[Deprecated] Không còn dùng Profile; giữ để tương thích ngược."""
+    return None
 
 
 @frappe.whitelist()
 def sync_existing_users_to_profiles():
-    """Sync all existing Microsoft users to ERP User Profiles"""
-    try:
-        # Get all Microsoft users that have mapped Frappe users
-        ms_users = frappe.db.sql("""
-            SELECT name, microsoft_id, mapped_user_id 
-            FROM `tabERP Microsoft User` 
-            WHERE mapped_user_id IS NOT NULL AND mapped_user_id != ''
-        """, as_dict=True)
-        
-        synced_count = 0
-        failed_count = 0
-        
-        for ms_user_data in ms_users:
-            try:
-                # Get full Microsoft user doc
-                ms_user = frappe.get_doc("ERP Microsoft User", ms_user_data.name)
-                
-                # Get Frappe user
-                frappe_user = frappe.get_doc("User", ms_user_data.mapped_user_id)
-                
-                # Reconstruct user_data from Microsoft user
-                user_data = {
-                    "id": ms_user.microsoft_id,
-                    "displayName": ms_user.display_name,
-                    "givenName": ms_user.given_name,
-                    "surname": ms_user.surname,
-                    "userPrincipalName": ms_user.user_principal_name,
-                    "mail": ms_user.mail,
-                    "jobTitle": ms_user.job_title,
-                    "department": ms_user.department,
-                    "officeLocation": ms_user.office_location,
-                    "businessPhones": ms_user.business_phones.split(", ") if ms_user.business_phones else [],
-                    "mobilePhone": ms_user.mobile_phone,
-                    "employeeId": ms_user.employee_id,
-                    "employeeType": ms_user.employee_type,
-                    "accountEnabled": ms_user.account_enabled,
-                    "preferredLanguage": ms_user.preferred_language,
-                    "usageLocation": ms_user.usage_location,
-                    "companyName": ""  # Not stored in Microsoft user
-                }
-                
-                # Create/update user profile
-                profile = create_or_update_user_profile(frappe_user, ms_user, user_data)
-                if profile:
-                    synced_count += 1
-                else:
-                    failed_count += 1
-                    
-            except Exception as e:
-                failed_count += 1
-                frappe.log_error(f"Error syncing user profile for {ms_user_data.microsoft_id}: {str(e)}", "User Profile Sync")
-        
-        return {
-            "status": "success",
-            "message": _("User profiles sync completed"),
-            "synced_count": synced_count,
-            "failed_count": failed_count,
-            "total_users": len(ms_users)
-        }
-        
-    except Exception as e:
-        frappe.log_error(f"Error syncing user profiles: {str(e)}", "User Profile Sync")
-        frappe.throw(_("Error syncing user profiles: {0}").format(str(e)))
+    """[Deprecated] Giữ endpoint để không gãy client cũ, nhưng không còn làm gì."""
+    return {"status": "success", "message": "No-op; profiles are deprecated"}
 
 
 @frappe.whitelist()
 def full_microsoft_sync():
-    """Complete Microsoft sync: Users + Frappe Users + User Profiles"""
-    try:
-        results = {}
-        
-        # 1. Sync Microsoft users
-
-        ms_result = sync_microsoft_users_internal()
-        results["microsoft_users"] = ms_result
-        
-        # 2. Sync User Profiles
-
-        profile_result = sync_existing_users_to_profiles()
-        results["user_profiles"] = profile_result
-        
-        # 3. Force create missing users
-
-        force_create_result = force_create_missing_users()
-        results["force_create_users"] = force_create_result
-        
-        # 4. Fix user providers
-
-        provider_fix_result = fix_user_providers()
-        results["provider_fix"] = provider_fix_result
-        
-        # 5. Fix missing employee codes
-
-        fix_result = fix_missing_employee_codes()
-        results["employee_code_fix"] = fix_result
-        
-        # 6. Get final counts
-        ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
-        profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
-        user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
-        
-        results["final_counts"] = {
-            "microsoft_users": ms_count,
-            "user_profiles": profile_count,
-            "frappe_users": user_count
+    """Rút gọn: chỉ đồng bộ users và thống kê. Không còn sync profiles."""
+    ms_result = sync_microsoft_users_internal()
+    ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
+    user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
+    return {
+        "status": "success",
+        "message": _("Full Microsoft sync (users only) completed"),
+        "results": {
+            "microsoft_users": ms_result,
+            "final_counts": {"microsoft_users": ms_count, "frappe_users": user_count}
         }
-        
-        return {
-            "status": "success",
-            "message": _("Full Microsoft sync completed successfully"),
-            "results": results
-        }
-        
-    except Exception as e:
-        frappe.log_error(f"Error in full Microsoft sync: {str(e)}", "Full Microsoft Sync")
-        frappe.throw(_("Error in full Microsoft sync: {0}").format(str(e)))
+    }
 
 
 def handle_microsoft_user_login(ms_user):
@@ -946,9 +785,6 @@ def handle_microsoft_user_login(ms_user):
         # Check if already mapped to Frappe user
         if ms_user.mapped_user_id:
             frappe_user = frappe.get_doc("User", ms_user.mapped_user_id)
-            
-            # Update user profile
-            update_user_profile_from_microsoft(frappe_user.email, ms_user)
             
             return frappe_user
         
@@ -959,17 +795,11 @@ def handle_microsoft_user_login(ms_user):
             ms_user.map_to_frappe_user(email)
             frappe_user = frappe.get_doc("User", email)
             
-            # Update user profile
-            update_user_profile_from_microsoft(email, ms_user)
-            
             return frappe_user
         
         # Create new Frappe user
         ms_user.map_to_frappe_user()
         frappe_user = frappe.get_doc("User", ms_user.mapped_user_id)
-        
-        # Create user profile
-        create_user_profile_from_microsoft(frappe_user.email, ms_user)
         
         return frappe_user
         
@@ -978,62 +808,14 @@ def handle_microsoft_user_login(ms_user):
         raise e
 
 
-def update_user_profile_from_microsoft(user_email, ms_user):
-    """Update user profile with Microsoft data"""
-    try:
-        # Get or create user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-        else:
-            profile = frappe.get_doc({
-                "doctype": "ERP User Profile",
-                "user": user_email
-            })
-        
-        # Update fields from Microsoft data
-        profile.provider = "microsoft"
-        profile.microsoft_id = ms_user.microsoft_id
-        profile.job_title = ms_user.job_title
-        profile.department = ms_user.department
-        profile.employee_code = ms_user.employee_id
-        
-        # Generate username if not set
-        if not profile.username and ms_user.user_principal_name:
-            profile.username = ms_user.user_principal_name.split('@')[0]
-        
-        profile.save()
-        
-        return profile
-        
-    except Exception as e:
-        frappe.log_error(f"User profile update error: {str(e)}", "Microsoft Profile Update")
-        raise e
+def update_user_profile_from_microsoft(*args, **kwargs):
+    """[Deprecated] Không còn dùng Profile; giữ để tương thích ngược."""
+    return None
 
 
-def create_user_profile_from_microsoft(user_email, ms_user):
-    """Create user profile from Microsoft data"""
-    try:
-        profile = frappe.get_doc({
-            "doctype": "ERP User Profile",
-            "user": user_email,
-            "provider": "microsoft",
-            "microsoft_id": ms_user.microsoft_id,
-            "job_title": ms_user.job_title,
-            "department": ms_user.department,
-            "employee_code": ms_user.employee_id,
-            "username": ms_user.user_principal_name.split('@')[0] if ms_user.user_principal_name else None,
-            "active": ms_user.account_enabled
-        })
-        
-        profile.insert()
-        
-        return profile
-        
-    except Exception as e:
-        frappe.log_error(f"User profile creation error: {str(e)}", "Microsoft Profile Creation")
-        raise e
+def create_user_profile_from_microsoft(*args, **kwargs):
+    """[Deprecated] Không còn dùng Profile; giữ để tương thích ngược."""
+    return None
 
 
 @frappe.whitelist()
