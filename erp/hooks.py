@@ -257,7 +257,13 @@ doc_events = {
         "validate": [
             "erp.common.hooks.validate_user_permissions"
         ]
-    }
+    },
+    # Publish user role change events to Redis for microservices (ticket-service, etc.)
+    "Has Role": {
+        "after_insert": "erp.common.role_events.on_has_role_after_insert",
+        "on_update": "erp.common.role_events.on_has_role_on_update",
+        "on_trash": "erp.common.role_events.on_has_role_on_trash",
+    },
 }
 
 # Login/Logout Hooks
