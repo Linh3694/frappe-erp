@@ -100,6 +100,12 @@ def publish(channel: str, message: Dict[str, Any]) -> bool:
 
 
 def build_user_payload(user_email: str) -> Optional[Dict[str, Any]]:
+    """Xây dựng payload user để publish lên Redis từ DocType User duy nhất.
+
+    - Ưu tiên đọc trực tiếp các trường trên `User` (bao gồm custom fields nếu có)
+    - Vẫn tương thích ngược nếu một số custom fields chưa được tạo
+    - Không còn phụ thuộc vào `ERP User Profile`
+    """
     try:
         if not user_email:
             return None
@@ -108,35 +114,42 @@ def build_user_payload(user_email: str) -> Optional[Dict[str, Any]]:
             return None
 
         user_doc = frappe.get_doc("User", user_email)
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        profile = frappe.get_doc("ERP User Profile", profile_name) if profile_name else None
 
+        # Trường có sẵn + custom fields (nếu đã tạo qua Customize Form)
+        # Các tên field giữ nguyên như trước để microservices không cần đổi
         payload: Dict[str, Any] = {
             "name": user_doc.name,
             "email": user_doc.email,
-            "full_name": user_doc.full_name,
-            "first_name": user_doc.first_name,
-            "last_name": user_doc.last_name,
+            "full_name": getattr(user_doc, "full_name", None),
+            "first_name": getattr(user_doc, "first_name", None),
+            "last_name": getattr(user_doc, "last_name", None),
             "enabled": bool(getattr(user_doc, "enabled", 1)),
             "roles": [{"role": r.role} for r in getattr(user_doc, "roles", [])],
+            # mapping ảnh đại diện (tương thích với avatar_url cũ)
+            "user_image": getattr(user_doc, "user_image", None),
+            "avatar_url": getattr(user_doc, "user_image", None),
         }
 
-        if profile:
-            payload.update(
-                {
-                    "username": profile.username,
-                    "employee_code": profile.employee_code,
-                    "job_title": profile.job_title,
-                    "department": profile.department,
-                    "user_role": profile.user_role,
-                    "provider": profile.provider,
-                    "active": profile.active,
-                    "disabled": profile.disabled,
-                    "last_login": profile.last_login,
-                    "last_seen": profile.last_seen,
-                    "avatar_url": profile.avatar_url,
-                }
-            )
+        # Custom fields nếu tồn tại trên User
+        for field_name in [
+            "username",
+            "employee_code",
+            "department",
+            "job_title",
+            "user_role",
+            "provider",
+            "microsoft_id",
+            "device_token",
+            "last_microsoft_sync",
+            "last_login",
+            "last_active",
+        ]:
+            if hasattr(user_doc, field_name):
+                payload[field_name] = getattr(user_doc, field_name)
+
+        # Trạng thái active/disabled tương thích từ enabled
+        payload.setdefault("active", payload["enabled"])  # mặc định active = enabled
+        payload.setdefault("disabled", not payload["enabled"])  # disabled = !enabled
 
         return payload
     except Exception:
