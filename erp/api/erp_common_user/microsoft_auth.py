@@ -1212,8 +1212,6 @@ def microsoft_webhook():
 
         if token:
             decoded = unquote(token)
-
-            # Trả 200 OK với body là token, content-type text/plain
             frappe.local.response["http_status_code"] = 200
             frappe.local.response["type"] = "text"
             frappe.local.response["message"] = token
