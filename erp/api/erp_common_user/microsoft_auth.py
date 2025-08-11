@@ -683,18 +683,25 @@ def create_frappe_user(ms_user, user_data):
             return None
             
         # Create new user
+        first_name = user_data.get("givenName") or ""
+        last_name = user_data.get("surname") or ""
+        # Build full name as: Last Name + First Name (trim extra spaces)
+        reversed_full_name = (f"{last_name} {first_name}" if (first_name or last_name) else None)
+
         user_doc = frappe.get_doc({
             "doctype": "User",
             "email": email,
-            "first_name": user_data.get("givenName") or "",
-            "last_name": user_data.get("surname") or "",
-            "full_name": user_data.get("displayName") or email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "full_name": (reversed_full_name or user_data.get("displayName") or email).strip(),
             "enabled": user_data.get("accountEnabled", True),
             "user_type": "System User",
             "send_welcome_email": 0,
             # Custom fields for Microsoft data
             "employee_id": user_data.get("employeeId"),
             "department": user_data.get("department"),
+            # Prefer core/custom field `job_title`; also set legacy `designation` for compatibility
+            "job_title": user_data.get("jobTitle"),
             "designation": user_data.get("jobTitle"),
             "location": user_data.get("officeLocation"),
             "mobile_no": user_data.get("mobilePhone"),
@@ -703,6 +710,11 @@ def create_frappe_user(ms_user, user_data):
         
         user_doc.flags.ignore_permissions = True
         user_doc.insert()
+        # After insert, core validate sets full_name as First + Last; override to Last + First for VN order
+        try:
+            frappe.db.set_value("User", user_doc.name, "full_name", (reversed_full_name or user_doc.full_name).strip(), update_modified=False)
+        except Exception:
+            pass
         
         return user_doc
         
@@ -715,9 +727,13 @@ def update_frappe_user(user_doc, ms_user, user_data):
     """Update existing Frappe user with Microsoft data"""
     try:
         # Update basic info
-        user_doc.first_name = user_data.get("givenName") or user_doc.first_name
-        user_doc.last_name = user_data.get("surname") or user_doc.last_name
-        user_doc.full_name = user_data.get("displayName") or user_doc.full_name
+        new_first = user_data.get("givenName") or user_doc.first_name
+        new_last = user_data.get("surname") or user_doc.last_name
+        user_doc.first_name = new_first
+        user_doc.last_name = new_last
+        # Full name should be "Last Name First Name"
+        computed_full = f"{new_last} {new_first}".strip()
+        user_doc.full_name = computed_full or (user_data.get("displayName") or user_doc.full_name)
         user_doc.enabled = user_data.get("accountEnabled", True)
         
         # Update Microsoft-specific fields (if they exist)
@@ -725,7 +741,10 @@ def update_frappe_user(user_doc, ms_user, user_data):
             user_doc.employee_id = user_data.get("employeeId") or user_doc.employee_id
         if hasattr(user_doc, 'department'):
             user_doc.department = user_data.get("department") or user_doc.department
-        if hasattr(user_doc, 'designation'):
+        # Prefer updating `job_title` field if present; otherwise fall back to `designation`
+        if hasattr(user_doc, 'job_title'):
+            user_doc.job_title = user_data.get("jobTitle") or getattr(user_doc, 'job_title')
+        elif hasattr(user_doc, 'designation'):
             user_doc.designation = user_data.get("jobTitle") or user_doc.designation
         if hasattr(user_doc, 'location'):
             user_doc.location = user_data.get("officeLocation") or user_doc.location
@@ -737,6 +756,11 @@ def update_frappe_user(user_doc, ms_user, user_data):
         
         user_doc.flags.ignore_permissions = True
         user_doc.save()
+        # Ensure full_name is stored as Last + First without re-triggering validate
+        try:
+            frappe.db.set_value("User", user_doc.name, "full_name", computed_full, update_modified=False)
+        except Exception:
+            pass
         
         return user_doc
         

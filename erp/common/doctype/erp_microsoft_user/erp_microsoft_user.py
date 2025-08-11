@@ -86,13 +86,18 @@ class ERPMicrosoftUser(Document):
             if frappe.db.exists("User", email):
                 frappe.throw(_("User with email {0} already exists").format(email))
             
+            # Build first/last and reversed full name (Last + First)
+            first_name = self.given_name or (self.display_name.split()[0] if self.display_name else "")
+            last_name = self.surname or (" ".join(self.display_name.split()[1:]) if self.display_name and len(self.display_name.split()) > 1 else "")
+            reversed_full_name = (f"{last_name} {first_name}").strip()
+
             # Create user document
             user_doc = frappe.get_doc({
                 "doctype": "User",
                 "email": email,
-                "first_name": self.given_name or self.display_name.split()[0] if self.display_name else "",
-                "last_name": self.surname or " ".join(self.display_name.split()[1:]) if self.display_name and len(self.display_name.split()) > 1 else "",
-                "full_name": self.display_name,
+                "first_name": first_name,
+                "last_name": last_name,
+                "full_name": reversed_full_name,
                 "username": self.user_principal_name.split('@')[0] if '@' in self.user_principal_name else self.user_principal_name,
                 "phone": self.mobile_phone,
                 "enabled": 1 if self.account_enabled else 0,
@@ -100,6 +105,7 @@ class ERPMicrosoftUser(Document):
                 # Custom fields (will be added later)
                 "employee_code": self.employee_id,
                 "job_title": self.job_title,
+                "designation": self.job_title,
                 "department": self.department,
                 "provider": "microsoft",
                 "microsoft_id": self.microsoft_id
