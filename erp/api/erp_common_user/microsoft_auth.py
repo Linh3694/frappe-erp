@@ -1180,11 +1180,31 @@ def microsoft_webhook():
                 if resource and '/' in resource:
                     user_id = resource.split('/')[-1]
             if not user_id:
+                # Log skip if cannot determine user id
+                try:
+                    msg = f"Skip notification: cannot determine user_id from payload={json.dumps(n)[:500]}"
+                    if debug_enabled:
+                        frappe.log_error("Microsoft Webhook", msg)
+                    _logger = _get_webhook_logger()
+                    if _logger:
+                        _logger.info(msg)
+                except Exception:
+                    pass
                 continue
 
             # Fetch latest user data from Graph
             resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{user_id}?$select={fields}", headers=headers)
             if resp.status_code != 200:
+                try:
+                    body_preview = resp.text[:500] if hasattr(resp, 'text') else ''
+                    msg = f"Graph fetch failed for user_id={user_id} status={resp.status_code} body={body_preview}"
+                    if debug_enabled:
+                        frappe.log_error("Microsoft Webhook", msg)
+                    _logger = _get_webhook_logger()
+                    if _logger:
+                        _logger.info(msg)
+                except Exception:
+                    pass
                 continue
             user_data = resp.json()
 
