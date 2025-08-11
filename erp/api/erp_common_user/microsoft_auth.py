@@ -997,6 +997,14 @@ from werkzeug.wrappers import Response
 
 @frappe.whitelist(allow_guest=True)
 def microsoft_webhook():
+    # Debug switch
+    try:
+        debug_enabled = (
+            frappe.conf.get("microsoft_webhook_debug")
+            or frappe.get_site_config().get("microsoft_webhook_debug")
+        )
+    except Exception:
+        debug_enabled = False
     token = None
     try:
         token = frappe.form_dict.get('validationToken') or frappe.form_dict.get('validationtoken')
@@ -1015,10 +1023,20 @@ def microsoft_webhook():
             decoded = unquote_plus(token)
         except Exception:
             decoded = token
+        if debug_enabled:
+            try:
+                frappe.log_error("Microsoft Webhook", f"Validation echo received, token_len={len(decoded)}")
+            except Exception:
+                pass
         return Response(decoded, mimetype="text/plain", status=200)
 
     try:
         if getattr(frappe.request, 'method', 'GET') == 'POST' and not getattr(frappe.request, 'data', None):
+            if debug_enabled:
+                try:
+                    frappe.log_error("Microsoft Webhook", "Received empty POST (reachability)")
+                except Exception:
+                    pass
             return Response('', mimetype='text/plain', status=200)
         
     except Exception:
@@ -1026,8 +1044,23 @@ def microsoft_webhook():
 
     data = {}
     try:
-        if frappe.request and frappe.request.data:
-            data = frappe.parse_json(frappe.request.data)
+        raw = None
+        if frappe.request:
+            raw = getattr(frappe.request, 'data', None)
+            if not raw and hasattr(frappe.request, 'get_data'):
+                raw = frappe.request.get_data()
+        if raw:
+            data = frappe.parse_json(raw)
+        if debug_enabled:
+            try:
+                method = getattr(frappe.request, 'method', '')
+                hdrs = getattr(frappe.request, 'headers', {}) or {}
+                sub_id = hdrs.get('ms-notification-subscription-id') if hasattr(hdrs, 'get') else ''
+                tenant = hdrs.get('ms-notification-tenant-id') if hasattr(hdrs, 'get') else ''
+                body_len = len(raw or b'')
+                frappe.log_error("Microsoft Webhook", f"Request method={method} body_len={body_len} sub_id={sub_id} tenant={tenant}")
+            except Exception:
+                pass
     except Exception:
         data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
 
@@ -1069,7 +1102,7 @@ def microsoft_webhook():
         except Exception:
             pass
     if not notifications:
-        return {"status": "ok", "received": 0}
+        return Response(json.dumps({"status": "ok", "received": 0}), mimetype="application/json", status=202)
 
     app_token = get_microsoft_app_token()
     headers = {"Authorization": f"Bearer {app_token}", "Content-Type": "application/json"}
@@ -1118,7 +1151,7 @@ def microsoft_webhook():
         except Exception:
             continue
 
-    return {"status": "ok", "received": len(notifications), "processed": processed}
+    return Response(json.dumps({"status": "ok", "received": len(notifications), "processed": processed}), mimetype="application/json", status=202)
 
 
 @frappe.whitelist()
