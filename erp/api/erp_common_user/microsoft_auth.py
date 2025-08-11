@@ -1214,6 +1214,13 @@ def microsoft_webhook():
         frappe.local.response['http_status_code'] = 200
         frappe.local.response['type'] = 'text'
         frappe.local.response['message'] = decoded
+        frappe.local.response['response'] = decoded
+        try:
+            # đảm bảo header content-type chính xác
+            frappe.local.response.setdefault('headers', [])
+            frappe.local.response['headers'].append(["Content-Type", "text/plain; charset=utf-8"])
+        except Exception:
+            pass
         return
 
     # 2) Reachability POST rỗng → 200
@@ -1228,61 +1235,61 @@ def microsoft_webhook():
     except Exception:
         pass
 
-        # Parse notifications body
-        data = {}
+    # Parse notifications body (POST từ Graph)
+    data = {}
+    try:
+        if frappe.request and frappe.request.data:
+            data = frappe.parse_json(frappe.request.data)
+    except Exception:
+        data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
+
+    notifications = data.get('value', []) if isinstance(data, dict) else []
+    if not notifications:
+        return {"status": "ok", "received": 0}
+
+    app_token = get_microsoft_app_token()
+    headers = {"Authorization": f"Bearer {app_token}", "Content-Type": "application/json"}
+    fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+
+    processed = 0
+    for n in notifications:
         try:
-            if frappe.request and frappe.request.data:
-                data = frappe.parse_json(frappe.request.data)
-        except Exception:
-            data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
-
-        notifications = data.get('value', []) if isinstance(data, dict) else []
-        if not notifications:
-            return {"status": "ok", "received": 0}
-
-        app_token = get_microsoft_app_token()
-        headers = {"Authorization": f"Bearer {app_token}", "Content-Type": "application/json"}
-        fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
-
-        processed = 0
-        for n in notifications:
-            try:
-                # Extract user id
-                user_id = None
-                if n.get('resourceData') and n['resourceData'].get('id'):
-                    user_id = n['resourceData']['id']
-                else:
-                    resource = n.get('resource')  # e.g., users/{id}
-                    if resource and '/' in resource:
-                        user_id = resource.split('/')[-1]
-                if not user_id:
-                    continue
-
-                # Fetch latest user data from Graph
-                resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{user_id}?$select={fields}", headers=headers)
-                if resp.status_code != 200:
-                    continue
-                user_data = resp.json()
-
-                # Upsert Microsoft and Frappe user
-                ms_user = create_or_update_microsoft_user(user_data)
-                email = user_data.get('mail') or user_data.get('userPrincipalName')
-                existed = bool(email and frappe.db.exists('User', email))
-
-                local_user = find_or_create_frappe_user(ms_user, user_data)
-                if local_user:
-                    update_frappe_user(local_user, ms_user, user_data)
-                    try:
-                        from erp.common.redis_events import publish_user_event, is_user_events_enabled
-                        if is_user_events_enabled() and email:
-                            publish_user_event('user_updated' if existed else 'user_created', email)
-                    except Exception:
-                        pass
-                processed += 1
-            except Exception:
+            # Extract user id
+            user_id = None
+            if n.get('resourceData') and n['resourceData'].get('id'):
+                user_id = n['resourceData']['id']
+            else:
+                resource = n.get('resource')  # e.g., users/{id}
+                if resource and '/' in resource:
+                    user_id = resource.split('/')[-1]
+            if not user_id:
                 continue
 
-        return {"status": "ok", "received": len(notifications), "processed": processed}
+            # Fetch latest user data from Graph
+            resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{user_id}?$select={fields}", headers=headers)
+            if resp.status_code != 200:
+                continue
+            user_data = resp.json()
+
+            # Upsert Microsoft and Frappe user
+            ms_user = create_or_update_microsoft_user(user_data)
+            email = user_data.get('mail') or user_data.get('userPrincipalName')
+            existed = bool(email and frappe.db.exists('User', email))
+
+            local_user = find_or_create_frappe_user(ms_user, user_data)
+            if local_user:
+                update_frappe_user(local_user, ms_user, user_data)
+                try:
+                    from erp.common.redis_events import publish_user_event, is_user_events_enabled
+                    if is_user_events_enabled() and email:
+                        publish_user_event('user_updated' if existed else 'user_created', email)
+                except Exception:
+                    pass
+            processed += 1
+        except Exception:
+            continue
+
+    return {"status": "ok", "received": len(notifications), "processed": processed}
     except Exception as e:
         frappe.log_error(f"Microsoft webhook error: {str(e)}", "Microsoft Webhook")
         return {"status": "error", "message": str(e)}
