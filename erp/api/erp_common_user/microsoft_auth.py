@@ -1500,3 +1500,92 @@ def delete_users_subscription(sub_id: str):
     except Exception as e:
         frappe.log_error("Microsoft Subscription", f"delete_users_subscription error: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+
+@frappe.whitelist()
+def sync_all_microsoft_users_once(limit: int | None = None, page_size: int = 50) -> dict:
+    """Đồng bộ toàn bộ Users từ Microsoft Graph (một lần), có phân trang.
+
+    - Tải danh sách /v1.0/users theo trang ($top) và gọi luồng tạo/cập nhật hiện có.
+    - Tham số:
+        - limit: số lượng tối đa users để đồng bộ (None = không giới hạn)
+        - page_size: số lượng users mỗi trang (mặc định 50, tối đa 999 theo Graph)
+    - Trả về thống kê processed/created/updated/errors.
+    """
+    try:
+        # Bảo vệ tham số
+        try:
+            page_size = int(page_size)
+        except Exception:
+            page_size = 50
+        if page_size < 1:
+            page_size = 50
+        if page_size > 999:
+            page_size = 999
+
+        token = get_microsoft_app_token()
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        fields = (
+            "id,displayName,givenName,surname,userPrincipalName,mail,"
+            "jobTitle,department,officeLocation,businessPhones,mobilePhone,"
+            "employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+        )
+
+        url = f"https://graph.microsoft.com/v1.0/users?$select={fields}&$top={page_size}"
+        processed = 0
+        created = 0
+        updated = 0
+        errors = 0
+        emails_seen: set[str] = set()
+
+        while url:
+            resp = requests.get(url, headers=headers)
+            if resp.status_code != 200:
+                return {"status": "error", "message": f"Graph list users failed: {resp.status_code} {resp.text[:300]}"}
+
+            data = resp.json() or {}
+            values = data.get("value", [])
+            for user_data in values:
+                try:
+                    ms_user = create_or_update_microsoft_user(user_data)
+                    email = user_data.get("mail") or user_data.get("userPrincipalName")
+                    if email:
+                        existed = bool(frappe.db.exists('User', email))
+                        local_user = find_or_create_frappe_user(ms_user, user_data)
+                        if local_user:
+                            update_frappe_user(local_user, ms_user, user_data)
+                        if existed:
+                            updated += 1
+                        else:
+                            created += 1
+                        emails_seen.add(email)
+                    processed += 1
+                except Exception:
+                    errors += 1
+
+                # Giới hạn tổng nếu được yêu cầu
+                if limit is not None and processed >= int(limit):
+                    break
+
+            # Kiểm tra limit sau mỗi trang
+            if limit is not None and processed >= int(limit):
+                break
+
+            # Phân trang tiếp theo
+            url = data.get('@odata.nextLink')
+
+        return {
+            "status": "success",
+            "processed": processed,
+            "created": created,
+            "updated": updated,
+            "errors": errors,
+            "unique_emails": len(emails_seen),
+        }
+
+    except Exception as e:
+        frappe.log_error("Microsoft Bulk Sync", f"sync_all_microsoft_users_once error: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+ 

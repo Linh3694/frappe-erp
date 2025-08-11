@@ -148,16 +148,12 @@ app_license = "mit"
 # Scheduled Tasks
 # ---------------
 
+# Chỉ giữ job gia hạn Microsoft Graph subscription; bỏ hẳn đồng bộ theo giờ
 scheduler_events = {
 	"cron": {
-        # Microsoft sync mỗi tiếng
-        "0 * * * *": [
-            "erp.api.erp_common_user.microsoft_auth.hourly_microsoft_sync_scheduler"
-        ],
-        # Gia hạn Microsoft Graph subscription cho resource users mỗi ~50 phút
-        "*/50 * * * *": [
-            "erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
-        ]
+		"*/50 * * * *": [
+			"erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
+		]
 	}
 }
 
