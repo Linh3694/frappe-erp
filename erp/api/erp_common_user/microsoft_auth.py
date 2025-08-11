@@ -467,15 +467,15 @@ def create_frappe_user(ms_user, user_data):
         # Create new user
         first_name = user_data.get("givenName") or ""
         last_name = user_data.get("surname") or ""
-        # Build full name as: Last Name + First Name (trim extra spaces)
-        reversed_full_name = (f"{last_name} {first_name}" if (first_name or last_name) else None)
+        display_name = (user_data.get("displayName") or f"{first_name} {last_name}" or email).strip()
 
         user_doc = frappe.get_doc({
             "doctype": "User",
             "email": email,
             "first_name": first_name,
             "last_name": last_name,
-            "full_name": (reversed_full_name or user_data.get("displayName") or email).strip(),
+            # Full Name phải khớp Display Name từ Microsoft
+            "full_name": display_name,
             "enabled": user_data.get("accountEnabled", True),
             "user_type": "System User",
             "send_welcome_email": 0,
@@ -492,9 +492,13 @@ def create_frappe_user(ms_user, user_data):
         
         user_doc.flags.ignore_permissions = True
         user_doc.insert()
-        # After insert, core validate sets full_name as First + Last; override to Last + First for VN order
+        # Clear middle_name nếu có, và đảm bảo full_name = display_name
         try:
-            frappe.db.set_value("User", user_doc.name, "full_name", (reversed_full_name or user_doc.full_name).strip(), update_modified=False)
+            if hasattr(user_doc, 'middle_name'):
+                setattr(user_doc, 'middle_name', "")
+            user_doc.full_name = display_name
+            user_doc.flags.ignore_permissions = True
+            user_doc.save()
         except Exception:
             pass
 
@@ -521,9 +525,9 @@ def update_frappe_user(user_doc, ms_user, user_data):
         new_last = user_data.get("surname") or user_doc.last_name
         user_doc.first_name = new_first
         user_doc.last_name = new_last
-        # Full name should be "Last Name First Name"
-        computed_full = f"{new_last} {new_first}".strip()
-        user_doc.full_name = computed_full or (user_data.get("displayName") or user_doc.full_name)
+        # Full Name phải khớp Display Name từ Microsoft nếu có
+        display_name = (user_data.get("displayName") or user_doc.full_name)
+        user_doc.full_name = display_name
         user_doc.enabled = user_data.get("accountEnabled", True)
         
         # Update Microsoft-specific fields (if they exist)
@@ -544,13 +548,15 @@ def update_frappe_user(user_doc, ms_user, user_data):
             business_phones = ", ".join(user_data.get("businessPhones", [])) if user_data.get("businessPhones") else None
             user_doc.phone = business_phones or user_doc.phone
         
-        user_doc.flags.ignore_permissions = True
-        user_doc.save()
-        # Ensure full_name is stored as Last + First without re-triggering validate
+        # Clear middle_name nếu có
         try:
-            frappe.db.set_value("User", user_doc.name, "full_name", computed_full, update_modified=False)
+            if hasattr(user_doc, 'middle_name'):
+                setattr(user_doc, 'middle_name', "")
         except Exception:
             pass
+
+        user_doc.flags.ignore_permissions = True
+        user_doc.save()
 
         # Publish redis event for realtime microservices
         try:
