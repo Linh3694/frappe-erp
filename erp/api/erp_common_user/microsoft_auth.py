@@ -1186,48 +1186,41 @@ def get_microsoft_test_users(limit=5):
 
 
 # === Microsoft Graph change notifications (webhook) ===
+from urllib.parse import unquote
 
 @frappe.whitelist(allow_guest=True)
 def microsoft_webhook():
-    """Endpoint nhận change notifications từ Microsoft Graph (users created/updated/deleted).
-
-    - GET: trả `validationToken` để xác thực subscription
-    - POST: nhận notifications, fetch chi tiết user và đồng bộ vào Frappe, sau đó publish sự kiện Redis
-    """
+    # 1) Echo validation token (decode) → 200 text/plain
+    token = None
     try:
-        # Validation handshake (Graph gửi validationToken qua query khi verify)
-        # Lấy validationToken từ query (Graph dùng GET để verify subscription)
+        token = frappe.form_dict.get('validationToken') or frappe.form_dict.get('validationtoken')
+    except Exception:
         token = None
+    if not token:
         try:
-            token = frappe.form_dict.get('validationToken')
+            args = getattr(frappe.request, 'args', None)
+            if args:
+                token = args.get('validationToken') or args.get('validationtoken')
         except Exception:
             token = None
-        if not token:
-            try:
-                args = getattr(frappe.request, 'args', None)
-                if args:
-                    token = args.get('validationToken')
-            except Exception:
-                token = None
 
-        if token:
-            decoded = unquote(token)
-            frappe.local.response["http_status_code"] = 200
-            frappe.local.response["type"] = "text"
-            frappe.local.response["message"] = token
+    if token:
+        decoded = unquote(token)
+        frappe.local.response['http_status_code'] = 200
+        frappe.local.response['type'] = 'text'
+        frappe.local.response['message'] = decoded  # PHẢI dùng 'message'
+        return
+
+    # 2) Reachability POST rỗng → 200
+    try:
+        if getattr(frappe.request, 'method', 'GET') == 'POST' and not getattr(frappe.request, 'data', None):
+            frappe.local.response['http_status_code'] = 200
+            frappe.local.response['type'] = 'text'
+            frappe.local.response['message'] = ''
             return
-
-        # Reachability test: Graph có thể gửi POST rỗng để kiểm tra 200-OK
-        try:
-            method = getattr(frappe.request, 'method', 'GET')
-            raw = getattr(frappe.request, 'data', None)
-            if method == 'POST' and (raw is None or raw == b'' or raw == ''):
-                frappe.local.response["http_status_code"] = 200
-                frappe.local.response["type"] = "text"
-                frappe.local.response["response"] = ""
-                return
-        except Exception:
-            pass
+        
+    except Exception:
+        pass
 
         # Parse notifications body
         data = {}
