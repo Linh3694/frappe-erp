@@ -1171,6 +1171,7 @@ def microsoft_webhook():
     processed = 0
     debug_info = []
     for n in notifications:
+        stage = "start"
         try:
             # Extract user id
             user_id = None
@@ -1189,11 +1190,17 @@ def microsoft_webhook():
                     _logger = _get_webhook_logger()
                     if _logger:
                         _logger.info(msg)
+                    if debug_enabled:
+                        debug_info.append({
+                            "note": "missing_user_id",
+                            "payload_preview": json.dumps(n)[:500]
+                        })
                 except Exception:
                     pass
                 continue
 
             # Fetch latest user data from Graph
+            stage = "graph_fetch"
             resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{user_id}?$select={fields}", headers=headers)
             if resp.status_code != 200:
                 try:
@@ -1223,12 +1230,15 @@ def microsoft_webhook():
                 })
 
             # Upsert Microsoft and Frappe user
+            stage = "create_or_update_microsoft_user"
             ms_user = create_or_update_microsoft_user(user_data)
             email = user_data.get('mail') or user_data.get('userPrincipalName')
             existed = bool(email and frappe.db.exists('User', email))
 
+            stage = "find_or_create_frappe_user"
             local_user = find_or_create_frappe_user(ms_user, user_data)
             if local_user:
+                stage = "update_frappe_user"
                 update_frappe_user(local_user, ms_user, user_data)
                 try:
                     msg = f"Processed user change id={user_id} email={email} existed={existed}"
@@ -1249,15 +1259,18 @@ def microsoft_webhook():
         except Exception as e:
             # Ghi lại lỗi xử lý 1 notification để chẩn đoán vì sao processed không tăng
             try:
-                err_msg = str(e)
+                import traceback as _tb
+                err_msg = str(e) or e.__class__.__name__
+                tb = _tb.format_exc()[-2000:]
                 if debug_enabled:
-                    frappe.log_error("Microsoft Webhook", f"Processing exception for notification: {err_msg}")
+                    frappe.log_error("Microsoft Webhook", f"Processing exception stage={stage}: {err_msg}\n{tb}")
                 _logger = _get_webhook_logger()
                 if _logger:
-                    _logger.info(f"Processing exception: {err_msg}")
+                    _logger.info(f"Processing exception stage={stage}: {err_msg}")
                 if debug_enabled:
                     debug_info.append({
                         "note": "processing_exception",
+                        "stage": stage,
                         "error": err_msg
                     })
             except Exception:
