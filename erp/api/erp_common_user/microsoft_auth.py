@@ -1187,6 +1187,7 @@ def get_microsoft_test_users(limit=5):
 
 # === Microsoft Graph change notifications (webhook) ===
 from urllib.parse import unquote_plus
+from werkzeug.wrappers import Response
 
 @frappe.whitelist(allow_guest=True)
 def microsoft_webhook():
@@ -1210,22 +1211,12 @@ def microsoft_webhook():
             decoded = unquote_plus(token)
         except Exception:
             decoded = token
-        frappe.local.response.clear()
-        frappe.local.response['http_status_code'] = 200
-        # Trả thuần văn bản: type 'text' và set cả 'message' lẫn 'response'
-        frappe.local.response['type'] = 'text'
-        frappe.local.response['message'] = decoded
-        frappe.local.response['response'] = decoded
-        return
+        return Response(decoded, mimetype="text/plain", status=200)
 
     # 2) Reachability POST rỗng → 200
     try:
         if getattr(frappe.request, 'method', 'GET') == 'POST' and not getattr(frappe.request, 'data', None):
-            frappe.local.response.clear()
-            frappe.local.response['http_status_code'] = 200
-            frappe.local.response['type'] = 'text'
-            frappe.local.response['message'] = ''
-            return
+            return Response('', mimetype='text/plain', status=200)
         
     except Exception:
         pass
