@@ -1246,7 +1246,22 @@ def microsoft_webhook():
                 except Exception:
                     pass
             processed += 1
-        except Exception:
+        except Exception as e:
+            # Ghi lại lỗi xử lý 1 notification để chẩn đoán vì sao processed không tăng
+            try:
+                err_msg = str(e)
+                if debug_enabled:
+                    frappe.log_error("Microsoft Webhook", f"Processing exception for notification: {err_msg}")
+                _logger = _get_webhook_logger()
+                if _logger:
+                    _logger.info(f"Processing exception: {err_msg}")
+                if debug_enabled:
+                    debug_info.append({
+                        "note": "processing_exception",
+                        "error": err_msg
+                    })
+            except Exception:
+                pass
             continue
 
     # Kèm thêm debug_info khi bật debug để hỗ trợ chẩn đoán nhanh
