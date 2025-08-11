@@ -1012,7 +1012,8 @@ def microsoft_webhook():
         )
     except Exception:
         debug_enabled = False
-    if debug_enabled and WEBHOOK_LOGGER:
+    # Always write a minimal trace to the dedicated webhook log (even if debug is off)
+    if WEBHOOK_LOGGER:
         try:
             WEBHOOK_LOGGER.info("Webhook hit: start handling request")
         except Exception:
@@ -1035,24 +1036,24 @@ def microsoft_webhook():
             decoded = unquote_plus(token)
         except Exception:
             decoded = token
-        if debug_enabled:
-            try:
+        try:
+            if debug_enabled:
                 frappe.log_error("Microsoft Webhook", f"Validation echo received, token_len={len(decoded)}")
-                if WEBHOOK_LOGGER:
-                    WEBHOOK_LOGGER.info(f"Validation echo received, token_len={len(decoded)}")
-            except Exception:
-                pass
+            if WEBHOOK_LOGGER:
+                WEBHOOK_LOGGER.info(f"Validation echo received, token_len={len(decoded)}")
+        except Exception:
+            pass
         return Response(decoded, mimetype="text/plain", status=200)
 
     try:
         if getattr(frappe.request, 'method', 'GET') == 'POST' and not getattr(frappe.request, 'data', None):
-            if debug_enabled:
-                try:
+            try:
+                if debug_enabled:
                     frappe.log_error("Microsoft Webhook", "Received empty POST (reachability)")
-                    if WEBHOOK_LOGGER:
-                        WEBHOOK_LOGGER.info("Received empty POST (reachability)")
-                except Exception:
-                    pass
+                if WEBHOOK_LOGGER:
+                    WEBHOOK_LOGGER.info("Received empty POST (reachability)")
+            except Exception:
+                pass
             return Response('', mimetype='text/plain', status=200)
         
     except Exception:
@@ -1067,19 +1068,19 @@ def microsoft_webhook():
                 raw = frappe.request.get_data()
         if raw:
             data = frappe.parse_json(raw)
-        if debug_enabled:
-            try:
-                method = getattr(frappe.request, 'method', '')
-                hdrs = getattr(frappe.request, 'headers', {}) or {}
-                sub_id = hdrs.get('ms-notification-subscription-id') if hasattr(hdrs, 'get') else ''
-                tenant = hdrs.get('ms-notification-tenant-id') if hasattr(hdrs, 'get') else ''
-                body_len = len(raw or b'')
-                msg = f"Request method={method} body_len={body_len} sub_id={sub_id} tenant={tenant}"
+        try:
+            method = getattr(frappe.request, 'method', '')
+            hdrs = getattr(frappe.request, 'headers', {}) or {}
+            sub_id = hdrs.get('ms-notification-subscription-id') if hasattr(hdrs, 'get') else ''
+            tenant = hdrs.get('ms-notification-tenant-id') if hasattr(hdrs, 'get') else ''
+            body_len = len(raw or b'')
+            msg = f"Request method={method} body_len={body_len} sub_id={sub_id} tenant={tenant}"
+            if debug_enabled:
                 frappe.log_error("Microsoft Webhook", msg)
-                if WEBHOOK_LOGGER:
-                    WEBHOOK_LOGGER.info(msg)
-            except Exception:
-                pass
+            if WEBHOOK_LOGGER:
+                WEBHOOK_LOGGER.info(msg)
+        except Exception:
+            pass
     except Exception:
         data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
 
@@ -1110,19 +1111,19 @@ def microsoft_webhook():
         )
     except Exception:
         debug_enabled = False
-    if debug_enabled:
+    try:
+        preview = ""
         try:
-            preview = ""
-            try:
-                preview = json.dumps(notifications)[:1000]
-            except Exception:
-                preview = str(notifications)[:1000]
-            msg = f"Received notifications: count={len(notifications)} preview={preview}"
-            frappe.log_error("Microsoft Webhook", msg)
-            if WEBHOOK_LOGGER:
-                WEBHOOK_LOGGER.info(msg)
+            preview = json.dumps(notifications)[:1000]
         except Exception:
-            pass
+            preview = str(notifications)[:1000]
+        msg = f"Received notifications: count={len(notifications)} preview={preview}"
+        if debug_enabled:
+            frappe.log_error("Microsoft Webhook", msg)
+        if WEBHOOK_LOGGER:
+            WEBHOOK_LOGGER.info(msg)
+    except Exception:
+        pass
     if not notifications:
         return Response(json.dumps({"status": "ok", "received": 0}), mimetype="application/json", status=202)
 
@@ -1158,14 +1159,14 @@ def microsoft_webhook():
             local_user = find_or_create_frappe_user(ms_user, user_data)
             if local_user:
                 update_frappe_user(local_user, ms_user, user_data)
-                if debug_enabled:
-                    try:
-                        msg = f"Processed user change id={user_id} email={email} existed={existed}"
+                try:
+                    msg = f"Processed user change id={user_id} email={email} existed={existed}"
+                    if debug_enabled:
                         frappe.log_error("Microsoft Webhook", msg)
-                        if WEBHOOK_LOGGER:
-                            WEBHOOK_LOGGER.info(msg)
-                    except Exception:
-                        pass
+                    if WEBHOOK_LOGGER:
+                        WEBHOOK_LOGGER.info(msg)
+                except Exception:
+                    pass
                 try:
                     from erp.common.redis_events import publish_user_event, is_user_events_enabled
                     if is_user_events_enabled() and email:
