@@ -1209,14 +1209,13 @@ def microsoft_webhook():
             decoded = unquote(token)
         except Exception:
             decoded = token
-        # Trả plain text, không JSON, không newline
+        # Trả plain text thuần chỉ chứa validationToken
         frappe.local.response.clear()
         frappe.local.response['http_status_code'] = 200
         frappe.local.response['type'] = 'text'
-        frappe.local.response['message'] = decoded
+        # Chỉ set 'response' để tránh bọc JSON
         frappe.local.response['response'] = decoded
         try:
-            # đảm bảo header content-type chính xác
             frappe.local.response.setdefault('headers', [])
             frappe.local.response['headers'].append(["Content-Type", "text/plain; charset=utf-8"])
         except Exception:
