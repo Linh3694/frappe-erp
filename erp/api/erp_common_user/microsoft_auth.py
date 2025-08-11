@@ -1265,3 +1265,30 @@ def ensure_users_subscription():
     except Exception as e:
         frappe.log_error("Microsoft Subscription", f"ensure_users_subscription error: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+
+@frappe.whitelist()
+def list_users_subscriptions():
+    """Liệt kê chi tiết subscriptions hiện có cho resource `users`."""
+    try:
+        token = get_microsoft_app_token()
+        subs = _list_users_subscriptions(token)
+        return {"status": "success", "subscriptions": subs}
+    except Exception as e:
+        frappe.log_error("Microsoft Subscription", f"list_users_subscriptions error: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+@frappe.whitelist()
+def delete_users_subscription(sub_id: str):
+    """Xóa 1 subscription theo id để tạo lại sạch sẽ."""
+    try:
+        token = get_microsoft_app_token()
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        resp = requests.delete(f"https://graph.microsoft.com/v1.0/subscriptions/{sub_id}", headers=headers)
+        if resp.status_code not in (200, 204):
+            frappe.throw(_(f"Delete subscription failed: {resp.text}"))
+        return {"status": "success", "deleted": sub_id}
+    except Exception as e:
+        frappe.log_error("Microsoft Subscription", f"delete_users_subscription error: {str(e)}")
+        return {"status": "error", "message": str(e)}
