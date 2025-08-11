@@ -169,17 +169,72 @@ def update_user_avatar(user_email, avatar_url):
             })
         
         profile.avatar_url = avatar_url
+        profile.flags.ignore_permissions = True
         profile.save()
         
         # Update User.user_image for compatibility
         user_doc = frappe.get_doc("User", user_email)
         user_doc.user_image = avatar_url
+        user_doc.flags.ignore_permissions = True
         user_doc.save()
         
         return True
         
     except Exception as e:
         frappe.log_error(f"Update user avatar error: {str(e)}", "Avatar Management")
+        raise e
+
+
+def _guess_extension_from_content_type(content_type: str) -> str:
+    mapping = {
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+        "image/gif": "gif",
+        "image/webp": "webp",
+    }
+    return mapping.get((content_type or "").lower(), "jpg")
+
+
+@frappe.whitelist()
+def save_user_avatar_bytes(user_email: str, content_bytes: bytes, content_type: str | None = None) -> str:
+    """Lưu avatar từ bytes cho user và cập nhật Profile/User.
+
+    Trả về URL avatar ("/files/Avatar/...").
+    """
+    try:
+        if not user_email:
+            frappe.throw(_("Missing user email"))
+
+        # Chọn phần mở rộng hợp lệ
+        ext = _guess_extension_from_content_type(content_type)
+
+        # Xử lý ảnh (resize/chuẩn hóa)
+        processed_content = process_image(content_bytes, ext)
+
+        # Tạo tên file
+        file_id = str(uuid.uuid4())
+        safe_email = user_email.replace("/", "_")
+        filename = f"user_{safe_email}_{file_id}.{ext}"
+
+        # Tạo thư mục Avatar nếu chưa có
+        upload_dir = frappe.get_site_path("public", "files", "Avatar")
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+
+        # Ghi file
+        file_path = os.path.join(upload_dir, filename)
+        with open(file_path, 'wb') as f:
+            f.write(processed_content)
+
+        avatar_url = f"/files/Avatar/{filename}"
+
+        # Cập nhật vào profile/user
+        update_user_avatar(user_email, avatar_url)
+
+        return avatar_url
+    except Exception as e:
+        frappe.log_error(f"Save user avatar bytes error: {str(e)}", "Avatar Management")
         raise e
 
 
