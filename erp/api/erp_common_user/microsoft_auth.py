@@ -996,11 +996,12 @@ from urllib.parse import unquote_plus
 from werkzeug.wrappers import Response
 from typing import Any
 
-# Dedicated file logger for webhook debugging
-try:
-    WEBHOOK_LOGGER = frappe.logger("microsoft_webhook", allow_site=True, file_count=5)
-except Exception:
-    WEBHOOK_LOGGER = None
+def _get_webhook_logger():
+    """Always get a fresh site-aware logger. Avoid module-level init before site context exists."""
+    try:
+        return frappe.logger("microsoft_webhook", allow_site=True, file_count=5)
+    except Exception:
+        return None
 
 @frappe.whitelist(allow_guest=True)
 def microsoft_webhook():
@@ -1013,9 +1014,10 @@ def microsoft_webhook():
     except Exception:
         debug_enabled = False
     # Always write a minimal trace to the dedicated webhook log (even if debug is off)
-    if WEBHOOK_LOGGER:
+    _logger = _get_webhook_logger()
+    if _logger:
         try:
-            WEBHOOK_LOGGER.info("Webhook hit: start handling request")
+            _logger.info("Webhook hit: start handling request")
         except Exception:
             pass
     token = None
@@ -1039,8 +1041,9 @@ def microsoft_webhook():
         try:
             if debug_enabled:
                 frappe.log_error("Microsoft Webhook", f"Validation echo received, token_len={len(decoded)}")
-            if WEBHOOK_LOGGER:
-                WEBHOOK_LOGGER.info(f"Validation echo received, token_len={len(decoded)}")
+            _logger = _get_webhook_logger()
+            if _logger:
+                _logger.info(f"Validation echo received, token_len={len(decoded)}")
         except Exception:
             pass
         return Response(decoded, mimetype="text/plain", status=200)
@@ -1050,8 +1053,9 @@ def microsoft_webhook():
             try:
                 if debug_enabled:
                     frappe.log_error("Microsoft Webhook", "Received empty POST (reachability)")
-                if WEBHOOK_LOGGER:
-                    WEBHOOK_LOGGER.info("Received empty POST (reachability)")
+                _logger = _get_webhook_logger()
+                if _logger:
+                    _logger.info("Received empty POST (reachability)")
             except Exception:
                 pass
             return Response('', mimetype='text/plain', status=200)
@@ -1077,8 +1081,9 @@ def microsoft_webhook():
             msg = f"Request method={method} body_len={body_len} sub_id={sub_id} tenant={tenant}"
             if debug_enabled:
                 frappe.log_error("Microsoft Webhook", msg)
-            if WEBHOOK_LOGGER:
-                WEBHOOK_LOGGER.info(msg)
+            _logger = _get_webhook_logger()
+            if _logger:
+                _logger.info(msg)
         except Exception:
             pass
     except Exception:
@@ -1120,8 +1125,9 @@ def microsoft_webhook():
         msg = f"Received notifications: count={len(notifications)} preview={preview}"
         if debug_enabled:
             frappe.log_error("Microsoft Webhook", msg)
-        if WEBHOOK_LOGGER:
-            WEBHOOK_LOGGER.info(msg)
+        _logger = _get_webhook_logger()
+        if _logger:
+            _logger.info(msg)
     except Exception:
         pass
     if not notifications:
@@ -1163,8 +1169,9 @@ def microsoft_webhook():
                     msg = f"Processed user change id={user_id} email={email} existed={existed}"
                     if debug_enabled:
                         frappe.log_error("Microsoft Webhook", msg)
-                    if WEBHOOK_LOGGER:
-                        WEBHOOK_LOGGER.info(msg)
+                    _logger = _get_webhook_logger()
+                    if _logger:
+                        _logger.info(msg)
                 except Exception:
                     pass
                 try:
