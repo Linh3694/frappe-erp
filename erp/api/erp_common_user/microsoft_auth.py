@@ -1207,21 +1207,14 @@ def microsoft_webhook():
     if token:
         # Decode token để Microsoft nhận đúng ký tự ':' và khoảng trắng
         try:
-            raw_token = unquote_plus(token)
+            decoded = unquote_plus(token)
         except Exception:
-            raw_token = token
+            decoded = token
         frappe.local.response.clear()
         frappe.local.response['http_status_code'] = 200
-        frappe.local.response['type'] = 'text'
-        # Thiết lập body ở cả 'message' và 'response' để framework luôn gửi đúng plain text
-        frappe.local.response['message'] = raw_token
-        frappe.local.response['response'] = raw_token
-        try:
-            frappe.local.response.setdefault('headers', [])
-            # Sử dụng đúng 'text/plain' không kèm charset để tránh sai khác
-            frappe.local.response['headers'].append(["Content-Type", "text/plain"])
-        except Exception:
-            pass
+        # Trả thuần văn bản: dùng type 'txt' + 'message'
+        frappe.local.response['type'] = 'txt'
+        frappe.local.response['message'] = decoded
         return
 
     # 2) Reachability POST rỗng → 200
