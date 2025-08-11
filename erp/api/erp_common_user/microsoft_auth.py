@@ -1212,9 +1212,10 @@ def microsoft_webhook():
             decoded = token
         frappe.local.response.clear()
         frappe.local.response['http_status_code'] = 200
-        # Trả thuần văn bản: dùng type 'txt' + 'message'
-        frappe.local.response['type'] = 'txt'
+        # Trả thuần văn bản: type 'text' và set cả 'message' lẫn 'response'
+        frappe.local.response['type'] = 'text'
         frappe.local.response['message'] = decoded
+        frappe.local.response['response'] = decoded
         return
 
     # 2) Reachability POST rỗng → 200
