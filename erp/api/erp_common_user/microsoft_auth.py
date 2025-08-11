@@ -1072,6 +1072,34 @@ def microsoft_webhook():
                 raw = frappe.request.get_data()
         if raw:
             data = frappe.parse_json(raw)
+
+        # Fallback 1: dùng get_json() nếu parse_json thất bại hoặc không có key 'value'
+        if not isinstance(data, dict) or 'value' not in data:
+            try:
+                json_data = frappe.request.get_json(silent=True)
+            except Exception:
+                json_data = None
+            if isinstance(json_data, dict) and json_data:
+                data = json_data
+
+        # Fallback 2: một số trường hợp Frappe gom payload vào form_dict
+        if (not isinstance(data, dict)) or ('value' not in data):
+            try:
+                form_dict = getattr(frappe, 'form_dict', None)
+                if form_dict:
+                    maybe_value = form_dict.get('value') if hasattr(form_dict, 'get') else None
+                    if maybe_value is not None:
+                        if isinstance(maybe_value, str):
+                            try:
+                                parsed_val = frappe.parse_json(maybe_value)
+                                data = {'value': parsed_val}
+                            except Exception:
+                                data = {'value': []}
+                        elif isinstance(maybe_value, list):
+                            data = {'value': maybe_value}
+            except Exception:
+                pass
+
         try:
             method = getattr(frappe.request, 'method', '')
             hdrs = getattr(frappe.request, 'headers', {}) or {}
@@ -1087,7 +1115,10 @@ def microsoft_webhook():
         except Exception:
             pass
     except Exception:
-        data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
+        try:
+            data = frappe.request.get_json(silent=True) or {}
+        except Exception:
+            data = {}
 
     notifications = data.get('value', []) if isinstance(data, dict) else []
     # Lưu dấu vết lần nhận gần nhất để kiểm tra nhanh (không phụ thuộc Error Log)
