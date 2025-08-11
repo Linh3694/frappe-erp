@@ -1196,20 +1196,38 @@ def microsoft_webhook():
     """
     try:
         # Validation handshake (Graph gửi validationToken qua query khi verify)
-        args = getattr(frappe.request, 'args', None)
-        if args and args.get('validationToken'):
-            # Trả về 200 OK với body là validationToken (text/plain)
+        # Lấy validationToken từ query (Graph dùng GET để verify subscription)
+        token = None
+        try:
+            token = frappe.form_dict.get('validationToken')
+        except Exception:
+            token = None
+        if not token:
             try:
-                from werkzeug.wrappers import Response
-                token = args.get('validationToken')
-                frappe.local.response = Response(token, status=200, content_type='text/plain')
+                args = getattr(frappe.request, 'args', None)
+                if args:
+                    token = args.get('validationToken')
             except Exception:
-                # Fallback nếu không khởi tạo được Response
-                token = args.get('validationToken')
+                token = None
+
+        if token:
+            # Trả 200 OK với body là token, content-type text/plain
+            frappe.local.response["http_status_code"] = 200
+            frappe.local.response["type"] = "text"
+            frappe.local.response["response"] = token
+            return
+
+        # Reachability test: Graph có thể gửi POST rỗng để kiểm tra 200-OK
+        try:
+            method = getattr(frappe.request, 'method', 'GET')
+            raw = getattr(frappe.request, 'data', None)
+            if method == 'POST' and (raw is None or raw == b'' or raw == ''):
                 frappe.local.response["http_status_code"] = 200
                 frappe.local.response["type"] = "text"
-                frappe.local.response["response"] = token
-            return
+                frappe.local.response["response"] = ""
+                return
+        except Exception:
+            pass
 
         # Parse notifications body
         data = {}
