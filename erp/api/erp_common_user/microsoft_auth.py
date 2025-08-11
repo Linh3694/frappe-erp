@@ -1032,6 +1032,25 @@ def microsoft_webhook():
         data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
 
     notifications = data.get('value', []) if isinstance(data, dict) else []
+    # Lưu dấu vết lần nhận gần nhất để kiểm tra nhanh (không phụ thuộc Error Log)
+    try:
+        cache = frappe.cache()
+        cache.set_value("ms_webhook_last_received_at", datetime.utcnow().isoformat())
+        cache.set_value("ms_webhook_last_notifications_count", len(notifications))
+        # Lưu preview an toàn để debug (tối đa 2KB)
+        try:
+            body_preview = json.dumps(notifications)[:2048]
+        except Exception:
+            body_preview = str(notifications)[:2048]
+        cache.set_value("ms_webhook_last_preview", body_preview)
+        total = cache.get_value("ms_webhook_total") or 0
+        try:
+            total = int(total)
+        except Exception:
+            total = 0
+        cache.set_value("ms_webhook_total", total + 1)
+    except Exception:
+        pass
     try:
         debug_enabled = (
             frappe.conf.get("microsoft_webhook_debug")
@@ -1100,6 +1119,18 @@ def microsoft_webhook():
             continue
 
     return {"status": "ok", "received": len(notifications), "processed": processed}
+
+
+@frappe.whitelist()
+def get_webhook_status():
+    """Xem nhanh tình trạng webhook: lần nhận gần nhất, số lượng notification, preview…"""
+    cache = frappe.cache()
+    return {
+        "last_received_at": cache.get_value("ms_webhook_last_received_at"),
+        "last_notifications_count": cache.get_value("ms_webhook_last_notifications_count"),
+        "last_preview": cache.get_value("ms_webhook_last_preview"),
+        "total_hits": cache.get_value("ms_webhook_total") or 0,
+    }
 
 
 @frappe.whitelist()
