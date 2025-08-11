@@ -97,6 +97,82 @@ def validate_user_permissions(doc, method):
         frappe.log_error(f"User permission validation error for {doc.email}: {str(e)}", "User Validation")
 
 
+def force_full_name_from_microsoft(doc, method):
+    """Đảm bảo `User.full_name` khớp `display_name` từ Microsoft và xóa `middle_name`.
+
+    - Áp dụng khi user có `microsoft_id` hoặc có bản ghi `ERP Microsoft User` tương ứng (theo email).
+    - Chỉ chỉnh sửa giá trị trên `doc` trước khi lưu; không chạm các field khác.
+    """
+    try:
+        # Xóa middle_name nếu tồn tại
+        if hasattr(doc, "middle_name"):
+            doc.middle_name = ""
+
+        display_name = None
+        microsoft_id = getattr(doc, "microsoft_id", None)
+
+        if microsoft_id:
+            display_name = frappe.db.get_value(
+                "ERP Microsoft User", {"microsoft_id": microsoft_id}, "display_name"
+            )
+
+        if not display_name and getattr(doc, "email", None):
+            display_name = frappe.db.get_value(
+                "ERP Microsoft User", {"mail": doc.email}, "display_name"
+            ) or frappe.db.get_value(
+                "ERP Microsoft User", {"user_principal_name": doc.email}, "display_name"
+            )
+
+        if display_name:
+            doc.full_name = display_name.strip()
+    except Exception as e:
+        frappe.log_error(
+            f"force_full_name_from_microsoft error for {getattr(doc, 'name', '<unknown>')}: {str(e)}",
+            "User Name Normalize",
+        )
+
+
+@frappe.whitelist()
+def apply_user_middle_name_hide():
+    """Ẩn các trường không dùng trên DocType `User` bằng Property Setter.
+
+    Hiện tại ẩn:
+      - middle_name
+      - employee_id (đã có employee_code)
+
+    Idempotent: nếu property đã tồn tại thì bỏ qua.
+    """
+    try:
+        def _set(doc_type: str, field_name: str, prop: str, value: str, ptype: str):
+            exists = frappe.db.exists(
+                "Property Setter",
+                {"doc_type": doc_type, "field_name": field_name, "property": prop},
+            )
+            if exists:
+                return
+            ps = frappe.get_doc(
+                {
+                    "doctype": "Property Setter",
+                    "doctype_or_field": "DocField",
+                    "doc_type": doc_type,
+                    "field_name": field_name,
+                    "property": prop,
+                    "value": value,
+                    "property_type": ptype,
+                }
+            )
+            ps.insert()
+
+        # Ẩn và bỏ bắt buộc (nếu có)
+        _set("User", "middle_name", "hidden", "1", "Check")
+        _set("User", "middle_name", "reqd", "0", "Check")
+        _set("User", "employee_id", "hidden", "1", "Check")
+        _set("User", "employee_id", "reqd", "0", "Check")
+
+        return {"status": "success"}
+    except Exception as e:
+        frappe.log_error(f"apply_user_middle_name_hide error: {str(e)}", "PropertySetter")
+        return {"status": "error", "message": str(e)}
 def setup_user_management_hooks():
     """Setup all user management hooks"""
     try:
@@ -115,13 +191,12 @@ def setup_user_management_hooks():
             frappe.get_hooks("doc_events")["User"]["on_update"].append("erp.common.hooks.update_user_profile_on_user_update")
         
         if "erp.common.hooks.delete_user_profile_on_user_deletion" not in frappe.get_hooks("doc_events")["User"]["before_delete"]:
-            frappe.get_hooks("doc_events")["User"]["before_delete"].append("erp.common.hooks.delete_user_profile_on_user_deletion")
-        
+            frappe.get_hooks("doc_events")["User"]["before_delete"].append("erp.common.hooks.delete_user_profile_on_user_deletion")    
+        # Đảm bảo validate theo thứ tự: normalize fullname trước, rồi validate quyền
+        if "erp.common.hooks.force_full_name_from_microsoft" not in frappe.get_hooks("doc_events")["User"]["validate"]:
+            frappe.get_hooks("doc_events")["User"]["validate"].append("erp.common.hooks.force_full_name_from_microsoft")
         if "erp.common.hooks.validate_user_permissions" not in frappe.get_hooks("doc_events")["User"]["validate"]:
-            frappe.get_hooks("doc_events")["User"]["validate"].append("erp.common.hooks.validate_user_permissions")
-        
-    
-        
+            frappe.get_hooks("doc_events")["User"]["validate"].append("erp.common.hooks.validate_user_permissions")    
     except Exception as e:
         frappe.log_error(f"Error setting up user management hooks: {str(e)}", "Hook Setup")
 

@@ -135,15 +135,24 @@ app_license = "mit"
 
 # Document Events
 # ---------------
-# Hook on document methods and events
-
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+# Chuẩn hóa User.full_name theo Display Name từ Microsoft và ẩn middle_name
+doc_events = {
+    "User": {
+        "validate": [
+            "erp.common.hooks.force_full_name_from_microsoft",
+            "erp.common.hooks.validate_user_permissions",
+        ],
+        "after_insert": [
+            "erp.common.hooks.create_user_profile_on_user_creation",
+        ],
+        "on_update": [
+            "erp.common.hooks.update_user_profile_on_user_update",
+        ],
+        "before_delete": [
+            "erp.common.hooks.delete_user_profile_on_user_deletion",
+        ],
+    }
+}
 
 # Scheduled Tasks
 # ---------------

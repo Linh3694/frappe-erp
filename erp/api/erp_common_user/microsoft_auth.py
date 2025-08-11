@@ -330,6 +330,46 @@ def get_all_microsoft_users(*args, **kwargs):
     return []
 
 
+def _get_allowed_group_ids() -> list[str]:
+    """Đọc danh sách group id được phép đồng bộ từ cấu hình `microsoft_group_ids`.
+
+    Hỗ trợ chuỗi phân tách bởi dấu phẩy trong site_config/frappe.conf.
+    Trả về list rỗng nếu không cấu hình (nghĩa là không lọc group).
+    """
+    try:
+        raw = (
+            frappe.conf.get("microsoft_group_ids")
+            or frappe.get_site_config().get("microsoft_group_ids")
+        )
+        if not raw:
+            return []
+        if isinstance(raw, list):
+            return [str(x).strip() for x in raw if str(x).strip()]
+        return [s.strip() for s in str(raw).split(",") if s.strip()]
+    except Exception:
+        return []
+
+
+def _is_user_in_allowed_groups(user_id: str, app_headers: dict) -> bool:
+    """Kiểm tra membership user thuộc các group được phép bằng API `checkMemberGroups`.
+
+    Nếu không cấu hình group → mặc định True.
+    """
+    allowed = _get_allowed_group_ids()
+    if not allowed:
+        return True
+    try:
+        url = f"https://graph.microsoft.com/v1.0/users/{user_id}/checkMemberGroups"
+        payload = {"groupIds": allowed}
+        resp = requests.post(url, headers=app_headers, json=payload)
+        if resp.status_code != 200:
+            return False
+        data = resp.json() or {}
+        returned = data if isinstance(data, list) else data.get("value", [])
+        return bool(returned)
+    except Exception:
+        return False
+
 def create_or_update_microsoft_user(user_data):
     """Create or update Microsoft user in Frappe with local user mapping"""
     try:
@@ -479,8 +519,7 @@ def create_frappe_user(ms_user, user_data):
             "enabled": user_data.get("accountEnabled", True),
             "user_type": "System User",
             "send_welcome_email": 0,
-            # Custom fields for Microsoft data
-            "employee_id": user_data.get("employeeId"),
+            # Custom fields for Microsoft data (chỉ giữ Employee Code, bỏ Employee ID)
             "department": user_data.get("department"),
             # Prefer core/custom field `job_title`; also set legacy `designation` for compatibility
             "job_title": user_data.get("jobTitle"),
@@ -531,8 +570,6 @@ def update_frappe_user(user_doc, ms_user, user_data):
         user_doc.enabled = user_data.get("accountEnabled", True)
         
         # Update Microsoft-specific fields (if they exist)
-        if hasattr(user_doc, 'employee_id'):
-            user_doc.employee_id = user_data.get("employeeId") or user_doc.employee_id
         if hasattr(user_doc, 'department'):
             user_doc.department = user_data.get("department") or user_doc.department
         # Prefer updating `job_title` field if present; otherwise fall back to `designation`
@@ -1236,6 +1273,17 @@ def microsoft_webhook():
                     pass
                 continue
             user_data = resp.json()
+            # Lọc theo group: bỏ qua nếu user không thuộc các group được phép
+            try:
+                if not _is_user_in_allowed_groups(user_id, headers):
+                    if debug_enabled:
+                        debug_info.append({
+                            "note": "skip_not_in_allowed_groups",
+                            "user_id": user_id
+                        })
+                    continue
+            except Exception:
+                continue
             if debug_enabled:
                 debug_info.append({
                     "user_id": user_id,
@@ -1547,6 +1595,13 @@ def sync_all_microsoft_users_once(limit: int | None = None, page_size: int = 50)
             values = data.get("value", [])
             for user_data in values:
                 try:
+                    try:
+                        user_id = user_data.get("id")
+                        if user_id and not _is_user_in_allowed_groups(user_id, headers):
+                            continue
+                    except Exception:
+                        continue
+
                     ms_user = create_or_update_microsoft_user(user_data)
                     email = user_data.get("mail") or user_data.get("userPrincipalName")
                     if email:
@@ -1585,6 +1640,118 @@ def sync_all_microsoft_users_once(limit: int | None = None, page_size: int = 50)
 
     except Exception as e:
         frappe.log_error("Microsoft Bulk Sync", f"sync_all_microsoft_users_once error: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+@frappe.whitelist()
+def sync_microsoft_group_members_once(group_ids: str | None = None, limit: int | None = None, page_size: int = 100) -> dict:
+    """Đồng bộ tất cả thành viên của các group chỉ định (hoặc từ `microsoft_group_ids`)."""
+    try:
+        # Danh sách group
+        if group_ids and isinstance(group_ids, str):
+            groups = [g.strip() for g in group_ids.split(',') if g.strip()]
+        else:
+            groups = _get_allowed_group_ids()
+        if not groups:
+            return {"status": "error", "message": "No group_ids provided or configured"}
+
+        # Chuẩn hóa tham số
+        try:
+            page_size = int(page_size)
+        except Exception:
+            page_size = 100
+        if page_size < 1:
+            page_size = 100
+        if page_size > 999:
+            page_size = 999
+
+        token = get_microsoft_app_token()
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+        fields = (
+            "id,displayName,givenName,surname,userPrincipalName,mail,"
+            "jobTitle,department,officeLocation,businessPhones,mobilePhone,"
+            "employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+        )
+
+        processed = 0
+        created = 0
+        updated = 0
+        errors = 0
+        seen_users: set[str] = set()
+
+        for gid in groups:
+            url = f"https://graph.microsoft.com/v1.0/groups/{gid}/members?$select={fields}&$top={page_size}"
+            while url:
+                resp = requests.get(url, headers=headers)
+                if resp.status_code != 200:
+                    return {"status": "error", "message": f"Graph list members failed for {gid}: {resp.status_code} {resp.text[:300]}"}
+                data = resp.json() or {}
+                values = data.get('value', [])
+                for m in values:
+                    try:
+                        # Loại bỏ object không phải user
+                        if not (m.get('userPrincipalName') or m.get('mail')):
+                            continue
+                        user_id = m.get('id')
+                        if not user_id or user_id in seen_users:
+                            continue
+                        seen_users.add(user_id)
+
+                        ms_user = create_or_update_microsoft_user(m)
+                        email = m.get('mail') or m.get('userPrincipalName')
+                        if email:
+                            existed = bool(frappe.db.exists('User', email))
+                            local_user = find_or_create_frappe_user(ms_user, m)
+                            if local_user:
+                                update_frappe_user(local_user, ms_user, m)
+                                # Đồng bộ avatar nếu có
+                                try:
+                                    photo_resp = requests.get(
+                                        f"https://graph.microsoft.com/v1.0/users/{user_id}/photo/$value",
+                                        headers=headers,
+                                        stream=True,
+                                    )
+                                    if photo_resp.status_code == 200:
+                                        content_type = photo_resp.headers.get('Content-Type')
+                                        content_bytes = photo_resp.content
+                                        from erp.api.erp_common_user.avatar_management import save_user_avatar_bytes
+                                        save_user_avatar_bytes(email, content_bytes, content_type)
+                                    else:
+                                        pass
+                                except Exception:
+                                    pass
+                            if existed:
+                                updated += 1
+                            else:
+                                created += 1
+                        processed += 1
+                    except Exception:
+                        errors += 1
+
+                    if limit is not None and processed >= int(limit):
+                        break
+
+                if limit is not None and processed >= int(limit):
+                    break
+
+                url = data.get('@odata.nextLink')
+
+            if limit is not None and processed >= int(limit):
+                break
+
+        return {
+            "status": "success",
+            "processed": processed,
+            "created": created,
+            "updated": updated,
+            "errors": errors,
+            "unique_users": len(seen_users),
+            "groups": groups,
+        }
+
+    except Exception as e:
+        frappe.log_error("Microsoft Group Bulk Sync", f"sync_microsoft_group_members_once error: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 
