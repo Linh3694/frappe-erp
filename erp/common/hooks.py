@@ -8,104 +8,92 @@ from frappe import _
 
 
 def create_user_profile_on_user_creation(doc, method):
-    """Auto-create user profile when new user is created"""
+    """Trước đây: auto-create ERP User Profile.
+
+    Hiện tại: chỉ publish sự kiện tạo user để microservices đồng bộ.
+    Không còn tạo `ERP User Profile`.
+    """
     try:
         # Skip for Guest and Administrator
         if doc.email in ["Guest", "Administrator"]:
             return
-        
-        # Check if profile already exists
-        if frappe.db.exists("ERP User Profile", {"user": doc.email}):
-            return
-        
-        # Create user profile
-        profile = frappe.get_doc({
-            "doctype": "ERP User Profile",
-            "user": doc.email,
-            "active": 1,
-            "provider": "local"
-        })
-        
-        profile.insert(ignore_permissions=True)
-        
 
-        
+        # Publish user_created event (feature-flagged)
+        try:
+            from .redis_events import publish_user_event, is_user_events_enabled
+            if is_user_events_enabled():
+                publish_user_event('user_created', doc.email)
+        except Exception:
+            pass
+
     except Exception as e:
-        frappe.log_error(f"Error auto-creating user profile for {doc.email}: {str(e)}", "User Profile Creation")
+        frappe.log_error(f"Error handling user creation for {doc.email}: {str(e)}", "User Creation Hook")
 
 
 def update_user_profile_on_user_update(doc, method):
-    """Update user profile when user is updated"""
+    """Trước đây: cập nhật ERP User Profile khi User cập nhật.
+
+    Hiện tại: không đụng tới profile, chỉ publish user_updated để realtime tới services.
+    """
     try:
         # Skip for Guest and Administrator
         if doc.email in ["Guest", "Administrator"]:
             return
-        
-        # Get user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": doc.email})
-        if not profile_name:
-            return
-        
-        profile = frappe.get_doc("ERP User Profile", profile_name)
-        
-        # Update last seen when user is updated
-        from datetime import datetime
-        profile.last_seen = datetime.now()
-        
-        # Sync enabled status
-        if hasattr(doc, 'enabled'):
-            profile.active = doc.enabled
-        
-        profile.save(ignore_permissions=True)
-        
+
+        # Publish user_updated event (feature-flagged)
+        try:
+            from .redis_events import publish_user_event, is_user_events_enabled
+            if is_user_events_enabled():
+                publish_user_event('user_updated', doc.email)
+        except Exception:
+            pass
+
     except Exception as e:
         try:
-            frappe.logger("user_profile").exception(f"Error updating user profile for {doc.email}: {str(e)}")
+            frappe.logger("user_profile").exception(f"Error in user update hook for {doc.email}: {str(e)}")
         except Exception:
-            print("User Profile Update error:", str(e))
+            print("User Update Hook error:", str(e))
 
 
 def delete_user_profile_on_user_deletion(doc, method):
-    """Delete user profile when user is deleted"""
+    """Trước đây: xóa ERP User Profile khi xóa User.
+
+    Hiện tại: chỉ publish user_deleted; không cần thao tác profile.
+    """
     try:
         # Skip for Guest and Administrator
         if doc.email in ["Guest", "Administrator"]:
             return
-        
-        # Get user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": doc.email})
-        if profile_name:
-            frappe.delete_doc("ERP User Profile", profile_name, ignore_permissions=True)
-    
-        
+
+        # Publish user_deleted event (feature-flagged)
+        try:
+            from .redis_events import publish_user_event, is_user_events_enabled
+            if is_user_events_enabled():
+                publish_user_event('user_deleted', doc.email)
+        except Exception:
+            pass
+
     except Exception as e:
-        frappe.log_error(f"Error deleting user profile for {doc.email}: {str(e)}", "User Profile Deletion")
+        frappe.log_error(f"Error in user deletion hook for {doc.email}: {str(e)}", "User Deletion Hook")
 
 
 def validate_user_permissions(doc, method):
-    """Validate user permissions based on profile"""
+    """Validate quyền trực tiếp từ `User`.
+
+    - Dùng `enabled` của core `User` để quyết định trạng thái
+    - Không còn phụ thuộc `ERP User Profile`
+    """
     try:
         # Skip for Guest and Administrator
         if doc.email in ["Guest", "Administrator"]:
             return
-        
-        # Get user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": doc.email})
-        if not profile_name:
-            return
-        
-        profile = frappe.get_doc("ERP User Profile", profile_name)
-        
-        # Check if user is disabled in profile
-        if profile.disabled:
+
+        # Nếu user bị disable ở core
+        if hasattr(doc, 'enabled') and not bool(doc.enabled):
             frappe.throw(_("User account is disabled"))
-        
-        # Check if user is inactive in profile
-        if not profile.active:
-            frappe.throw(_("User account is inactive"))
-        
+
     except Exception as e:
-        # Don't throw error for validation issues, just log
+        # Just log
         frappe.log_error(f"User permission validation error for {doc.email}: {str(e)}", "User Validation")
 
 

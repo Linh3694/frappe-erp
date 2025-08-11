@@ -8,6 +8,7 @@ from frappe import _
 import requests
 import json
 from datetime import datetime
+from datetime import timedelta
 import secrets
 import base64
 import urllib.parse
@@ -45,7 +46,7 @@ def microsoft_login_redirect():
         }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft login redirect error: {str(e)}", "Microsoft Auth")
+        frappe.log_error("Microsoft Auth", f"Microsoft login redirect error: {str(e)}")
         frappe.throw(_("Error generating Microsoft login URL: {0}").format(str(e)))
 
 
@@ -89,27 +90,27 @@ def microsoft_callback(code, state):
         
         # Create or update Microsoft user record
         ms_user = create_or_update_microsoft_user(user_info)
-        
+
         # Login or create Frappe user
         frappe_user = handle_microsoft_user_login(ms_user)
-        
-        # Update user profile with latest Microsoft data if available
-        if user_profile and user_info:
-            try:
-                # Update profile with fresh data from Microsoft
-                if user_info.get("jobTitle"):
-                    user_profile.job_title = user_info.get("jobTitle")
-                if user_info.get("department"):
-                    user_profile.department = user_info.get("department")
-                if user_info.get("employeeId"):
-                    user_profile.employee_code = user_info.get("employeeId")
-                
-                user_profile.microsoft_id = ms_user.microsoft_id
-                user_profile.provider = "microsoft"
-                user_profile.save()
 
-            except Exception as update_error:
-                pass
+        # Cập nhật trực tiếp các trường trên User từ Microsoft
+        try:
+            if frappe_user and user_info:
+                if hasattr(frappe_user, 'department') and user_info.get("department"):
+                    frappe_user.department = user_info.get("department")
+                if hasattr(frappe_user, 'designation') and user_info.get("jobTitle"):
+                    frappe_user.designation = user_info.get("jobTitle")
+                if hasattr(frappe_user, 'employee_code') and user_info.get("employeeId"):
+                    frappe_user.employee_code = user_info.get("employeeId")
+                if hasattr(frappe_user, 'microsoft_id') and getattr(ms_user, 'microsoft_id', None):
+                    frappe_user.microsoft_id = ms_user.microsoft_id
+                if hasattr(frappe_user, 'provider'):
+                    frappe_user.provider = "microsoft"
+                frappe_user.flags.ignore_permissions = True
+                frappe_user.save()
+        except Exception:
+            pass
         
         # Commit any changes before querying roles
         frappe.db.commit()
@@ -180,7 +181,7 @@ def microsoft_callback(code, state):
         return
         
     except Exception as e:
-        frappe.log_error(f"Microsoft callback error: {str(e)}", "Microsoft Auth")
+        frappe.log_error("Microsoft Auth", f"Microsoft callback error: {str(e)}")
         
         # Get frontend URL for error redirect
         frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
@@ -203,7 +204,7 @@ def sync_microsoft_users_scheduler():
 
         return result
     except Exception as e:
-        frappe.log_error(f"Scheduled Microsoft users sync error: {str(e)}", "Microsoft Sync Scheduler")
+        frappe.log_error("Microsoft Sync Scheduler", f"Scheduled Microsoft users sync error: {str(e)}")
 
         return {"status": "error", "message": str(e)}
 
@@ -230,7 +231,7 @@ def hourly_microsoft_sync_scheduler():
         }
         
     except Exception as e:
-        frappe.log_error(f"Hourly Microsoft sync error: {str(e)}", "Hourly Microsoft Sync")
+        frappe.log_error("Hourly Microsoft Sync", f"Hourly Microsoft sync error: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 
@@ -278,7 +279,7 @@ def full_microsoft_sync_scheduler():
         
     except Exception as e:
         error_msg = f"Full Microsoft sync error: {str(e)}"
-        frappe.log_error(error_msg, "Full Microsoft Sync")
+        frappe.log_error("Full Microsoft Sync", error_msg)
         return {"status": "error", "message": str(e)}
 
 
@@ -288,7 +289,7 @@ def sync_microsoft_users():
     try:
         return sync_microsoft_users_internal()
     except Exception as e:
-        frappe.log_error(f"Microsoft users sync error: {str(e)}", "Microsoft Sync")
+        frappe.log_error("Microsoft Sync", f"Microsoft users sync error: {str(e)}")
         frappe.throw(_("Error syncing Microsoft users: {0}").format(str(e)))
 
 
@@ -311,16 +312,12 @@ def sync_microsoft_users_internal():
         if email:
             ms_users_by_email[email.lower()] = user_data
     
-    # Get all existing ERP User Profiles
-    existing_profiles = frappe.db.sql("""
-        SELECT name, email, user, microsoft_id 
-        FROM `tabERP User Profile` 
-        WHERE email IS NOT NULL AND email != ''
-    """, as_dict=True)
-    
-    for profile_data in existing_profiles:
+    # Lấy tất cả User đã có email để đồng bộ
+    existing_users = frappe.get_all("User", fields=["name", "email"], filters={"email": ["!=", ""], "user_type": ["in", ["System User", "Website User"]]})
+
+    for u in existing_users:
         try:
-            profile_email = profile_data.email.lower()
+            profile_email = u.email.lower()
             
             # Find corresponding Microsoft user data
             if profile_email in ms_users_by_email:
@@ -329,25 +326,27 @@ def sync_microsoft_users_internal():
                 # Create or update Microsoft user record
                 ms_user = create_or_update_microsoft_user(user_data)
                 
-                # Update the ERP User Profile with latest Microsoft data
+                # Update trực tiếp User với dữ liệu mới nhất từ Microsoft
                 if ms_user:
-                    profile = frappe.get_doc("ERP User Profile", profile_data.name)
-                    
-                    # Update with fresh Microsoft data
-                    if user_data.get("jobTitle"):
-                        profile.job_title = user_data.get("jobTitle")
-                    if user_data.get("department"):
-                        profile.department = user_data.get("department")
-                    if user_data.get("employeeId"):
-                        profile.employee_code = user_data.get("employeeId")
-                    
-                    profile.microsoft_id = ms_user.microsoft_id
-                    profile.provider = "microsoft"
-                    profile.last_microsoft_sync = datetime.now()
-                    profile.sync_source = "Microsoft 365"
-                    
-                    profile.save()
-                    profiles_updated += 1
+                    try:
+                        user_doc = frappe.get_doc("User", u.name)
+                        if hasattr(user_doc, 'designation') and user_data.get("jobTitle"):
+                            user_doc.designation = user_data.get("jobTitle")
+                        if hasattr(user_doc, 'department') and user_data.get("department"):
+                            user_doc.department = user_data.get("department")
+                        if hasattr(user_doc, 'employee_code') and user_data.get("employeeId"):
+                            user_doc.employee_code = user_data.get("employeeId")
+                        if hasattr(user_doc, 'microsoft_id'):
+                            user_doc.microsoft_id = ms_user.microsoft_id
+                        if hasattr(user_doc, 'provider'):
+                            user_doc.provider = "microsoft"
+                        if hasattr(user_doc, 'last_microsoft_sync'):
+                            user_doc.last_microsoft_sync = datetime.now()
+                        user_doc.flags.ignore_permissions = True
+                        user_doc.save()
+                        profiles_updated += 1
+                    except Exception:
+                        pass
 
                 
                 synced_count += 1
@@ -356,18 +355,14 @@ def sync_microsoft_users_internal():
                 
         except Exception as e:
             failed_count += 1
-            frappe.log_error(f"Error syncing profile {profile_data.email}: {str(e)}", "Microsoft Profile Sync")
+            frappe.log_error("Microsoft Profile Sync", f"Error syncing profile {u.email}: {str(e)}")
     
-    # Also sync any new Microsoft users that don't have profiles yet (just create MS User records)
+    # Also sync any new Microsoft users: tạo/ cập nhật record Microsoft user để mapping
     for user_data in ms_users_data:
         try:
-            email = user_data.get("mail") or user_data.get("userPrincipalName")
-            if email and not frappe.db.get_value("ERP User Profile", {"email": email.lower()}):
-                # Create Microsoft user record for future reference
-                create_or_update_microsoft_user(user_data)
-                
+            create_or_update_microsoft_user(user_data)
         except Exception as e:
-            frappe.log_error(f"Error creating MS user record for {user_data.get('id')}: {str(e)}", "Microsoft Sync")
+            frappe.log_error("Microsoft Sync", f"Error creating MS user record for {user_data.get('id')}: {str(e)}")
     
     return {
         "status": "success",
@@ -376,7 +371,7 @@ def sync_microsoft_users_internal():
         "failed_count": failed_count,
         "profiles_updated": profiles_updated,
         "total_ms_users": len(ms_users_data),
-        "total_profiles": len(existing_profiles)
+        "total_profiles": len(existing_users)
     }
 
 
@@ -411,7 +406,7 @@ def map_microsoft_user(microsoft_user_id, frappe_user_email=None, create_new=Fal
             }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft user mapping error: {str(e)}", "Microsoft Mapping")
+        frappe.log_error("Microsoft Mapping", f"Microsoft user mapping error: {str(e)}")
         frappe.throw(_("Error mapping Microsoft user: {0}").format(str(e)))
 
 
@@ -526,7 +521,7 @@ def get_all_microsoft_users(access_token):
             response = requests.get(url, headers=headers)
             
             if response.status_code != 200:
-                frappe.log_error(f"Group {group_id} members request failed: {response.text}", "Microsoft Group Sync")
+                frappe.log_error("Microsoft Group Sync", f"Group {group_id} members request failed: {response.text}")
                 break  # Skip this group but continue with others
             
             data = response.json()
@@ -601,10 +596,6 @@ def create_or_update_microsoft_user(user_data):
         
         ms_user.save()
         
-        # 4. Create or update ERP User Profile
-        if local_user:
-            create_or_update_user_profile(local_user, ms_user, user_data)
-        
         return ms_user
         
     except Exception as e:
@@ -671,7 +662,7 @@ def find_or_create_frappe_user(ms_user, user_data):
         return None
         
     except Exception as e:
-        frappe.log_error(f"Error in find_or_create_frappe_user: {str(e)}", "Microsoft User Mapping")
+        frappe.log_error("Microsoft User Mapping", f"Error in find_or_create_frappe_user: {str(e)}")
         return None
 
 
@@ -715,11 +706,19 @@ def create_frappe_user(ms_user, user_data):
             frappe.db.set_value("User", user_doc.name, "full_name", (reversed_full_name or user_doc.full_name).strip(), update_modified=False)
         except Exception:
             pass
-        
+
+        # Publish redis event for realtime microservices
+        try:
+            from erp.common.redis_events import publish_user_event, is_user_events_enabled
+            if is_user_events_enabled():
+                publish_user_event('user_created', user_doc.email)
+        except Exception:
+            pass
+
         return user_doc
         
     except Exception as e:
-        frappe.log_error(f"Error creating Frappe user: {str(e)}", "Microsoft User Creation")
+        frappe.log_error("Microsoft User Creation", f"Error creating Frappe user: {str(e)}")
         return None
 
 
@@ -761,196 +760,47 @@ def update_frappe_user(user_doc, ms_user, user_data):
             frappe.db.set_value("User", user_doc.name, "full_name", computed_full, update_modified=False)
         except Exception:
             pass
-        
+
+        # Publish redis event for realtime microservices
+        try:
+            from erp.common.redis_events import publish_user_event, is_user_events_enabled
+            if is_user_events_enabled():
+                publish_user_event('user_updated', user_doc.email)
+        except Exception:
+            pass
+
         return user_doc
         
     except Exception as e:
-        frappe.log_error(f"Error updating Frappe user {user_doc.email}: {str(e)}", "Microsoft User Update")
+        frappe.log_error("Microsoft User Update", f"Error updating Frappe user {user_doc.email}: {str(e)}")
         return user_doc
 
 
-def create_or_update_user_profile(frappe_user, ms_user, user_data):
-    """Create or update ERP User Profile from Microsoft data"""
-    try:
-        user_email = user_data.get("mail") or user_data.get("userPrincipalName") or frappe_user.email
-        
-        # Check if ERP User Profile already exists by email (email-centric approach)
-        existing_profile = frappe.db.get_value("ERP User Profile", {"email": user_email})
-        
-        if existing_profile:
-            # Update existing profile
-            profile = frappe.get_doc("ERP User Profile", existing_profile)
-        else:
-            # Create new profile
-            profile = frappe.get_doc({
-                "doctype": "ERP User Profile",
-                "user": frappe_user.name,
-                "email": user_email
-            })
-        
-        # Update profile fields with Microsoft data
-        profile.full_name = user_data.get("displayName") or frappe_user.full_name
-        profile.first_name = user_data.get("givenName") or frappe_user.first_name
-        profile.last_name = user_data.get("surname") or frappe_user.last_name
-        profile.email = user_email
-        profile.username = user_email  # Use email as username
-        
-        # Microsoft-specific fields
-        profile.employee_code = user_data.get("employeeId")  # Fixed: Use employee_code not employee_id
-        profile.department = user_data.get("department")
-        profile.job_title = user_data.get("jobTitle")
-        profile.office_location = user_data.get("officeLocation")
-        profile.mobile_phone = user_data.get("mobilePhone")
-        profile.company_name = user_data.get("companyName")
-        
-        # Handle business phones
-        if user_data.get("businessPhones"):
-            profile.business_phones = ", ".join(user_data["businessPhones"])
-        
-        # Additional info
-        profile.account_enabled = user_data.get("accountEnabled", True)
-        profile.employee_type = user_data.get("employeeType")
-        profile.preferred_language = user_data.get("preferredLanguage")
-        profile.usage_location = user_data.get("usageLocation")
-        
-        # Sync info
-        profile.microsoft_id = ms_user.microsoft_id  # Fixed: Use microsoft_id not microsoft_user_id
-        profile.provider = "microsoft"  # Set provider to show Microsoft fields in UI
-        profile.last_microsoft_sync = datetime.now()
-        profile.sync_source = "Microsoft 365"
-        
-        profile.flags.ignore_permissions = True
-        if existing_profile:
-            profile.save()
-        else:
-            profile.insert()
-        
-
-        return profile
-        
-    except Exception as e:
-        frappe.log_error(f"Error creating/updating ERP User Profile for {frappe_user.email}: {str(e)}", "ERP User Profile Sync")
-        return None
+def create_or_update_user_profile(*args, **kwargs):
+    """[Deprecated] Không còn dùng Profile; giữ để tương thích ngược."""
+    return None
 
 
 @frappe.whitelist()
 def sync_existing_users_to_profiles():
-    """Sync all existing Microsoft users to ERP User Profiles"""
-    try:
-        # Get all Microsoft users that have mapped Frappe users
-        ms_users = frappe.db.sql("""
-            SELECT name, microsoft_id, mapped_user_id 
-            FROM `tabERP Microsoft User` 
-            WHERE mapped_user_id IS NOT NULL AND mapped_user_id != ''
-        """, as_dict=True)
-        
-        synced_count = 0
-        failed_count = 0
-        
-        for ms_user_data in ms_users:
-            try:
-                # Get full Microsoft user doc
-                ms_user = frappe.get_doc("ERP Microsoft User", ms_user_data.name)
-                
-                # Get Frappe user
-                frappe_user = frappe.get_doc("User", ms_user_data.mapped_user_id)
-                
-                # Reconstruct user_data from Microsoft user
-                user_data = {
-                    "id": ms_user.microsoft_id,
-                    "displayName": ms_user.display_name,
-                    "givenName": ms_user.given_name,
-                    "surname": ms_user.surname,
-                    "userPrincipalName": ms_user.user_principal_name,
-                    "mail": ms_user.mail,
-                    "jobTitle": ms_user.job_title,
-                    "department": ms_user.department,
-                    "officeLocation": ms_user.office_location,
-                    "businessPhones": ms_user.business_phones.split(", ") if ms_user.business_phones else [],
-                    "mobilePhone": ms_user.mobile_phone,
-                    "employeeId": ms_user.employee_id,
-                    "employeeType": ms_user.employee_type,
-                    "accountEnabled": ms_user.account_enabled,
-                    "preferredLanguage": ms_user.preferred_language,
-                    "usageLocation": ms_user.usage_location,
-                    "companyName": ""  # Not stored in Microsoft user
-                }
-                
-                # Create/update user profile
-                profile = create_or_update_user_profile(frappe_user, ms_user, user_data)
-                if profile:
-                    synced_count += 1
-                else:
-                    failed_count += 1
-                    
-            except Exception as e:
-                failed_count += 1
-                frappe.log_error(f"Error syncing user profile for {ms_user_data.microsoft_id}: {str(e)}", "User Profile Sync")
-        
-        return {
-            "status": "success",
-            "message": _("User profiles sync completed"),
-            "synced_count": synced_count,
-            "failed_count": failed_count,
-            "total_users": len(ms_users)
-        }
-        
-    except Exception as e:
-        frappe.log_error(f"Error syncing user profiles: {str(e)}", "User Profile Sync")
-        frappe.throw(_("Error syncing user profiles: {0}").format(str(e)))
+    """[Deprecated] Giữ endpoint để không gãy client cũ, nhưng không còn làm gì."""
+    return {"status": "success", "message": "No-op; profiles are deprecated"}
 
 
 @frappe.whitelist()
 def full_microsoft_sync():
-    """Complete Microsoft sync: Users + Frappe Users + User Profiles"""
-    try:
-        results = {}
-        
-        # 1. Sync Microsoft users
-
-        ms_result = sync_microsoft_users_internal()
-        results["microsoft_users"] = ms_result
-        
-        # 2. Sync User Profiles
-
-        profile_result = sync_existing_users_to_profiles()
-        results["user_profiles"] = profile_result
-        
-        # 3. Force create missing users
-
-        force_create_result = force_create_missing_users()
-        results["force_create_users"] = force_create_result
-        
-        # 4. Fix user providers
-
-        provider_fix_result = fix_user_providers()
-        results["provider_fix"] = provider_fix_result
-        
-        # 5. Fix missing employee codes
-
-        fix_result = fix_missing_employee_codes()
-        results["employee_code_fix"] = fix_result
-        
-        # 6. Get final counts
-        ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
-        profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
-        user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
-        
-        results["final_counts"] = {
-            "microsoft_users": ms_count,
-            "user_profiles": profile_count,
-            "frappe_users": user_count
+    """Rút gọn: chỉ đồng bộ users và thống kê. Không còn sync profiles."""
+    ms_result = sync_microsoft_users_internal()
+    ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
+    user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
+    return {
+        "status": "success",
+        "message": _("Full Microsoft sync (users only) completed"),
+        "results": {
+            "microsoft_users": ms_result,
+            "final_counts": {"microsoft_users": ms_count, "frappe_users": user_count}
         }
-        
-        return {
-            "status": "success",
-            "message": _("Full Microsoft sync completed successfully"),
-            "results": results
-        }
-        
-    except Exception as e:
-        frappe.log_error(f"Error in full Microsoft sync: {str(e)}", "Full Microsoft Sync")
-        frappe.throw(_("Error in full Microsoft sync: {0}").format(str(e)))
+    }
 
 
 def handle_microsoft_user_login(ms_user):
@@ -959,9 +809,6 @@ def handle_microsoft_user_login(ms_user):
         # Check if already mapped to Frappe user
         if ms_user.mapped_user_id:
             frappe_user = frappe.get_doc("User", ms_user.mapped_user_id)
-            
-            # Update user profile
-            update_user_profile_from_microsoft(frappe_user.email, ms_user)
             
             return frappe_user
         
@@ -972,81 +819,27 @@ def handle_microsoft_user_login(ms_user):
             ms_user.map_to_frappe_user(email)
             frappe_user = frappe.get_doc("User", email)
             
-            # Update user profile
-            update_user_profile_from_microsoft(email, ms_user)
-            
             return frappe_user
         
         # Create new Frappe user
         ms_user.map_to_frappe_user()
         frappe_user = frappe.get_doc("User", ms_user.mapped_user_id)
         
-        # Create user profile
-        create_user_profile_from_microsoft(frappe_user.email, ms_user)
-        
         return frappe_user
         
     except Exception as e:
-        frappe.log_error(f"Microsoft user login error: {str(e)}", "Microsoft Login")
+        frappe.log_error("Microsoft Login", f"Microsoft user login error: {str(e)}")
         raise e
 
 
-def update_user_profile_from_microsoft(user_email, ms_user):
-    """Update user profile with Microsoft data"""
-    try:
-        # Get or create user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-        else:
-            profile = frappe.get_doc({
-                "doctype": "ERP User Profile",
-                "user": user_email
-            })
-        
-        # Update fields from Microsoft data
-        profile.provider = "microsoft"
-        profile.microsoft_id = ms_user.microsoft_id
-        profile.job_title = ms_user.job_title
-        profile.department = ms_user.department
-        profile.employee_code = ms_user.employee_id
-        
-        # Generate username if not set
-        if not profile.username and ms_user.user_principal_name:
-            profile.username = ms_user.user_principal_name.split('@')[0]
-        
-        profile.save()
-        
-        return profile
-        
-    except Exception as e:
-        frappe.log_error(f"User profile update error: {str(e)}", "Microsoft Profile Update")
-        raise e
+def update_user_profile_from_microsoft(*args, **kwargs):
+    """[Deprecated] Không còn dùng Profile; giữ để tương thích ngược."""
+    return None
 
 
-def create_user_profile_from_microsoft(user_email, ms_user):
-    """Create user profile from Microsoft data"""
-    try:
-        profile = frappe.get_doc({
-            "doctype": "ERP User Profile",
-            "user": user_email,
-            "provider": "microsoft",
-            "microsoft_id": ms_user.microsoft_id,
-            "job_title": ms_user.job_title,
-            "department": ms_user.department,
-            "employee_code": ms_user.employee_id,
-            "username": ms_user.user_principal_name.split('@')[0] if ms_user.user_principal_name else None,
-            "active": ms_user.account_enabled
-        })
-        
-        profile.insert()
-        
-        return profile
-        
-    except Exception as e:
-        frappe.log_error(f"User profile creation error: {str(e)}", "Microsoft Profile Creation")
-        raise e
+def create_user_profile_from_microsoft(*args, **kwargs):
+    """[Deprecated] Không còn dùng Profile; giữ để tương thích ngược."""
+    return None
 
 
 @frappe.whitelist()
@@ -1114,7 +907,7 @@ def force_create_missing_users():
                 
             except Exception as e:
                 failed_count += 1
-                frappe.log_error(f"Error force creating user {ms_user_data.display_name}: {str(e)}", "Force Create User")
+                frappe.log_error("Force Create User", f"Error force creating user {ms_user_data.display_name}: {str(e)}")
 
         
         result = {
@@ -1130,7 +923,7 @@ def force_create_missing_users():
         
     except Exception as e:
         error_msg = f"Error force creating users: {str(e)}"
-        frappe.log_error(error_msg, "Force Create Users")
+        frappe.log_error("Force Create Users", error_msg)
         frappe.throw(_(error_msg))
 
 
@@ -1170,7 +963,7 @@ def fix_user_providers():
                 
             except Exception as e:
                 failed_count += 1
-                frappe.log_error(f"Error fixing provider for {profile_data.name}: {str(e)}", "Provider Fix")
+                frappe.log_error("Provider Fix", f"Error fixing provider for {profile_data.name}: {str(e)}")
 
         
         result = {
@@ -1186,7 +979,7 @@ def fix_user_providers():
         
     except Exception as e:
         error_msg = f"Error fixing providers: {str(e)}"
-        frappe.log_error(error_msg, "Provider Fix")
+        frappe.log_error("Provider Fix", error_msg)
         frappe.throw(_(error_msg))
 
 
@@ -1229,7 +1022,7 @@ def fix_missing_employee_codes():
                 
             except Exception as e:
                 failed_count += 1
-                frappe.log_error(f"Error updating profile {profile_data.name}: {str(e)}", "Employee Code Fix")
+                frappe.log_error("Employee Code Fix", f"Error updating profile {profile_data.name}: {str(e)}")
 
         
         result = {
@@ -1245,7 +1038,7 @@ def fix_missing_employee_codes():
         
     except Exception as e:
         error_msg = f"Error fixing employee codes: {str(e)}"
-        frappe.log_error(error_msg, "Employee Code Fix")
+        frappe.log_error("Employee Code Fix", error_msg)
         frappe.throw(_(error_msg))
 
 
@@ -1268,7 +1061,7 @@ def get_microsoft_sync_stats():
         }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft sync stats error: {str(e)}", "Microsoft Stats")
+        frappe.log_error("Microsoft Stats", f"Microsoft sync stats error: {str(e)}")
         frappe.throw(_("Error getting Microsoft sync stats: {0}").format(str(e)))
 
 
@@ -1306,7 +1099,7 @@ def test_microsoft_config():
         }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft config test error: {str(e)}", "Microsoft Config Test")
+        frappe.log_error("Microsoft Config Test", f"Microsoft config test error: {str(e)}")
         return {
             "status": "error",
             "message": str(e),
@@ -1355,7 +1148,7 @@ def test_microsoft_connection():
             }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft connection test error: {str(e)}", "Microsoft Connection Test")
+        frappe.log_error("Microsoft Connection Test", f"Microsoft connection test error: {str(e)}")
         return {
             "status": "error",
             "message": str(e),
@@ -1409,8 +1202,196 @@ def get_microsoft_test_users(limit=5):
             }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft test users error: {str(e)}", "Microsoft Test Users")
+        frappe.log_error("Microsoft Test Users", f"Microsoft test users error: {str(e)}")
         return {
             "status": "error",
             "message": str(e)
         }
+
+
+# === Microsoft Graph change notifications (webhook) ===
+from urllib.parse import unquote_plus
+from werkzeug.wrappers import Response
+
+@frappe.whitelist(allow_guest=True)
+def microsoft_webhook():
+    # 1) Echo validation token (decode) → 200 text/plain
+    token = None
+    try:
+        token = frappe.form_dict.get('validationToken') or frappe.form_dict.get('validationtoken')
+    except Exception:
+        token = None
+    if not token:
+        try:
+            args = getattr(frappe.request, 'args', None)
+            if args:
+                token = args.get('validationToken') or args.get('validationtoken')
+        except Exception:
+            token = None
+
+    if token:
+        # Decode token để Microsoft nhận đúng ký tự ':' và khoảng trắng
+        try:
+            decoded = unquote_plus(token)
+        except Exception:
+            decoded = token
+        return Response(decoded, mimetype="text/plain", status=200)
+
+    # 2) Reachability POST rỗng → 200
+    try:
+        if getattr(frappe.request, 'method', 'GET') == 'POST' and not getattr(frappe.request, 'data', None):
+            return Response('', mimetype='text/plain', status=200)
+        
+    except Exception:
+        pass
+
+    # Parse notifications body (POST từ Graph)
+    data = {}
+    try:
+        if frappe.request and frappe.request.data:
+            data = frappe.parse_json(frappe.request.data)
+    except Exception:
+        data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
+
+    notifications = data.get('value', []) if isinstance(data, dict) else []
+    if not notifications:
+        return {"status": "ok", "received": 0}
+
+    app_token = get_microsoft_app_token()
+    headers = {"Authorization": f"Bearer {app_token}", "Content-Type": "application/json"}
+    fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+
+    processed = 0
+    for n in notifications:
+        try:
+            # Extract user id
+            user_id = None
+            if n.get('resourceData') and n['resourceData'].get('id'):
+                user_id = n['resourceData']['id']
+            else:
+                resource = n.get('resource')  # e.g., users/{id}
+                if resource and '/' in resource:
+                    user_id = resource.split('/')[-1]
+            if not user_id:
+                continue
+
+            # Fetch latest user data from Graph
+            resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{user_id}?$select={fields}", headers=headers)
+            if resp.status_code != 200:
+                continue
+            user_data = resp.json()
+
+            # Upsert Microsoft and Frappe user
+            ms_user = create_or_update_microsoft_user(user_data)
+            email = user_data.get('mail') or user_data.get('userPrincipalName')
+            existed = bool(email and frappe.db.exists('User', email))
+
+            local_user = find_or_create_frappe_user(ms_user, user_data)
+            if local_user:
+                update_frappe_user(local_user, ms_user, user_data)
+                try:
+                    from erp.common.redis_events import publish_user_event, is_user_events_enabled
+                    if is_user_events_enabled() and email:
+                        publish_user_event('user_updated' if existed else 'user_created', email)
+                except Exception:
+                    pass
+            processed += 1
+        except Exception:
+            continue
+
+    return {"status": "ok", "received": len(notifications), "processed": processed}
+
+
+@frappe.whitelist()
+def create_users_subscription():
+    """Tạo subscription cho resource `users` để nhận realtime notifications.
+
+    Cấu hình cần có `microsoft_webhook_url` trong site_config hoặc frappe.conf.
+    """
+    try:
+        notification_url = (
+            frappe.conf.get("microsoft_webhook_url")
+            or frappe.get_site_config().get("microsoft_webhook_url")
+        )
+        if not notification_url:
+            frappe.throw(_("Missing microsoft_webhook_url in site_config"))
+
+        token = get_microsoft_app_token()
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+        expiration = (datetime.utcnow() + timedelta(minutes=55)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        body = {
+            "changeType": "created,updated,deleted",
+            "notificationUrl": notification_url,
+            "resource": "users",
+            "expirationDateTime": expiration,
+            "clientState": secrets.token_hex(16),
+        }
+
+        resp = requests.post("https://graph.microsoft.com/v1.0/subscriptions", headers=headers, json=body)
+        if resp.status_code not in (200, 201):
+            frappe.throw(_(f"Create subscription failed: {resp.text}"))
+
+        return {"status": "success", "subscription": resp.json()}
+    except Exception as e:
+        frappe.log_error("Microsoft Subscription", f"Create users subscription error: {str(e)}")
+        frappe.throw(_(f"Error creating users subscription: {str(e)}"))
+
+
+def _list_users_subscriptions(token: str):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    resp = requests.get("https://graph.microsoft.com/v1.0/subscriptions", headers=headers)
+    if resp.status_code != 200:
+        return []
+    data = resp.json() or {}
+    return [s for s in data.get('value', []) if s.get('resource') == 'users']
+
+
+def _renew_subscription(token: str, sub_id: str, new_expiration_utc_iso: str):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body = {"expirationDateTime": new_expiration_utc_iso}
+    resp = requests.patch(f"https://graph.microsoft.com/v1.0/subscriptions/{sub_id}", headers=headers, json=body)
+    return resp.status_code in (200, 202)
+
+
+@frappe.whitelist()
+def ensure_users_subscription():
+    """Gia hạn/tạo mới subscription cho resource `users` nếu sắp hết hạn.
+
+    - Nếu không có subscription nào → tạo mới
+    - Nếu có, nhưng còn < 20 phút → renew
+    """
+    try:
+        token = get_microsoft_app_token()
+        subs = _list_users_subscriptions(token)
+
+        # Nếu không có, tạo mới
+        if not subs:
+            return create_users_subscription()
+
+        # Kiểm tra từng subscription, renew nếu sắp hết hạn
+        from datetime import datetime as dt
+        from dateutil import parser as dtparser
+
+        renewed = 0
+        for s in subs:
+            exp = s.get('expirationDateTime')
+            try:
+                exp_dt = dtparser.isoparse(exp) if exp else None
+            except Exception:
+                exp_dt = None
+            if not exp_dt:
+                continue
+            now_utc = dt.utcnow()
+            # nếu còn dưới 20 phút thì renew lên ~55 phút
+            minutes_left = (exp_dt - now_utc).total_seconds() / 60.0
+            if minutes_left < 20:
+                new_exp = (now_utc + timedelta(minutes=55)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if _renew_subscription(token, s.get('id'), new_exp):
+                    renewed += 1
+
+        return {"status": "success", "checked": len(subs), "renewed": renewed}
+
+    except Exception as e:
+        frappe.log_error("Microsoft Subscription", f"ensure_users_subscription error: {str(e)}")
+        return {"status": "error", "message": str(e)}

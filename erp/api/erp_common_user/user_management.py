@@ -181,13 +181,7 @@ def get_user_by_id(user_email):
         # Get user document
         user_doc = frappe.get_doc("User", user_email)
         
-        # Get user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        profile = None
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-        
-        # Build user data
+        # Build user data (chỉ từ User + custom fields)
         user_data = {
             "email": user_doc.email,
             "full_name": user_doc.full_name,
@@ -196,27 +190,25 @@ def get_user_by_id(user_email):
             "enabled": user_doc.enabled,
             "creation": user_doc.creation,
             "modified": user_doc.modified,
-            "roles": [{"role": role.role} for role in user_doc.roles]
+            "roles": [{"role": role.role} for role in user_doc.roles],
+            "avatar_url": getattr(user_doc, "user_image", None),
         }
-        
-        # Add profile data if exists
-        if profile:
-            user_data.update({
-                "username": profile.username,
-                "employee_code": profile.employee_code,
-                "job_title": profile.job_title,
-                "department": profile.department,
-                "user_role": profile.user_role,
-                "provider": profile.provider,
-                "active": profile.active,
-                "disabled": profile.disabled,
-                "last_login": profile.last_login,
-                "last_seen": profile.last_seen,
-                "microsoft_id": profile.microsoft_id,
-                "apple_id": profile.apple_id,
-                "avatar_url": profile.avatar_url,
-                "device_token": profile.device_token
-            })
+
+        # Append custom fields nếu tồn tại trên User
+        for field_name in [
+            "username",
+            "employee_code",
+            "job_title",
+            "department",
+            "provider",
+            "microsoft_id",
+            "apple_id",
+            "device_token",
+            "last_login",
+            "last_active",
+        ]:
+            if hasattr(user_doc, field_name):
+                user_data[field_name] = getattr(user_doc, field_name)
         
         return {
             "status": "success",
@@ -384,29 +376,18 @@ def update_user(user_email=None, user_data=None, **kwargs):
         
         user_doc.save()
         
-        # Update User Profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-        else:
-            # Create profile if doesn't exist
-            profile = frappe.get_doc({
-                "doctype": "ERP User Profile",
-                "user": user_email
-            })
-        
-        # Update profile fields
-        profile_fields = [
-            "username", "employee_code", "job_title", "department", 
-            "user_role", "active", "disabled", "avatar_url", "device_token"
-        ]
-        
-        for field in profile_fields:
+        # Không còn cập nhật ERP User Profile. Thay vào đó cập nhật trực tiếp các custom fields trên User nếu được gửi lên
+        for field in [
+            "username", "employee_code", "job_title", "department",
+            "provider", "microsoft_id", "apple_id",
+            "device_token", "last_active"
+        ]:
             if field in user_data:
-                setattr(profile, field, user_data[field])
-        
-        profile.save()
+                try:
+                    setattr(user_doc, field, user_data[field])
+                except Exception:
+                    pass
+        user_doc.save()
         
         # Update roles if provided - chỉ sử dụng Frappe system roles
         if user_data.get("roles"):
@@ -480,12 +461,7 @@ def enable_disable_user(user_email, enabled):
         user_doc.enabled = int(enabled)
         user_doc.save()
         
-        # Update User Profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-            profile.active = int(enabled)
-            profile.save()
+        # Không còn đồng bộ sang ERP User Profile
         
         status_text = "enabled" if int(enabled) else "disabled"
         

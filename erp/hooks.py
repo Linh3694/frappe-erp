@@ -150,10 +150,14 @@ app_license = "mit"
 
 scheduler_events = {
 	"cron": {
-		# Microsoft sync mỗi tiếng
-		"0 * * * *": [
-			"erp.api.erp_common_user.microsoft_auth.hourly_microsoft_sync_scheduler"
-		]
+        # Microsoft sync mỗi tiếng
+        "0 * * * *": [
+            "erp.api.erp_common_user.microsoft_auth.hourly_microsoft_sync_scheduler"
+        ],
+        # Gia hạn Microsoft Graph subscription cho resource users mỗi ~50 phút
+        "*/50 * * * *": [
+            "erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
+        ]
 	}
 }
 
@@ -257,7 +261,13 @@ doc_events = {
         "validate": [
             "erp.common.hooks.validate_user_permissions"
         ]
-    }
+    },
+    # Publish user role change events to Redis for microservices (ticket-service, etc.)
+    "Has Role": {
+        "after_insert": "erp.common.role_events.on_has_role_after_insert",
+        "on_update": "erp.common.role_events.on_has_role_on_update",
+        "on_trash": "erp.common.role_events.on_has_role_on_trash",
+    },
 }
 
 # Login/Logout Hooks
