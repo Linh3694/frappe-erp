@@ -1205,15 +1205,21 @@ def microsoft_webhook():
             token = None
 
     if token:
-        decoded = unquote(token)
+        try:
+            decoded = unquote(token)
+        except Exception:
+            decoded = token
+        # Trả plain text, không JSON, không newline
+        frappe.local.response.clear()
         frappe.local.response['http_status_code'] = 200
         frappe.local.response['type'] = 'text'
-        frappe.local.response['message'] = decoded  # PHẢI dùng 'message'
+        frappe.local.response['message'] = decoded
         return
 
     # 2) Reachability POST rỗng → 200
     try:
         if getattr(frappe.request, 'method', 'GET') == 'POST' and not getattr(frappe.request, 'data', None):
+            frappe.local.response.clear()
             frappe.local.response['http_status_code'] = 200
             frappe.local.response['type'] = 'text'
             frappe.local.response['message'] = ''
