@@ -46,7 +46,7 @@ def microsoft_login_redirect():
         }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft login redirect error: {str(e)}", "Microsoft Auth")
+        frappe.log_error("Microsoft Auth", f"Microsoft login redirect error: {str(e)}")
         frappe.throw(_("Error generating Microsoft login URL: {0}").format(str(e)))
 
 
@@ -181,7 +181,7 @@ def microsoft_callback(code, state):
         return
         
     except Exception as e:
-        frappe.log_error(f"Microsoft callback error: {str(e)}", "Microsoft Auth")
+        frappe.log_error("Microsoft Auth", f"Microsoft callback error: {str(e)}")
         
         # Get frontend URL for error redirect
         frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
@@ -204,7 +204,7 @@ def sync_microsoft_users_scheduler():
 
         return result
     except Exception as e:
-        frappe.log_error(f"Scheduled Microsoft users sync error: {str(e)}", "Microsoft Sync Scheduler")
+        frappe.log_error("Microsoft Sync Scheduler", f"Scheduled Microsoft users sync error: {str(e)}")
 
         return {"status": "error", "message": str(e)}
 
@@ -231,7 +231,7 @@ def hourly_microsoft_sync_scheduler():
         }
         
     except Exception as e:
-        frappe.log_error(f"Hourly Microsoft sync error: {str(e)}", "Hourly Microsoft Sync")
+        frappe.log_error("Hourly Microsoft Sync", f"Hourly Microsoft sync error: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 
@@ -279,7 +279,7 @@ def full_microsoft_sync_scheduler():
         
     except Exception as e:
         error_msg = f"Full Microsoft sync error: {str(e)}"
-        frappe.log_error(error_msg, "Full Microsoft Sync")
+        frappe.log_error("Full Microsoft Sync", error_msg)
         return {"status": "error", "message": str(e)}
 
 
@@ -289,7 +289,7 @@ def sync_microsoft_users():
     try:
         return sync_microsoft_users_internal()
     except Exception as e:
-        frappe.log_error(f"Microsoft users sync error: {str(e)}", "Microsoft Sync")
+        frappe.log_error("Microsoft Sync", f"Microsoft users sync error: {str(e)}")
         frappe.throw(_("Error syncing Microsoft users: {0}").format(str(e)))
 
 
@@ -355,14 +355,14 @@ def sync_microsoft_users_internal():
                 
         except Exception as e:
             failed_count += 1
-            frappe.log_error(f"Error syncing profile {profile_data.email}: {str(e)}", "Microsoft Profile Sync")
+            frappe.log_error("Microsoft Profile Sync", f"Error syncing profile {profile_data.email}: {str(e)}")
     
     # Also sync any new Microsoft users: tạo/ cập nhật record Microsoft user để mapping
     for user_data in ms_users_data:
         try:
             create_or_update_microsoft_user(user_data)
         except Exception as e:
-            frappe.log_error(f"Error creating MS user record for {user_data.get('id')}: {str(e)}", "Microsoft Sync")
+            frappe.log_error("Microsoft Sync", f"Error creating MS user record for {user_data.get('id')}: {str(e)}")
     
     return {
         "status": "success",
@@ -406,7 +406,7 @@ def map_microsoft_user(microsoft_user_id, frappe_user_email=None, create_new=Fal
             }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft user mapping error: {str(e)}", "Microsoft Mapping")
+        frappe.log_error("Microsoft Mapping", f"Microsoft user mapping error: {str(e)}")
         frappe.throw(_("Error mapping Microsoft user: {0}").format(str(e)))
 
 
@@ -521,7 +521,7 @@ def get_all_microsoft_users(access_token):
             response = requests.get(url, headers=headers)
             
             if response.status_code != 200:
-                frappe.log_error(f"Group {group_id} members request failed: {response.text}", "Microsoft Group Sync")
+                frappe.log_error("Microsoft Group Sync", f"Group {group_id} members request failed: {response.text}")
                 break  # Skip this group but continue with others
             
             data = response.json()
@@ -662,7 +662,7 @@ def find_or_create_frappe_user(ms_user, user_data):
         return None
         
     except Exception as e:
-        frappe.log_error(f"Error in find_or_create_frappe_user: {str(e)}", "Microsoft User Mapping")
+        frappe.log_error("Microsoft User Mapping", f"Error in find_or_create_frappe_user: {str(e)}")
         return None
 
 
@@ -706,7 +706,7 @@ def create_frappe_user(ms_user, user_data):
         return user_doc
         
     except Exception as e:
-        frappe.log_error(f"Error creating Frappe user: {str(e)}", "Microsoft User Creation")
+        frappe.log_error("Microsoft User Creation", f"Error creating Frappe user: {str(e)}")
         return None
 
 
@@ -748,7 +748,7 @@ def update_frappe_user(user_doc, ms_user, user_data):
         return user_doc
         
     except Exception as e:
-        frappe.log_error(f"Error updating Frappe user {user_doc.email}: {str(e)}", "Microsoft User Update")
+        frappe.log_error("Microsoft User Update", f"Error updating Frappe user {user_doc.email}: {str(e)}")
         return user_doc
 
 
@@ -804,7 +804,7 @@ def handle_microsoft_user_login(ms_user):
         return frappe_user
         
     except Exception as e:
-        frappe.log_error(f"Microsoft user login error: {str(e)}", "Microsoft Login")
+        frappe.log_error("Microsoft Login", f"Microsoft user login error: {str(e)}")
         raise e
 
 
@@ -883,7 +883,7 @@ def force_create_missing_users():
                 
             except Exception as e:
                 failed_count += 1
-                frappe.log_error(f"Error force creating user {ms_user_data.display_name}: {str(e)}", "Force Create User")
+                frappe.log_error("Force Create User", f"Error force creating user {ms_user_data.display_name}: {str(e)}")
 
         
         result = {
@@ -899,7 +899,7 @@ def force_create_missing_users():
         
     except Exception as e:
         error_msg = f"Error force creating users: {str(e)}"
-        frappe.log_error(error_msg, "Force Create Users")
+        frappe.log_error("Force Create Users", error_msg)
         frappe.throw(_(error_msg))
 
 
@@ -939,7 +939,7 @@ def fix_user_providers():
                 
             except Exception as e:
                 failed_count += 1
-                frappe.log_error(f"Error fixing provider for {profile_data.name}: {str(e)}", "Provider Fix")
+                frappe.log_error("Provider Fix", f"Error fixing provider for {profile_data.name}: {str(e)}")
 
         
         result = {
@@ -955,7 +955,7 @@ def fix_user_providers():
         
     except Exception as e:
         error_msg = f"Error fixing providers: {str(e)}"
-        frappe.log_error(error_msg, "Provider Fix")
+        frappe.log_error("Provider Fix", error_msg)
         frappe.throw(_(error_msg))
 
 
@@ -998,7 +998,7 @@ def fix_missing_employee_codes():
                 
             except Exception as e:
                 failed_count += 1
-                frappe.log_error(f"Error updating profile {profile_data.name}: {str(e)}", "Employee Code Fix")
+                frappe.log_error("Employee Code Fix", f"Error updating profile {profile_data.name}: {str(e)}")
 
         
         result = {
@@ -1014,7 +1014,7 @@ def fix_missing_employee_codes():
         
     except Exception as e:
         error_msg = f"Error fixing employee codes: {str(e)}"
-        frappe.log_error(error_msg, "Employee Code Fix")
+        frappe.log_error("Employee Code Fix", error_msg)
         frappe.throw(_(error_msg))
 
 
@@ -1037,7 +1037,7 @@ def get_microsoft_sync_stats():
         }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft sync stats error: {str(e)}", "Microsoft Stats")
+        frappe.log_error("Microsoft Stats", f"Microsoft sync stats error: {str(e)}")
         frappe.throw(_("Error getting Microsoft sync stats: {0}").format(str(e)))
 
 
@@ -1075,7 +1075,7 @@ def test_microsoft_config():
         }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft config test error: {str(e)}", "Microsoft Config Test")
+        frappe.log_error("Microsoft Config Test", f"Microsoft config test error: {str(e)}")
         return {
             "status": "error",
             "message": str(e),
@@ -1124,7 +1124,7 @@ def test_microsoft_connection():
             }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft connection test error: {str(e)}", "Microsoft Connection Test")
+        frappe.log_error("Microsoft Connection Test", f"Microsoft connection test error: {str(e)}")
         return {
             "status": "error",
             "message": str(e),
@@ -1178,7 +1178,7 @@ def get_microsoft_test_users(limit=5):
             }
         
     except Exception as e:
-        frappe.log_error(f"Microsoft test users error: {str(e)}", "Microsoft Test Users")
+        frappe.log_error("Microsoft Test Users", f"Microsoft test users error: {str(e)}")
         return {
             "status": "error",
             "message": str(e)
@@ -1324,7 +1324,7 @@ def create_users_subscription():
 
         return {"status": "success", "subscription": resp.json()}
     except Exception as e:
-        frappe.log_error(f"Create users subscription error: {str(e)}", "Microsoft Subscription")
+        frappe.log_error("Microsoft Subscription", f"Create users subscription error: {str(e)}")
         frappe.throw(_(f"Error creating users subscription: {str(e)}"))
 
 
@@ -1383,5 +1383,5 @@ def ensure_users_subscription():
         return {"status": "success", "checked": len(subs), "renewed": renewed}
 
     except Exception as e:
-        frappe.log_error(f"ensure_users_subscription error: {str(e)}", "Microsoft Subscription")
+        frappe.log_error("Microsoft Subscription", f"ensure_users_subscription error: {str(e)}")
         return {"status": "error", "message": str(e)}
