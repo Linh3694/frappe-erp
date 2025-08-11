@@ -1290,9 +1290,6 @@ def microsoft_webhook():
             continue
 
     return {"status": "ok", "received": len(notifications), "processed": processed}
-    except Exception as e:
-        frappe.log_error(f"Microsoft webhook error: {str(e)}", "Microsoft Webhook")
-        return {"status": "error", "message": str(e)}
 
 
 @frappe.whitelist()
