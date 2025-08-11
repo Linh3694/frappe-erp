@@ -150,10 +150,14 @@ app_license = "mit"
 
 scheduler_events = {
 	"cron": {
-		# Microsoft sync mỗi tiếng
-		"0 * * * *": [
-			"erp.api.erp_common_user.microsoft_auth.hourly_microsoft_sync_scheduler"
-		]
+        # Microsoft sync mỗi tiếng
+        "0 * * * *": [
+            "erp.api.erp_common_user.microsoft_auth.hourly_microsoft_sync_scheduler"
+        ],
+        # Gia hạn Microsoft Graph subscription cho resource users mỗi ~50 phút
+        "*/50 * * * *": [
+            "erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
+        ]
 	}
 }
 

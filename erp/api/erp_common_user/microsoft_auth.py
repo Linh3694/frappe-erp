@@ -1299,3 +1299,62 @@ def create_users_subscription():
     except Exception as e:
         frappe.log_error(f"Create users subscription error: {str(e)}", "Microsoft Subscription")
         frappe.throw(_(f"Error creating users subscription: {str(e)}"))
+
+
+def _list_users_subscriptions(token: str):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    resp = requests.get("https://graph.microsoft.com/v1.0/subscriptions", headers=headers)
+    if resp.status_code != 200:
+        return []
+    data = resp.json() or {}
+    return [s for s in data.get('value', []) if s.get('resource') == 'users']
+
+
+def _renew_subscription(token: str, sub_id: str, new_expiration_utc_iso: str):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body = {"expirationDateTime": new_expiration_utc_iso}
+    resp = requests.patch(f"https://graph.microsoft.com/v1.0/subscriptions/{sub_id}", headers=headers, json=body)
+    return resp.status_code in (200, 202)
+
+
+@frappe.whitelist()
+def ensure_users_subscription():
+    """Gia hạn/tạo mới subscription cho resource `users` nếu sắp hết hạn.
+
+    - Nếu không có subscription nào → tạo mới
+    - Nếu có, nhưng còn < 20 phút → renew
+    """
+    try:
+        token = get_microsoft_app_token()
+        subs = _list_users_subscriptions(token)
+
+        # Nếu không có, tạo mới
+        if not subs:
+            return create_users_subscription()
+
+        # Kiểm tra từng subscription, renew nếu sắp hết hạn
+        from datetime import datetime as dt
+        from dateutil import parser as dtparser
+
+        renewed = 0
+        for s in subs:
+            exp = s.get('expirationDateTime')
+            try:
+                exp_dt = dtparser.isoparse(exp) if exp else None
+            except Exception:
+                exp_dt = None
+            if not exp_dt:
+                continue
+            now_utc = dt.utcnow()
+            # nếu còn dưới 20 phút thì renew lên ~55 phút
+            minutes_left = (exp_dt - now_utc).total_seconds() / 60.0
+            if minutes_left < 20:
+                new_exp = (now_utc + timedelta(minutes=55)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if _renew_subscription(token, s.get('id'), new_exp):
+                    renewed += 1
+
+        return {"status": "success", "checked": len(subs), "renewed": renewed}
+
+    except Exception as e:
+        frappe.log_error(f"ensure_users_subscription error: {str(e)}", "Microsoft Subscription")
+        return {"status": "error", "message": str(e)}
