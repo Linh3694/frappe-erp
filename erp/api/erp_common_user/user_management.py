@@ -200,7 +200,6 @@ def get_user_by_id(user_email):
             "employee_code",
             "job_title",
             "department",
-            "user_role",
             "provider",
             "microsoft_id",
             "apple_id",
@@ -380,7 +379,7 @@ def update_user(user_email=None, user_data=None, **kwargs):
         # Không còn cập nhật ERP User Profile. Thay vào đó cập nhật trực tiếp các custom fields trên User nếu được gửi lên
         for field in [
             "username", "employee_code", "job_title", "department",
-            "user_role", "provider", "microsoft_id", "apple_id",
+            "provider", "microsoft_id", "apple_id",
             "device_token", "last_active"
         ]:
             if field in user_data:

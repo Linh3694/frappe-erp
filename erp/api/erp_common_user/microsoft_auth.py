@@ -1198,11 +1198,17 @@ def microsoft_webhook():
         # Validation handshake (Graph gửi validationToken qua query khi verify)
         args = getattr(frappe.request, 'args', None)
         if args and args.get('validationToken'):
-            token = args.get('validationToken')
-            frappe.local.response.update({
-                'type': 'text',
-                'response': token
-            })
+            # Trả về 200 OK với body là validationToken (text/plain)
+            try:
+                from werkzeug.wrappers import Response
+                token = args.get('validationToken')
+                frappe.local.response = Response(token, status=200, content_type='text/plain')
+            except Exception:
+                # Fallback nếu không khởi tạo được Response
+                token = args.get('validationToken')
+                frappe.local.response["http_status_code"] = 200
+                frappe.local.response["type"] = "text"
+                frappe.local.response["response"] = token
             return
 
         # Parse notifications body

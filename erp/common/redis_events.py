@@ -136,7 +136,6 @@ def build_user_payload(user_email: str) -> Optional[Dict[str, Any]]:
             "employee_code",
             "department",
             "job_title",
-            "user_role",
             "provider",
             "microsoft_id",
             "device_token",
