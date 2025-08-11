@@ -197,182 +197,16 @@ def microsoft_callback(code, state):
         return
 
 
-def sync_microsoft_users_scheduler():
-    """Sync users from Microsoft Graph API - For Scheduler (no throw exceptions)"""
-    try:
-        result = sync_microsoft_users_internal()
-
-        return result
-    except Exception as e:
-        frappe.log_error("Microsoft Sync Scheduler", f"Scheduled Microsoft users sync error: {str(e)}")
-
-        return {"status": "error", "message": str(e)}
-
-
-def hourly_microsoft_sync_scheduler():
-    """Hourly Microsoft sync for scheduler - optimized and clean"""
-    try:
-        # Simple hourly sync - just update existing profiles with fresh Microsoft data
-        results = sync_microsoft_users_internal()
-        
-        # Get final counts
-        ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
-        profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
-        
-        results["final_counts"] = {
-            "microsoft_users": ms_count,
-            "user_profiles": profile_count
-        }
-        
-        return {
-            "status": "success", 
-            "message": "Hourly Microsoft sync completed",
-            "results": results
-        }
-        
-    except Exception as e:
-        frappe.log_error("Hourly Microsoft Sync", f"Hourly Microsoft sync error: {str(e)}")
-        return {"status": "error", "message": str(e)}
-
-
-def full_microsoft_sync_scheduler():
-    """Complete Microsoft sync for manual runs - Users + Profiles (no throw exceptions)"""
-    try:
-        results = {}
-        
-        # 1. Sync Microsoft users from Graph API
-        ms_result = sync_microsoft_users_internal()
-        results["microsoft_users"] = ms_result
-        
-        # 2. Sync User Profiles
-        profile_result = sync_existing_users_to_profiles()
-        results["user_profiles"] = profile_result
-        
-        # 3. Force create missing users
-        force_create_result = force_create_missing_users()
-        results["force_create_users"] = force_create_result
-        
-        # 4. Fix user providers 
-        provider_fix_result = fix_user_providers()
-        results["provider_fix"] = provider_fix_result
-        
-        # 5. Fix missing employee codes
-        fix_result = fix_missing_employee_codes()
-        results["employee_code_fix"] = fix_result
-        
-        # 6. Get final counts
-        ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
-        profile_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP User Profile`")[0][0]
-        user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
-        
-        results["final_counts"] = {
-            "microsoft_users": ms_count,
-            "user_profiles": profile_count,
-            "frappe_users": user_count
-        }
-        
-        return {
-            "status": "success",
-            "message": "Full Microsoft sync completed successfully",
-            "results": results
-        }
-        
-    except Exception as e:
-        error_msg = f"Full Microsoft sync error: {str(e)}"
-        frappe.log_error("Full Microsoft Sync", error_msg)
-        return {"status": "error", "message": str(e)}
+"""
+NOTE: Hệ thống đã dùng Microsoft Graph Subscriptions (webhook) nên các job đồng bộ theo giờ/ngày không còn cần thiết.
+Các hàm đồng bộ định kỳ đã được loại bỏ để tránh nhầm lẫn; chỉ giữ cơ chế cập nhật theo thông báo thay đổi từ Microsoft (microsoft_webhook).
+"""
 
 
 @frappe.whitelist()
 def sync_microsoft_users():
-    """Sync users from Microsoft Graph API - For API calls"""
-    try:
-        return sync_microsoft_users_internal()
-    except Exception as e:
-        frappe.log_error("Microsoft Sync", f"Microsoft users sync error: {str(e)}")
-        frappe.throw(_("Error syncing Microsoft users: {0}").format(str(e)))
-
-
-def sync_microsoft_users_internal():
-    """Internal sync function - email-centric approach"""
-    # Get app-only access token
-    token = get_microsoft_app_token()
-    
-    # Get all users from Microsoft Graph
-    ms_users_data = get_all_microsoft_users(token)
-    
-    synced_count = 0
-    failed_count = 0
-    profiles_updated = 0
-    
-    # Create index of Microsoft users by email for fast lookup
-    ms_users_by_email = {}
-    for user_data in ms_users_data:
-        email = user_data.get("mail") or user_data.get("userPrincipalName")
-        if email:
-            ms_users_by_email[email.lower()] = user_data
-    
-    # Lấy tất cả User đã có email để đồng bộ
-    existing_users = frappe.get_all("User", fields=["name", "email"], filters={"email": ["!=", ""], "user_type": ["in", ["System User", "Website User"]]})
-
-    for u in existing_users:
-        try:
-            profile_email = u.email.lower()
-            
-            # Find corresponding Microsoft user data
-            if profile_email in ms_users_by_email:
-                user_data = ms_users_by_email[profile_email]
-                
-                # Create or update Microsoft user record
-                ms_user = create_or_update_microsoft_user(user_data)
-                
-                # Update trực tiếp User với dữ liệu mới nhất từ Microsoft
-                if ms_user:
-                    try:
-                        user_doc = frappe.get_doc("User", u.name)
-                        if hasattr(user_doc, 'designation') and user_data.get("jobTitle"):
-                            user_doc.designation = user_data.get("jobTitle")
-                        if hasattr(user_doc, 'department') and user_data.get("department"):
-                            user_doc.department = user_data.get("department")
-                        if hasattr(user_doc, 'employee_code') and user_data.get("employeeId"):
-                            user_doc.employee_code = user_data.get("employeeId")
-                        if hasattr(user_doc, 'microsoft_id'):
-                            user_doc.microsoft_id = ms_user.microsoft_id
-                        if hasattr(user_doc, 'provider'):
-                            user_doc.provider = "microsoft"
-                        if hasattr(user_doc, 'last_microsoft_sync'):
-                            user_doc.last_microsoft_sync = datetime.now()
-                        user_doc.flags.ignore_permissions = True
-                        user_doc.save()
-                        profiles_updated += 1
-                    except Exception:
-                        pass
-
-                
-                synced_count += 1
-            else:
-                pass
-                
-        except Exception as e:
-            failed_count += 1
-            frappe.log_error("Microsoft Profile Sync", f"Error syncing profile {u.email}: {str(e)}")
-    
-    # Also sync any new Microsoft users: tạo/ cập nhật record Microsoft user để mapping
-    for user_data in ms_users_data:
-        try:
-            create_or_update_microsoft_user(user_data)
-        except Exception as e:
-            frappe.log_error("Microsoft Sync", f"Error creating MS user record for {user_data.get('id')}: {str(e)}")
-    
-    return {
-        "status": "success",
-        "message": _("Email-centric Microsoft sync completed"),
-        "synced_count": synced_count,
-        "failed_count": failed_count,
-        "profiles_updated": profiles_updated,
-        "total_ms_users": len(ms_users_data),
-        "total_profiles": len(existing_users)
-    }
+    """[Deprecated] Không còn dùng đồng bộ định kỳ vì đã có webhook."""
+    return {"status": "success", "message": "No-op; use webhook subscription instead"}
 
 
 @frappe.whitelist()
@@ -418,8 +252,6 @@ def get_microsoft_config():
         "client_id": frappe.conf.get("microsoft_client_id") or frappe.get_site_config().get("microsoft_client_id"),
         "client_secret": frappe.conf.get("microsoft_client_secret") or frappe.get_site_config().get("microsoft_client_secret"),
         "redirect_uri": frappe.conf.get("microsoft_redirect_uri") or frappe.get_site_config().get("microsoft_redirect_uri") or f"{frappe.utils.get_url()}/api/method/erp.api.erp_common_user.microsoft_auth.microsoft_callback",
-        "hourly_sync": frappe.conf.get("microsoft_hourly_sync") or frappe.get_site_config().get("microsoft_hourly_sync", False),
-        "group_ids": frappe.conf.get("microsoft_group_ids") or frappe.get_site_config().get("microsoft_group_ids", "dd475730-881b-4c7e-8c8b-13f2160da442,989da314-610e-4be4-9f67-1d6d63e2fc34")
     }
     
     # Validate required fields
@@ -493,57 +325,9 @@ def get_microsoft_user_info(access_token):
     return response.json()
 
 
-def get_all_microsoft_users(access_token):
-    """Get users from Microsoft Graph groups (not all users)"""
-    config = get_microsoft_config()
-    group_ids = config.get("group_ids", "").split(",")
-    group_ids = [gid.strip() for gid in group_ids if gid.strip()]
-    
-    if not group_ids:
-        raise Exception("No Microsoft group IDs configured")
-    
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-    
-    users = []
-    # Include all fields we need for sync  
-    fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
-    
-    # Get users from each group
-    for group_id in group_ids:
-
-        
-        url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/members?$select={fields}&$top=100"
-        
-        while url:
-            response = requests.get(url, headers=headers)
-            
-            if response.status_code != 200:
-                frappe.log_error("Microsoft Group Sync", f"Group {group_id} members request failed: {response.text}")
-                break  # Skip this group but continue with others
-            
-            data = response.json()
-            group_members = data.get("value", [])
-            
-            # Filter only user objects (exclude groups, devices, etc.)
-            user_members = [member for member in group_members if member.get("@odata.type") == "#microsoft.graph.user"]
-            users.extend(user_members)
-            
-            # Get next page
-            url = data.get("@odata.nextLink")
-    
-    # Remove duplicates based on user ID (in case user is in multiple groups)
-    seen_ids = set()
-    unique_users = []
-    for user in users:
-        if user["id"] not in seen_ids:
-            seen_ids.add(user["id"])
-            unique_users.append(user)
-    
-
-    return unique_users
+def get_all_microsoft_users(*args, **kwargs):
+    """[Deprecated] Không còn dùng group-based fetch vì đã có webhook subscriptions."""
+    return []
 
 
 def create_or_update_microsoft_user(user_data):
@@ -789,15 +573,13 @@ def sync_existing_users_to_profiles():
 
 @frappe.whitelist()
 def full_microsoft_sync():
-    """Rút gọn: chỉ đồng bộ users và thống kê. Không còn sync profiles."""
-    ms_result = sync_microsoft_users_internal()
+    """Đã chuyển sang webhook; hàm này chỉ trả về thống kê tổng quan."""
     ms_count = frappe.db.sql("SELECT COUNT(*) FROM `tabERP Microsoft User`")[0][0]
     user_count = frappe.db.sql("SELECT COUNT(*) FROM `tabUser` WHERE user_type = 'System User' AND name != 'Administrator'")[0][0]
     return {
         "status": "success",
-        "message": _("Full Microsoft sync (users only) completed"),
+        "message": _("Stats only; syncing is webhook-driven"),
         "results": {
-            "microsoft_users": ms_result,
             "final_counts": {"microsoft_users": ms_count, "frappe_users": user_count}
         }
     }
@@ -1254,6 +1036,24 @@ def microsoft_webhook():
         data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
 
     notifications = data.get('value', []) if isinstance(data, dict) else []
+    # Optional debug logging controlled by config flag
+    try:
+        debug_enabled = (
+            frappe.conf.get("microsoft_webhook_debug")
+            or frappe.get_site_config().get("microsoft_webhook_debug")
+        )
+    except Exception:
+        debug_enabled = False
+    if debug_enabled:
+        try:
+            preview = ""
+            try:
+                preview = json.dumps(notifications)[:1000]
+            except Exception:
+                preview = str(notifications)[:1000]
+            frappe.log_error("Microsoft Webhook", f"Received notifications: count={len(notifications)} preview={preview}")
+        except Exception:
+            pass
     if not notifications:
         return {"status": "ok", "received": 0}
 
@@ -1289,6 +1089,11 @@ def microsoft_webhook():
             local_user = find_or_create_frappe_user(ms_user, user_data)
             if local_user:
                 update_frappe_user(local_user, ms_user, user_data)
+                if debug_enabled:
+                    try:
+                        frappe.log_error("Microsoft Webhook", f"Processed user change id={user_id} email={email} existed={existed}")
+                    except Exception:
+                        pass
                 try:
                     from erp.common.redis_events import publish_user_event, is_user_events_enabled
                     if is_user_events_enabled() and email:
