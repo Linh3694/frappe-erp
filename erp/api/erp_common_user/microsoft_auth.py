@@ -1186,7 +1186,7 @@ def get_microsoft_test_users(limit=5):
 
 
 # === Microsoft Graph change notifications (webhook) ===
-from urllib.parse import unquote
+from urllib.parse import unquote_plus
 
 @frappe.whitelist(allow_guest=True)
 def microsoft_webhook():
@@ -1205,19 +1205,21 @@ def microsoft_webhook():
             token = None
 
     if token:
+        # Decode token để Microsoft nhận đúng ký tự ':' và khoảng trắng
         try:
-            decoded = unquote(token)
+            raw_token = unquote_plus(token)
         except Exception:
-            decoded = token
-        # Trả plain text thuần chỉ chứa validationToken
+            raw_token = token
         frappe.local.response.clear()
         frappe.local.response['http_status_code'] = 200
         frappe.local.response['type'] = 'text'
-        # Chỉ set 'response' để tránh bọc JSON
-        frappe.local.response['response'] = decoded
+        # Thiết lập body ở cả 'message' và 'response' để framework luôn gửi đúng plain text
+        frappe.local.response['message'] = raw_token
+        frappe.local.response['response'] = raw_token
         try:
             frappe.local.response.setdefault('headers', [])
-            frappe.local.response['headers'].append(["Content-Type", "text/plain; charset=utf-8"])
+            # Sử dụng đúng 'text/plain' không kèm charset để tránh sai khác
+            frappe.local.response['headers'].append(["Content-Type", "text/plain"])
         except Exception:
             pass
         return
