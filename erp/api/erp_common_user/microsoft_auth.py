@@ -378,6 +378,9 @@ def create_or_update_microsoft_user(user_data):
             ms_user.mapped_user_id = local_user.name
             ms_user.sync_status = "synced"
         
+        # Bypass permission vì webhook chạy allow_guest
+        ms_user.flags.ignore_permissions = True
+        ms_user.flags.ignore_permissions = True
         ms_user.save()
         
         return ms_user
@@ -387,7 +390,11 @@ def create_or_update_microsoft_user(user_data):
         if 'ms_user' in locals():
             ms_user.sync_status = "failed"
             ms_user.sync_error = str(e)
-            ms_user.save()
+            try:
+                ms_user.flags.ignore_permissions = True
+                ms_user.save()
+            except Exception:
+                pass
         
         raise e
 
