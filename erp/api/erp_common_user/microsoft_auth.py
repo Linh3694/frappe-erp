@@ -997,7 +997,6 @@ from werkzeug.wrappers import Response
 
 @frappe.whitelist(allow_guest=True)
 def microsoft_webhook():
-    # 1) Echo validation token (decode) → 200 text/plain
     token = None
     try:
         token = frappe.form_dict.get('validationToken') or frappe.form_dict.get('validationtoken')
@@ -1012,14 +1011,12 @@ def microsoft_webhook():
             token = None
 
     if token:
-        # Decode token để Microsoft nhận đúng ký tự ':' và khoảng trắng
         try:
             decoded = unquote_plus(token)
         except Exception:
             decoded = token
         return Response(decoded, mimetype="text/plain", status=200)
 
-    # 2) Reachability POST rỗng → 200
     try:
         if getattr(frappe.request, 'method', 'GET') == 'POST' and not getattr(frappe.request, 'data', None):
             return Response('', mimetype='text/plain', status=200)
@@ -1027,7 +1024,6 @@ def microsoft_webhook():
     except Exception:
         pass
 
-    # Parse notifications body (POST từ Graph)
     data = {}
     try:
         if frappe.request and frappe.request.data:
@@ -1036,7 +1032,6 @@ def microsoft_webhook():
         data = frappe.request.get_json() if getattr(frappe.request, 'is_json', False) else {}
 
     notifications = data.get('value', []) if isinstance(data, dict) else []
-    # Optional debug logging controlled by config flag
     try:
         debug_enabled = (
             frappe.conf.get("microsoft_webhook_debug")
@@ -1106,6 +1101,45 @@ def microsoft_webhook():
 
     return {"status": "ok", "received": len(notifications), "processed": processed}
 
+
+@frappe.whitelist()
+def sync_one_microsoft_user(identifier: str):
+    """Đồng bộ thủ công 1 user từ Microsoft Graph theo `identifier` (email/UPN hoặc objectId).
+
+    Ví dụ:
+    bench --site <site> execute erp.api.erp_common_user.microsoft_auth.sync_one_microsoft_user --kwargs '{"identifier": "user@domain.com"}'
+    """
+    try:
+        if not identifier:
+            frappe.throw(_("Missing identifier"))
+
+        token = get_microsoft_app_token()
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        fields = (
+            "id,displayName,givenName,surname,userPrincipalName,mail,"
+            "jobTitle,department,officeLocation,businessPhones,mobilePhone,"
+            "employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+        )
+
+        # Có thể truy vấn /users/{idOrUPN}
+        resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{identifier}?$select={fields}", headers=headers)
+        if resp.status_code != 200:
+            frappe.throw(_(f"Graph fetch failed: {resp.text}"))
+
+        user_data = resp.json()
+        ms_user = create_or_update_microsoft_user(user_data)
+        email = user_data.get("mail") or user_data.get("userPrincipalName")
+
+        local_user = find_or_create_frappe_user(ms_user, user_data)
+        if not local_user:
+            return {"status": "success", "message": "User data saved in MS record, no local User found", "email": email}
+
+        update_frappe_user(local_user, ms_user, user_data)
+        return {"status": "success", "email": email, "updated_fields": {"department": user_data.get("department"), "job_title": user_data.get("jobTitle")}}
+
+    except Exception as e:
+        frappe.log_error("Microsoft Manual Sync", f"sync_one_microsoft_user error: {str(e)}")
+        frappe.throw(_(f"Error: {str(e)}"))
 
 @frappe.whitelist()
 def create_users_subscription():
