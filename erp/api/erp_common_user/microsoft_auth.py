@@ -1169,6 +1169,7 @@ def microsoft_webhook():
     fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
 
     processed = 0
+    debug_info = []
     for n in notifications:
         try:
             # Extract user id
@@ -1203,10 +1204,23 @@ def microsoft_webhook():
                     _logger = _get_webhook_logger()
                     if _logger:
                         _logger.info(msg)
+                    if debug_enabled:
+                        debug_info.append({
+                            "user_id": user_id,
+                            "graph_status": resp.status_code,
+                            "graph_body": body_preview,
+                            "note": "graph_fetch_failed"
+                        })
                 except Exception:
                     pass
                 continue
             user_data = resp.json()
+            if debug_enabled:
+                debug_info.append({
+                    "user_id": user_id,
+                    "graph_status": resp.status_code,
+                    "note": "graph_fetch_ok"
+                })
 
             # Upsert Microsoft and Frappe user
             ms_user = create_or_update_microsoft_user(user_data)
@@ -1235,7 +1249,14 @@ def microsoft_webhook():
         except Exception:
             continue
 
-    return Response(json.dumps({"status": "ok", "received": len(notifications), "processed": processed}), mimetype="application/json", status=202)
+    # Kèm thêm debug_info khi bật debug để hỗ trợ chẩn đoán nhanh
+    resp_payload = {"status": "ok", "received": len(notifications), "processed": processed}
+    try:
+        if debug_enabled:
+            resp_payload["debug"] = debug_info
+    except Exception:
+        pass
+    return Response(json.dumps(resp_payload), mimetype="application/json", status=202)
 
 
 @frappe.whitelist()
