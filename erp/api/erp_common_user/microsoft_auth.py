@@ -994,6 +994,13 @@ def get_microsoft_test_users(limit=5):
 # === Microsoft Graph change notifications (webhook) ===
 from urllib.parse import unquote_plus
 from werkzeug.wrappers import Response
+from typing import Any
+
+# Dedicated file logger for webhook debugging
+try:
+    WEBHOOK_LOGGER = frappe.logger("microsoft_webhook", allow_site=True, file_count=5)
+except Exception:
+    WEBHOOK_LOGGER = None
 
 @frappe.whitelist(allow_guest=True)
 def microsoft_webhook():
@@ -1005,6 +1012,11 @@ def microsoft_webhook():
         )
     except Exception:
         debug_enabled = False
+    if debug_enabled and WEBHOOK_LOGGER:
+        try:
+            WEBHOOK_LOGGER.info("Webhook hit: start handling request")
+        except Exception:
+            pass
     token = None
     try:
         token = frappe.form_dict.get('validationToken') or frappe.form_dict.get('validationtoken')
@@ -1026,6 +1038,8 @@ def microsoft_webhook():
         if debug_enabled:
             try:
                 frappe.log_error("Microsoft Webhook", f"Validation echo received, token_len={len(decoded)}")
+                if WEBHOOK_LOGGER:
+                    WEBHOOK_LOGGER.info(f"Validation echo received, token_len={len(decoded)}")
             except Exception:
                 pass
         return Response(decoded, mimetype="text/plain", status=200)
@@ -1035,6 +1049,8 @@ def microsoft_webhook():
             if debug_enabled:
                 try:
                     frappe.log_error("Microsoft Webhook", "Received empty POST (reachability)")
+                    if WEBHOOK_LOGGER:
+                        WEBHOOK_LOGGER.info("Received empty POST (reachability)")
                 except Exception:
                     pass
             return Response('', mimetype='text/plain', status=200)
@@ -1058,7 +1074,10 @@ def microsoft_webhook():
                 sub_id = hdrs.get('ms-notification-subscription-id') if hasattr(hdrs, 'get') else ''
                 tenant = hdrs.get('ms-notification-tenant-id') if hasattr(hdrs, 'get') else ''
                 body_len = len(raw or b'')
-                frappe.log_error("Microsoft Webhook", f"Request method={method} body_len={body_len} sub_id={sub_id} tenant={tenant}")
+                msg = f"Request method={method} body_len={body_len} sub_id={sub_id} tenant={tenant}"
+                frappe.log_error("Microsoft Webhook", msg)
+                if WEBHOOK_LOGGER:
+                    WEBHOOK_LOGGER.info(msg)
             except Exception:
                 pass
     except Exception:
@@ -1098,7 +1117,10 @@ def microsoft_webhook():
                 preview = json.dumps(notifications)[:1000]
             except Exception:
                 preview = str(notifications)[:1000]
-            frappe.log_error("Microsoft Webhook", f"Received notifications: count={len(notifications)} preview={preview}")
+            msg = f"Received notifications: count={len(notifications)} preview={preview}"
+            frappe.log_error("Microsoft Webhook", msg)
+            if WEBHOOK_LOGGER:
+                WEBHOOK_LOGGER.info(msg)
         except Exception:
             pass
     if not notifications:
@@ -1138,7 +1160,10 @@ def microsoft_webhook():
                 update_frappe_user(local_user, ms_user, user_data)
                 if debug_enabled:
                     try:
-                        frappe.log_error("Microsoft Webhook", f"Processed user change id={user_id} email={email} existed={existed}")
+                        msg = f"Processed user change id={user_id} email={email} existed={existed}"
+                        frappe.log_error("Microsoft Webhook", msg)
+                        if WEBHOOK_LOGGER:
+                            WEBHOOK_LOGGER.info(msg)
                     except Exception:
                         pass
                 try:
