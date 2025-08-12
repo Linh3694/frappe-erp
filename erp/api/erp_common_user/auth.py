@@ -245,9 +245,16 @@ def get_current_user():
         # Nếu chưa có session hợp lệ, thử xác thực bằng Bearer JWT
         if frappe.session.user == "Guest":
             try:
+                # Hỗ trợ nhiều header đề phòng proxy strip Authorization
                 auth_header = frappe.get_request_header("Authorization") or ""
+                alt_header = frappe.get_request_header("X-Auth-Token") or frappe.get_request_header("X-Frappe-Auth-Token") or ""
+                token_candidate = None
                 if auth_header.lower().startswith("bearer "):
-                    bearer = auth_header.split(" ", 1)[1].strip()
+                    token_candidate = auth_header.split(" ", 1)[1].strip()
+                elif alt_header:
+                    token_candidate = alt_header.strip()
+                if token_candidate:
+                    bearer = token_candidate
                     payload = verify_jwt_token(bearer)
                     user_email = None
                     if payload:
