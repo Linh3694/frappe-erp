@@ -248,7 +248,8 @@ def get_current_user():
                 auth_header = frappe.get_request_header("Authorization") or ""
                 if auth_header.lower().startswith("bearer "):
                     bearer = auth_header.split(" ", 1)[1].strip()
-                    user_email = verify_jwt_token(bearer)
+                    payload = verify_jwt_token(bearer)
+                    user_email = payload.get("email") if payload else None
                     if user_email:
                         # Khi xác thực qua JWT, vẫn trả về user data (không tạo session)
                         user_doc = frappe.get_doc("User", user_email)
@@ -353,32 +354,56 @@ def get_current_user():
 
 
 def generate_jwt_token(user_email):
-    """Generate JWT token for API access"""
+    """Generate JWT token for API access (HS256 shared secret).
+
+    Claims:
+      - sub: user email (subject)
+      - email: user email (explicit)
+      - roles: list of frappe roles
+      - iss: issuer (site url)
+      - ver: token schema version
+      - iat, exp: issued/expiry
+    """
     try:
+        try:
+            roles = frappe.get_roles(user_email) or []
+        except Exception:
+            roles = []
+
         payload = {
-            "user": user_email,
+            "sub": user_email,
+            "email": user_email,
+            "roles": roles,
+            "iss": frappe.utils.get_url(),
+            "ver": 1,
             "iat": datetime.utcnow(),
-            "exp": datetime.utcnow() + timedelta(hours=24)
+            "exp": datetime.utcnow() + timedelta(hours=24),
         }
-        
-        secret = frappe.conf.get("jwt_secret") or frappe.get_site_config().get("jwt_secret") or "default_jwt_secret_change_in_production"
+
+        secret = (
+            frappe.conf.get("jwt_secret")
+            or frappe.get_site_config().get("jwt_secret")
+            or "default_jwt_secret_change_in_production"
+        )
         token = jwt.encode(payload, secret, algorithm="HS256")
-        
+
         return token
-        
+
     except Exception as e:
         frappe.log_error(f"JWT token generation error: {str(e)}", "Authentication")
         return None
 
 
 def verify_jwt_token(token):
-    """Verify JWT token"""
+    """Verify JWT token and return payload dict on success, else None"""
     try:
-        secret = frappe.conf.get("jwt_secret") or frappe.get_site_config().get("jwt_secret") or "default_jwt_secret_change_in_production"
+        secret = (
+            frappe.conf.get("jwt_secret")
+            or frappe.get_site_config().get("jwt_secret")
+            or "default_jwt_secret_change_in_production"
+        )
         payload = jwt.decode(token, secret, algorithms=["HS256"])
-        
-        return payload.get("user")
-        
+        return payload
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:
