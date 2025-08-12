@@ -249,7 +249,13 @@ def get_current_user():
                 if auth_header.lower().startswith("bearer "):
                     bearer = auth_header.split(" ", 1)[1].strip()
                     payload = verify_jwt_token(bearer)
-                    user_email = payload.get("email") if payload else None
+                    user_email = None
+                    if payload:
+                        user_email = (
+                            payload.get("email")
+                            or payload.get("user")
+                            or payload.get("sub")
+                        )
                     if user_email:
                         # Khi xác thực qua JWT, vẫn trả về user data (không tạo session)
                         user_doc = frappe.get_doc("User", user_email)
