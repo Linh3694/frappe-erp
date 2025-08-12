@@ -242,7 +242,57 @@ def change_password(current_password, new_password):
 def get_current_user():
     """Get current user information"""
     try:
+        # Nếu chưa có session hợp lệ, thử xác thực bằng Bearer JWT
         if frappe.session.user == "Guest":
+            try:
+                auth_header = frappe.get_request_header("Authorization") or ""
+                if auth_header.lower().startswith("bearer "):
+                    bearer = auth_header.split(" ", 1)[1].strip()
+                    user_email = verify_jwt_token(bearer)
+                    if user_email:
+                        # Khi xác thực qua JWT, vẫn trả về user data (không tạo session)
+                        user_doc = frappe.get_doc("User", user_email)
+                        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
+                        user_data = {
+                            "email": user_doc.email,
+                            "full_name": user_doc.full_name,
+                            "first_name": user_doc.first_name,
+                            "last_name": user_doc.last_name,
+                            "enabled": user_doc.enabled,
+                            "user_image": user_doc.user_image or "",
+                        }
+                        if profile_name:
+                            profile = frappe.get_doc("ERP User Profile", profile_name)
+                            user_data.update({
+                                "username": profile.username,
+                                "employee_code": profile.employee_code,
+                                "job_title": profile.job_title,
+                                "department": profile.department,
+                                "role": profile.user_role,
+                                "provider": profile.provider,
+                                "active": profile.active,
+                                "last_login": profile.last_login,
+                                "last_seen": profile.last_seen,
+                                "avatar_url": profile.avatar_url or user_doc.user_image or "",
+                            })
+                        # Bổ sung roles
+                        try:
+                            user_data["roles"] = frappe.get_roles(user_email) or []
+                        except Exception:
+                            user_data["roles"] = []
+                        try:
+                            from frappe import permissions as frappe_permissions
+                            user_data["user_roles"] = frappe_permissions.get_roles(user_email, with_standard=False) or []
+                        except Exception:
+                            user_data["user_roles"] = []
+                        return {
+                            "status": "success",
+                            "user": user_data,
+                            "authenticated": True,
+                        }
+            except Exception:
+                pass
+            # Không xác thực được
             return {
                 "status": "success",
                 "user": None,
