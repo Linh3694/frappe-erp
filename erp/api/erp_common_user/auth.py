@@ -72,17 +72,41 @@ def login(email=None, username=None, password=None, provider="local"):
         # Generate JWT token for API access
         token = generate_jwt_token(profile.user)
         
+        # Collect roles info (Frappe roles and manual roles)
+        try:
+            frappe_roles = frappe.get_roles(profile.user) or []
+        except Exception:
+            frappe_roles = []
+        try:
+            from frappe import permissions as frappe_permissions
+            manual_roles = frappe_permissions.get_roles(profile.user, with_standard=False) or []
+        except Exception:
+            manual_roles = []
+
+        user_doc = profile.get_user_doc()
+        avatar_url = None
+        try:
+            avatar_url = profile.avatar_url or (user_doc.user_image if user_doc else "") or ""
+        except Exception:
+            avatar_url = ""
+
         return {
             "status": "success",
             "message": _("Login successful"),
             "user": {
                 "email": profile.user,
                 "username": profile.username,
-                "full_name": profile.get_user_doc().full_name,
+                "full_name": user_doc.full_name if user_doc else profile.username,
                 "job_title": profile.job_title,
                 "department": profile.department,
+                "employee_code": getattr(profile, "employee_code", None),
                 "role": profile.user_role,
-                "provider": profile.provider
+                "roles": frappe_roles,
+                "user_roles": manual_roles,
+                "provider": profile.provider or "local",
+                "active": bool(profile.active),
+                "user_image": getattr(user_doc, "user_image", "") if user_doc else "",
+                "avatar_url": avatar_url,
             },
             "token": token,
             "expires_in": 24 * 60 * 60  # 24 hours
@@ -235,7 +259,7 @@ def get_current_user():
             "first_name": user_doc.first_name,
             "last_name": user_doc.last_name,
             "enabled": user_doc.enabled,
-            "user_image": user_doc.user_image or ""
+            "user_image": user_doc.user_image or "",
         }
         
         if profile_name:
@@ -250,8 +274,19 @@ def get_current_user():
                 "active": profile.active,
                 "last_login": profile.last_login,
                 "last_seen": profile.last_seen,
-                "avatar_url": profile.avatar_url or user_doc.user_image or ""
+                "avatar_url": profile.avatar_url or user_doc.user_image or "",
             })
+        
+        # Add frappe roles for current user (ensure consistent fields for FE)
+        try:
+            user_data["roles"] = frappe.get_roles(frappe.session.user) or []
+        except Exception:
+            user_data["roles"] = []
+        try:
+            from frappe import permissions as frappe_permissions
+            user_data["user_roles"] = frappe_permissions.get_roles(frappe.session.user, with_standard=False) or []
+        except Exception:
+            user_data["user_roles"] = []
         else:
             # If no profile exists, still provide avatar from user_image
             user_data["avatar_url"] = user_doc.user_image or ""
