@@ -255,15 +255,19 @@ def get_current_user():
             
         if token_candidate:
             try:
+                frappe.logger().info(f"Attempting JWT validation for token: {token_candidate[:20]}...")
                 payload = verify_jwt_token(token_candidate)
+                frappe.logger().info(f"JWT payload: {payload}")
                 if payload:
                     jwt_user_email = (
                         payload.get("email")
                         or payload.get("user")
                         or payload.get("sub")
                     )
+                    frappe.logger().info(f"JWT user email: {jwt_user_email}")
                     # If JWT is valid, use it regardless of session state
                     if jwt_user_email and frappe.db.exists("User", jwt_user_email):
+                        frappe.logger().info(f"JWT authentication successful for: {jwt_user_email}")
                         # Khi xác thực qua JWT, vẫn trả về user data (không tạo session)
                         user_doc = frappe.get_doc("User", jwt_user_email)
                         profile_name = frappe.db.get_value("ERP User Profile", {"user": jwt_user_email})
@@ -291,22 +295,23 @@ def get_current_user():
                             })
                         # Bổ sung roles
                         try:
-                            user_data["roles"] = frappe.get_roles(user_email) or []
+                            user_data["frappe_roles"] = frappe.get_roles(jwt_user_email) or []
+                            # Also keep "roles" for backward compatibility
+                            user_data["roles"] = user_data["frappe_roles"]
                         except Exception:
+                            user_data["frappe_roles"] = []
                             user_data["roles"] = []
-                        try:
-                            from frappe import permissions as frappe_permissions
-                            user_data["user_roles"] = frappe_permissions.get_roles(user_email, with_standard=False) or []
-                        except Exception:
-                            user_data["user_roles"] = []
                         return {
                             "status": "success",
                             "user": user_data,
                             "authenticated": True,
                         }
-            except Exception:
-                pass
-            # Không xác thực được
+            except Exception as jwt_error:
+                # JWT validation failed, continue to session-based auth
+                print(f"JWT validation failed: {jwt_error}")
+        
+        # If no valid JWT, check session-based authentication  
+        if frappe.session.user == "Guest":
             return {
                 "status": "success",
                 "user": None,
@@ -383,14 +388,16 @@ def generate_jwt_token(user_email):
         except Exception:
             roles = []
 
+        # Use Unix timestamps for better compatibility
+        now = datetime.utcnow()
         payload = {
             "sub": user_email,
             "email": user_email,
             "roles": roles,
             "iss": frappe.utils.get_url(),
             "ver": 1,
-            "iat": datetime.utcnow(),
-            "exp": datetime.utcnow() + timedelta(hours=24),
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=24)).timestamp()),
         }
 
         secret = (
@@ -398,7 +405,13 @@ def generate_jwt_token(user_email):
             or frappe.get_site_config().get("jwt_secret")
             or "default_jwt_secret_change_in_production"
         )
+        
+        frappe.logger().info(f"Generating JWT for: {user_email}")
+        frappe.logger().info(f"JWT payload: {payload}")
+        frappe.logger().info(f"JWT secret (first 10 chars): {secret[:10]}...")
+        
         token = jwt.encode(payload, secret, algorithm="HS256")
+        frappe.logger().info(f"Generated JWT token (first 30 chars): {token[:30]}...")
 
         return token
 
@@ -415,11 +428,19 @@ def verify_jwt_token(token):
             or frappe.get_site_config().get("jwt_secret")
             or "default_jwt_secret_change_in_production"
         )
+        frappe.logger().info(f"JWT secret (first 10 chars): {secret[:10]}...")
+        frappe.logger().info(f"Verifying token: {token[:30]}...")
         payload = jwt.decode(token, secret, algorithms=["HS256"])
+        frappe.logger().info(f"JWT verification successful: {payload}")
         return payload
-    except jwt.ExpiredSignatureError:
+    except jwt.ExpiredSignatureError as e:
+        frappe.logger().error(f"JWT expired: {str(e)}")
         return None
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        frappe.logger().error(f"JWT invalid: {str(e)}")
+        return None
+    except Exception as e:
+        frappe.logger().error(f"JWT verification error: {str(e)}")
         return None
 
 
