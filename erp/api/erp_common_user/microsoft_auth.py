@@ -104,7 +104,14 @@ def microsoft_callback(code, state):
         
         # Generate JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
+        
+        # Ensure user exists in database before generating JWT
+        if not frappe.db.exists("User", frappe_user.email):
+            frappe.throw(_("User not found in database: {0}").format(frappe_user.email))
+        
+        frappe.logger().info(f"Generating JWT token for Microsoft user: {frappe_user.email}")
         jwt_token = generate_jwt_token(frappe_user.email)
+        frappe.logger().info(f"Generated JWT token: {jwt_token[:30] + '...' if jwt_token else 'None'}")
         
         # Get Frappe roles for the user
         frappe_roles = []
