@@ -242,31 +242,31 @@ def change_password(current_password, new_password):
 def get_current_user():
     """Get current user information"""
     try:
-        # Nếu chưa có session hợp lệ, thử xác thực bằng Bearer JWT
-        if frappe.session.user == "Guest":
+        # Always check for JWT token first, even if we have a session
+        auth_header = frappe.get_request_header("Authorization") or ""
+        alt_header = frappe.get_request_header("X-Auth-Token") or frappe.get_request_header("X-Frappe-Auth-Token") or ""
+        token_candidate = None
+        jwt_user_email = None
+        
+        if auth_header.lower().startswith("bearer "):
+            token_candidate = auth_header.split(" ", 1)[1].strip()
+        elif alt_header:
+            token_candidate = alt_header.strip()
+            
+        if token_candidate:
             try:
-                # Hỗ trợ nhiều header đề phòng proxy strip Authorization
-                auth_header = frappe.get_request_header("Authorization") or ""
-                alt_header = frappe.get_request_header("X-Auth-Token") or frappe.get_request_header("X-Frappe-Auth-Token") or ""
-                token_candidate = None
-                if auth_header.lower().startswith("bearer "):
-                    token_candidate = auth_header.split(" ", 1)[1].strip()
-                elif alt_header:
-                    token_candidate = alt_header.strip()
-                if token_candidate:
-                    bearer = token_candidate
-                    payload = verify_jwt_token(bearer)
-                    user_email = None
-                    if payload:
-                        user_email = (
-                            payload.get("email")
-                            or payload.get("user")
-                            or payload.get("sub")
-                        )
-                    if user_email:
+                payload = verify_jwt_token(token_candidate)
+                if payload:
+                    jwt_user_email = (
+                        payload.get("email")
+                        or payload.get("user")
+                        or payload.get("sub")
+                    )
+                    # If JWT is valid, use it regardless of session state
+                    if jwt_user_email and frappe.db.exists("User", jwt_user_email):
                         # Khi xác thực qua JWT, vẫn trả về user data (không tạo session)
-                        user_doc = frappe.get_doc("User", user_email)
-                        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
+                        user_doc = frappe.get_doc("User", jwt_user_email)
+                        profile_name = frappe.db.get_value("ERP User Profile", {"user": jwt_user_email})
                         user_data = {
                             "email": user_doc.email,
                             "full_name": user_doc.full_name,
