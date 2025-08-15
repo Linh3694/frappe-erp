@@ -72,21 +72,8 @@ def microsoft_callback(code, state):
             frappe.throw(_("No email found in Microsoft account"))
 
         
-        # Check if user profile exists (email-centric approach)
+        # Skip ERP User Profile - use only Frappe User
         user_profile = None
-        try:
-            user_profile = frappe.get_doc("ERP User Profile", {"email": user_email})
-
-        except Exception as e:
-
-            # Redirect to frontend with error - account not registered
-            frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
-            error_message = urllib.parse.quote("Tài khoản chưa được đăng ký trong hệ thống")
-            callback_url = f"{frontend_url}/auth/microsoft/callback?success=false&error={error_message}"
-            
-            frappe.local.response["type"] = "redirect"
-            frappe.local.response["location"] = callback_url
-            return
         
         # Create or update Microsoft user record
         ms_user = create_or_update_microsoft_user(user_info)
@@ -143,7 +130,7 @@ def microsoft_callback(code, state):
             
 
         
-        # Create comprehensive user data for frontend (prioritize user_profile data)
+        # Create user data using only Frappe User and Microsoft info
         user_data = {
             "email": user_email,  # Use Microsoft email as primary
             "full_name": frappe_user.full_name,
@@ -151,11 +138,11 @@ def microsoft_callback(code, state):
             "last_name": frappe_user.last_name or "",
             "provider": "microsoft",
             "microsoft_id": ms_user.microsoft_id if ms_user else None,
-            # Prioritize user_profile data since it's been updated with fresh Microsoft data
-            "job_title": user_profile.job_title if user_profile and user_profile.job_title else "",
-            "department": user_profile.department if user_profile and user_profile.department else "",
-            "employee_code": user_profile.employee_code if user_profile and user_profile.employee_code else "",
-            "user_role": user_profile.user_role if user_profile else "user",  # ERP custom role
+            # Use Microsoft Graph data directly
+            "job_title": user_info.get("jobTitle", ""),
+            "department": user_info.get("department", ""),
+            "employee_code": user_info.get("employeeId", ""),
+            "user_role": "user",  # Default role
             "frappe_roles": frappe_roles,  # All Frappe roles (including automatic)
             "manual_roles": manual_roles,  # Only manually assigned roles
             "active": frappe_user.enabled,
@@ -636,28 +623,37 @@ def full_microsoft_sync():
 
 
 def handle_microsoft_user_login(ms_user):
-    """Handle Microsoft user login"""
+    """Handle Microsoft user login - simplified to use only Frappe User"""
     try:
-        # Check if already mapped to Frappe user
-        if ms_user.mapped_user_id:
-            frappe_user = frappe.get_doc("User", ms_user.mapped_user_id)
-            
-            return frappe_user
+        # Get email from Microsoft user
+        email = ms_user.mail or ms_user.user_principal_name
         
         # Check if Frappe user exists with same email
-        email = ms_user.mail or ms_user.user_principal_name
         if frappe.db.exists("User", email):
-            # Map to existing user
-            ms_user.map_to_frappe_user(email)
             frappe_user = frappe.get_doc("User", email)
+            return frappe_user
+        else:
+            # Create new Frappe user directly
+            frappe_user = frappe.new_doc("User")
+            frappe_user.email = email
+            frappe_user.first_name = ms_user.given_name or email.split('@')[0]
+            frappe_user.last_name = ms_user.surname or ""
+            frappe_user.full_name = f"{frappe_user.first_name} {frappe_user.last_name}".strip()
+            frappe_user.enabled = 1
+            frappe_user.send_welcome_email = 0  # Don't send welcome email
+            frappe_user.user_type = "System User"
+            
+            # Add Microsoft-specific fields if they exist
+            if hasattr(frappe_user, 'microsoft_id'):
+                frappe_user.microsoft_id = ms_user.id
+            if hasattr(frappe_user, 'provider'):
+                frappe_user.provider = "microsoft"
+            
+            frappe_user.flags.ignore_permissions = True
+            frappe_user.insert()
+            frappe.db.commit()
             
             return frappe_user
-        
-        # Create new Frappe user
-        ms_user.map_to_frappe_user()
-        frappe_user = frappe.get_doc("User", ms_user.mapped_user_id)
-        
-        return frappe_user
         
     except Exception as e:
         frappe.log_error("Microsoft Login", f"Microsoft user login error: {str(e)}")

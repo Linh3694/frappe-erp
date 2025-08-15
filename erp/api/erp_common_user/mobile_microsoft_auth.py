@@ -147,56 +147,15 @@ def mobile_microsoft_callback(code, state=None):
                 "error_code": "NO_EMAIL"
             }
         
-        # Check if user profile exists in ERP (simple approach)
+        # Skip ERP User Profile - directly check/create Frappe user
         user_profile = None
-        try:
-            user_profile = frappe.get_doc("ERP User Profile", {"email": user_email})
-            frappe.logger().info(f"Found ERP User Profile for: {user_email}")
-        except frappe.DoesNotExistError:
-            frappe.logger().warning(f"ERP User Profile not found for: {user_email}")
-            return {
-                "success": False,
-                "error": "Tài khoản chưa được đăng ký trong hệ thống",
-                "error_code": "USER_NOT_REGISTERED",
-                "user_email": user_email
-            }
-        except Exception as e:
-            frappe.logger().error(f"Error checking user profile: {str(e)}")
-            return {
-                "success": False,
-                "error": "Error checking user registration",
-                "error_code": "USER_CHECK_FAILED",
-                "details": str(e)
-            }
         
-        # Get corresponding Frappe user
-        frappe_user = None
-        try:
-            if user_profile.user:
-                # User profile has linked Frappe user
-                frappe_user = frappe.get_doc("User", user_profile.user)
-                frappe.logger().info(f"Found linked Frappe user: {frappe_user.email}")
-            else:
-                # Try to find Frappe user by email
-                if frappe.db.exists("User", user_email):
-                    frappe_user = frappe.get_doc("User", user_email)
-                    frappe.logger().info(f"Found Frappe user by email: {frappe_user.email}")
-                else:
-                    frappe.logger().error(f"No Frappe user found for email: {user_email}")
-                    return {
-                        "success": False,
-                        "error": "User account not found in system",
-                        "error_code": "FRAPPE_USER_NOT_FOUND",
-                        "user_email": user_email
-                    }
-        except Exception as e:
-            frappe.logger().error(f"Error getting Frappe user: {str(e)}")
-            return {
-                "success": False,
-                "error": "Error retrieving user account",
-                "error_code": "USER_RETRIEVAL_FAILED",
-                "details": str(e)
-            }
+        # Create or update Microsoft user record
+        ms_user = create_or_update_microsoft_user(user_info)
+        
+        # Get or create Frappe user
+        frappe_user = handle_microsoft_user_login(ms_user)
+        frappe.logger().info(f"Microsoft login processed for: {frappe_user.email}")
         
         # Generate JWT token for API access
         try:
@@ -219,17 +178,17 @@ def mobile_microsoft_callback(code, state=None):
         except Exception:
             frappe_roles = ["Guest"]
         
-        # Create user data for mobile app (simple approach)
+        # Create user data for mobile app using Microsoft Graph info
         user_data = {
             "email": user_email,
             "full_name": frappe_user.full_name,
             "first_name": frappe_user.first_name or "",
             "last_name": frappe_user.last_name or "",
             "provider": "microsoft",
-            "job_title": user_profile.job_title if user_profile and user_profile.job_title else "",
-            "department": user_profile.department if user_profile and user_profile.department else "",
-            "employee_code": user_profile.employee_code if user_profile and user_profile.employee_code else "",
-            "user_role": user_profile.user_role if user_profile else "user",
+            "job_title": user_info.get("jobTitle", ""),
+            "department": user_info.get("department", ""),
+            "employee_code": user_info.get("employeeId", ""),
+            "user_role": "user",  # Default role
             "roles": frappe_roles,
             "active": frappe_user.enabled,
             "username": user_email,
@@ -319,16 +278,8 @@ def mobile_direct_token_auth(microsoft_token):
                 "error_code": "NO_EMAIL"
             }
         
-        # Check if user profile exists
-        try:
-            user_profile = frappe.get_doc("ERP User Profile", {"email": user_email})
-        except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "error": "Tài khoản chưa được đăng ký trong hệ thống",
-                "error_code": "USER_NOT_REGISTERED",
-                "user_email": user_email
-            }
+        # Skip ERP User Profile - use only Frappe User
+        user_profile = None
         
         # Create or update Microsoft user record
         ms_user = create_or_update_microsoft_user(user_info)
@@ -343,15 +294,15 @@ def mobile_direct_token_auth(microsoft_token):
         # Get user roles
         frappe_roles = frappe.get_roles(frappe_user.email) or ["Guest"]
         
-        # Create user data
+        # Create user data using Microsoft Graph info
         user_data = {
             "email": user_email,
             "full_name": frappe_user.full_name,
             "provider": "microsoft",
-            "job_title": user_profile.job_title if user_profile else "",
-            "department": user_profile.department if user_profile else "",
-            "employee_code": user_profile.employee_code if user_profile else "",
-            "user_role": user_profile.user_role if user_profile else "user",
+            "job_title": user_info.get("jobTitle", ""),
+            "department": user_info.get("department", ""),
+            "employee_code": user_info.get("employeeId", ""),
+            "user_role": "user",  # Default role
             "roles": frappe_roles,
             "active": frappe_user.enabled,
             "username": user_email
