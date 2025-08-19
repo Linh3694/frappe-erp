@@ -522,6 +522,73 @@ def update_profile(profile_data):
         frappe.throw(_("Error updating profile: {0}").format(str(e)))
 
 
+@frappe.whitelist(allow_guest=True)
+def debug_jwt_token():
+    """Debug JWT token validation"""
+    try:
+        auth_header = frappe.get_request_header("Authorization") or ""
+        token_candidate = None
+        
+        if auth_header.lower().startswith("bearer "):
+            token_candidate = auth_header.split(" ", 1)[1].strip()
+        
+        if not token_candidate:
+            return {
+                "success": False,
+                "message": "No Bearer token found",
+                "debug": {
+                    "auth_header": auth_header[:50] + "..." if len(auth_header) > 50 else auth_header,
+                    "headers": dict(frappe.request.headers) if frappe.request else {}
+                }
+            }
+        
+        # Test JWT decoding
+        try:
+            secret = (
+                frappe.conf.get("jwt_secret")
+                or frappe.get_site_config().get("jwt_secret")
+                or "default_jwt_secret_change_in_production"
+            )
+            
+            payload = jwt.decode(token_candidate, secret, algorithms=["HS256"])
+            user_email = payload.get("email") or payload.get("sub")
+            
+            # Check if user exists
+            user_exists = frappe.db.exists("User", user_email) if user_email else False
+            
+            return {
+                "success": True,
+                "message": "JWT token valid",
+                "debug": {
+                    "token_preview": token_candidate[:30] + "...",
+                    "secret_preview": secret[:10] + "..." if secret else None,
+                    "payload": payload,
+                    "user_email": user_email,
+                    "user_exists": user_exists
+                }
+            }
+            
+        except jwt.ExpiredSignatureError:
+            return {
+                "success": False,
+                "message": "Token expired",
+                "debug": {"token_preview": token_candidate[:30] + "..."}
+            }
+        except jwt.InvalidTokenError as e:
+            return {
+                "success": False,
+                "message": f"Invalid token: {str(e)}",
+                "debug": {"token_preview": token_candidate[:30] + "..."}
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Debug error: {str(e)}",
+            "debug": {"error": str(e)}
+        }
+
+
 @frappe.whitelist()
 def delete_avatar():
     """Delete user avatar"""
