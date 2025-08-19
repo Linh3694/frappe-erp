@@ -1,1 +1,0 @@
-# User Profile DocType - Extension for Frappe User

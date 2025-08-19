@@ -135,36 +135,30 @@ app_license = "mit"
 
 # Document Events
 # ---------------
-# Chuẩn hóa User.full_name theo Display Name từ Microsoft và ẩn middle_name
-doc_events = {
-    "User": {
-        "validate": [
-            "erp.common.hooks.force_full_name_from_microsoft",
-            "erp.common.hooks.validate_user_permissions",
-        ],
-        "after_insert": [
-            "erp.common.hooks.create_user_profile_on_user_creation",
-        ],
-        "on_update": [
-            "erp.common.hooks.update_user_profile_on_user_update",
-        ],
-        "before_delete": [
-            "erp.common.hooks.delete_user_profile_on_user_deletion",
-        ],
-    }
-}
+# doc_events = {
+#     "Event": "erp.event.get_events"
+# }
 
 # Scheduled Tasks
 # ---------------
 
-# Chỉ giữ job gia hạn Microsoft Graph subscription; bỏ hẳn đồng bộ theo giờ
-scheduler_events = {
-	"cron": {
-		"*/50 * * * *": [
-			"erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
-		]
-	}
-}
+# scheduler_events = {
+# 	"all": [
+# 		"erp.tasks.all"
+# 	],
+# 	"daily": [
+# 		"erp.tasks.daily"
+# 	],
+# 	"hourly": [
+# 		"erp.tasks.hourly"
+# 	],
+# 	"weekly": [
+# 		"erp.tasks.weekly"
+# 	],
+# 	"monthly": [
+# 		"erp.tasks.monthly"
+# 	]
+# }
 
 # Testing
 # -------
@@ -233,9 +227,9 @@ scheduler_events = {
 # Authentication and authorization
 # --------------------------------
 
-auth_hooks = [
-	"erp.common.jwt_auth.validate_jwt_auth"
-]
+# auth_hooks = [
+# 	"erp.authentication.auth_hooks"
+# ]
 
 # Automatically update python controller files with type annotations for this app.
 # export_python_type_annotations = True
@@ -246,42 +240,33 @@ auth_hooks = [
 
 # File upload system setup
 # ------------------------
-after_install = [
-    "erp.common.hooks.setup_user_management_hooks"
-]
+# after_install = [
+#     "erp.install.after_install"
+# ]
 
 # User Management Hooks
 # ---------------------
-doc_events = {
-    "User": {
-        "after_insert": [
-            "erp.common.hooks.create_user_profile_on_user_creation"
-        ],
-        "on_update": [
-            "erp.common.hooks.update_user_profile_on_user_update"
-        ],
-        "before_delete": [
-            "erp.common.hooks.delete_user_profile_on_user_deletion"
-        ],
-        "validate": [
-            "erp.common.hooks.validate_user_permissions"
-        ]
-    },
-    # Publish user role change events to Redis for microservices (ticket-service, etc.)
-    "Has Role": {
-        "after_insert": "erp.common.role_events.on_has_role_after_insert",
-        "on_update": "erp.common.role_events.on_has_role_on_update",
-        "on_trash": "erp.common.role_events.on_has_role_on_trash",
-    },
-}
+# doc_events = {
+#     "User": {
+#         "after_insert": [
+#             "erp.utils.user_hooks.after_insert"
+#         ],
+#         "on_update": [
+#             "erp.utils.user_hooks.on_update"
+#         ],
+#         "before_delete": [
+#             "erp.utils.user_hooks.before_delete"
+#         ]
+#     }
+# }
 
 # Login/Logout Hooks
 # ------------------
-on_login = [
-    "erp.common.hooks.on_login"
-]
+# on_login = [
+#     "erp.utils.hooks.on_login"
+# ]
 
-on_logout = [
-    "erp.common.hooks.on_logout"
-]
+# on_logout = [
+#     "erp.utils.hooks.on_logout"
+# ]
 

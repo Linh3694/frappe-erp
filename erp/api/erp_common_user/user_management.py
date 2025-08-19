@@ -1,6 +1,7 @@
 """
 User Management API
 Handles user CRUD operations, role management, etc.
+Updated to work only with Frappe User core (no ERP User Profile dependency)
 """
 
 import frappe
@@ -19,149 +20,139 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         limit: Items per page
         search: Search term (name, email, username)
         role: Filter by role
-        department: Filter by department
-        active: Filter by active status
+        department: Filter by department  
+        active: Filter by active status (maps to enabled)
     """
     try:
-        # Debug: Log parameters
-        frappe.logger().info(f"get_users called with: page={page}, limit={limit}, search={search}, role={role}, department={department}, active={active}")
-        
-        # Debug: Log request data (an toàn, không crash nếu không có JSON)
-        import json
-        request_data = {}
-        try:
-            if frappe.request.is_json:
-                request_data = frappe.request.get_json()
-        except Exception as e:
-            frappe.logger().info(f"Ignore JSON decode error: {e}")
-        frappe.logger().info(f"get_users request data: {json.dumps(request_data, default=str)}")
-        
-        # Debug: Log request form data
-        form_data = frappe.request.form.to_dict() if hasattr(frappe.request, 'form') else {}
-        frappe.logger().info(f"get_users form data: {json.dumps(form_data, default=str)}")
-        
-        # Debug: Log all request parameters
+        # Read parameters from URL or function args
         all_params = frappe.request.args.to_dict() if hasattr(frappe.request, 'args') else {}
-        frappe.logger().info(f"get_users all params: {json.dumps(all_params, default=str)}")
-        
-        # Đọc tham số từ URL parameters (ưu tiên) hoặc function parameters
-        page = all_params.get('page', page)
-        limit = all_params.get('limit', limit)
+        page = int(all_params.get('page', page) or 1)
+        limit = int(all_params.get('limit', limit) or 20)
         search = all_params.get('search', search)
         role = all_params.get('role', role)
         department = all_params.get('department', department)
         active = all_params.get('active', active)
         
-        frappe.logger().info(f"Final parameters after reading from URL: page={page}, limit={limit}, search={search}, role={role}, department={department}, active={active}")
-        
-        # Convert parameters to proper types
-        try:
-            page = int(page) if page else 1
-            limit = int(limit) if limit else 20
-            frappe.logger().info(f"Converted parameters: page={page} (type: {type(page)}), limit={limit} (type: {type(limit)})")
-        except (ValueError, TypeError) as e:
-            frappe.logger().error(f"Error converting parameters: {e}")
-            page = 1
-            limit = 20
-        
         # Build filters
-        filters = {}
+        filters = {"user_type": "System User"}  # Only system users
         
-        if role:
-            filters["user_role"] = role
-        if department:
-            filters["department"] = department
         if active is not None:
-            filters["active"] = active
+            filters["enabled"] = int(active)
         
         # Build search conditions
         search_conditions = []
         if search:
             search_conditions = [
-                ["ERP User Profile", "user", "like", f"%{search}%"],
-                ["ERP User Profile", "username", "like", f"%{search}%"],
+                ["User", "email", "like", f"%{search}%"],
                 ["User", "full_name", "like", f"%{search}%"]
             ]
+            # Add custom field searches if they exist
+            try:
+                if frappe.db.has_column("User", "username"):
+                    search_conditions.append(["User", "username", "like", f"%{search}%"])
+                if frappe.db.has_column("User", "employee_code"):
+                    search_conditions.append(["User", "employee_code", "like", f"%{search}%"])
+            except:
+                pass
         
         # Calculate offset
-        offset = (int(page) - 1) * int(limit)
+        offset = (page - 1) * limit
         
-        # Debug: Log SQL parameters
-        frappe.logger().info(f"SQL parameters: limit={int(limit)}, offset={offset}")
+        # Build WHERE clause
+        where_conditions = ["u.user_type = 'System User'"]
         
-        # Get user profiles with joins
-        profiles = frappe.db.sql("""
+        if active is not None:
+            where_conditions.append(f"u.enabled = {int(active)}")
+            
+        if department:
+            where_conditions.append(f"u.department = '{department}'")
+            
+        if search:
+            search_clause = f"(u.email LIKE '%{search}%' OR u.full_name LIKE '%{search}%'"
+            try:
+                if frappe.db.has_column("User", "username"):
+                    search_clause += f" OR u.username LIKE '%{search}%'"
+                if frappe.db.has_column("User", "employee_code"):
+                    search_clause += f" OR u.employee_code LIKE '%{search}%'"
+            except:
+                pass
+            search_clause += ")"
+            where_conditions.append(search_clause)
+        
+        where_clause = " AND ".join(where_conditions)
+        
+        # Get users with role information
+        users = frappe.db.sql(f"""
             SELECT 
-                p.name,
-                p.user as id,
-                p.username,
-                p.employee_code,
-                p.job_title,
-                p.department,
-                p.user_role,
-                p.provider,
-                p.active,
-                p.disabled,
-                p.last_login,
-                p.last_seen,
-                u.full_name,
+                u.name,
+                u.email as id,
                 u.email,
+                u.full_name,
+                u.first_name,
+                u.last_name,
+                u.enabled as active,
                 u.enabled,
                 u.creation as user_created,
-                COALESCE(u.email, p.user) as display_email
+                u.user_image,
+                '' as username,
+                '' as employee_code,
+                '' as job_title,
+                '' as department,
+                '' as user_role,
+                'local' as provider,
+                NULL as last_login,
+                NULL as last_seen
             FROM 
-                `tabERP User Profile` p
-            LEFT JOIN 
-                `tabUser` u ON p.user = u.email
+                `tabUser` u
             WHERE 
-                p.user IS NOT NULL
-                {role_filter}
-                {department_filter}
-                {active_filter}
-                {search_filter}
+                {where_clause}
             ORDER BY 
-                p.modified DESC
+                u.modified DESC
             LIMIT {limit} OFFSET {offset}
-        """.format(
-            role_filter=f"AND p.user_role = '{role}'" if role else "",
-            department_filter=f"AND p.department = '{department}'" if department else "",
-            active_filter=f"AND p.active = {int(active)}" if active is not None else "",
-            search_filter=f"AND (p.user LIKE '%{search}%' OR p.username LIKE '%{search}%' OR u.full_name LIKE '%{search}%')" if search else "",
-            limit=int(limit),
-            offset=offset
-        ), as_dict=True)
+        """, as_dict=True)
         
-        # Debug: Log result count
-        frappe.logger().info(f"Query returned {len(profiles)} users")
+        # Add custom fields if they exist
+        for user in users:
+            try:
+                user_doc = frappe.get_cached_doc("User", user.email)
+                for field in ["username", "employee_code", "job_title", "department", "designation", "provider", "last_login", "last_seen"]:
+                    if hasattr(user_doc, field):
+                        user[field] = getattr(user_doc, field) or ""
+                        
+                # Map designation to user_role for backward compatibility
+                if hasattr(user_doc, "designation"):
+                    user["user_role"] = getattr(user_doc, "designation") or "user"
+                else:
+                    user["user_role"] = "user"
+                    
+            except:
+                pass
         
         # Get total count
-        total_count = frappe.db.sql("""
+        total_count = frappe.db.sql(f"""
             SELECT COUNT(*)
-            FROM `tabERP User Profile` p
-            LEFT JOIN `tabUser` u ON p.user = u.email
-            WHERE p.user IS NOT NULL
-                {role_filter}
-                {department_filter}
-                {active_filter}
-                {search_filter}
-        """.format(
-            role_filter=f"AND p.user_role = '{role}'" if role else "",
-            department_filter=f"AND p.department = '{department}'" if department else "",
-            active_filter=f"AND p.active = {int(active)}" if active is not None else "",
-            search_filter=f"AND (p.user LIKE '%{search}%' OR p.username LIKE '%{search}%' OR u.full_name LIKE '%{search}%')" if search else ""
-        ))[0][0]
+            FROM `tabUser` u
+            WHERE {where_clause}
+        """)[0][0]
         
-        # Debug: Log total count
-        frappe.logger().info(f"Total users in database: {total_count}")
+        # Get role information for each user
+        for user in users:
+            try:
+                user["roles"] = frappe.get_roles(user.email) or []
+            except:
+                user["roles"] = []
+        
+        total_pages = (total_count + limit - 1) // limit
         
         return {
             "status": "success",
-            "users": profiles,
+            "users": users,
             "pagination": {
-                "page": int(page),
-                "limit": int(limit),
-                "total": total_count,
-                "pages": (total_count + int(limit) - 1) // int(limit)
+                "current_page": page,
+                "total_pages": total_pages,
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset
             }
         }
         
@@ -171,90 +162,15 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
 
 
 @frappe.whitelist()
-def get_user_by_id(user_email):
-    """Get user details by email"""
+def create_user(user_data):
+    """Create new user"""
     try:
-        # Check if user exists
-        if not frappe.db.exists("User", user_email):
-            frappe.throw(_("User not found"))
-        
-        # Get user document
-        user_doc = frappe.get_doc("User", user_email)
-        
-        # Build user data (chỉ từ User + custom fields)
-        user_data = {
-            "email": user_doc.email,
-            "full_name": user_doc.full_name,
-            "first_name": user_doc.first_name,
-            "last_name": user_doc.last_name,
-            "enabled": user_doc.enabled,
-            "creation": user_doc.creation,
-            "modified": user_doc.modified,
-            "roles": [{"role": role.role} for role in user_doc.roles],
-            "avatar_url": getattr(user_doc, "user_image", None),
-        }
-
-        # Append custom fields nếu tồn tại trên User
-        for field_name in [
-            "username",
-            "employee_code",
-            "job_title",
-            "department",
-            "provider",
-            "microsoft_id",
-            "apple_id",
-            "device_token",
-            "last_login",
-            "last_active",
-        ]:
-            if hasattr(user_doc, field_name):
-                user_data[field_name] = getattr(user_doc, field_name)
-        
-        return {
-            "status": "success",
-            "user": user_data
-        }
-        
-    except Exception as e:
-        frappe.log_error(f"Get user by ID error: {str(e)}", "User Management")
-        frappe.throw(_("Error getting user: {0}").format(str(e)))
-
-
-@frappe.whitelist()
-def create_user(user_data=None, **kwargs):
-    """Create user and profile"""
-    try:
-        # Debug logging
-        frappe.logger().info(f"create_user called with: user_data={user_data}, kwargs={kwargs}")
-        
-        # Lấy dữ liệu từ request body nếu không có trong tham số
-        if not user_data and frappe.request.is_json:
-            try:
-                user_data = frappe.request.get_json()
-                frappe.logger().info(f"Request JSON data: {user_data}")
-            except Exception as e:
-                frappe.logger().error(f"Error parsing JSON request: {e}")
-                frappe.throw(_("Invalid JSON data in request"))
-        
-        # Nếu user_data là string, parse JSON
         if isinstance(user_data, str):
-            try:
-                user_data = json.loads(user_data)
-            except json.JSONDecodeError as e:
-                frappe.logger().error(f"Error parsing user_data JSON: {e}")
-                frappe.throw(_("Invalid JSON in user_data"))
+            user_data = json.loads(user_data)
         
-        # Nếu không có user_data, sử dụng kwargs
-        if not user_data:
-            user_data = kwargs
-        
-        frappe.logger().info(f"Final user_data: {user_data}")
-        
-        # Validate required fields
+        # Check required fields
         if not user_data.get("email"):
             frappe.throw(_("Email is required"))
-        if not user_data.get("full_name"):
-            frappe.throw(_("Full name is required"))
         
         # Check if user already exists
         if frappe.db.exists("User", user_data["email"]):
@@ -264,50 +180,44 @@ def create_user(user_data=None, **kwargs):
         user_doc = frappe.get_doc({
             "doctype": "User",
             "email": user_data["email"],
-            "first_name": user_data.get("first_name") or user_data["full_name"].split()[0],
-            "last_name": user_data.get("last_name") or " ".join(user_data["full_name"].split()[1:]),
-            "full_name": user_data["full_name"],
+            "first_name": user_data.get("first_name", ""),
+            "last_name": user_data.get("last_name", ""),
+            "full_name": user_data.get("full_name", f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip()),
             "enabled": user_data.get("enabled", 1),
-            "send_welcome_email": user_data.get("send_welcome_email", 0)
+            "send_welcome_email": user_data.get("send_welcome_email", 0),
+            "user_type": "System User",
         })
         
+        # Add custom fields if they exist and are provided
+        custom_fields = [
+            "username", "employee_code", "job_title", "department", "designation",
+            "provider", "microsoft_id", "apple_id"
+        ]
+        
+        for field in custom_fields:
+            if field in user_data and hasattr(user_doc, field):
+                setattr(user_doc, field, user_data[field])
+        
         # Set password if provided
-        if user_data.get("password"):
-            user_doc.new_password = user_data["password"]
+        if user_data.get("new_password"):
+            user_doc.new_password = user_data["new_password"]
         
-        user_doc.insert(ignore_permissions=True)
+        user_doc.flags.ignore_permissions = True
+        user_doc.insert()
         
-        # Create User Profile
-        profile_data = {
-            "doctype": "ERP User Profile",
-            "user": user_data["email"],
-            "username": user_data.get("username"),
-            "employee_code": user_data.get("employee_code"),
-            "job_title": user_data.get("job_title"),
-            "department": user_data.get("department"),
-            "user_role": user_data.get("user_role", "user"),
-            "provider": user_data.get("provider", "local"),
-            "active": user_data.get("active", 1),
-            "disabled": user_data.get("disabled", 0)
-        }
-        
-        profile = frappe.get_doc(profile_data)
-        profile.insert(ignore_permissions=True)
-        
-        # Assign roles if provided - chỉ sử dụng Frappe system roles
+        # Assign roles if provided
         if user_data.get("roles"):
-            valid_frappe_roles = ["System Manager", "Administrator", "All", "User", "Guest"]
             for role in user_data["roles"]:
-                if role in valid_frappe_roles:
-                    user_doc.append("roles", {"role": role})
-                else:
-                    frappe.logger().warning(f"Invalid role '{role}' provided, skipping")
-            user_doc.save()
+                user_doc.add_roles(role)
         
         return {
             "status": "success",
             "message": _("User created successfully"),
-            "user_email": user_doc.email
+            "user": {
+                "email": user_doc.email,
+                "full_name": user_doc.full_name,
+                "enabled": user_doc.enabled
+            }
         }
         
     except Exception as e:
@@ -316,97 +226,56 @@ def create_user(user_data=None, **kwargs):
 
 
 @frappe.whitelist()
-def update_user(user_email=None, user_data=None, **kwargs):
-    """Update user and profile"""
+def update_user(user_data):
+    """Update existing user"""
     try:
-        # Debug logging
-        frappe.logger().info(f"update_user called with: user_email={user_email}, user_data={user_data}, kwargs={kwargs}")
-        
-        # Lấy dữ liệu từ request body nếu không có trong tham số
-        if not user_data and frappe.request.is_json:
-            try:
-                request_data = frappe.request.get_json()
-                frappe.logger().info(f"Request JSON data: {request_data}")
-                
-                # Nếu user_email không được truyền qua tham số, lấy từ request data
-                if not user_email and 'user_email' in request_data:
-                    user_email = request_data['user_email']
-                
-                # Lấy user_data từ request data
-                user_data = {k: v for k, v in request_data.items() if k != 'user_email'}
-                
-            except Exception as e:
-                frappe.logger().error(f"Error parsing JSON request: {e}")
-                frappe.throw(_("Invalid JSON data in request"))
-        
-        # Nếu user_data là string, parse JSON
         if isinstance(user_data, str):
-            try:
-                user_data = json.loads(user_data)
-            except json.JSONDecodeError as e:
-                frappe.logger().error(f"Error parsing user_data JSON: {e}")
-                frappe.throw(_("Invalid JSON in user_data"))
+            user_data = json.loads(user_data)
         
-        # Nếu không có user_data, sử dụng kwargs
-        if not user_data:
-            user_data = kwargs
-        
-        frappe.logger().info(f"Final user_email: {user_email}, user_data: {user_data}")
-        
-        # Validate required parameters
+        user_email = user_data.get("email")
         if not user_email:
-            frappe.throw(_("user_email is required"))
+            frappe.throw(_("Email is required"))
         
-        # Check if user exists
         if not frappe.db.exists("User", user_email):
             frappe.throw(_("User not found"))
         
-        # Update User document
+        # Get user document
         user_doc = frappe.get_doc("User", user_email)
         
-        # Update allowed User fields
-        user_fields = ["first_name", "last_name", "full_name", "enabled"]
-        for field in user_fields:
+        # Update basic fields
+        updateable_fields = [
+            "first_name", "last_name", "full_name", "enabled", "user_image"
+        ]
+        
+        for field in updateable_fields:
             if field in user_data:
                 setattr(user_doc, field, user_data[field])
         
+        # Update custom fields if they exist
+        custom_fields = [
+            "username", "employee_code", "job_title", "department", "designation",
+            "provider", "microsoft_id", "apple_id"
+        ]
+        
+        for field in custom_fields:
+            if field in user_data and hasattr(user_doc, field):
+                setattr(user_doc, field, user_data[field])
+        
         # Update password if provided
-        if user_data.get("password"):
-            user_doc.new_password = user_data["password"]
+        if user_data.get("new_password"):
+            user_doc.new_password = user_data["new_password"]
         
+        user_doc.flags.ignore_permissions = True
         user_doc.save()
-        
-        # Không còn cập nhật ERP User Profile. Thay vào đó cập nhật trực tiếp các custom fields trên User nếu được gửi lên
-        for field in [
-            "username", "employee_code", "job_title", "department",
-            "provider", "microsoft_id", "apple_id",
-            "device_token", "last_active"
-        ]:
-            if field in user_data:
-                try:
-                    setattr(user_doc, field, user_data[field])
-                except Exception:
-                    pass
-        user_doc.save()
-        
-        # Update roles if provided - chỉ sử dụng Frappe system roles
-        if user_data.get("roles"):
-            # Clear existing roles
-            user_doc.roles = []
-            
-            # Add new roles - chỉ cho phép Frappe system roles
-            valid_frappe_roles = ["System Manager", "Administrator", "All", "User", "Guest"]
-            for role in user_data["roles"]:
-                if role in valid_frappe_roles:
-                    user_doc.append("roles", {"role": role})
-                else:
-                    frappe.logger().warning(f"Invalid role '{role}' provided, skipping")
-            
-            user_doc.save()
         
         return {
             "status": "success",
-            "message": _("User updated successfully")
+            "message": _("User updated successfully"),
+            "user": {
+                "email": user_doc.email,
+                "full_name": user_doc.full_name,
+                "enabled": user_doc.enabled
+            }
         }
         
     except Exception as e:
@@ -416,24 +285,17 @@ def update_user(user_email=None, user_data=None, **kwargs):
 
 @frappe.whitelist()
 def delete_user(user_email):
-    """Delete user and profile"""
+    """Delete user"""
     try:
-        # Check if user exists
+        if not user_email:
+            frappe.throw(_("User email is required"))
+        
         if not frappe.db.exists("User", user_email):
             frappe.throw(_("User not found"))
-        
-        # Don't allow deleting Administrator
-        if user_email == "Administrator":
-            frappe.throw(_("Cannot delete Administrator user"))
         
         # Don't allow deleting current user
         if user_email == frappe.session.user:
             frappe.throw(_("Cannot delete your own account"))
-        
-        # Delete user profile first
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        if profile_name:
-            frappe.delete_doc("ERP User Profile", profile_name, ignore_permissions=True)
         
         # Delete user
         frappe.delete_doc("User", user_email, ignore_permissions=True)
@@ -449,19 +311,16 @@ def delete_user(user_email):
 
 
 @frappe.whitelist()
-def enable_disable_user(user_email, enabled):
-    """Enable or disable user"""
+def toggle_user_status(user_email, enabled):
+    """Toggle user enabled/disabled status"""
     try:
-        # Check if user exists
         if not frappe.db.exists("User", user_email):
             frappe.throw(_("User not found"))
         
-        # Update User document
         user_doc = frappe.get_doc("User", user_email)
         user_doc.enabled = int(enabled)
+        user_doc.flags.ignore_permissions = True
         user_doc.save()
-        
-        # Không còn đồng bộ sang ERP User Profile
         
         status_text = "enabled" if int(enabled) else "disabled"
         
@@ -471,85 +330,128 @@ def enable_disable_user(user_email, enabled):
         }
         
     except Exception as e:
-        frappe.log_error(f"Enable/disable user error: {str(e)}", "User Management")
-        frappe.throw(_("Error updating user status: {0}").format(str(e)))
+        frappe.log_error(f"Toggle user status error: {str(e)}", "User Management")
+        frappe.throw(_("Error toggling user status: {0}").format(str(e)))
 
 
 @frappe.whitelist()
-def reset_user_password(user_email):
-    """Reset user password and send email"""
+def send_password_reset(user_email):
+    """Send password reset email to user"""
     try:
-        # Check if user exists
         if not frappe.db.exists("User", user_email):
             frappe.throw(_("User not found"))
         
-        # Get user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        if not profile_name:
-            frappe.throw(_("User profile not found"))
-        
-        profile = frappe.get_doc("ERP User Profile", profile_name)
-        
-        # Generate reset token
-        token = profile.generate_reset_token()
-        
-        # Send reset email
-        from erp.user_management.api.auth import send_password_reset_email
-        send_password_reset_email(user_email, token)
-        
-        return {
-            "status": "success",
-            "message": _("Password reset email sent")
-        }
-        
-    except Exception as e:
-        frappe.log_error(f"Reset user password error: {str(e)}", "User Management")
-        frappe.throw(_("Error resetting user password: {0}").format(str(e)))
-
-
-@frappe.whitelist()
-def set_user_password(user_email, new_password):
-    """Set user password directly (Admin function)"""
-    try:
-        # Check if user exists
-        if not frappe.db.exists("User", user_email):
-            frappe.throw(_("User not found"))
-        
-        # Get user document
+        # Use Frappe's built-in password reset
+        from frappe.utils.password import update_password_reset_token
         user_doc = frappe.get_doc("User", user_email)
+        token = update_password_reset_token(user_doc)
         
-        # Set new password
-        user_doc.new_password = new_password
+        # Send reset email using auth.py function
+        from erp.api.erp_common_user.auth import send_password_reset_email
+        success = send_password_reset_email(user_email, token)
         
-        # Force save and commit
-        user_doc.save(ignore_permissions=True)
-        frappe.db.commit()
-        
-        return {
-            "status": "success",
-            "message": _("Password updated successfully")
-        }
-        
+        if success:
+            return {
+                "status": "success",
+                "message": _("Password reset email sent to {0}").format(user_email)
+            }
+        else:
+            frappe.throw(_("Error sending password reset email"))
+            
     except Exception as e:
-        frappe.log_error(f"Set user password error: {str(e)}", "User Management")
-        frappe.throw(_("Error setting user password: {0}").format(str(e)))
+        frappe.log_error(f"Send password reset error: {str(e)}", "User Management")
+        frappe.throw(_("Error sending password reset: {0}").format(str(e)))
 
 
 @frappe.whitelist()
-def get_user_roles():
-    """Get available user roles"""
+def get_user_stats():
+    """Get user management statistics"""
     try:
-        # Chỉ sử dụng Frappe system roles
-        roles = [
-            {"value": "System Manager", "label": "System Manager"},
-            {"value": "Administrator", "label": "Administrator"},
-            {"value": "All", "label": "All"},
-            {"value": "User", "label": "User"},
-            {"value": "Guest", "label": "Guest"}
-        ]
+        stats = {
+            "total_users": frappe.db.count("User", {"user_type": "System User"}),
+            "enabled_users": frappe.db.count("User", {"user_type": "System User", "enabled": 1}),
+            "disabled_users": frappe.db.count("User", {"user_type": "System User", "enabled": 0}),
+        }
+        
+        # Add custom field stats if they exist
+        try:
+            if frappe.db.has_column("User", "provider"):
+                stats.update({
+                    "microsoft_users": frappe.db.count("User", {"user_type": "System User", "provider": "microsoft"}),
+                    "apple_users": frappe.db.count("User", {"user_type": "System User", "provider": "apple"}),
+                    "local_users": frappe.db.count("User", {"user_type": "System User", "provider": ["in", ["local", ""]]}),
+                })
+        except:
+            stats.update({
+                "microsoft_users": 0,
+                "apple_users": 0, 
+                "local_users": stats["total_users"]
+            })
+        
+        # Users by role
+        role_stats = frappe.db.sql("""
+            SELECT r.role, COUNT(*) as count
+            FROM `tabHas Role` r
+            INNER JOIN `tabUser` u ON r.parent = u.name
+            WHERE u.user_type = 'System User'
+            AND u.enabled = 1
+            GROUP BY r.role
+            ORDER BY count DESC
+        """, as_dict=True)
+        
+        stats["role_distribution"] = role_stats
+        
+        # Users by department (if custom field exists)
+        dept_stats = []
+        try:
+            if frappe.db.has_column("User", "department"):
+                dept_stats = frappe.db.sql("""
+                    SELECT department, COUNT(*) as count
+                    FROM `tabUser`
+                    WHERE user_type = 'System User'
+                    AND department IS NOT NULL AND department != ''
+                    GROUP BY department
+                    ORDER BY count DESC
+                    LIMIT 10
+                """, as_dict=True)
+        except:
+            pass
+            
+        stats["department_distribution"] = dept_stats
+        
+        # Recent activity (users created in last 7 days)
+        from datetime import datetime, timedelta
+        week_ago = datetime.now() - timedelta(days=7)
+        
+        recent_users = frappe.db.count("User", {
+            "user_type": "System User",
+            "creation": [">=", week_ago]
+        })
+        
+        stats["recent_new_users"] = recent_users
         
         return {
             "status": "success",
+            "stats": stats
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Get user stats error: {str(e)}", "User Management")
+        frappe.throw(_("Error getting user statistics: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_user_roles(user_email):
+    """Get roles for a specific user"""
+    try:
+        if not frappe.db.exists("User", user_email):
+            frappe.throw(_("User not found"))
+        
+        roles = frappe.get_roles(user_email) or []
+        
+        return {
+            "status": "success",
+            "user_email": user_email,
             "roles": roles
         }
         
@@ -559,57 +461,153 @@ def get_user_roles():
 
 
 @frappe.whitelist()
-def get_user_dashboard_stats():
-    """Get user dashboard statistics"""
+def assign_user_roles(user_email, roles):
+    """Assign roles to user"""
     try:
-        stats = {
-            "total_users": frappe.db.count("User"),
-            "total_profiles": frappe.db.count("ERP User Profile"),
-            "active_users": frappe.db.count("ERP User Profile", {"active": 1}),
-            "disabled_users": frappe.db.count("ERP User Profile", {"disabled": 1}),
-            "enabled_users": frappe.db.count("User", {"enabled": 1}),
-            "microsoft_users": frappe.db.count("ERP User Profile", {"provider": "microsoft"}),
-            "apple_users": frappe.db.count("ERP User Profile", {"provider": "apple"}),
-            "local_users": frappe.db.count("ERP User Profile", {"provider": "local"})
-        }
+        if not frappe.db.exists("User", user_email):
+            frappe.throw(_("User not found"))
         
-        # Users by role
-        role_stats = frappe.db.sql("""
-            SELECT user_role, COUNT(*) as count
-            FROM `tabERP User Profile`
-            GROUP BY user_role
-            ORDER BY count DESC
-        """, as_dict=True)
+        if isinstance(roles, str):
+            roles = json.loads(roles)
         
-        stats["users_by_role"] = {role["user_role"] or "user": role["count"] for role in role_stats}
+        user_doc = frappe.get_doc("User", user_email)
         
-        # Users by department
-        dept_stats = frappe.db.sql("""
-            SELECT department, COUNT(*) as count
-            FROM `tabERP User Profile`
-            WHERE department IS NOT NULL AND department != ''
-            GROUP BY department
-            ORDER BY count DESC
-            LIMIT 10
-        """, as_dict=True)
+        # Remove existing roles first
+        user_doc.set("roles", [])
         
-        stats["users_by_department"] = {dept["department"]: dept["count"] for dept in dept_stats}
+        # Add new roles
+        for role in roles:
+            user_doc.add_roles(role)
         
-        # Recent logins (last 7 days)
-        from datetime import datetime, timedelta
-        week_ago = datetime.now() - timedelta(days=7)
-        
-        recent_logins = frappe.db.count("ERP User Profile", {
-            "last_login": [">=", week_ago]
-        })
-        
-        stats["recent_logins"] = recent_logins
+        user_doc.flags.ignore_permissions = True
+        user_doc.save()
         
         return {
             "status": "success",
-            "stats": stats
+            "message": _("Roles assigned successfully"),
+            "user_email": user_email,
+            "roles": roles
         }
         
     except Exception as e:
-        frappe.log_error(f"Get user dashboard stats error: {str(e)}", "User Management")
-        frappe.throw(_("Error getting user dashboard stats: {0}").format(str(e)))
+        frappe.log_error(f"Assign user roles error: {str(e)}", "User Management")
+        frappe.throw(_("Error assigning user roles: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_available_roles():
+    """Get list of available roles"""
+    try:
+        roles = frappe.get_all("Role", 
+            filters={"disabled": 0},
+            fields=["name", "role_name"],
+            order_by="role_name"
+        )
+        
+        return {
+            "status": "success",
+            "roles": roles
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Get available roles error: {str(e)}", "User Management")
+        frappe.throw(_("Error getting available roles: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def bulk_update_users(user_emails, update_data):
+    """Bulk update multiple users"""
+    try:
+        if isinstance(user_emails, str):
+            user_emails = json.loads(user_emails)
+        if isinstance(update_data, str):
+            update_data = json.loads(update_data)
+            
+        if not user_emails:
+            frappe.throw(_("No users selected"))
+        
+        updated_count = 0
+        failed_count = 0
+        
+        for user_email in user_emails:
+            try:
+                if frappe.db.exists("User", user_email):
+                    user_doc = frappe.get_doc("User", user_email)
+                    
+                    # Update allowed fields
+                    for field, value in update_data.items():
+                        if hasattr(user_doc, field) and field in ["enabled", "department", "designation", "job_title"]:
+                            setattr(user_doc, field, value)
+                    
+                    user_doc.flags.ignore_permissions = True
+                    user_doc.save()
+                    updated_count += 1
+                    
+            except Exception as e:
+                failed_count += 1
+                frappe.log_error(f"Bulk update error for {user_email}: {str(e)}", "Bulk User Update")
+        
+        return {
+            "status": "success",
+            "message": _("Bulk update completed"),
+            "updated_count": updated_count,
+            "failed_count": failed_count
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Bulk update users error: {str(e)}", "User Management")
+        frappe.throw(_("Error bulk updating users: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def export_users(filters=None):
+    """Export users to CSV format"""
+    try:
+        if isinstance(filters, str):
+            filters = json.loads(filters)
+        
+        # Build WHERE clause
+        where_conditions = ["user_type = 'System User'"]
+        
+        if filters:
+            if filters.get("enabled") is not None:
+                where_conditions.append(f"enabled = {int(filters['enabled'])}")
+            if filters.get("department"):
+                where_conditions.append(f"department = '{filters['department']}'")
+        
+        where_clause = " AND ".join(where_conditions)
+        
+        # Get user data
+        users = frappe.db.sql(f"""
+            SELECT 
+                email,
+                full_name,
+                first_name,
+                last_name,
+                enabled,
+                creation,
+                modified
+            FROM `tabUser`
+            WHERE {where_clause}
+            ORDER BY full_name
+        """, as_dict=True)
+        
+        # Add custom fields if they exist
+        for user in users:
+            try:
+                user_doc = frappe.get_cached_doc("User", user.email)
+                for field in ["username", "employee_code", "job_title", "department", "provider"]:
+                    if hasattr(user_doc, field):
+                        user[field] = getattr(user_doc, field) or ""
+            except:
+                pass
+        
+        return {
+            "status": "success",
+            "users": users,
+            "total_count": len(users)
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Export users error: {str(e)}", "User Management")
+        frappe.throw(_("Error exporting users: {0}").format(str(e)))

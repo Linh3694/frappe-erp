@@ -155,24 +155,9 @@ def process_image(file_content, file_extension):
 
 
 def update_user_avatar(user_email, avatar_url):
-    """Update user avatar in both User and ERP User Profile"""
+    """Update user avatar in User document only"""
     try:
-        # Update ERP User Profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-        else:
-            profile = frappe.get_doc({
-                "doctype": "ERP User Profile",
-                "user": user_email
-            })
-        
-        profile.avatar_url = avatar_url
-        profile.flags.ignore_permissions = True
-        profile.save()
-        
-        # Update User.user_image for compatibility
+        # Update User.user_image only (no ERP User Profile)
         user_doc = frappe.get_doc("User", user_email)
         user_doc.user_image = avatar_url
         user_doc.flags.ignore_permissions = True
@@ -251,16 +236,8 @@ def get_avatar_url(user_email=None):
                 "avatar_url": None
             }
         
-        # Get from ERP User Profile first
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        avatar_url = None
-        
-        if profile_name:
-            avatar_url = frappe.db.get_value("ERP User Profile", profile_name, "avatar_url")
-        
-        # Fallback to User.user_image
-        if not avatar_url:
-            avatar_url = frappe.db.get_value("User", user_email, "user_image")
+        # Get directly from User.user_image (no ERP User Profile)
+        avatar_url = frappe.db.get_value("User", user_email, "user_image")
         
         return {
             "status": "success",
@@ -283,15 +260,8 @@ def delete_avatar():
         if frappe.session.user == "Guest":
             frappe.throw(_("Please login to delete avatar"))
         
-        # Get current avatar
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": frappe.session.user})
-        current_avatar = None
-        
-        if profile_name:
-            current_avatar = frappe.db.get_value("ERP User Profile", profile_name, "avatar_url")
-        
-        if not current_avatar:
-            current_avatar = frappe.db.get_value("User", frappe.session.user, "user_image")
+        # Get current avatar from User only
+        current_avatar = frappe.db.get_value("User", frappe.session.user, "user_image")
         
         # Delete file if exists
         if current_avatar and current_avatar.startswith("/files/Avatar/"):
@@ -299,15 +269,10 @@ def delete_avatar():
             if os.path.exists(file_path):
                 os.remove(file_path)
         
-        # Update profile
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-            profile.avatar_url = ""
-            profile.save()
-        
-        # Update User
+        # Update User only (no ERP User Profile)
         user_doc = frappe.get_doc("User", frappe.session.user)
         user_doc.user_image = ""
+        user_doc.flags.ignore_permissions = True
         user_doc.save()
         
         return {

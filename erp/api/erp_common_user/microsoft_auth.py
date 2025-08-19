@@ -165,8 +165,8 @@ def microsoft_callback(code, state):
         # Get frontend URL (adjust this based on your frontend URL)
         frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
         
-        # Redirect to frontend callback with token and user data in URL fragment (for security)
-        callback_url = f"{frontend_url}/auth/microsoft/callback?success=true#token={jwt_token}&user={user_encoded}"
+        # Redirect to frontend callback with token and user data in URL query params
+        callback_url = f"{frontend_url}/auth/microsoft/callback?success=true&token={jwt_token}"
         
         # Set redirect response
         frappe.local.response["type"] = "redirect"
@@ -471,18 +471,11 @@ def find_or_create_frappe_user(ms_user, user_data):
                     update_frappe_user(local_user, ms_user, user_data)
                     return local_user
         
-        # 4. Check if ERP User Profile exists for this email before creating new user
+        # 4. Create new Frappe user if doesn't exist
         if not local_user and email:
-            # Check if there's a User Profile for this email
-            profile_exists = frappe.db.get_value("ERP User Profile", {"email": email})
-            if profile_exists:
-                # Create Frappe user since profile exists but user might not exist
-                local_user = create_frappe_user(ms_user, user_data)
-                return local_user
-            else:
-                # Don't create user if no profile exists - this should be managed manually
-
-                return None
+            # Create Frappe user directly - no need to check ERP User Profile
+            local_user = create_frappe_user(ms_user, user_data)
+            return local_user
             
         return None
         
@@ -677,204 +670,34 @@ def create_user_profile_from_microsoft(*args, **kwargs):
     return None
 
 
-@frappe.whitelist()
+@frappe.whitelist() 
 def force_create_missing_users():
-    """Force create Frappe users for unmapped Microsoft users"""
-    try:
-
-        
-        # Get Microsoft users with employee_id but no mapping
-        unmapped_users = frappe.db.sql("""
-            SELECT name, microsoft_id, display_name, user_principal_name, 
-                   given_name, surname, mail, employee_id, job_title, department
-            FROM `tabERP Microsoft User`
-            WHERE employee_id IS NOT NULL 
-            AND employee_id != ''
-            AND (mapped_user_id IS NULL OR mapped_user_id = '')
-        """, as_dict=True)
-        
-        if not unmapped_users:
-            return {
-                "status": "success",
-                "message": "No unmapped Microsoft users found",
-                "created_count": 0
-            }
-        
-        created_count = 0
-        failed_count = 0
-        
-        for ms_user_data in unmapped_users:
-            try:
-                # Get full Microsoft user doc
-                ms_user = frappe.get_doc("ERP Microsoft User", ms_user_data.name)
-                
-                # Reconstruct user_data for create process
-                user_data = {
-                    "id": ms_user.microsoft_id,
-                    "displayName": ms_user.display_name,
-                    "givenName": ms_user.given_name,
-                    "surname": ms_user.surname,
-                    "userPrincipalName": ms_user.user_principal_name,
-                    "mail": ms_user.mail,
-                    "jobTitle": ms_user.job_title,
-                    "department": ms_user.department,
-                    "employeeId": ms_user.employee_id,
-                    "accountEnabled": ms_user.account_enabled
-                }
-                
-                # Force create Frappe user 
-                frappe_user = find_or_create_frappe_user(ms_user, user_data)
-                
-                if frappe_user:
-                    # Update mapping
-                    ms_user.mapped_user_id = frappe_user.name
-                    ms_user.sync_status = "mapped"
-                    ms_user.save()
-                    
-                    # Create User Profile
-                    create_or_update_user_profile(frappe_user, ms_user, user_data)
-                    
-                    created_count += 1
-
-                else:
-                    failed_count += 1
-
-                
-            except Exception as e:
-                failed_count += 1
-                frappe.log_error("Force Create User", f"Error force creating user {ms_user_data.display_name}: {str(e)}")
-
-        
-        result = {
-            "status": "success",
-            "message": f"Force created {created_count} users",
-            "created_count": created_count,
-            "failed_count": failed_count,
-            "total_attempted": len(unmapped_users)
-        }
-        
-
-        return result
-        
-    except Exception as e:
-        error_msg = f"Error force creating users: {str(e)}"
-        frappe.log_error("Force Create Users", error_msg)
-        frappe.throw(_(error_msg))
+    """[Deprecated] No longer needed after removing ERP User Profile"""
+    return {
+        "status": "success",
+        "message": "ERP User Profile removed - function deprecated",
+        "created_count": 0
+    }
 
 
 @frappe.whitelist()
 def fix_user_providers():
-    """Fix provider field for User Profiles with Microsoft IDs"""
-    try:
-
-        
-        # Get User Profiles with Microsoft ID but provider = 'local'
-        profiles_to_fix = frappe.db.sql("""
-            SELECT name, user, microsoft_id
-            FROM `tabERP User Profile`
-            WHERE microsoft_id IS NOT NULL 
-            AND microsoft_id != ''
-            AND (provider IS NULL OR provider = 'local')
-        """, as_dict=True)
-        
-        if not profiles_to_fix:
-            return {
-                "status": "success",
-                "message": "No profiles need provider fix",
-                "updated_count": 0
-            }
-        
-        updated_count = 0
-        failed_count = 0
-        
-        for profile_data in profiles_to_fix:
-            try:
-                profile_doc = frappe.get_doc("ERP User Profile", profile_data.name)
-                profile_doc.provider = "microsoft"
-                profile_doc.save()
-                
-                updated_count += 1
-
-                
-            except Exception as e:
-                failed_count += 1
-                frappe.log_error("Provider Fix", f"Error fixing provider for {profile_data.name}: {str(e)}")
-
-        
-        result = {
-            "status": "success",
-            "message": f"Fixed provider for {updated_count} profiles",
-            "updated_count": updated_count,
-            "failed_count": failed_count,
-            "total_found": len(profiles_to_fix)
-        }
-        
-
-        return result
-        
-    except Exception as e:
-        error_msg = f"Error fixing providers: {str(e)}"
-        frappe.log_error("Provider Fix", error_msg)
-        frappe.throw(_(error_msg))
+    """[Deprecated] No longer needed after removing ERP User Profile"""
+    return {
+        "status": "success", 
+        "message": "ERP User Profile removed - function deprecated",
+        "updated_count": 0
+    }
 
 
 @frappe.whitelist()
 def fix_missing_employee_codes():
-    """Fix missing employee codes in User Profiles from Microsoft Users"""
-    try:
-
-        
-        # Get all User Profiles missing employee_code but have microsoft_id
-        profiles_missing_code = frappe.db.sql("""
-            SELECT up.name, up.user, up.microsoft_id, ms.employee_id, ms.display_name
-            FROM `tabERP User Profile` up
-            LEFT JOIN `tabERP Microsoft User` ms ON ms.microsoft_id = up.microsoft_id
-            WHERE (up.employee_code IS NULL OR up.employee_code = '')
-            AND up.microsoft_id IS NOT NULL
-            AND ms.employee_id IS NOT NULL
-            AND ms.employee_id != ''
-        """, as_dict=True)
-        
-        if not profiles_missing_code:
-            return {
-                "status": "success",
-                "message": "No profiles missing employee codes",
-                "updated_count": 0
-            }
-        
-        updated_count = 0
-        failed_count = 0
-        
-        for profile_data in profiles_missing_code:
-            try:
-                # Update profile with employee_code
-                profile_doc = frappe.get_doc("ERP User Profile", profile_data.name)
-                profile_doc.employee_code = profile_data.employee_id
-                profile_doc.save()
-                
-                updated_count += 1
-
-                
-            except Exception as e:
-                failed_count += 1
-                frappe.log_error("Employee Code Fix", f"Error updating profile {profile_data.name}: {str(e)}")
-
-        
-        result = {
-            "status": "success",
-            "message": f"Fixed {updated_count} missing employee codes",
-            "updated_count": updated_count,
-            "failed_count": failed_count,
-            "total_found": len(profiles_missing_code)
-        }
-        
-
-        return result
-        
-    except Exception as e:
-        error_msg = f"Error fixing employee codes: {str(e)}"
-        frappe.log_error("Employee Code Fix", error_msg)
-        frappe.throw(_(error_msg))
+    """[Deprecated] No longer needed after removing ERP User Profile"""
+    return {
+        "status": "success", 
+        "message": "ERP User Profile removed - function deprecated", 
+        "updated_count": 0
+    }
 
 
 @frappe.whitelist()
@@ -900,148 +723,13 @@ def get_microsoft_sync_stats():
         frappe.throw(_("Error getting Microsoft sync stats: {0}").format(str(e)))
 
 
-@frappe.whitelist()
-def test_microsoft_config():
-    """Test Microsoft configuration"""
-    try:
-        config = get_microsoft_config()
-        
-        # Test if all required fields are present
-        required_fields = ["tenant_id", "client_id", "client_secret"]
-        config_status = {}
-        
-        for field in required_fields:
-            if config.get(field):
-                config_status[field] = "✓ Configured"
-            else:
-                config_status[field] = "✗ Missing"
-        
-        # Mask sensitive data
-        display_config = {
-            "tenant_id": config.get("tenant_id", "Not configured"),
-            "client_id": config.get("client_id", "Not configured"),
-            "client_secret": "***" + config.get("client_secret", "")[-4:] if config.get("client_secret") else "Not configured",
-            "redirect_uri": config.get("redirect_uri", "Not configured"),
-            "hourly_sync": config.get("hourly_sync", False)
-        }
-        
-        return {
-            "status": "success",
-            "message": "Microsoft configuration test completed",
-            "config": display_config,
-            "config_status": config_status,
-            "all_configured": all(config.get(field) for field in required_fields)
-        }
-        
-    except Exception as e:
-        frappe.log_error("Microsoft Config Test", f"Microsoft config test error: {str(e)}")
-        return {
-            "status": "error",
-            "message": str(e),
-            "config": {},
-            "config_status": {},
-            "all_configured": False
-        }
+# Removed test_microsoft_config() - not needed in production
 
 
-@frappe.whitelist()
-def test_microsoft_connection():
-    """Test connection to Microsoft Graph API"""
-    try:
-        # Get app-only token to test connection
-        token = get_microsoft_app_token()
-        
-        # Test basic Graph API call
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
-        
-        # Try to get basic organization info
-        response = requests.get("https://graph.microsoft.com/v1.0/organization", headers=headers)
-        
-        if response.status_code == 200:
-            org_data = response.json()
-            org_info = org_data.get("value", [{}])[0] if org_data.get("value") else {}
-            
-            return {
-                "status": "success",
-                "message": "Microsoft Graph API connection successful",
-                "connection_test": "✓ Connected",
-                "organization": {
-                    "display_name": org_info.get("displayName", "Unknown"),
-                    "id": org_info.get("id", "Unknown"),
-                    "verified_domains": len(org_info.get("verifiedDomains", []))
-                }
-            }
-        else:
-            return {
-                "status": "error",
-                "message": f"Microsoft Graph API connection failed: {response.text}",
-                "connection_test": "✗ Failed",
-                "status_code": response.status_code
-            }
-        
-    except Exception as e:
-        frappe.log_error("Microsoft Connection Test", f"Microsoft connection test error: {str(e)}")
-        return {
-            "status": "error",
-            "message": str(e),
-            "connection_test": "✗ Failed"
-        }
+# Removed test_microsoft_connection() - not needed in production
 
 
-@frappe.whitelist()
-def get_microsoft_test_users(limit=5):
-    """Get a few Microsoft users for testing"""
-    try:
-        # Get app-only token
-        token = get_microsoft_app_token()
-        
-        # Get first few users
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.get(f"https://graph.microsoft.com/v1.0/users?$top={limit}", headers=headers)
-        
-        if response.status_code == 200:
-            data = response.json()
-            users = data.get("value", [])
-            
-            # Clean up user data for display
-            clean_users = []
-            for user in users:
-                clean_users.append({
-                    "id": user.get("id"),
-                    "displayName": user.get("displayName"),
-                    "userPrincipalName": user.get("userPrincipalName"),
-                    "mail": user.get("mail"),
-                    "jobTitle": user.get("jobTitle"),
-                    "department": user.get("department"),
-                    "accountEnabled": user.get("accountEnabled")
-                })
-            
-            return {
-                "status": "success",
-                "message": f"Retrieved {len(clean_users)} test users",
-                "users": clean_users,
-                "total_found": len(clean_users)
-            }
-        else:
-            return {
-                "status": "error",
-                "message": f"Failed to get test users: {response.text}",
-                "status_code": response.status_code
-            }
-        
-    except Exception as e:
-        frappe.log_error("Microsoft Test Users", f"Microsoft test users error: {str(e)}")
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+# Removed get_microsoft_test_users() - not needed in production
 
 
 # === Microsoft Graph change notifications (webhook) ===

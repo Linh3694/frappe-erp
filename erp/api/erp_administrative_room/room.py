@@ -256,50 +256,8 @@ def get_devices_by_room(room_id):
             "phones": []
         }
         
-        try:
-            # Query IT devices where room field equals this room
-            it_devices = frappe.get_all(
-                "ERP IT Inventory Device",
-                filters={"room": room_id},
-                fields=[
-                    "name", "device_name", "device_type", "manufacturer", 
-                    "serial_number", "status", "processor", "ram", "storage"
-                ]
-            )
-            
-            # Group devices by type
-            for device in it_devices:
-                device_type = device.device_type.lower() if device.device_type else "tools"
-                
-                device_info = {
-                    "name": device.name,
-                    "device_name": device.device_name,
-                    "manufacturer": device.manufacturer,
-                    "serial_number": device.serial_number,
-                    "status": device.status,
-                    "specs": {
-                        "processor": device.processor,
-                        "ram": device.ram,
-                        "storage": device.storage
-                    }
-                }
-                
-                # Map device types to appropriate categories
-                if device_type in ["laptop", "desktop"]:
-                    devices["laptops"].append(device_info)
-                elif device_type == "monitor":
-                    devices["monitors"].append(device_info)
-                elif device_type == "projector":
-                    devices["projectors"].append(device_info)
-                elif device_type == "printer":
-                    devices["printers"].append(device_info)
-                elif device_type == "phone":
-                    devices["phones"].append(device_info)
-                else:
-                    devices["tools"].append(device_info)
-                        
-        except Exception as e:
-            frappe.log_error(f"Error fetching devices for room {room_id}: {str(e)}")
+        # Note: IT Inventory module has been removed, so device tracking is disabled
+        # This section would populate devices from IT inventory if the module existed
         
         has_devices = any(len(device_list) > 0 for device_list in devices.values())
         

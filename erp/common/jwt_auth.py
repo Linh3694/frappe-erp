@@ -94,18 +94,5 @@ def verify_jwt_token(token):
 
 
 def update_user_activity(user_email):
-    """Update user's last activity"""
-    try:
-        # Update ERP User Profile if exists
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": user_email})
-        if profile_name:
-            frappe.db.set_value(
-                "ERP User Profile", 
-                profile_name, 
-                "last_seen", 
-                frappe.utils.now(),
-                update_modified=False
-            )
-            frappe.db.commit()
-    except Exception as e:
-        frappe.log_error(f"User activity update error: {str(e)}", "JWT Authentication")
+    """Update user's last activity - no longer needed after removing ERP User Profile"""
+    pass

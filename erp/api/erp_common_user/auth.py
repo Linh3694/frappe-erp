@@ -1,6 +1,7 @@
 """
 Authentication API endpoints
 Handles user login, logout, password reset, etc.
+Updated to work only with Frappe User core (no ERP User Profile dependency)
 """
 
 import frappe
@@ -11,6 +12,39 @@ import jwt
 from datetime import datetime, timedelta
 import requests
 import json
+
+
+def find_user_by_identifier(identifier):
+    """Find user by email, username, or employee_code (custom fields on User)"""
+    try:
+        # First try direct email match
+        if frappe.db.exists("User", identifier):
+            return frappe.get_doc("User", identifier)
+        
+        # Try to find by username or employee_code (custom fields on User)
+        user_email = None
+        
+        # Check if User has custom field 'username'
+        try:
+            user_email = frappe.db.get_value("User", {"username": identifier})
+        except:
+            pass
+            
+        # Check if User has custom field 'employee_code'
+        if not user_email:
+            try:
+                user_email = frappe.db.get_value("User", {"employee_code": identifier})
+            except:
+                pass
+                
+        if user_email:
+            return frappe.get_doc("User", user_email)
+            
+        return None
+        
+    except Exception as e:
+        frappe.log_error(f"Error finding user by identifier {identifier}: {str(e)}", "User Lookup")
+        return None
 
 
 @frappe.whitelist(allow_guest=True)
@@ -30,26 +64,20 @@ def login(email=None, username=None, password=None, provider="local"):
         if not identifier:
             frappe.throw(_("Email or username is required"))
         
-        # Get user profile
-        from erp.common.doctype.erp_user_profile.erp_user_profile import ERPUserProfile
-        profile = ERPUserProfile.find_by_login_identifier(identifier)
+        # Find user
+        user_doc = find_user_by_identifier(identifier)
         
-        if not profile:
+        if not user_doc:
             frappe.throw(_("User not found"))
         
-        # Check if user is active
-        if not profile.active or profile.disabled:
+        # Check if user is enabled
+        if not user_doc.enabled:
             frappe.throw(_("Account is disabled"))
         
         # Authenticate based on provider
         if provider == "local":
             if not password:
                 frappe.throw(_("Password is required for local authentication"))
-            
-            # Verify password with Frappe's authentication
-            user_doc = profile.get_user_doc()
-            if not user_doc:
-                frappe.throw(_("User account not found"))
             
             # Use Frappe's login manager
             login_manager = LoginManager()
@@ -58,56 +86,63 @@ def login(email=None, username=None, password=None, provider="local"):
             
         elif provider == "microsoft":
             # Microsoft authentication handled separately
-            if not profile.microsoft_id:
+            microsoft_id = getattr(user_doc, "microsoft_id", None)
+            if not microsoft_id:
                 frappe.throw(_("Microsoft authentication not configured"))
         
         elif provider == "apple":
             # Apple authentication handled separately
-            if not profile.apple_id:
+            apple_id = getattr(user_doc, "apple_id", None)
+            if not apple_id:
                 frappe.throw(_("Apple authentication not configured"))
         
-        # Update login timestamps
-        profile.update_last_login()
+        # Update last login timestamp on User if custom field exists
+        try:
+            if hasattr(user_doc, 'last_login'):
+                user_doc.last_login = frappe.utils.now()
+                user_doc.flags.ignore_permissions = True
+                user_doc.save()
+        except:
+            pass
         
         # Generate JWT token for API access
-        token = generate_jwt_token(profile.user)
+        token = generate_jwt_token(user_doc.email)
         
-        # Collect roles info (Frappe roles and manual roles)
+        # Collect roles info
         try:
-            frappe_roles = frappe.get_roles(profile.user) or []
+            frappe_roles = frappe.get_roles(user_doc.email) or []
         except Exception:
             frappe_roles = []
         try:
             from frappe import permissions as frappe_permissions
-            manual_roles = frappe_permissions.get_roles(profile.user, with_standard=False) or []
+            manual_roles = frappe_permissions.get_roles(user_doc.email, with_standard=False) or []
         except Exception:
             manual_roles = []
 
-        user_doc = profile.get_user_doc()
-        avatar_url = None
-        try:
-            avatar_url = profile.avatar_url or (user_doc.user_image if user_doc else "") or ""
-        except Exception:
-            avatar_url = ""
+        # Build user data from User core fields + custom fields
+        user_data = {
+            "email": user_doc.email,
+            "full_name": user_doc.full_name,
+            "first_name": user_doc.first_name,
+            "last_name": user_doc.last_name,
+            "enabled": user_doc.enabled,
+            "roles": frappe_roles,
+            "user_roles": manual_roles,
+            "provider": getattr(user_doc, "provider", "local"),
+            "active": user_doc.enabled,  # Map enabled to active for backward compatibility
+            "user_image": user_doc.user_image or "",
+            "avatar_url": user_doc.user_image or "",
+        }
+        
+        # Add custom fields if they exist
+        for field in ["username", "employee_code", "job_title", "department", "designation", "microsoft_id", "apple_id"]:
+            if hasattr(user_doc, field):
+                user_data[field] = getattr(user_doc, field)
 
         return {
             "status": "success",
             "message": _("Login successful"),
-            "user": {
-                "email": profile.user,
-                "username": profile.username,
-                "full_name": user_doc.full_name if user_doc else profile.username,
-                "job_title": profile.job_title,
-                "department": profile.department,
-                "employee_code": getattr(profile, "employee_code", None),
-                "role": profile.user_role,
-                "roles": frappe_roles,
-                "user_roles": manual_roles,
-                "provider": profile.provider or "local",
-                "active": bool(profile.active),
-                "user_image": getattr(user_doc, "user_image", "") if user_doc else "",
-                "avatar_url": avatar_url,
-            },
+            "user": user_data,
             "token": token,
             "expires_in": 24 * 60 * 60  # 24 hours
         }
@@ -121,10 +156,16 @@ def login(email=None, username=None, password=None, provider="local"):
 def logout():
     """User logout"""
     try:
-        # Update last seen
+        # Update last seen timestamp if custom field exists
         if frappe.session.user != "Guest":
-            from erp.common.doctype.erp_user_profile.erp_user_profile import update_last_seen
-            update_last_seen(frappe.session.user)
+            try:
+                user_doc = frappe.get_doc("User", frappe.session.user)
+                if hasattr(user_doc, 'last_seen'):
+                    user_doc.last_seen = frappe.utils.now()
+                    user_doc.flags.ignore_permissions = True
+                    user_doc.save()
+            except:
+                pass
         
         # Use Frappe's logout
         frappe.local.login_manager.logout()
@@ -150,15 +191,10 @@ def forgot_password(email):
         if not frappe.db.exists("User", email):
             frappe.throw(_("User with email {0} not found").format(email))
         
-        # Get user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": email})
-        if not profile_name:
-            frappe.throw(_("User profile not found"))
-        
-        profile = frappe.get_doc("ERP User Profile", profile_name)
-        
-        # Generate reset token
-        token = profile.generate_reset_token()
+        # Use Frappe's built-in password reset
+        from frappe.utils.password import update_password_reset_token
+        user_doc = frappe.get_doc("User", email)
+        token = update_password_reset_token(user_doc)
         
         # Send reset email
         send_password_reset_email(email, token)
@@ -178,27 +214,23 @@ def reset_password(token, new_password):
     """Reset password using token"""
     try:
         # Find user with valid token
-        profile_name = frappe.db.get_value("ERP User Profile", {
-            "reset_password_token": token,
-            "reset_password_expire": [">", datetime.now()]
+        user_email = frappe.db.get_value("User", {
+            "reset_password_key": token
         })
         
-        if not profile_name:
+        if not user_email:
             frappe.throw(_("Invalid or expired reset token"))
         
-        profile = frappe.get_doc("ERP User Profile", profile_name)
+        user_doc = frappe.get_doc("User", user_email)
         
-        # Verify token
-        if not profile.verify_reset_token(token):
+        # Check token expiry
+        from frappe.utils.password import verify_reset_token
+        if not verify_reset_token(user_doc, token):
             frappe.throw(_("Invalid or expired reset token"))
         
-        # Update user password
-        user_doc = profile.get_user_doc()
+        # Update password
         user_doc.new_password = new_password
         user_doc.save()
-        
-        # Clear reset token
-        profile.clear_reset_token()
         
         return {
             "status": "success",
@@ -242,7 +274,7 @@ def change_password(current_password, new_password):
 def get_current_user():
     """Get current user information"""
     try:
-        # Always check for JWT token first, even if we have a session
+        # Check for JWT token first
         auth_header = frappe.get_request_header("Authorization") or ""
         alt_header = frappe.get_request_header("X-Auth-Token") or frappe.get_request_header("X-Frappe-Auth-Token") or ""
         token_candidate = None
@@ -255,52 +287,17 @@ def get_current_user():
             
         if token_candidate:
             try:
-                frappe.logger().info(f"Attempting JWT validation for token: {token_candidate[:20]}...")
                 payload = verify_jwt_token(token_candidate)
-                frappe.logger().info(f"JWT payload: {payload}")
                 if payload:
                     jwt_user_email = (
                         payload.get("email")
                         or payload.get("user")
                         or payload.get("sub")
                     )
-                    frappe.logger().info(f"JWT user email: {jwt_user_email}")
-                    # If JWT is valid, use it regardless of session state
+                    # If JWT is valid, use it
                     if jwt_user_email and frappe.db.exists("User", jwt_user_email):
-                        frappe.logger().info(f"JWT authentication successful for: {jwt_user_email}")
-                        # Khi xác thực qua JWT, vẫn trả về user data (không tạo session)
                         user_doc = frappe.get_doc("User", jwt_user_email)
-                        profile_name = frappe.db.get_value("ERP User Profile", {"user": jwt_user_email})
-                        user_data = {
-                            "email": user_doc.email,
-                            "full_name": user_doc.full_name,
-                            "first_name": user_doc.first_name,
-                            "last_name": user_doc.last_name,
-                            "enabled": user_doc.enabled,
-                            "user_image": user_doc.user_image or "",
-                        }
-                        if profile_name:
-                            profile = frappe.get_doc("ERP User Profile", profile_name)
-                            user_data.update({
-                                "username": profile.username,
-                                "employee_code": profile.employee_code,
-                                "job_title": profile.job_title,
-                                "department": profile.department,
-                                "role": profile.user_role,
-                                "provider": profile.provider,
-                                "active": profile.active,
-                                "last_login": profile.last_login,
-                                "last_seen": profile.last_seen,
-                                "avatar_url": profile.avatar_url or user_doc.user_image or "",
-                            })
-                        # Bổ sung roles
-                        try:
-                            user_data["frappe_roles"] = frappe.get_roles(jwt_user_email) or []
-                            # Also keep "roles" for backward compatibility
-                            user_data["roles"] = user_data["frappe_roles"]
-                        except Exception:
-                            user_data["frappe_roles"] = []
-                            user_data["roles"] = []
+                        user_data = build_user_data_response(user_doc)
                         return {
                             "status": "success",
                             "user": user_data,
@@ -308,9 +305,9 @@ def get_current_user():
                         }
             except Exception as jwt_error:
                 # JWT validation failed, continue to session-based auth
-                print(f"JWT validation failed: {jwt_error}")
+                frappe.logger().debug(f"JWT validation failed: {jwt_error}")
         
-        # If no valid JWT, check session-based authentication  
+        # Check session-based authentication  
         if frappe.session.user == "Guest":
             return {
                 "status": "success",
@@ -318,47 +315,9 @@ def get_current_user():
                 "authenticated": False
             }
         
-        # Get user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": frappe.session.user})
+        # Get current user data
         user_doc = frappe.get_doc("User", frappe.session.user)
-        
-        user_data = {
-            "email": user_doc.email,
-            "full_name": user_doc.full_name,
-            "first_name": user_doc.first_name,
-            "last_name": user_doc.last_name,
-            "enabled": user_doc.enabled,
-            "user_image": user_doc.user_image or "",
-        }
-        
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-            user_data.update({
-                "username": profile.username,
-                "employee_code": profile.employee_code,
-                "job_title": profile.job_title,
-                "department": profile.department,
-                "role": profile.user_role,
-                "provider": profile.provider,
-                "active": profile.active,
-                "last_login": profile.last_login,
-                "last_seen": profile.last_seen,
-                "avatar_url": profile.avatar_url or user_doc.user_image or "",
-            })
-        
-        # Add frappe roles for current user (ensure consistent fields for FE)
-        try:
-            user_data["roles"] = frappe.get_roles(frappe.session.user) or []
-        except Exception:
-            user_data["roles"] = []
-        try:
-            from frappe import permissions as frappe_permissions
-            user_data["user_roles"] = frappe_permissions.get_roles(frappe.session.user, with_standard=False) or []
-        except Exception:
-            user_data["user_roles"] = []
-        else:
-            # If no profile exists, still provide avatar from user_image
-            user_data["avatar_url"] = user_doc.user_image or ""
+        user_data = build_user_data_response(user_doc)
         
         return {
             "status": "success",
@@ -371,24 +330,52 @@ def get_current_user():
         frappe.throw(_("Error getting user information: {0}").format(str(e)))
 
 
-def generate_jwt_token(user_email):
-    """Generate JWT token for API access (HS256 shared secret).
+def build_user_data_response(user_doc):
+    """Build user data response from User document"""
+    user_data = {
+        "email": user_doc.email,
+        "full_name": user_doc.full_name,
+        "first_name": user_doc.first_name,
+        "last_name": user_doc.last_name,
+        "enabled": user_doc.enabled,
+        "active": user_doc.enabled,  # Map for backward compatibility
+        "user_image": user_doc.user_image or "",
+        "avatar_url": user_doc.user_image or "",
+    }
+    
+    # Add custom fields if they exist
+    custom_fields = [
+        "username", "employee_code", "job_title", "department", "designation",
+        "provider", "microsoft_id", "apple_id", "last_login", "last_seen"
+    ]
+    
+    for field in custom_fields:
+        if hasattr(user_doc, field):
+            user_data[field] = getattr(user_doc, field)
+    
+    # Add roles
+    try:
+        user_data["roles"] = frappe.get_roles(user_doc.email) or []
+    except Exception:
+        user_data["roles"] = []
+        
+    try:
+        from frappe import permissions as frappe_permissions
+        user_data["user_roles"] = frappe_permissions.get_roles(user_doc.email, with_standard=False) or []
+    except Exception:
+        user_data["user_roles"] = []
+    
+    return user_data
 
-    Claims:
-      - sub: user email (subject)
-      - email: user email (explicit)
-      - roles: list of frappe roles
-      - iss: issuer (site url)
-      - ver: token schema version
-      - iat, exp: issued/expiry
-    """
+
+def generate_jwt_token(user_email):
+    """Generate JWT token for API access"""
     try:
         try:
             roles = frappe.get_roles(user_email) or []
         except Exception:
             roles = []
 
-        # Use Unix timestamps for better compatibility
         now = datetime.utcnow()
         payload = {
             "sub": user_email,
@@ -406,13 +393,7 @@ def generate_jwt_token(user_email):
             or "default_jwt_secret_change_in_production"
         )
         
-        frappe.logger().info(f"Generating JWT for: {user_email}")
-        frappe.logger().info(f"JWT payload: {payload}")
-        frappe.logger().info(f"JWT secret (first 10 chars): {secret[:10]}...")
-        
         token = jwt.encode(payload, secret, algorithm="HS256")
-        frappe.logger().info(f"Generated JWT token (first 30 chars): {token[:30]}...")
-
         return token
 
     except Exception as e:
@@ -428,26 +409,19 @@ def verify_jwt_token(token):
             or frappe.get_site_config().get("jwt_secret")
             or "default_jwt_secret_change_in_production"
         )
-        frappe.logger().info(f"JWT secret (first 10 chars): {secret[:10]}...")
-        frappe.logger().info(f"Verifying token: {token[:30]}...")
         payload = jwt.decode(token, secret, algorithms=["HS256"])
-        frappe.logger().info(f"JWT verification successful: {payload}")
         return payload
-    except jwt.ExpiredSignatureError as e:
-        frappe.logger().error(f"JWT expired: {str(e)}")
+    except jwt.ExpiredSignatureError:
         return None
-    except jwt.InvalidTokenError as e:
-        frappe.logger().error(f"JWT invalid: {str(e)}")
+    except jwt.InvalidTokenError:
         return None
-    except Exception as e:
-        frappe.logger().error(f"JWT verification error: {str(e)}")
+    except Exception:
         return None
 
 
 def send_password_reset_email(email, token):
     """Send password reset email"""
     try:
-        # Get user
         user_doc = frappe.get_doc("User", email)
         
         # Create reset URL
@@ -491,7 +465,6 @@ def refresh_token():
         if frappe.session.user == "Guest":
             frappe.throw(_("Please login to refresh token"))
         
-        # Generate new token
         token = generate_jwt_token(frappe.session.user)
         
         if not token:
@@ -510,7 +483,7 @@ def refresh_token():
 
 @frappe.whitelist()
 def update_profile(profile_data):
-    """Update user profile"""
+    """Update user profile - works directly with User custom fields"""
     try:
         if frappe.session.user == "Guest":
             frappe.throw(_("Please login to update profile"))
@@ -519,39 +492,29 @@ def update_profile(profile_data):
             import json
             profile_data = json.loads(profile_data)
         
-        # Get or create user profile
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": frappe.session.user})
+        # Get user document
+        user_doc = frappe.get_doc("User", frappe.session.user)
         
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-        else:
-            profile = frappe.get_doc({
-                "doctype": "ERP User Profile",
-                "user": frappe.session.user
-            })
-        
-        # Update allowed fields
+        # Update allowed custom fields
         allowed_fields = [
-            "username", "job_title", "department", "avatar_url", 
-            "device_token", "notes"
+            "username", "job_title", "department", "designation", "user_image"
         ]
         
         for field in allowed_fields:
-            if field in profile_data:
-                setattr(profile, field, profile_data[field])
+            if field in profile_data and hasattr(user_doc, field):
+                setattr(user_doc, field, profile_data[field])
         
-        profile.save()
-        
-        # Sync avatar_url to User.user_image if avatar_url is updated
+        # Special handling for avatar_url -> user_image
         if "avatar_url" in profile_data:
-            user_doc = frappe.get_doc("User", frappe.session.user)
             user_doc.user_image = profile_data["avatar_url"]
-            user_doc.save()
+        
+        user_doc.flags.ignore_permissions = True
+        user_doc.save()
         
         return {
             "status": "success",
             "message": _("Profile updated successfully"),
-            "profile": profile.as_dict()
+            "user": build_user_data_response(user_doc)
         }
         
     except Exception as e:
@@ -566,15 +529,8 @@ def delete_avatar():
         if frappe.session.user == "Guest":
             frappe.throw(_("Please login to delete avatar"))
         
-        # Get current avatar
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": frappe.session.user})
-        current_avatar = None
-        
-        if profile_name:
-            current_avatar = frappe.db.get_value("ERP User Profile", profile_name, "avatar_url")
-        
-        if not current_avatar:
-            current_avatar = frappe.db.get_value("User", frappe.session.user, "user_image")
+        user_doc = frappe.get_doc("User", frappe.session.user)
+        current_avatar = user_doc.user_image
         
         # Delete file if exists
         if current_avatar and current_avatar.startswith("/files/Avatar/"):
@@ -583,15 +539,9 @@ def delete_avatar():
             if os.path.exists(file_path):
                 os.remove(file_path)
         
-        # Update profile
-        if profile_name:
-            profile = frappe.get_doc("ERP User Profile", profile_name)
-            profile.avatar_url = ""
-            profile.save()
-        
         # Update User
-        user_doc = frappe.get_doc("User", frappe.session.user)
         user_doc.user_image = ""
+        user_doc.flags.ignore_permissions = True
         user_doc.save()
         
         return {
@@ -626,27 +576,26 @@ def upload_avatar():
             frappe.throw(_("Invalid file type. Allowed types: {0}").format(', '.join(allowed_extensions)))
         
         # Validate file size (max 5MB)
-        avatar_file.seek(0, 2)  # Move to end
+        avatar_file.seek(0, 2)
         file_size = avatar_file.tell()
-        avatar_file.seek(0)  # Reset to beginning
+        avatar_file.seek(0)
         
         max_size = 5 * 1024 * 1024  # 5MB
         if file_size > max_size:
             frappe.throw(_("File size too large. Maximum allowed: 5MB"))
         
-        # Create filename & ensure extension
+        # Create filename
         import uuid
         import os
         file_id = str(uuid.uuid4())
         filename = f"{file_id}.{file_extension or 'jpg'}"
         
         # Create Avatar directory if it doesn't exist
-        from frappe.utils.file_manager import get_file_path
         upload_dir = frappe.get_site_path("public", "files", "Avatar")
         if not os.path.exists(upload_dir):
             os.makedirs(upload_dir)
         
-        # Save file (read stream safely)
+        # Save file
         file_path = os.path.join(upload_dir, filename)
         avatar_file.stream.seek(0)
         with open(file_path, 'wb') as f:
@@ -655,13 +604,8 @@ def upload_avatar():
         # Create file URL
         avatar_url = f"/files/Avatar/{filename}"
         
-        # Update avatar via lightweight DB operations to avoid triggering heavy hooks
-        profile_name = frappe.db.get_value("ERP User Profile", {"user": frappe.session.user})
-        if profile_name:
-            frappe.db.set_value("ERP User Profile", profile_name, "avatar_url", avatar_url)
-        # Update User.user_image for compatibility (avoid full save to skip hooks)
+        # Update User.user_image
         frappe.db.set_value("User", frappe.session.user, "user_image", avatar_url)
-        # Ensure changes are flushed immediately
         frappe.db.commit()
         
         return {
@@ -671,10 +615,5 @@ def upload_avatar():
         }
         
     except Exception as e:
-        # Tránh dùng log_error (ghi DB) khi DB connection có vấn đề; log ra file thay thế
-        try:
-            frappe.logger("avatar_upload").exception(f"Upload avatar error: {str(e)}")
-        except Exception:
-            # Fallback cuối cùng
-            print("Upload avatar error:", str(e))
+        frappe.log_error(f"Upload avatar error: {str(e)}", "Authentication")
         frappe.throw(_("Error uploading avatar: {0}").format(str(e)))
