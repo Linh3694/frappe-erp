@@ -25,6 +25,19 @@ def get_current_user_full():
         # Get user roles
         user_roles = frappe.get_roles(user_email)
         
+        # Helper function to safely convert datetime to ISO format
+        def safe_datetime_to_iso(dt_value):
+            if not dt_value:
+                return None
+            try:
+                if hasattr(dt_value, 'isoformat'):
+                    return dt_value.isoformat()
+                else:
+                    # If it's already a string, return as-is
+                    return str(dt_value)
+            except:
+                return None
+
         # Extract all relevant fields
         user_data = {
             "email": user_doc.email,
@@ -48,12 +61,12 @@ def get_current_user_full():
             "enabled": user_doc.enabled,
             "user_type": user_doc.user_type,
             "roles": user_roles,
-            "creation": user_doc.creation.isoformat() if user_doc.creation else None,
-            "modified": user_doc.modified.isoformat() if user_doc.modified else None,
-            "last_login": user_doc.last_login.isoformat() if user_doc.last_login else None,
-            "last_active": user_doc.last_active.isoformat() if user_doc.last_active else None,
-            "login_after": user_doc.login_after.isoformat() if user_doc.login_after else None,
-            "login_before": user_doc.login_before.isoformat() if user_doc.login_before else None,
+            "creation": safe_datetime_to_iso(user_doc.creation),
+            "modified": safe_datetime_to_iso(user_doc.modified),
+            "last_login": safe_datetime_to_iso(user_doc.last_login),
+            "last_active": safe_datetime_to_iso(user_doc.last_active),
+            "login_after": safe_datetime_to_iso(user_doc.login_after),
+            "login_before": safe_datetime_to_iso(user_doc.login_before),
         }
         
         # Add employee info if exists
