@@ -232,7 +232,7 @@ has_permission = {
 
 # Request Events
 # ----------------
-# before_request = ["erp.utils.before_request"]
+before_request = ["erp.utils.auth_middleware.jwt_auth_middleware"]
 # after_request = ["erp.utils.after_request"]
 
 # Job Events
