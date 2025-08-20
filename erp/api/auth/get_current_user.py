@@ -25,84 +25,71 @@ def get_current_user_full():
         # Get user roles
         user_roles = frappe.get_roles(user_email)
         
-        # Helper function to safely convert datetime to ISO format
-        def safe_datetime_to_iso(dt_value):
-            if not dt_value:
-                return None
+        # Helper function to safely get field value
+        def safe_get_field(doc, fieldname, default=None):
             try:
-                if hasattr(dt_value, 'isoformat'):
-                    return dt_value.isoformat()
-                else:
-                    # If it's already a string, return as-is
-                    return str(dt_value)
+                value = getattr(doc, fieldname, default)
+                # Convert None to empty string for display fields
+                if value is None and fieldname in ['first_name', 'last_name', 'full_name']:
+                    return ""
+                return value
             except:
-                return None
+                return default
 
-        # Extract all relevant fields
+        # Extract essential fields safely
         user_data = {
-            "email": user_doc.email,
-            "name": user_doc.name,
-            "first_name": user_doc.first_name,
-            "last_name": user_doc.last_name,
-            "full_name": user_doc.full_name,
-            "username": user_doc.username,
-            "language": user_doc.language,
-            "time_zone": user_doc.time_zone,
-            "user_image": user_doc.user_image,
-            "avatar_url": user_doc.user_image,  # Alias for compatibility
-            "mobile_no": user_doc.mobile_no,
-            "phone": user_doc.phone,
-            "location": user_doc.location,
-            "bio": user_doc.bio,
-            "interest": user_doc.interest,
-            "banner_image": user_doc.banner_image,
-            "desk_theme": user_doc.desk_theme,
-            "mute_sounds": user_doc.mute_sounds,
-            "enabled": user_doc.enabled,
-            "user_type": user_doc.user_type,
+            # Core identification
+            "email": safe_get_field(user_doc, 'email', ''),
+            "name": safe_get_field(user_doc, 'name', ''),
+            
+            # Name fields
+            "first_name": safe_get_field(user_doc, 'first_name', ''),
+            "last_name": safe_get_field(user_doc, 'last_name', ''),
+            "full_name": safe_get_field(user_doc, 'full_name', ''),
+            "username": safe_get_field(user_doc, 'username', ''),
+            
+            # Profile fields
+            "user_image": safe_get_field(user_doc, 'user_image', ''),
+            "avatar_url": safe_get_field(user_doc, 'user_image', ''),  # Alias for compatibility
+            "mobile_no": safe_get_field(user_doc, 'mobile_no', ''),
+            "phone": safe_get_field(user_doc, 'phone', ''),
+            "location": safe_get_field(user_doc, 'location', ''),
+            "bio": safe_get_field(user_doc, 'bio', ''),
+            "language": safe_get_field(user_doc, 'language', 'vi'),
+            "time_zone": safe_get_field(user_doc, 'time_zone', 'Asia/Ho_Chi_Minh'),
+            
+            # Status fields
+            "enabled": safe_get_field(user_doc, 'enabled', 1),
+            "user_type": safe_get_field(user_doc, 'user_type', 'System User'),
+            
+            # Roles and permissions
             "roles": user_roles,
-            "creation": safe_datetime_to_iso(user_doc.creation),
-            "modified": safe_datetime_to_iso(user_doc.modified),
-            "last_login": safe_datetime_to_iso(user_doc.last_login),
-            "last_active": safe_datetime_to_iso(user_doc.last_active),
-            "login_after": safe_datetime_to_iso(user_doc.login_after),
-            "login_before": safe_datetime_to_iso(user_doc.login_before),
+            "active": True,  # Default to active if enabled
+            
+            # Provider info (for compatibility)
+            "provider": "frappe",
         }
         
-        # Add employee info if exists
+        # Add employee info if exists (optional)
         try:
-            employee = frappe.db.get_value(
+            employee_data = frappe.db.get_value(
                 "Employee", 
                 {"user_id": user_email}, 
-                ["employee_name", "designation", "department", "company", "employee", "cell_number", "personal_email"]
+                ["employee_name", "designation", "department", "company", "name"]
             )
             
-            if employee:
+            if employee_data and len(employee_data) >= 4:
                 user_data.update({
-                    "employee_name": employee[0],
-                    "designation": employee[1], 
-                    "job_title": employee[1],  # Alias
-                    "department": employee[2],
-                    "company": employee[3],
-                    "employee_code": employee[4],
-                    "employee_id": employee[4],  # Alias
-                    "cell_number": employee[5],
-                    "personal_email": employee[6]
+                    "employee_name": employee_data[0] or "",
+                    "designation": employee_data[1] or "", 
+                    "job_title": employee_data[1] or "",  # Alias
+                    "department": employee_data[2] or "",
+                    "company": employee_data[3] or "",
+                    "employee_code": employee_data[4] or "",
+                    "employee_id": employee_data[4] or "",  # Alias
                 })
         except Exception as e:
             frappe.logger().debug(f"No employee record found for {user_email}: {str(e)}")
-        
-        # Add custom fields if they exist
-        custom_fields = {}
-        for field in user_doc.meta.fields:
-            if field.fieldname.startswith('custom_'):
-                try:
-                    custom_fields[field.fieldname] = getattr(user_doc, field.fieldname)
-                except:
-                    pass
-        
-        if custom_fields:
-            user_data["custom_fields"] = custom_fields
         
         # Add campus roles analysis
         campus_roles = [role for role in user_roles if role.startswith("Campus ")]
