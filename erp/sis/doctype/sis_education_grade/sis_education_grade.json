@@ -20,7 +20,9 @@
   "campus_id",
   "title_vn",
   "title_en",
-  "education_stage_id"
+  "grade_code",
+  "education_stage_id",
+  "sort_order"
  ],
  "fields": [
   {
@@ -52,11 +54,27 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "grade_code",
+   "fieldtype": "Data",
+   "label": "Grade Code",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
    "fieldname": "education_stage_id",
    "fieldtype": "Link",
    "label": "Education Stage",
    "options": "SIS Education Stage",
-   "reqd": 1
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order",
+   "reqd": 1,
+   "default": 0
   }
  ],
  "index_web_pages_for_search": 1,
