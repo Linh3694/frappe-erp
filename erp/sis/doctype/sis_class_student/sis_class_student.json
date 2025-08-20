@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
+  "campus_id",
   "class_id",
   "student_id",
   "school_year_id",
@@ -27,6 +28,14 @@
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
    "label": "Basic Information"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "class_id",

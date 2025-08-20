@@ -3,13 +3,13 @@
  "allow_copy": 0,
  "allow_events_in_timeline": 0,
  "allow_guest_to_view": 0,
- "allow_import": 1,
- "allow_rename": 1,
- "autoname": "format:SIS-EVENT-TEACHER-{#####}",
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:USER-CAMPUS-{user}",
  "beta": 0,
- "creation": "2024-08-20 09:00:00.000000",
+ "creation": "2024-08-20 10:00:00.000000",
  "custom": 0,
- "description": "SIS Event Teacher Management",
+ "description": "User Campus Preference Management",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -17,9 +17,9 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
-  "campus_id",
-  "event_id",
-  "teacher_id"
+  "user",
+  "current_campus",
+  "default_campus"
  ],
  "fields": [
   {
@@ -28,37 +28,36 @@
    "label": "Basic Information"
   },
   {
-   "fieldname": "campus_id",
+   "fieldname": "user",
    "fieldtype": "Link",
-   "label": "Campus",
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "current_campus",
+   "fieldtype": "Link",
+   "label": "Current Campus",
    "options": "SIS Campus",
-   "reqd": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "event_id",
+   "fieldname": "default_campus",
    "fieldtype": "Link",
-   "label": "Event",
-   "options": "SIS Event",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "teacher_id",
-   "fieldtype": "Link",
-   "label": "Teacher",
-   "options": "SIS Teacher",
-   "reqd": 1,
+   "label": "Default Campus",
+   "options": "SIS Campus",
    "in_list_view": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-08-20 09:00:00.000000",
+ "modified": "2024-08-20 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
- "name": "SIS Event Teacher",
+ "name": "SIS User Campus Preference",
  "owner": "Administrator",
  "permissions": [
   {
@@ -72,11 +71,18 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "All",
+   "if_owner": 1,
+   "write": 1
   }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "event_id",
+ "title_field": "user",
  "track_changes": 1
 }

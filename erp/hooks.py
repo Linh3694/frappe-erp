@@ -117,13 +117,53 @@ app_license = "mit"
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+permission_query_conditions = {
+	"SIS School Year": "erp.sis.utils.permission_query.sis_school_year_query",
+	"SIS Education Stage": "erp.sis.utils.permission_query.sis_education_stage_query", 
+	"SIS Education Grade": "erp.sis.utils.permission_query.sis_education_grade_query",
+	"SIS Academic Program": "erp.sis.utils.permission_query.sis_academic_program_query",
+	"SIS Timetable Subject": "erp.sis.utils.permission_query.sis_timetable_subject_query",
+	"SIS Curriculum": "erp.sis.utils.permission_query.sis_curriculum_query",
+	"SIS Actual Subject": "erp.sis.utils.permission_query.sis_actual_subject_query",
+	"SIS Subject": "erp.sis.utils.permission_query.sis_subject_query",
+	"SIS Timetable Column": "erp.sis.utils.permission_query.sis_timetable_column_query",
+	"SIS Calendar": "erp.sis.utils.permission_query.sis_calendar_query",
+	"SIS Class": "erp.sis.utils.permission_query.sis_class_query",
+	"SIS Teacher": "erp.sis.utils.permission_query.sis_teacher_query",
+	"SIS Subject Assignment": "erp.sis.utils.permission_query.sis_subject_assignment_query",
+	"SIS Timetable": "erp.sis.utils.permission_query.sis_timetable_query",
+	"SIS Timetable Instance": "erp.sis.utils.permission_query.sis_timetable_instance_query",
+	"SIS Event": "erp.sis.utils.permission_query.sis_event_query",
+	"SIS Event Student": "erp.sis.utils.permission_query.sis_event_student_query",
+	"SIS Event Teacher": "erp.sis.utils.permission_query.sis_event_teacher_query",
+	"SIS Student Timetable": "erp.sis.utils.permission_query.sis_student_timetable_query",
+	"SIS Class Student": "erp.sis.utils.permission_query.sis_class_student_query",
+	"SIS Photo": "erp.sis.utils.permission_query.sis_photo_query"
+}
+
+has_permission = {
+	"SIS School Year": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Education Stage": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Education Grade": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Academic Program": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Timetable Subject": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Curriculum": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Actual Subject": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Subject": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Timetable Column": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Calendar": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Class": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Teacher": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Subject Assignment": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Timetable": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Timetable Instance": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Event": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Event Student": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Event Teacher": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Student Timetable": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Class Student": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Photo": "erp.sis.utils.campus_permissions.has_campus_permission"
+}
 
 # DocType Class
 # ---------------
