@@ -100,8 +100,8 @@ def create_education_stage():
         # Get data from request
         data = frappe.local.form_dict
         
-        # Validate required fields
-        required_fields = ["stage_name_vn", "stage_name_en", "stage_code"]
+        # Validate required fields - updated field names
+        required_fields = ["title_vn", "title_en", "short_title"]
         for field in required_fields:
             if not data.get(field):
                 return {
@@ -109,20 +109,22 @@ def create_education_stage():
                     "message": f"Field '{field}' is required"
                 }
         
-        # Get current user's campus
-        user = frappe.session.user
-        campus_name = frappe.db.get_value("User", user, "campus")
+        # Get current user's campus from campus_id if provided, else from user profile
+        campus_id = data.get("campus_id")
+        if not campus_id:
+            user = frappe.session.user
+            campus_id = frappe.db.get_value("User", user, "campus")
         
-        if not campus_name:
+        if not campus_id:
             return {
                 "success": False,
-                "message": "User campus not found"
+                "message": "Campus not found"
             }
         
-        # Check if stage code already exists for this campus
+        # Check if short_title already exists for this campus
         existing_stage = frappe.db.exists("SIS Education Stage", {
-            "stage_code": data.get("stage_code"),
-            "campus": campus_name
+            "short_title": data.get("short_title"),
+            "campus_id": campus_id
         })
         
         if existing_stage:
@@ -134,11 +136,10 @@ def create_education_stage():
         # Create new education stage
         stage_doc = frappe.new_doc("SIS Education Stage")
         stage_doc.update({
-            "stage_name_vn": data.get("stage_name_vn"),
-            "stage_name_en": data.get("stage_name_en"),
-            "stage_code": data.get("stage_code"),
-            "campus": campus_name,
-            "is_active": 1
+            "title_vn": data.get("title_vn"),
+            "title_en": data.get("title_en"),
+            "short_title": data.get("short_title"),
+            "campus_id": campus_id
         })
         
         stage_doc.insert(ignore_permissions=True)
