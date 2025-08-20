@@ -5,15 +5,20 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
+from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 
 
 @frappe.whitelist(allow_guest=False)
 def get_all_education_stages():
     """Get all education stages with basic information - SIMPLE VERSION"""
     try:
-        # Get current user's campus information
-        user = frappe.session.user
-        campus_id = frappe.db.get_value("User", user, "campus") or "campus-1"
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            # Fallback to default if no campus found
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         filters = {"campus_id": campus_id}
             
@@ -104,11 +109,14 @@ def create_education_stage():
             if not data.get(field):
                 frappe.throw(_(f"Field '{field}' is required"))
         
-        # Get campus from user or form data
+        # Get campus from user roles or form data
         campus_id = data.get("campus_id")
         if not campus_id:
-            user = frappe.session.user
-            campus_id = frappe.db.get_value("User", user, "campus") or "campus-1"
+            campus_id = get_current_campus_from_context()
+            if not campus_id:
+                # Fallback to default if no campus found
+                campus_id = "campus-1"
+                frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         frappe.logger().info(f"Using campus_id: {campus_id}")
         
@@ -269,14 +277,13 @@ def check_short_title_availability(short_title, stage_id=None):
                 "message": "Short title is required"
             }
         
-        # Get current user's campus
-        user = frappe.session.user
-        campus_id = frappe.db.get_value("User", user, "campus")
+        # Get current user's campus from roles
+        campus_id = get_current_campus_from_context()
         
         if not campus_id:
             return {
                 "success": False,
-                "message": "User campus not found"
+                "message": "User campus not found in roles"
             }
         
         filters = {
