@@ -98,10 +98,27 @@ def get_education_stage_by_id(stage_id):
 def create_education_stage():
     """Create a new education stage - SIMPLE VERSION"""
     try:
-        # Get data from request
-        data = frappe.local.form_dict
+        # Get data from request - support both JSON and form data
+        data = {}
         
-        frappe.logger().info(f"Received data for create_education_stage: {data}")
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_education_stage: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_education_stage: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_education_stage: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_education_stage: {data}")
         
         # Validate required fields
         required_fields = ["title_vn", "title_en", "short_title"]
