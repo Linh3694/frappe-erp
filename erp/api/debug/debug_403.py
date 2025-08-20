@@ -6,7 +6,7 @@ from frappe import _
 import json
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def debug_403_error():
     """Debug lỗi 403 Education Stage API"""
     result = {
@@ -108,7 +108,7 @@ def debug_403_error():
         }
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def quick_perm_check():
     """Quick permission check"""
     try:

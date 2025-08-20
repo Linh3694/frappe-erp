@@ -54,7 +54,7 @@ def get_all_education_stages():
         }
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def get_education_stage_by_id(stage_id):
     """Get education stage details by ID"""
     try:
@@ -157,7 +157,7 @@ def create_education_stage():
         }
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def update_education_stage(stage_id):
     """Update an existing education stage"""
     try:
@@ -223,7 +223,7 @@ def update_education_stage(stage_id):
         }
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def delete_education_stage(stage_id):
     """Delete an education stage"""
     try:
@@ -267,7 +267,7 @@ def delete_education_stage(stage_id):
         }
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def check_short_title_availability(short_title, stage_id=None):
     """Check if a short title is available for the current campus"""
     try:
