@@ -5,11 +5,11 @@
  "allow_guest_to_view": 0,
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:BUILDING-{#####}",
+ "autoname": "format:SIS-CLASS-STUDENT-{#####}",
  "beta": 0,
- "creation": "2024-12-19 16:00:00.000000",
+ "creation": "2024-08-20 09:00:00.000000",
  "custom": 0,
- "description": "Administrative Building Management",
+ "description": "SIS Class Student Management",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -17,10 +17,10 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
-  "title_vn",
-  "title_en",
-  "short_title",
-  "campus_id"
+  "class_id",
+  "student_id",
+  "school_year_id",
+  "class_type"
  ],
  "fields": [
   {
@@ -29,42 +29,42 @@
    "label": "Basic Information"
   },
   {
-   "fieldname": "title_vn",
-   "fieldtype": "Data",
-   "label": "Building Name (VN)",
-   "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "title_en",
-   "fieldtype": "Data",
-   "label": "Building Name (EN)",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "short_title",
-   "fieldtype": "Data",
-   "label": "Short Title",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "campus_id",
+   "fieldname": "class_id",
    "fieldtype": "Link",
-   "label": "Campus",
-   "options": "SIS Campus",
+   "label": "Class",
+   "options": "SIS Class",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "School Year",
+   "options": "SIS School Year",
    "reqd": 1
+  },
+  {
+   "fieldname": "class_type",
+   "fieldtype": "Link",
+   "label": "Class Type",
+   "options": "SIS Class"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-12-19 16:00:00.000000",
+ "modified": "2024-08-20 09:00:00.000000",
  "modified_by": "Administrator",
- "module": "Administrative",
- "name": "ERP Administrative Building",
+ "module": "Sis",
+ "name": "SIS Class Student",
  "owner": "Administrator",
  "permissions": [
   {
@@ -83,6 +83,6 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "title_vn",
+ "title_field": "class_id",
  "track_changes": 1
-} 
+}

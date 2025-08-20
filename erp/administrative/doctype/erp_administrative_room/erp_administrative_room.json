@@ -17,19 +17,13 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
-  "room_name",
-  "room_name_en",
-  "room_type",
+  "title_vn",
+  "title_en",
+  "short_title",
   "capacity",
   "column_break_1",
-  "periods_per_day",
-  "is_homeroom",
-  "building_id",
-  "section_break_2",
-  "description",
-  "section_break_3",
-  "created_at",
-  "updated_at"
+  "room_type",
+  "building_id"
  ],
  "fields": [
   {
@@ -38,7 +32,7 @@
    "label": "Basic Information"
   },
   {
-   "fieldname": "room_name",
+   "fieldname": "title_vn",
    "fieldtype": "Data",
    "label": "Room Name (VN)",
    "reqd": 1,
@@ -46,17 +40,18 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "room_name_en",
+   "fieldname": "title_en",
    "fieldtype": "Data",
    "label": "Room Name (EN)",
+   "reqd": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "room_type",
-   "fieldtype": "Select",
-   "label": "Room Type",
-   "options": "classroom\nlab\nlibrary\nother\noffice",
-   "reqd": 1
+   "fieldname": "short_title",
+   "fieldtype": "Data",
+   "label": "Short Title",
+   "reqd": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "capacity",
@@ -68,49 +63,18 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "periods_per_day",
-   "fieldtype": "Int",
-   "label": "Periods Per Day",
-   "default": "10"
-  },
-  {
-   "fieldname": "is_homeroom",
-   "fieldtype": "Check",
-   "label": "Is Homeroom",
-   "default": "0"
+   "fieldname": "room_type",
+   "fieldtype": "Select",
+   "label": "Room Type",
+   "options": "classroom\nfunction",
+   "reqd": 1
   },
   {
    "fieldname": "building_id",
    "fieldtype": "Link",
    "label": "Building",
-   "options": "ERP Administrative Building"
-  },
-  {
-   "fieldname": "section_break_2",
-   "fieldtype": "Section Break",
-   "label": "Description"
-  },
-  {
-   "fieldname": "description",
-   "fieldtype": "Text",
-   "label": "Description"
-  },
-  {
-   "fieldname": "section_break_3",
-   "fieldtype": "Section Break",
-   "label": "Timestamps"
-  },
-  {
-   "fieldname": "created_at",
-   "fieldtype": "Datetime",
-   "label": "Created At",
-   "read_only": 1
-  },
-  {
-   "fieldname": "updated_at",
-   "fieldtype": "Datetime",
-   "label": "Updated At",
-   "read_only": 1
+   "options": "ERP Administrative Building",
+   "reqd": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -138,6 +102,6 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "room_name",
+ "title_field": "title_vn",
  "track_changes": 1
 }

@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-TIMETABLE-COLUMN-{#####}",
+ "beta": 0,
+ "creation": "2024-08-20 09:00:00.000000",
+ "custom": 0,
+ "description": "SIS Timetable Column Management",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "education_stage_id",
+  "period_priority",
+  "period_type",
+  "period_name",
+  "start_time",
+  "end_time"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "education_stage_id",
+   "fieldtype": "Link",
+   "label": "Education Stage",
+   "options": "SIS Education Stage",
+   "reqd": 1
+  },
+  {
+   "fieldname": "period_priority",
+   "fieldtype": "Int",
+   "label": "Period Priority",
+   "reqd": 1
+  },
+  {
+   "fieldname": "period_type",
+   "fieldtype": "Select",
+   "label": "Period Type",
+   "options": "study\\nnon-study",
+   "reqd": 1
+  },
+  {
+   "fieldname": "period_name",
+   "fieldtype": "Data",
+   "label": "Period Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "start_time",
+   "fieldtype": "Time",
+   "label": "Start Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "end_time",
+   "fieldtype": "Time",
+   "label": "End Time",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-08-20 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Timetable Column",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "period_name",
+ "track_changes": 1
+}

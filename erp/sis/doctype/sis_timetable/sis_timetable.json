@@ -1,0 +1,117 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-TIMETABLE-{#####}",
+ "beta": 0,
+ "creation": "2024-08-20 09:00:00.000000",
+ "custom": 0,
+ "description": "SIS Timetable Management",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "class_id",
+  "subject_assignment_id",
+  "timetable_column_id",
+  "subject_id",
+  "day_of_week",
+  "start_date",
+  "end_date",
+  "calendar_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "label": "Class",
+   "options": "SIS Class",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "subject_assignment_id",
+   "fieldtype": "Link",
+   "label": "Subject Assignment",
+   "options": "SIS Subject Assignment",
+   "reqd": 1
+  },
+  {
+   "fieldname": "timetable_column_id",
+   "fieldtype": "Link",
+   "label": "Timetable Column",
+   "options": "SIS Timetable Column",
+   "reqd": 1
+  },
+  {
+   "fieldname": "subject_id",
+   "fieldtype": "Link",
+   "label": "Subject",
+   "options": "SIS Subject",
+   "reqd": 1
+  },
+  {
+   "fieldname": "day_of_week",
+   "fieldtype": "Select",
+   "label": "Day of Week",
+   "options": "Monday\\nTuesday\\nWednesday\\nThursday\\nFriday\\nSaturday\\nSunday",
+   "reqd": 1
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Start Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "End Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "calendar_id",
+   "fieldtype": "Link",
+   "label": "Calendar",
+   "options": "SIS Calendar"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-08-20 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Timetable",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "class_id",
+ "track_changes": 1
+}

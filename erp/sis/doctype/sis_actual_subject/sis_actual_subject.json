@@ -5,11 +5,11 @@
  "allow_guest_to_view": 0,
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:BUILDING-{#####}",
+ "autoname": "format:SIS_ACTUAL_SUBJECT-{#####}",
  "beta": 0,
- "creation": "2024-12-19 16:00:00.000000",
+ "creation": "2024-08-20 09:00:00.000000",
  "custom": 0,
- "description": "Administrative Building Management",
+ "description": "SIS Actual Subject Management",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -19,8 +19,7 @@
   "basic_information",
   "title_vn",
   "title_en",
-  "short_title",
-  "campus_id"
+  "curriculum_id"
  ],
  "fields": [
   {
@@ -31,7 +30,7 @@
   {
    "fieldname": "title_vn",
    "fieldtype": "Data",
-   "label": "Building Name (VN)",
+   "label": "Actual Subject Name (VN)",
    "reqd": 1,
    "unique": 1,
    "in_list_view": 1
@@ -39,32 +38,25 @@
   {
    "fieldname": "title_en",
    "fieldtype": "Data",
-   "label": "Building Name (EN)",
+   "label": "Actual Subject Name (EN)",
    "reqd": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "short_title",
-   "fieldtype": "Data",
-   "label": "Short Title",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "campus_id",
+   "fieldname": "curriculum_id",
    "fieldtype": "Link",
-   "label": "Campus",
-   "options": "SIS Campus",
+   "label": "Curriculum",
+   "options": "SIS Curriculum",
    "reqd": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-12-19 16:00:00.000000",
+ "modified": "2024-08-20 09:00:00.000000",
  "modified_by": "Administrator",
- "module": "Administrative",
- "name": "ERP Administrative Building",
+ "module": "Sis",
+ "name": "SIS Actual Subject",
  "owner": "Administrator",
  "permissions": [
   {
@@ -85,4 +77,4 @@
  "states": [],
  "title_field": "title_vn",
  "track_changes": 1
-} 
+}

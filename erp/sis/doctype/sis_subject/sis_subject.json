@@ -5,11 +5,11 @@
  "allow_guest_to_view": 0,
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:BUILDING-{#####}",
+ "autoname": "format:SIS-SUBJECT-{#####}",
  "beta": 0,
- "creation": "2024-12-19 16:00:00.000000",
+ "creation": "2024-08-20 09:00:00.000000",
  "custom": 0,
- "description": "Administrative Building Management",
+ "description": "SIS Subject Management",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -17,10 +17,11 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
-  "title_vn",
-  "title_en",
-  "short_title",
-  "campus_id"
+  "title",
+  "education_stage",
+  "timetable_subject_id",
+  "actual_subject_id",
+  "room_id"
  ],
  "fields": [
   {
@@ -29,42 +30,46 @@
    "label": "Basic Information"
   },
   {
-   "fieldname": "title_vn",
+   "fieldname": "title",
    "fieldtype": "Data",
-   "label": "Building Name (VN)",
+   "label": "Subject Title",
    "reqd": 1,
    "unique": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "title_en",
-   "fieldtype": "Data",
-   "label": "Building Name (EN)",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "short_title",
-   "fieldtype": "Data",
-   "label": "Short Title",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "campus_id",
+   "fieldname": "education_stage",
    "fieldtype": "Link",
-   "label": "Campus",
-   "options": "SIS Campus",
+   "label": "Education Stage",
+   "options": "SIS Education Stage",
    "reqd": 1
+  },
+  {
+   "fieldname": "timetable_subject_id",
+   "fieldtype": "Link",
+   "label": "Timetable Subject",
+   "options": "SIS Timetable Subject"
+  },
+  {
+   "fieldname": "actual_subject_id",
+   "fieldtype": "Link",
+   "label": "Actual Subject",
+   "options": "SIS Actual Subject"
+  },
+  {
+   "fieldname": "room_id",
+   "fieldtype": "Link",
+   "label": "Room",
+   "options": "ERP Administrative Room"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-12-19 16:00:00.000000",
+ "modified": "2024-08-20 09:00:00.000000",
  "modified_by": "Administrator",
- "module": "Administrative",
- "name": "ERP Administrative Building",
+ "module": "Sis",
+ "name": "SIS Subject",
  "owner": "Administrator",
  "permissions": [
   {
@@ -83,6 +88,6 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "title_vn",
+ "title_field": "title",
  "track_changes": 1
-} 
+}

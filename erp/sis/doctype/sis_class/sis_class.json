@@ -1,0 +1,116 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-CLASS-{#####}",
+ "beta": 0,
+ "creation": "2024-08-20 09:00:00.000000",
+ "custom": 0,
+ "description": "SIS Class Management",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "title",
+  "school_year_id",
+  "education_grade",
+  "academic_program",
+  "homeroom_teacher",
+  "vice_homeroom_teacher",
+  "room",
+  "academic_level"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Class Title",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "School Year",
+   "options": "SIS School Year",
+   "reqd": 1
+  },
+  {
+   "fieldname": "education_grade",
+   "fieldtype": "Link",
+   "label": "Education Grade",
+   "options": "SIS Education Grade",
+   "reqd": 1
+  },
+  {
+   "fieldname": "academic_program",
+   "fieldtype": "Link",
+   "label": "Academic Program",
+   "options": "SIS Academic Program",
+   "reqd": 1
+  },
+  {
+   "fieldname": "homeroom_teacher",
+   "fieldtype": "Link",
+   "label": "Homeroom Teacher",
+   "options": "SIS Teacher"
+  },
+  {
+   "fieldname": "vice_homeroom_teacher",
+   "fieldtype": "Link",
+   "label": "Vice Homeroom Teacher",
+   "options": "SIS Teacher"
+  },
+  {
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "label": "Room",
+   "options": "ERP Administrative Room"
+  },
+  {
+   "fieldname": "academic_level",
+   "fieldtype": "Select",
+   "label": "Academic Level",
+   "options": "Level 1\\nLevel 2\\nLevel 3\\nLevel 4"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-08-20 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Class",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}
