@@ -171,11 +171,11 @@ def update_education_stage(stage_id):
                 "message": "Education stage not found"
             }
         
-        # Check if stage code already exists for this campus (excluding current stage)
-        if data.get("stage_code") and data.get("stage_code") != stage_doc.stage_code:
+        # Check if short_title already exists for this campus (excluding current stage)
+        if data.get("short_title") and data.get("short_title") != stage_doc.short_title:
             existing_stage = frappe.db.exists("SIS Education Stage", {
-                "stage_code": data.get("stage_code"),
-                "campus": stage_doc.campus,
+                "short_title": data.get("short_title"),
+                "campus_id": stage_doc.campus_id,
                 "name": ["!=", stage_id]
             })
             
@@ -186,7 +186,7 @@ def update_education_stage(stage_id):
                 }
         
         # Update fields
-        updatable_fields = ["stage_name_vn", "stage_name_en", "stage_code", "is_active"]
+        updatable_fields = ["title_vn", "title_en", "short_title"]
         for field in updatable_fields:
             if field in data:
                 setattr(stage_doc, field, data.get(field))
@@ -260,28 +260,28 @@ def delete_education_stage(stage_id):
 
 
 @frappe.whitelist()
-def check_stage_code_availability(stage_code, stage_id=None):
-    """Check if a stage code is available for the current campus"""
+def check_short_title_availability(short_title, stage_id=None):
+    """Check if a short title is available for the current campus"""
     try:
-        if not stage_code:
+        if not short_title:
             return {
                 "success": False,
-                "message": "Stage code is required"
+                "message": "Short title is required"
             }
         
         # Get current user's campus
         user = frappe.session.user
-        campus_name = frappe.db.get_value("User", user, "campus")
+        campus_id = frappe.db.get_value("User", user, "campus")
         
-        if not campus_name:
+        if not campus_id:
             return {
                 "success": False,
                 "message": "User campus not found"
             }
         
         filters = {
-            "stage_code": stage_code,
-            "campus": campus_name
+            "short_title": short_title,
+            "campus_id": campus_id
         }
         
         # Exclude current stage if updating
@@ -294,15 +294,15 @@ def check_stage_code_availability(stage_code, stage_id=None):
             "success": True,
             "data": {
                 "is_available": not bool(existing_stage),
-                "stage_code": stage_code
+                "short_title": short_title
             },
-            "message": "Stage code availability checked"
+            "message": "Short title availability checked"
         }
         
     except Exception as e:
-        frappe.log_error(f"Error checking stage code availability: {str(e)}")
+        frappe.log_error(f"Error checking short title availability: {str(e)}")
         return {
             "success": False,
-            "message": "Error checking stage code availability",
+            "message": "Error checking short title availability",
             "error": str(e)
         }
