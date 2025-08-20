@@ -7,7 +7,7 @@ from frappe.utils import nowdate, get_datetime
 import json
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def get_all_education_stages():
     """Get all education stages with basic information - SIMPLE VERSION"""
     try:
@@ -89,7 +89,7 @@ def get_education_stage_by_id(stage_id):
         }
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def create_education_stage():
     """Create a new education stage - SIMPLE VERSION"""
     try:
