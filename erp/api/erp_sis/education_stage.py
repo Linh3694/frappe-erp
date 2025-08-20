@@ -9,38 +9,33 @@ import json
 
 @frappe.whitelist()
 def get_all_education_stages():
-    """Get all education stages with basic information"""
+    """Get all education stages with basic information - SIMPLE VERSION"""
     try:
         # Get current user's campus information
         user = frappe.session.user
-        campus_name = frappe.db.get_value("User", user, "campus")
+        campus_id = frappe.db.get_value("User", user, "campus") or "campus-1"
         
-        filters = {}
-        if campus_name:
-            filters["campus"] = campus_name
+        filters = {"campus_id": campus_id}
             
         education_stages = frappe.get_all(
             "SIS Education Stage",
             fields=[
                 "name",
-                "stage_name_vn",
-                "stage_name_en", 
-                "stage_code",
-                "campus",
-                "is_active",
+                "title_vn",
+                "title_en", 
+                "short_title",
+                "campus_id",
                 "creation",
                 "modified"
             ],
             filters=filters,
-            order_by="stage_name_vn asc"
+            order_by="title_vn asc"
         )
         
         return {
             "success": True,
-            "data": {
-                "education_stages": education_stages,
-                "total_count": len(education_stages)
-            },
+            "data": education_stages,
+            "total_count": len(education_stages),
             "message": "Education stages fetched successfully"
         }
         
@@ -48,7 +43,8 @@ def get_all_education_stages():
         frappe.log_error(f"Error fetching education stages: {str(e)}")
         return {
             "success": False,
-            "message": "Error fetching education stages",
+            "data": [],
+            "message": f"Error fetching education stages: {str(e)}",
             "error": str(e)
         }
 
@@ -95,31 +91,26 @@ def get_education_stage_by_id(stage_id):
 
 @frappe.whitelist()
 def create_education_stage():
-    """Create a new education stage"""
+    """Create a new education stage - SIMPLE VERSION"""
     try:
         # Get data from request
         data = frappe.local.form_dict
         
-        # Validate required fields - updated field names
+        frappe.logger().info(f"Received data for create_education_stage: {data}")
+        
+        # Validate required fields
         required_fields = ["title_vn", "title_en", "short_title"]
         for field in required_fields:
             if not data.get(field):
-                return {
-                    "success": False,
-                    "message": f"Field '{field}' is required"
-                }
+                frappe.throw(_(f"Field '{field}' is required"))
         
-        # Get current user's campus from campus_id if provided, else from user profile
+        # Get campus from user or form data
         campus_id = data.get("campus_id")
         if not campus_id:
             user = frappe.session.user
-            campus_id = frappe.db.get_value("User", user, "campus")
+            campus_id = frappe.db.get_value("User", user, "campus") or "campus-1"
         
-        if not campus_id:
-            return {
-                "success": False,
-                "message": "Campus not found"
-            }
+        frappe.logger().info(f"Using campus_id: {campus_id}")
         
         # Check if short_title already exists for this campus
         existing_stage = frappe.db.exists("SIS Education Stage", {
@@ -128,14 +119,11 @@ def create_education_stage():
         })
         
         if existing_stage:
-            return {
-                "success": False,
-                "message": "Ký hiệu đã tồn tại cho trường học này"
-            }
+            frappe.throw(_("Ký hiệu đã tồn tại cho trường học này"))
         
         # Create new education stage
-        stage_doc = frappe.new_doc("SIS Education Stage")
-        stage_doc.update({
+        stage_doc = frappe.get_doc({
+            "doctype": "SIS Education Stage",
             "title_vn": data.get("title_vn"),
             "title_en": data.get("title_en"),
             "short_title": data.get("short_title"),
@@ -144,19 +132,19 @@ def create_education_stage():
         
         stage_doc.insert(ignore_permissions=True)
         
+        frappe.logger().info(f"Created education stage: {stage_doc.name}")
+        
         return {
             "success": True,
-            "data": {
-                "education_stage": stage_doc.as_dict()
-            },
+            "data": stage_doc.as_dict(),
             "message": "Education stage created successfully"
         }
         
     except Exception as e:
-        frappe.log_error(f"Error creating education stage: {str(e)}")
+        frappe.logger().error(f"Error creating education stage: {str(e)}")
         return {
             "success": False,
-            "message": "Error creating education stage",
+            "message": f"Error creating education stage: {str(e)}",
             "error": str(e)
         }
 
