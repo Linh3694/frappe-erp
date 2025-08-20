@@ -6,12 +6,15 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.jwt_auth import jwt_auth_middleware
 
 
 @frappe.whitelist(allow_guest=False)
 def get_all_education_stages():
     """Get all education stages with basic information - SIMPLE VERSION"""
     try:
+        # Try JWT authentication first
+        jwt_auth_middleware()
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
         
@@ -98,6 +101,8 @@ def get_education_stage_by_id(stage_id):
 def create_education_stage():
     """Create a new education stage - SIMPLE VERSION"""
     try:
+        # Try JWT authentication first
+        jwt_auth_middleware()
         # Get data from request
         data = frappe.local.form_dict
         
