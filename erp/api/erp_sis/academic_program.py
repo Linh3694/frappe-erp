@@ -107,16 +107,39 @@ def get_academic_program_by_id(program_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_academic_program(title_vn, title_en, short_title):
+def create_academic_program():
     """Create a new academic program - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_academic_program: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_academic_program: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_academic_program: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_academic_program: {data}")
+        
+        # Extract values from data
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en")
+        short_title = data.get("short_title")
+        
         # Input validation
         if not title_vn or not short_title:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Title VN and short title are required"
-            }
+            frappe.throw(_("Title VN and short title are required"))
         
         # Get campus from user context - simplified
         try:
@@ -153,11 +176,7 @@ def create_academic_program(title_vn, title_en, short_title):
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Academic program with title '{title_vn}' already exists"
-            }
+            frappe.throw(_(f"Academic program with title '{title_vn}' already exists"))
             
         # Check if short title already exists for this campus
         existing_code = frappe.db.exists(
@@ -169,11 +188,7 @@ def create_academic_program(title_vn, title_en, short_title):
         )
         
         if existing_code:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Academic program with short title '{short_title}' already exists"
-            }
+            frappe.throw(_(f"Academic program with short title '{short_title}' already exists"))
         
         # Create new academic program - with detailed debugging
         frappe.logger().info(f"Creating SIS Academic Program with data: title_vn={title_vn}, title_en={title_en}, short_title={short_title}, campus_id={campus_id}")
@@ -199,26 +214,19 @@ def create_academic_program(title_vn, title_en, short_title):
             frappe.logger().error(f"Error creating/inserting academic program doc: {str(doc_error)}")
             raise doc_error
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Academic program created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": academic_program_doc.name,
-                "title_vn": academic_program_doc.title_vn,
-                "title_en": academic_program_doc.title_en,
-                "short_title": academic_program_doc.short_title,
-                "campus_id": academic_program_doc.campus_id
-            },
-            "message": "Academic program created successfully"
+            "name": academic_program_doc.name,
+            "title_vn": academic_program_doc.title_vn,
+            "title_en": academic_program_doc.title_en,
+            "short_title": academic_program_doc.short_title,
+            "campus_id": academic_program_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating academic program: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating academic program: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating academic program: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)
