@@ -167,19 +167,31 @@ def create_school_year(title_vn, title_en, start_date, end_date, is_enable=1):
                 "message": f"School year with title '{title_vn}' already exists"
             }
         
-        # Create new school year
-        school_year_doc = frappe.get_doc({
-            "doctype": "SIS School Year",
-            "title_vn": title_vn,
-            "title_en": title_en,
-            "start_date": start_date,
-            "end_date": end_date,
-            "is_enable": int(is_enable),
-            "campus_id": campus_id
-        })
+        # Create new school year - with detailed debugging
+        frappe.logger().info(f"Creating SIS School Year with data: title_vn={title_vn}, title_en={title_en}, start_date={start_date}, end_date={end_date}, is_enable={is_enable}, campus_id={campus_id}")
         
-        school_year_doc.insert()
-        frappe.db.commit()
+        try:
+            school_year_doc = frappe.get_doc({
+                "doctype": "SIS School Year",
+                "title_vn": title_vn,
+                "title_en": title_en or "",  # Provide default empty string
+                "start_date": start_date,
+                "end_date": end_date,
+                "is_enable": int(is_enable),
+                "campus_id": campus_id
+            })
+            
+            frappe.logger().info(f"School year doc created: {school_year_doc}")
+            
+            school_year_doc.insert()
+            frappe.logger().info("School year doc inserted successfully")
+            
+            frappe.db.commit()
+            frappe.logger().info("Database committed successfully")
+            
+        except Exception as doc_error:
+            frappe.logger().error(f"Error creating/inserting school year doc: {str(doc_error)}")
+            raise doc_error
         
         # Return the created data
         return {

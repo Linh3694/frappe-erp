@@ -161,17 +161,29 @@ def create_academic_program(title_vn, title_en, short_title):
                 "message": f"Academic program with short title '{short_title}' already exists"
             }
         
-        # Create new academic program
-        academic_program_doc = frappe.get_doc({
-            "doctype": "SIS Academic Program",
-            "title_vn": title_vn,
-            "title_en": title_en,
-            "short_title": short_title,
-            "campus_id": campus_id
-        })
+        # Create new academic program - with detailed debugging
+        frappe.logger().info(f"Creating SIS Academic Program with data: title_vn={title_vn}, title_en={title_en}, short_title={short_title}, campus_id={campus_id}")
         
-        academic_program_doc.insert()
-        frappe.db.commit()
+        try:
+            academic_program_doc = frappe.get_doc({
+                "doctype": "SIS Academic Program",
+                "title_vn": title_vn,
+                "title_en": title_en or "",  # Provide default empty string
+                "short_title": short_title,
+                "campus_id": campus_id
+            })
+            
+            frappe.logger().info(f"Academic program doc created: {academic_program_doc}")
+            
+            academic_program_doc.insert()
+            frappe.logger().info("Academic program doc inserted successfully")
+            
+            frappe.db.commit()
+            frappe.logger().info("Database committed successfully")
+            
+        except Exception as doc_error:
+            frappe.logger().error(f"Error creating/inserting academic program doc: {str(doc_error)}")
+            raise doc_error
         
         # Return the created data
         return {

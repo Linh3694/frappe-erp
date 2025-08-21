@@ -161,17 +161,29 @@ def create_curriculum(title_vn, title_en, short_title):
                 "message": f"Curriculum with short title '{short_title}' already exists"
             }
         
-        # Create new curriculum
-        curriculum_doc = frappe.get_doc({
-            "doctype": "SIS Curriculum",
-            "title_vn": title_vn,
-            "title_en": title_en,
-            "short_title": short_title,
-            "campus_id": campus_id
-        })
+        # Create new curriculum - with detailed debugging
+        frappe.logger().info(f"Creating SIS Curriculum with data: title_vn={title_vn}, title_en={title_en}, short_title={short_title}, campus_id={campus_id}")
         
-        curriculum_doc.insert()
-        frappe.db.commit()
+        try:
+            curriculum_doc = frappe.get_doc({
+                "doctype": "SIS Curriculum",
+                "title_vn": title_vn,
+                "title_en": title_en or "",  # Provide default empty string
+                "short_title": short_title,
+                "campus_id": campus_id
+            })
+            
+            frappe.logger().info(f"Curriculum doc created: {curriculum_doc}")
+            
+            curriculum_doc.insert()
+            frappe.logger().info("Curriculum doc inserted successfully")
+            
+            frappe.db.commit()
+            frappe.logger().info("Database committed successfully")
+            
+        except Exception as doc_error:
+            frappe.logger().error(f"Error creating/inserting curriculum doc: {str(doc_error)}")
+            raise doc_error
         
         # Return the created data
         return {
