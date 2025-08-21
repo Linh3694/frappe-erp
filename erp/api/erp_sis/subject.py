@@ -111,16 +111,41 @@ def get_subject_by_id(subject_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_subject(title, education_stage, timetable_subject_id=None, actual_subject_id=None, room_id=None):
+def create_subject():
     """Create a new subject - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_subject: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_subject: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_subject: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_subject: {data}")
+        
+        # Extract values from data
+        title = data.get("title")
+        education_stage = data.get("education_stage")
+        timetable_subject_id = data.get("timetable_subject_id")
+        actual_subject_id = data.get("actual_subject_id")
+        room_id = data.get("room_id")
+        
         # Input validation
         if not title or not education_stage:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Title and education stage are required"
-            }
+            frappe.throw(_("Title and education stage are required"))
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -139,11 +164,7 @@ def create_subject(title, education_stage, timetable_subject_id=None, actual_sub
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Subject with title '{title}' already exists"
-            }
+            frappe.throw(_(f"Subject with title '{title}' already exists"))
         
         # Verify education stage exists and belongs to same campus
         education_stage_exists = frappe.db.exists(
@@ -175,28 +196,21 @@ def create_subject(title, education_stage, timetable_subject_id=None, actual_sub
         subject_doc.insert()
         frappe.db.commit()
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Subject created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": subject_doc.name,
-                "title": subject_doc.title,
-                "education_stage": subject_doc.education_stage,
-                "timetable_subject_id": subject_doc.timetable_subject_id,
-                "actual_subject_id": subject_doc.actual_subject_id,
-                "room_id": subject_doc.room_id,
-                "campus_id": subject_doc.campus_id
-            },
-            "message": "Subject created successfully"
+            "name": subject_doc.name,
+            "title": subject_doc.title,
+            "education_stage": subject_doc.education_stage,
+            "timetable_subject_id": subject_doc.timetable_subject_id,
+            "actual_subject_id": subject_doc.actual_subject_id,
+            "room_id": subject_doc.room_id,
+            "campus_id": subject_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating subject: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating subject: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating subject: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)

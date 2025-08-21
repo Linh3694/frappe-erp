@@ -135,11 +135,7 @@ def create_actual_subject(title_vn, title_en, curriculum_id):
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Actual subject with title '{title_vn}' already exists"
-            }
+            frappe.throw(_(f"Actual subject with title '{title_vn}' already exists"))
         
         # Verify curriculum exists and belongs to same campus
         curriculum_exists = frappe.db.exists(
@@ -169,26 +165,19 @@ def create_actual_subject(title_vn, title_en, curriculum_id):
         actual_subject_doc.insert()
         frappe.db.commit()
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Actual subject created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": actual_subject_doc.name,
-                "title_vn": actual_subject_doc.title_vn,
-                "title_en": actual_subject_doc.title_en,
-                "curriculum_id": actual_subject_doc.curriculum_id,
-                "campus_id": actual_subject_doc.campus_id
-            },
-            "message": "Actual subject created successfully"
+            "name": actual_subject_doc.name,
+            "title_vn": actual_subject_doc.title_vn,
+            "title_en": actual_subject_doc.title_en,
+            "curriculum_id": actual_subject_doc.curriculum_id,
+            "campus_id": actual_subject_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating actual subject: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating actual subject: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating actual subject: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)

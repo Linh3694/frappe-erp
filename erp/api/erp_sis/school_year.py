@@ -111,16 +111,41 @@ def get_school_year_by_id(school_year_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_school_year(title_vn, title_en, start_date, end_date, is_enable=1):
+def create_school_year():
     """Create a new school year - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_school_year: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_school_year: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_school_year: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_school_year: {data}")
+        
+        # Extract values from data
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en")
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")
+        is_enable = data.get("is_enable", 1)
+        
         # Input validation
         if not title_vn or not start_date or not end_date:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Title VN, start date and end date are required"
-            }
+            frappe.throw(_("Title VN, start date and end date are required"))
         
         # Validate dates
         try:
@@ -128,17 +153,9 @@ def create_school_year(title_vn, title_en, start_date, end_date, is_enable=1):
             end_date = getdate(end_date)
             
             if start_date >= end_date:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Start date must be before end date"
-                }
+                frappe.throw(_("Start date must be before end date"))
         except Exception:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Invalid date format"
-            }
+            frappe.throw(_("Invalid date format"))
         
         # Get campus from user context - simplified
         try:
@@ -175,11 +192,7 @@ def create_school_year(title_vn, title_en, start_date, end_date, is_enable=1):
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"School year with title '{title_vn}' already exists"
-            }
+            frappe.throw(_(f"School year with title '{title_vn}' already exists"))
         
         # Create new school year - with detailed debugging
         frappe.logger().info(f"Creating SIS School Year with data: title_vn={title_vn}, title_en={title_en}, start_date={start_date}, end_date={end_date}, is_enable={is_enable}, campus_id={campus_id}")
@@ -207,28 +220,21 @@ def create_school_year(title_vn, title_en, start_date, end_date, is_enable=1):
             frappe.logger().error(f"Error creating/inserting school year doc: {str(doc_error)}")
             raise doc_error
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("School year created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": school_year_doc.name,
-                "title_vn": school_year_doc.title_vn,
-                "title_en": school_year_doc.title_en,
-                "start_date": str(school_year_doc.start_date),
-                "end_date": str(school_year_doc.end_date),
-                "is_enable": school_year_doc.is_enable,
-                "campus_id": school_year_doc.campus_id
-            },
-            "message": "School year created successfully"
+            "name": school_year_doc.name,
+            "title_vn": school_year_doc.title_vn,
+            "title_en": school_year_doc.title_en,
+            "start_date": str(school_year_doc.start_date),
+            "end_date": str(school_year_doc.end_date),
+            "is_enable": school_year_doc.is_enable,
+            "campus_id": school_year_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating school year: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating school year: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating school year: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)

@@ -105,16 +105,38 @@ def get_timetable_subject_by_id(subject_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_timetable_subject(title_vn, title_en):
+def create_timetable_subject():
     """Create a new timetable subject - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_timetable_subject: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_timetable_subject: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_timetable_subject: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_timetable_subject: {data}")
+        
+        # Extract values from data
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en")
+        
         # Input validation
         if not title_vn:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Title VN is required"
-            }
+            frappe.throw(_("Title VN is required"))
         
         # Get campus from user context - simplified
         try:
@@ -137,11 +159,7 @@ def create_timetable_subject(title_vn, title_en):
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Timetable subject with title '{title_vn}' already exists"
-            }
+            frappe.throw(_(f"Timetable subject with title '{title_vn}' already exists"))
         
         # Create new timetable subject
         timetable_subject_doc = frappe.get_doc({
@@ -154,25 +172,18 @@ def create_timetable_subject(title_vn, title_en):
         timetable_subject_doc.insert()
         frappe.db.commit()
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Timetable subject created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": timetable_subject_doc.name,
-                "title_vn": timetable_subject_doc.title_vn,
-                "title_en": timetable_subject_doc.title_en,
-                "campus_id": timetable_subject_doc.campus_id
-            },
-            "message": "Timetable subject created successfully"
+            "name": timetable_subject_doc.name,
+            "title_vn": timetable_subject_doc.title_vn,
+            "title_en": timetable_subject_doc.title_en,
+            "campus_id": timetable_subject_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating timetable subject: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating timetable subject: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating timetable subject: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)
