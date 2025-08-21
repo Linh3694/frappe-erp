@@ -158,7 +158,11 @@ def create_building():
         )
         
         if existing:
-            frappe.throw(_(f"Building with title '{title_vn}' already exists"))
+            return {
+                "success": False,
+                "data": {},
+                "message": f"Building with title '{title_vn}' already exists"
+            }
             
         # Check if short title already exists for this campus
         existing_code = frappe.db.exists(
