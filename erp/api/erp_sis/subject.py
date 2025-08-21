@@ -580,31 +580,18 @@ def get_actual_subjects_for_selection():
         if not campus_id:
             campus_id = "campus-1"
         
-        # Get buildings for this campus to filter rooms
-        building_filters = {"campus_id": campus_id}
-        buildings = frappe.get_all(
-            "ERP Administrative Building",
-            fields=["name"],
-            filters=building_filters
-        )
-        
-        building_ids = [b.name for b in buildings]
-        
-        if not building_ids:
-            return {
-                "success": True,
-                "data": [],
-                "message": "No buildings found for this campus"
-            }
-        
+        # Get actual subjects for this campus
         actual_subjects = frappe.get_all(
             "SIS Actual Subject",
             fields=[
                 "name",
-                "title_vn",
+                "title_vn", 
                 "title_en"
             ],
-            filters={"curriculum_id": ["!=", ""]},  # Ensure it has a curriculum
+            filters={
+                "campus_id": campus_id,
+                "curriculum_id": ["!=", ""]  # Ensure it has a curriculum
+            },
             order_by="title_vn asc"
         )
         

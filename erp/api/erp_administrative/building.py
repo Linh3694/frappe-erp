@@ -188,7 +188,7 @@ def create_building():
         building_doc.insert()
         frappe.db.commit()
         
-        # Return the created data - follow Education Stage pattern
+        # Return the created data - follow Frappe pattern like other services  
         frappe.msgprint(_("Building created successfully"))
         return {
             "name": building_doc.name,
