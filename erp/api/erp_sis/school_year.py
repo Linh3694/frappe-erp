@@ -140,8 +140,12 @@ def create_school_year(title_vn, title_en, start_date, end_date, is_enable=1):
                 "message": "Invalid date format"
             }
         
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
+        # Get campus from user context - simplified
+        try:
+            campus_id = get_current_campus_from_context()
+        except Exception as e:
+            frappe.logger().error(f"Error getting campus context: {str(e)}")
+            campus_id = None
         
         if not campus_id:
             campus_id = "campus-1"
