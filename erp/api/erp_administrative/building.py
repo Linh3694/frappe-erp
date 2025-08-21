@@ -139,7 +139,11 @@ def create_building():
         
         # Input validation
         if not title_vn or not short_title:
-            frappe.throw(_("Title VN and short title are required"))
+            return {
+                "success": False,
+                "data": {},
+                "message": "Title VN and short title are required"
+            }
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -204,7 +208,11 @@ def create_building():
         
     except Exception as e:
         frappe.log_error(f"Error creating building: {str(e)}")
-        frappe.throw(_(f"Error creating building: {str(e)}"))
+        return {
+            "success": False,
+            "data": {},
+            "message": f"Error creating building: {str(e)}"
+        }
 
 
 @frappe.whitelist(allow_guest=False)
