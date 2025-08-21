@@ -19,7 +19,7 @@
   "basic_information",
   "campus_id",
   "user_id",
-  "education_grade_id"
+  "education_stage_id"
  ],
  "fields": [
   {
@@ -45,10 +45,10 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "education_grade_id",
+   "fieldname": "education_stage_id",
    "fieldtype": "Link",
-   "label": "Education Grade",
-   "options": "SIS Education Grade"
+   "label": "Education Stage",
+   "options": "SIS Education Stage"
   }
  ],
  "index_web_pages_for_search": 1,

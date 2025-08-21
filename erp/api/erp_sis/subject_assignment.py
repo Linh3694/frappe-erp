@@ -1,0 +1,453 @@
+# Copyright (c) 2024, Wellspring International School and contributors
+# For license information, please see license.txt
+
+import frappe
+from frappe import _
+from frappe.utils import nowdate, get_datetime
+import json
+from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+
+
+@frappe.whitelist(allow_guest=False)
+def get_all_subject_assignments():
+    """Get all subject assignments with basic information - SIMPLE VERSION"""
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            # Fallback to default if no campus found
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        
+        filters = {"campus_id": campus_id}
+            
+        subject_assignments = frappe.get_all(
+            "SIS Subject Assignment",
+            fields=[
+                "name",
+                "teacher_id",
+                "subject_id",
+                "campus_id",
+                "creation",
+                "modified"
+            ],
+            filters=filters,
+            order_by="teacher_id asc"
+        )
+        
+        return {
+            "success": True,
+            "data": subject_assignments,
+            "total_count": len(subject_assignments),
+            "message": "Subject assignments fetched successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching subject assignments: {str(e)}")
+        return {
+            "success": False,
+            "data": [],
+            "total_count": 0,
+            "message": f"Error fetching subject assignments: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_subject_assignment_by_id(assignment_id):
+    """Get a specific subject assignment by ID"""
+    try:
+        if not assignment_id:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Subject Assignment ID is required"
+            }
+        
+        # Get current user's campus
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+            
+        filters = {
+            "name": assignment_id,
+            "campus_id": campus_id
+        }
+        
+        assignment = frappe.get_doc("SIS Subject Assignment", filters)
+        
+        if not assignment:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Subject assignment not found or access denied"
+            }
+        
+        return {
+            "success": True,
+            "data": {
+                "name": assignment.name,
+                "teacher_id": assignment.teacher_id,
+                "subject_id": assignment.subject_id,
+                "campus_id": assignment.campus_id
+            },
+            "message": "Subject assignment fetched successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching subject assignment {assignment_id}: {str(e)}")
+        return {
+            "success": False,
+            "data": {},
+            "message": f"Error fetching subject assignment: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def create_subject_assignment(teacher_id, subject_id):
+    """Create a new subject assignment - SIMPLE VERSION"""
+    try:
+        # Input validation
+        if not teacher_id or not subject_id:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Teacher ID and Subject ID are required"
+            }
+        
+        # Get campus from user context
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        
+        # Check if assignment already exists
+        existing = frappe.db.exists(
+            "SIS Subject Assignment",
+            {
+                "teacher_id": teacher_id,
+                "subject_id": subject_id,
+                "campus_id": campus_id
+            }
+        )
+        
+        if existing:
+            return {
+                "success": False,
+                "data": {},
+                "message": f"This teacher is already assigned to this subject"
+            }
+        
+        # Verify teacher exists and belongs to same campus
+        teacher_exists = frappe.db.exists(
+            "SIS Teacher",
+            {
+                "name": teacher_id,
+                "campus_id": campus_id
+            }
+        )
+        
+        if not teacher_exists:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Selected teacher does not exist or access denied"
+            }
+        
+        # Verify subject exists and belongs to same campus
+        subject_exists = frappe.db.exists(
+            "SIS Subject",
+            {
+                "name": subject_id,
+                "campus_id": campus_id
+            }
+        )
+        
+        if not subject_exists:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Selected subject does not exist or access denied"
+            }
+        
+        # Create new subject assignment
+        assignment_doc = frappe.get_doc({
+            "doctype": "SIS Subject Assignment",
+            "teacher_id": teacher_id,
+            "subject_id": subject_id,
+            "campus_id": campus_id
+        })
+        
+        assignment_doc.insert()
+        frappe.db.commit()
+        
+        # Return the created data
+        return {
+            "success": True,
+            "data": {
+                "name": assignment_doc.name,
+                "teacher_id": assignment_doc.teacher_id,
+                "subject_id": assignment_doc.subject_id,
+                "campus_id": assignment_doc.campus_id
+            },
+            "message": "Subject assignment created successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error creating subject assignment: {str(e)}")
+        return {
+            "success": False,
+            "data": {},
+            "message": f"Error creating subject assignment: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def update_subject_assignment(assignment_id, teacher_id=None, subject_id=None):
+    """Update an existing subject assignment"""
+    try:
+        if not assignment_id:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Subject Assignment ID is required"
+            }
+        
+        # Get campus from user context
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Get existing document
+        try:
+            assignment_doc = frappe.get_doc("SIS Subject Assignment", assignment_id)
+            
+            # Check campus permission
+            if assignment_doc.campus_id != campus_id:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Access denied: You don't have permission to modify this subject assignment"
+                }
+                
+        except frappe.DoesNotExistError:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Subject assignment not found"
+            }
+        
+        # Update fields if provided
+        if teacher_id and teacher_id != assignment_doc.teacher_id:
+            # Verify teacher exists and belongs to same campus
+            teacher_exists = frappe.db.exists(
+                "SIS Teacher",
+                {
+                    "name": teacher_id,
+                    "campus_id": campus_id
+                }
+            )
+            
+            if not teacher_exists:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Selected teacher does not exist or access denied"
+                }
+            
+            assignment_doc.teacher_id = teacher_id
+        
+        if subject_id and subject_id != assignment_doc.subject_id:
+            # Verify subject exists and belongs to same campus
+            subject_exists = frappe.db.exists(
+                "SIS Subject",
+                {
+                    "name": subject_id,
+                    "campus_id": campus_id
+                }
+            )
+            
+            if not subject_exists:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Selected subject does not exist or access denied"
+                }
+            
+            assignment_doc.subject_id = subject_id
+        
+        # Check for duplicate assignment after updates
+        if teacher_id or subject_id:
+            final_teacher_id = teacher_id or assignment_doc.teacher_id
+            final_subject_id = subject_id or assignment_doc.subject_id
+            
+            existing = frappe.db.exists(
+                "SIS Subject Assignment",
+                {
+                    "teacher_id": final_teacher_id,
+                    "subject_id": final_subject_id,
+                    "campus_id": campus_id,
+                    "name": ["!=", assignment_id]
+                }
+            )
+            
+            if existing:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": f"This teacher is already assigned to this subject"
+                }
+        
+        assignment_doc.save()
+        frappe.db.commit()
+        
+        return {
+            "success": True,
+            "data": {
+                "name": assignment_doc.name,
+                "teacher_id": assignment_doc.teacher_id,
+                "subject_id": assignment_doc.subject_id,
+                "campus_id": assignment_doc.campus_id
+            },
+            "message": "Subject assignment updated successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error updating subject assignment {assignment_id}: {str(e)}")
+        return {
+            "success": False,
+            "data": {},
+            "message": f"Error updating subject assignment: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False) 
+def delete_subject_assignment(assignment_id):
+    """Delete a subject assignment"""
+    try:
+        if not assignment_id:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Subject Assignment ID is required"
+            }
+        
+        # Get campus from user context
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Get existing document
+        try:
+            assignment_doc = frappe.get_doc("SIS Subject Assignment", assignment_id)
+            
+            # Check campus permission
+            if assignment_doc.campus_id != campus_id:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Access denied: You don't have permission to delete this subject assignment"
+                }
+                
+        except frappe.DoesNotExistError:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Subject assignment not found"
+            }
+        
+        # Delete the document
+        frappe.delete_doc("SIS Subject Assignment", assignment_id)
+        frappe.db.commit()
+        
+        return {
+            "success": True,
+            "data": {},
+            "message": "Subject assignment deleted successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error deleting subject assignment {assignment_id}: {str(e)}")
+        return {
+            "success": False,
+            "data": {},
+            "message": f"Error deleting subject assignment: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_teachers_for_assignment():
+    """Get teachers for dropdown selection"""
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        filters = {"campus_id": campus_id}
+            
+        teachers = frappe.get_all(
+            "SIS Teacher",
+            fields=[
+                "name",
+                "user_id"
+            ],
+            filters=filters,
+            order_by="user_id asc"
+        )
+        
+        return {
+            "success": True,
+            "data": teachers,
+            "message": "Teachers fetched successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching teachers for assignment: {str(e)}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Error fetching teachers: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_subjects_for_assignment():
+    """Get subjects for dropdown selection"""
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        filters = {"campus_id": campus_id}
+            
+        subjects = frappe.get_all(
+            "SIS Subject",
+            fields=[
+                "name",
+                "title"
+            ],
+            filters=filters,
+            order_by="title asc"
+        )
+        
+        return {
+            "success": True,
+            "data": subjects,
+            "message": "Subjects fetched successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching subjects for assignment: {str(e)}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Error fetching subjects: {str(e)}"
+        }
