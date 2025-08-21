@@ -585,7 +585,7 @@ def get_actual_subjects_for_selection():
             "SIS Actual Subject",
             fields=[
                 "name",
-                "title_vn", 
+                "title_vn",
                 "title_en"
             ],
             filters={
