@@ -389,7 +389,7 @@ def delete_school_year(school_year_id):
         }
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def test_debug():
     """Debug function to test basic operations"""
     try:
