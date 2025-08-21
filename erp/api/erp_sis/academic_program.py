@@ -85,8 +85,8 @@ def get_academic_program_by_id(program_id):
                 "message": "Academic program not found or access denied"
             }
         
-                    return {
-                "success": True,
+        return {
+            "success": True,
                 "data": {
                     "name": academic_program.name,
                     "title_vn": academic_program.title_vn,
