@@ -126,8 +126,22 @@ def create_academic_program(title_vn, title_en, short_title):
             campus_id = None
         
         if not campus_id:
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+            # Get first available campus instead of hardcoded campus-1
+            first_campus = frappe.get_all("SIS Campus", fields=["name"], limit=1)
+            if first_campus:
+                campus_id = first_campus[0].name
+                frappe.logger().warning(f"No campus found for user {frappe.session.user}, using first available: {campus_id}")
+            else:
+                # Create default campus if none exists
+                default_campus = frappe.get_doc({
+                    "doctype": "SIS Campus",
+                    "title_vn": "Trường Mặc Định", 
+                    "title_en": "Default Campus"
+                })
+                default_campus.insert()
+                frappe.db.commit()
+                campus_id = default_campus.name
+                frappe.logger().info(f"Created default campus: {campus_id}")
         
         # Check if program title already exists for this campus
         existing = frappe.db.exists(
