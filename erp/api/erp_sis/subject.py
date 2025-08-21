@@ -22,22 +22,32 @@ def get_all_subjects():
         
         filters = {"campus_id": campus_id}
             
-        subjects = frappe.get_all(
-            "SIS Subject",
-            fields=[
-                "name",
-                "title",
-                "education_stage",
-                "timetable_subject_id",
-                "actual_subject_id",
-                "room_id",
-                "campus_id",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="title asc"
-        )
+        # Use SQL query to join with related tables for proper display names
+        subjects_query = """
+            SELECT 
+                s.name,
+                s.title,
+                s.education_stage,
+                s.timetable_subject_id,
+                s.actual_subject_id,
+                s.room_id,
+                s.campus_id,
+                s.creation,
+                s.modified,
+                es.title_vn as education_stage_name,
+                ts.title_vn as timetable_subject_name,
+                act.title_vn as actual_subject_name,
+                r.title_vn as room_name
+            FROM `tabSIS Subject` s
+            LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name
+            LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
+            LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name
+            LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
+            WHERE s.campus_id = %s
+            ORDER BY s.title ASC
+        """
+        
+        subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
         
         return {
             "success": True,
@@ -373,6 +383,114 @@ def delete_subject(subject_id):
             "success": False,
             "data": {},
             "message": f"Error deleting subject: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_actual_subjects_for_selection():
+    """Get all actual subjects for dropdown selection"""
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            # Fallback to default if no campus found
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        
+        filters = {"campus_id": campus_id}
+            
+        actual_subjects = frappe.get_all(
+            "SIS Actual Subject",
+            fields=["name", "title_vn", "title_en"],
+            filters=filters,
+            order_by="title_vn asc"
+        )
+        
+        return {
+            "success": True,
+            "data": actual_subjects,
+            "message": "Actual subjects for selection fetched successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching actual subjects for selection: {str(e)}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Error fetching actual subjects: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_timetable_subjects_for_selection():
+    """Get all timetable subjects for dropdown selection"""
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            # Fallback to default if no campus found
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        
+        filters = {"campus_id": campus_id}
+            
+        timetable_subjects = frappe.get_all(
+            "SIS Timetable Subject",
+            fields=["name", "title_vn", "title_en"],
+            filters=filters,
+            order_by="title_vn asc"
+        )
+        
+        return {
+            "success": True,
+            "data": timetable_subjects,
+            "message": "Timetable subjects for selection fetched successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching timetable subjects for selection: {str(e)}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Error fetching timetable subjects: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_rooms_for_selection():
+    """Get all rooms for dropdown selection"""
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            # Fallback to default if no campus found
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        
+        filters = {"campus_id": campus_id}
+            
+        rooms = frappe.get_all(
+            "ERP Administrative Room",
+            fields=["name", "title_vn", "title_en", "short_title"],
+            filters=filters,
+            order_by="title_vn asc"
+        )
+        
+        return {
+            "success": True,
+            "data": rooms,
+            "message": "Rooms for selection fetched successfully"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching rooms for selection: {str(e)}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Error fetching rooms: {str(e)}"
         }
 
 
