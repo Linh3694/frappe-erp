@@ -107,16 +107,39 @@ def get_building_by_id(building_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_building(title_vn, title_en, short_title):
+def create_building():
     """Create a new building - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_building: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_building: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_building: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_building: {data}")
+        
+        # Extract values from data
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en")
+        short_title = data.get("short_title")
+        
         # Input validation
         if not title_vn or not short_title:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Title VN and short title are required"
-            }
+            frappe.throw(_("Title VN and short title are required"))
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -135,11 +158,7 @@ def create_building(title_vn, title_en, short_title):
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Building with title '{title_vn}' already exists"
-            }
+            frappe.throw(_(f"Building with title '{title_vn}' already exists"))
             
         # Check if short title already exists for this campus
         existing_code = frappe.db.exists(
@@ -169,26 +188,19 @@ def create_building(title_vn, title_en, short_title):
         building_doc.insert()
         frappe.db.commit()
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Building created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": building_doc.name,
-                "title_vn": building_doc.title_vn,
-                "title_en": building_doc.title_en,
-                "short_title": building_doc.short_title,
-                "campus_id": building_doc.campus_id
-            },
-            "message": "Building created successfully"
+            "name": building_doc.name,
+            "title_vn": building_doc.title_vn,
+            "title_en": building_doc.title_en,
+            "short_title": building_doc.short_title,
+            "campus_id": building_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating building: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating building: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating building: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)

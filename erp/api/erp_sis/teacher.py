@@ -105,16 +105,38 @@ def get_teacher_by_id(teacher_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_teacher(user_id, education_stage_id=None):
+def create_teacher():
     """Create a new teacher - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_teacher: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_teacher: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_teacher: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_teacher: {data}")
+        
+        # Extract values from data
+        user_id = data.get("user_id")
+        education_stage_id = data.get("education_stage_id")
+        
         # Input validation
         if not user_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "User ID is required"
-            }
+            frappe.throw(_("User ID is required"))
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -133,11 +155,7 @@ def create_teacher(user_id, education_stage_id=None):
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Teacher with user '{user_id}' already exists in this campus"
-            }
+            frappe.throw(_(f"Teacher with user '{user_id}' already exists in this campus"))
         
         # Verify user exists
         user_exists = frappe.db.exists("User", user_id)
@@ -176,25 +194,18 @@ def create_teacher(user_id, education_stage_id=None):
         teacher_doc.insert()
         frappe.db.commit()
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Teacher created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": teacher_doc.name,
-                "user_id": teacher_doc.user_id,
-                "education_stage_id": teacher_doc.education_stage_id,
-                "campus_id": teacher_doc.campus_id
-            },
-            "message": "Teacher created successfully"
+            "name": teacher_doc.name,
+            "user_id": teacher_doc.user_id,
+            "education_stage_id": teacher_doc.education_stage_id,
+            "campus_id": teacher_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating teacher: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating teacher: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating teacher: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)

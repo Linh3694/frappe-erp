@@ -105,16 +105,38 @@ def get_subject_assignment_by_id(assignment_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_subject_assignment(teacher_id, subject_id):
+def create_subject_assignment():
     """Create a new subject assignment - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_subject_assignment: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_subject_assignment: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_subject_assignment: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_subject_assignment: {data}")
+        
+        # Extract values from data
+        teacher_id = data.get("teacher_id")
+        subject_id = data.get("subject_id")
+        
         # Input validation
         if not teacher_id or not subject_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Teacher ID and Subject ID are required"
-            }
+            frappe.throw(_("Teacher ID and Subject ID are required"))
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -134,11 +156,7 @@ def create_subject_assignment(teacher_id, subject_id):
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"This teacher is already assigned to this subject"
-            }
+            frappe.throw(_("This teacher is already assigned to this subject"))
         
         # Verify teacher exists and belongs to same campus
         teacher_exists = frappe.db.exists(
@@ -183,25 +201,18 @@ def create_subject_assignment(teacher_id, subject_id):
         assignment_doc.insert()
         frappe.db.commit()
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Subject assignment created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": assignment_doc.name,
-                "teacher_id": assignment_doc.teacher_id,
-                "subject_id": assignment_doc.subject_id,
-                "campus_id": assignment_doc.campus_id
-            },
-            "message": "Subject assignment created successfully"
+            "name": assignment_doc.name,
+            "teacher_id": assignment_doc.teacher_id,
+            "subject_id": assignment_doc.subject_id,
+            "campus_id": assignment_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating subject assignment: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating subject assignment: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating subject assignment: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)

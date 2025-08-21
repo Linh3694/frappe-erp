@@ -140,16 +140,42 @@ def get_room_by_id(room_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_room(title_vn, title_en, short_title, capacity, room_type, building_id):
+def create_room():
     """Create a new room - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_room: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_room: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_room: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_room: {data}")
+        
+        # Extract values from data
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en")
+        short_title = data.get("short_title")
+        capacity = data.get("capacity")
+        room_type = data.get("room_type")
+        building_id = data.get("building_id")
+        
         # Input validation
         if not title_vn or not short_title or not room_type or not building_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Title VN, short title, room type, and building are required"
-            }
+            frappe.throw(_("Title VN, short title, room type, and building are required"))
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -168,11 +194,7 @@ def create_room(title_vn, title_en, short_title, capacity, room_type, building_i
         )
         
         if not building_exists:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Selected building does not exist or access denied"
-            }
+            frappe.throw(_("Selected building does not exist or access denied"))
         
         # Check if room title already exists in this building
         existing = frappe.db.exists(
@@ -184,11 +206,7 @@ def create_room(title_vn, title_en, short_title, capacity, room_type, building_i
         )
         
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Room with title '{title_vn}' already exists in this building"
-            }
+            frappe.throw(_(f"Room with title '{title_vn}' already exists in this building"))
         
         # Create new room
         room_doc = frappe.get_doc({
@@ -204,28 +222,22 @@ def create_room(title_vn, title_en, short_title, capacity, room_type, building_i
         room_doc.insert()
         frappe.db.commit()
         
-        # Return the created data
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Room created successfully"))
         return {
-            "success": True,
-            "data": {
-                "name": room_doc.name,
-                "title_vn": room_doc.title_vn,
-                "title_en": room_doc.title_en,
-                "short_title": room_doc.short_title,
-                "capacity": room_doc.capacity,
-                "room_type": room_doc.room_type,
-                "building_id": room_doc.building_id
-            },
-            "message": "Room created successfully"
+            "name": room_doc.name,
+            "title_vn": room_doc.title_vn,
+            "title_en": room_doc.title_en,
+            "short_title": room_doc.short_title,
+            "capacity": room_doc.capacity,
+            "room_type": room_doc.room_type,
+            "building_id": room_doc.building_id,
+            "campus_id": room_doc.campus_id
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating room: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating room: {str(e)}"
-        }
+        frappe.throw(_(f"Error creating room: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False)
