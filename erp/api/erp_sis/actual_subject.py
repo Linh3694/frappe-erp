@@ -107,16 +107,32 @@ def get_actual_subject_by_id(subject_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def create_actual_subject(title_vn, title_en, curriculum_id):
+def create_actual_subject():
     """Create a new actual subject - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                else:
+                    data = frappe.local.form_dict
+            except (json.JSONDecodeError, TypeError):
+                data = frappe.local.form_dict
+        else:
+            data = frappe.local.form_dict
+        
+        # Extract values from data
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en")
+        curriculum_id = data.get("curriculum_id")
+        
         # Input validation
         if not title_vn or not curriculum_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Title VN and Curriculum are required"
-            }
+            frappe.throw(_("Title VN and Curriculum are required"))
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()

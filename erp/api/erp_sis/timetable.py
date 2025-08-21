@@ -487,3 +487,101 @@ def get_education_stages_for_timetable():
             "data": [],
             "message": f"Error fetching education stages: {str(e)}"
         }
+
+
+@frappe.whitelist(allow_guest=False)
+def create_timetable():
+    """Create a new timetable column - SIMPLE VERSION"""
+    try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+        
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                else:
+                    data = frappe.local.form_dict
+            except (json.JSONDecodeError, TypeError):
+                data = frappe.local.form_dict
+        else:
+            data = frappe.local.form_dict
+        
+        # Extract values from data
+        education_stage_id = data.get("education_stage_id")
+        period_priority = data.get("period_priority")
+        period_type = data.get("period_type")
+        period_name = data.get("period_name")
+        start_time = data.get("start_time")
+        end_time = data.get("end_time")
+        
+        # Input validation
+        if not education_stage_id or not period_priority or not period_type or not period_name or not start_time or not end_time:
+            frappe.throw(_("All fields are required"))
+        
+        # Get campus from user context
+        try:
+            campus_id = get_current_campus_from_context()
+        except Exception as e:
+            frappe.logger().error(f"Error getting campus context: {str(e)}")
+            campus_id = None
+        
+        if not campus_id:
+            first_campus = frappe.get_all("SIS Campus", fields=["name"], limit=1)
+            if first_campus:
+                campus_id = first_campus[0].name
+            else:
+                default_campus = frappe.get_doc({
+                    "doctype": "SIS Campus",
+                    "title_vn": "Trường Mặc Định",
+                    "title_en": "Default Campus"
+                })
+                default_campus.insert()
+                frappe.db.commit()
+                campus_id = default_campus.name
+        
+        # Check if period priority already exists for this education stage
+        existing = frappe.db.exists(
+            "SIS Timetable Column",
+            {
+                "education_stage_id": education_stage_id,
+                "period_priority": period_priority,
+                "campus_id": campus_id
+            }
+        )
+        
+        if existing:
+            frappe.throw(_(f"Period priority '{period_priority}' already exists for this education stage"))
+        
+        # Create new timetable column
+        timetable_doc = frappe.get_doc({
+            "doctype": "SIS Timetable Column",
+            "education_stage_id": education_stage_id,
+            "period_priority": period_priority,
+            "period_type": period_type,
+            "period_name": period_name,
+            "start_time": start_time,
+            "end_time": end_time,
+            "campus_id": campus_id
+        })
+        
+        timetable_doc.insert()
+        frappe.db.commit()
+        
+        # Return the created data - follow Education Stage pattern
+        frappe.msgprint(_("Timetable column created successfully"))
+        return {
+            "name": timetable_doc.name,
+            "education_stage_id": timetable_doc.education_stage_id,
+            "period_priority": timetable_doc.period_priority,
+            "period_type": timetable_doc.period_type,
+            "period_name": timetable_doc.period_name,
+            "start_time": timetable_doc.start_time,
+            "end_time": timetable_doc.end_time,
+            "campus_id": timetable_doc.campus_id
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error creating timetable column: {str(e)}")
+        frappe.throw(_(f"Error creating timetable column: {str(e)}"))
