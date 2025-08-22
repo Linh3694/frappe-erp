@@ -71,31 +71,21 @@ def get_all_students(page=1, limit=20):
         }
 
 
-@frappe.whitelist(allow_guest=False)
-def get_student_details():
-    """Get a specific student by ID - fixed version"""
+@frappe.whitelist(allow_guest=False)  
+def get_student_info(student_id=None, student_code=None):
+    """Get a specific student by ID or code"""
     try:
-        # Get student_id from both query parameters and request data
-        student_id = frappe.local.form_dict.get("student_id")
-        
-        # Also try from JSON data if POST request
-        if not student_id and frappe.request.data:
-            try:
-                json_data = frappe.safe_decode(frappe.request.data)
-                data = frappe.parse_json(json_data) if json_data else {}
-                student_id = data.get("student_id")
-            except:
-                pass
-        
-        frappe.logger().info(f"get_student_details called with student_id: {student_id}")
-        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"request method: {frappe.request.method}")
-        
-        if not student_id:
+        # Handle both student_id and student_code
+        if not student_id and not student_code:
+            # Try to get from form_dict  
+            student_id = frappe.local.form_dict.get("student_id")
+            student_code = frappe.local.form_dict.get("student_code")
+            
+        if not student_id and not student_code:
             return {
                 "success": False,
                 "data": {},
-                "message": "Student ID is required"
+                "message": "Student ID or code is required"
             }
         
         # Get current user's campus
@@ -103,13 +93,40 @@ def get_student_details():
         
         if not campus_id:
             campus_id = "campus-1"
-            
-        filters = {
-            "name": student_id,
-            "campus_id": campus_id
-        }
         
-        student = frappe.get_doc("CRM Student", filters)
+        # Build filters based on what parameter we have
+        if student_id:
+            filters = {
+                "name": student_id,
+                "campus_id": campus_id
+            }
+            student = frappe.get_doc("CRM Student", student_id)
+        else:
+            # Search by student_code
+            students = frappe.get_all("CRM Student", 
+                filters={
+                    "student_code": student_code,
+                    "campus_id": campus_id
+                }, 
+                fields=["name"], 
+                limit=1)
+            
+            if not students:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Student not found"
+                }
+            
+            student = frappe.get_doc("CRM Student", students[0].name)
+        
+        # Verify campus access
+        if student.campus_id != campus_id:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Student not found or access denied"
+            }
         
         if not student:
             return {
