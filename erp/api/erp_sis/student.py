@@ -316,23 +316,67 @@ def create_student():
 def update_student():
     """Update an existing student"""
     try:
-        # Get data from form_dict like other functions
-        student_id = frappe.local.form_dict.get("student_id")
-        student_name = frappe.local.form_dict.get("student_name")
-        student_code = frappe.local.form_dict.get("student_code") 
-        dob = frappe.local.form_dict.get("dob")
-        gender = frappe.local.form_dict.get("gender")
+        def get_param(key):
+            value = frappe.local.form_dict.get(key)
+            if value:
+                return value
+                
+            if hasattr(frappe, 'form_dict') and frappe.form_dict.get(key):
+                return frappe.form_dict.get(key)
+            
+            if frappe.request.data:
+                try:
+                    import json
+                    json_data = json.loads(frappe.request.data.decode('utf-8'))
+                    if isinstance(json_data, dict) and key in json_data:
+                        return json_data[key]
+                except:
+                    try:
+                        import urllib.parse
+                        parsed = urllib.parse.parse_qs(frappe.request.data.decode('utf-8'))
+                        if key in parsed and parsed[key]:
+                            return parsed[key][0]  # parse_qs returns lists
+                    except:
+                        pass
+                        
+            # Try request.form if available
+            if hasattr(frappe.local, 'request') and hasattr(frappe.local.request, 'form'):
+                value = frappe.local.request.form.get(key)
+                if value:
+                    return value
+                    
+            return None
+            
+        student_id = get_param("student_id")
+        student_name = get_param("student_name")
+        student_code = get_param("student_code") 
+        dob = get_param("dob")
+        gender = get_param("gender")
         
-        frappe.logger().info(f"update_student called with form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"=== REQUEST DEBUG INFO ===")
+        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"request.data: {frappe.request.data}")
+        frappe.logger().info(f"request.method: {getattr(frappe.request, 'method', 'unknown')}")
+        frappe.logger().info(f"request.headers: {getattr(frappe.request, 'headers', {})}")
+        
         frappe.logger().info(f"Received data - student_id: {student_id}, student_name: {student_name}, student_code: {student_code}, dob: {dob}, gender: {gender}")
         
-        # Debug using frappe.msgprint (will show in browser as popup)
+        # Try to decode request data for debug
+        decoded_data = "Unable to decode"
+        if frappe.request.data:
+            try:
+                decoded_data = frappe.request.data.decode('utf-8')
+            except:
+                decoded_data = str(frappe.request.data)
+        
         frappe.msgprint(f"DEBUG: update_student called - ID: {student_id}")
+        frappe.msgprint(f"DEBUG: Request data decoded: {decoded_data}")
         frappe.msgprint(f"DEBUG: Received data: name={student_name}, code={student_code}, dob={dob}, gender={gender}")
         
         # Also add to response for debugging
         debug_info = {
             "form_dict": dict(frappe.local.form_dict),
+            "request_data_decoded": decoded_data,
             "student_id": student_id,
             "student_name": student_name, 
             "student_code": student_code,
