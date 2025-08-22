@@ -1,5 +1,3 @@
-# Copyright (c) 2024, Wellspring International School and contributors
-# For license information, please see license.txt
 
 import frappe
 from frappe import _
@@ -313,51 +311,75 @@ def create_student():
 
 
 @frappe.whitelist(allow_guest=False)
-def update_student():
+def update_student(student_id=None, student_name=None, student_code=None, dob=None, gender=None):
     """Update an existing student"""
     try:
-        def get_param(key):
-            value = frappe.local.form_dict.get(key)
-            if value:
-                return value
+        frappe.msgprint(f"DEBUG: Function called with params - ID: {student_id}, name: {student_name}, code: {student_code}")
+        
+        # Fallback to form_dict if parameters are None
+        if not student_id:
+            student_id = frappe.local.form_dict.get("student_id")
+        if not student_name:  
+            student_name = frappe.local.form_dict.get("student_name")
+        if not student_code:
+            student_code = frappe.local.form_dict.get("student_code")
+        if not dob:
+            dob = frappe.local.form_dict.get("dob")
+        if not gender:
+            gender = frappe.local.form_dict.get("gender")
+            
+        frappe.msgprint(f"DEBUG: After form_dict fallback - ID: {student_id}, name: {student_name}, code: {student_code}")
+        
+        # Try to get from JSON if still None
+        if not student_id and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8'))
+                student_id = json_data.get("student_id")
+                student_name = json_data.get("student_name")
+                student_code = json_data.get("student_code")
+                dob = json_data.get("dob")
+                gender = json_data.get("gender")
+                frappe.msgprint(f"DEBUG: From JSON - ID: {student_id}, name: {student_name}, code: {student_code}")
+            except Exception as e:
+                frappe.msgprint(f"DEBUG: JSON parsing failed: {e}")
                 
-            if hasattr(frappe, 'form_dict') and frappe.form_dict.get(key):
-                return frappe.form_dict.get(key)
-            
-            if frappe.request.data:
-                try:
-                    import json
-                    json_data = json.loads(frappe.request.data.decode('utf-8'))
-                    if isinstance(json_data, dict) and key in json_data:
-                        return json_data[key]
-                except:
-                    try:
-                        import urllib.parse
-                        parsed = urllib.parse.parse_qs(frappe.request.data.decode('utf-8'))
-                        if key in parsed and parsed[key]:
-                            return parsed[key][0]  # parse_qs returns lists
-                    except:
-                        pass
-                        
-            # Try request.form if available
-            if hasattr(frappe.local, 'request') and hasattr(frappe.local.request, 'form'):
-                value = frappe.local.request.form.get(key)
-                if value:
-                    return value
-                    
-            return None
-            
-        student_id = get_param("student_id")
-        student_name = get_param("student_name")
-        student_code = get_param("student_code") 
-        dob = get_param("dob")
-        gender = get_param("gender")
+        frappe.msgprint(f"DEBUG: Final values - ID: {student_id}, name: {student_name}, code: {student_code}, dob: {dob}, gender: {gender}")
+    
+    except Exception as outer_error:
+        frappe.msgprint(f"ERROR: {str(outer_error)}")
+        return {"success": False, "message": str(outer_error)}
+        
+    # Continue with main logic
+    try:
         
         frappe.logger().info(f"=== REQUEST DEBUG INFO ===")
         frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
         frappe.logger().info(f"request.data: {frappe.request.data}")
         frappe.logger().info(f"request.method: {getattr(frappe.request, 'method', 'unknown')}")
         frappe.logger().info(f"request.headers: {getattr(frappe.request, 'headers', {})}")
+        
+        # Debug ALL possible sources of data
+        frappe.logger().info(f"=== ALL DATA SOURCES ===")
+        
+        # Check if there's request.json
+        if hasattr(frappe.request, 'json'):
+            frappe.logger().info(f"request.json: {frappe.request.json}")
+        
+        # Check request.form  
+        if hasattr(frappe.request, 'form'):
+            frappe.logger().info(f"request.form: {frappe.request.form}")
+            
+        # Check request.args
+        if hasattr(frappe.request, 'args'):
+            frappe.logger().info(f"request.args: {frappe.request.args}")
+            
+        # Check request.values
+        if hasattr(frappe.request, 'values'):
+            frappe.logger().info(f"request.values: {frappe.request.values}")
+            
+        # Check all attributes of request object
+        frappe.logger().info(f"request attributes: {dir(frappe.request)}")
         
         frappe.logger().info(f"Received data - student_id: {student_id}, student_name: {student_name}, student_code: {student_code}, dob: {dob}, gender: {gender}")
         
@@ -375,13 +397,16 @@ def update_student():
         
         # Also add to response for debugging
         debug_info = {
+            "function_params": f"ID: {student_id}, name: {student_name}, code: {student_code}, dob: {dob}, gender: {gender}",
             "form_dict": dict(frappe.local.form_dict),
             "request_data_decoded": decoded_data,
-            "student_id": student_id,
-            "student_name": student_name, 
-            "student_code": student_code,
-            "dob": dob,
-            "gender": gender
+            "final_values": {
+                "student_id": student_id,
+                "student_name": student_name, 
+                "student_code": student_code,
+                "dob": dob,
+                "gender": gender
+            }
         }
         
         if not student_id:
