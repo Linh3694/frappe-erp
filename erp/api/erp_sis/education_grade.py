@@ -351,3 +351,4 @@ def check_grade_code_availability(grade_code, grade_id=None):
             "message": "Error checking grade code availability",
             "error": str(e)
         }
+
