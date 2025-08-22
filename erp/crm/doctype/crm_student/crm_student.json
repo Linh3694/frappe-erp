@@ -47,7 +47,7 @@
    "fieldname": "gender",
    "fieldtype": "Select",
    "label": "Gender",
-   "options": "male\\nfemale\\nothers",
+   "options": "male\nfemale\nothers",
    "reqd": 1,
    "in_list_view": 1
   },
