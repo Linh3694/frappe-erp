@@ -19,7 +19,8 @@
   "basic_information",
   "student_name",
   "dob",
-  "gender"
+  "gender",
+  "campus_id"
  ],
  "fields": [
   {
@@ -47,6 +48,14 @@
    "fieldtype": "Select",
    "label": "Gender",
    "options": "male\\nfemale\\nothers",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
    "reqd": 1,
    "in_list_view": 1
   }
