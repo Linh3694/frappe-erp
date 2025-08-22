@@ -75,8 +75,21 @@ def get_all_students(page=1, limit=20):
 def get_student_details():
     """Get a specific student by ID - fixed version"""
     try:
-        # Get student_id from query parameters
+        # Get student_id from both query parameters and request data
         student_id = frappe.local.form_dict.get("student_id")
+        
+        # Also try from JSON data if POST request
+        if not student_id and frappe.request.data:
+            try:
+                json_data = frappe.safe_decode(frappe.request.data)
+                data = frappe.parse_json(json_data) if json_data else {}
+                student_id = data.get("student_id")
+            except:
+                pass
+        
+        frappe.logger().info(f"get_student_details called with student_id: {student_id}")
+        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"request method: {frappe.request.method}")
         
         if not student_id:
             return {
