@@ -326,6 +326,10 @@ def update_student():
         frappe.logger().info(f"update_student called with form_dict: {frappe.local.form_dict}")
         frappe.logger().info(f"Received data - student_id: {student_id}, student_name: {student_name}, student_code: {student_code}, dob: {dob}, gender: {gender}")
         
+        # Debug print directly to stdout (will show in browser network tab)
+        print(f"[DEBUG] update_student called - ID: {student_id}")
+        print(f"[DEBUG] Received data: name={student_name}, code={student_code}, dob={dob}, gender={gender}")
+        
         if not student_id:
             return {
                 "success": False,
@@ -365,9 +369,16 @@ def update_student():
         # Track if any changes were made
         changes_made = False
         
+        # Helper function to normalize values for comparison
+        def normalize_value(val):
+            """Convert None/null/empty to empty string for comparison"""
+            if val is None or val == "null" or val == "":
+                return ""
+            return str(val).strip()
+        
         # Update fields if provided
-        frappe.logger().info(f"Checking student_name: '{student_name}' vs current '{student_doc.student_name}' (equal: {student_name == student_doc.student_name})")
-        if student_name and student_name != student_doc.student_name:
+        frappe.logger().info(f"Checking student_name: '{student_name}' vs current '{student_doc.student_name}' (normalized: '{normalize_value(student_name)}' vs '{normalize_value(student_doc.student_name)}')")
+        if student_name and normalize_value(student_name) != normalize_value(student_doc.student_name):
             frappe.logger().info(f"Updating student_name from '{student_doc.student_name}' to '{student_name}'")
             # Check for duplicate student name (temporarily disable campus filtering)
             existing_name = frappe.db.exists(
@@ -388,8 +399,13 @@ def update_student():
             student_doc.student_name = student_name
             changes_made = True
         
-        frappe.logger().info(f"Checking student_code: '{student_code}' vs current '{student_doc.student_code}' (equal: {student_code == student_doc.student_code})")
-        if student_code and student_code != student_doc.student_code:
+        frappe.logger().info(f"Checking student_code: '{student_code}' vs current '{student_doc.student_code}' (normalized: '{normalize_value(student_code)}' vs '{normalize_value(student_doc.student_code)}')")
+        print(f"[DEBUG] Comparing student_code: '{student_code}' vs current '{student_doc.student_code}'")
+        print(f"[DEBUG] Normalized comparison: '{normalize_value(student_code)}' vs '{normalize_value(student_doc.student_code)}'")
+        print(f"[DEBUG] Are they different? {normalize_value(student_code) != normalize_value(student_doc.student_code)}")
+        
+        if student_code and normalize_value(student_code) != normalize_value(student_doc.student_code):
+            print(f"[DEBUG] WILL UPDATE student_code from '{student_doc.student_code}' to '{student_code}'")
             frappe.logger().info(f"Updating student_code from '{student_doc.student_code}' to '{student_code}'")
             # Check for duplicate student code (temporarily disable campus filtering)
             existing_code = frappe.db.exists(
@@ -409,15 +425,18 @@ def update_student():
                 }
             student_doc.student_code = student_code
             changes_made = True
+            print(f"[DEBUG] student_code UPDATED successfully, changes_made = {changes_made}")
+        else:
+            print(f"[DEBUG] NO UPDATE needed for student_code")
 
-        frappe.logger().info(f"Checking dob: '{dob}' vs current '{student_doc.dob}' (equal: {dob == student_doc.dob})")
-        if dob and dob != student_doc.dob:
+        frappe.logger().info(f"Checking dob: '{dob}' vs current '{student_doc.dob}' (normalized: '{normalize_value(dob)}' vs '{normalize_value(student_doc.dob)}')")
+        if dob and normalize_value(dob) != normalize_value(student_doc.dob):
             frappe.logger().info(f"Updating dob from '{student_doc.dob}' to '{dob}'")
             student_doc.dob = dob
             changes_made = True
             
-        frappe.logger().info(f"Checking gender: '{gender}' vs current '{student_doc.gender}' (equal: {gender == student_doc.gender})")
-        if gender and gender != student_doc.gender:
+        frappe.logger().info(f"Checking gender: '{gender}' vs current '{student_doc.gender}' (normalized: '{normalize_value(gender)}' vs '{normalize_value(student_doc.gender)}')")
+        if gender and normalize_value(gender) != normalize_value(student_doc.gender):
             frappe.logger().info(f"Updating gender from '{student_doc.gender}' to '{gender}'")
             # Validate gender
             if gender not in ['male', 'female', 'others']:
@@ -438,26 +457,35 @@ def update_student():
         # Force reload to get fresh data before saving
         student_doc.reload()
         frappe.logger().info(f"Before save - doc values: name={student_doc.student_name}, code={student_doc.student_code}, dob={student_doc.dob}, gender={student_doc.gender}")
+        print(f"[DEBUG] Before save - doc values: name={student_doc.student_name}, code={student_doc.student_code}, dob={student_doc.dob}, gender={student_doc.gender}")
+        print(f"[DEBUG] Changes made flag: {changes_made}")
         
         try:
+            print(f"[DEBUG] About to save document...")
             student_doc.save()
+            print(f"[DEBUG] Document saved successfully!")
             frappe.logger().info(f"Document saved successfully")
         except Exception as save_error:
+            print(f"[DEBUG] ERROR during save: {str(save_error)}")
             frappe.logger().error(f"Error during save: {str(save_error)}")
             raise save_error
             
         try:
+            print(f"[DEBUG] About to commit to database...")
             frappe.db.commit()
+            print(f"[DEBUG] Database committed successfully!")
             frappe.logger().info(f"Database committed successfully")
         except Exception as commit_error:
+            print(f"[DEBUG] ERROR during commit: {str(commit_error)}")
             frappe.logger().error(f"Error during commit: {str(commit_error)}")
             raise commit_error
         
         # Reload again to get the saved data
         student_doc.reload()
         frappe.logger().info(f"After save - doc values: name={student_doc.student_name}, code={student_doc.student_code}, dob={student_doc.dob}, gender={student_doc.gender}")
+        print(f"[DEBUG] After save - doc values: name={student_doc.student_name}, code={student_doc.student_code}, dob={student_doc.dob}, gender={student_doc.gender}")
         
-        return {
+        response_data = {
             "success": True,
             "data": {
                 "name": student_doc.name,
@@ -469,6 +497,9 @@ def update_student():
             },
             "message": f"Student updated successfully{' (with changes)' if changes_made else ' (no changes detected)'}"
         }
+        
+        print(f"[DEBUG] Returning response: {response_data}")
+        return response_data
         
     except Exception as e:
         # Get student_id from locals if not available in scope
