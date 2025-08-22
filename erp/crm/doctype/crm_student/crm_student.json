@@ -21,7 +21,9 @@
   "student_code",
   "dob",
   "gender",
-  "campus_id"
+  "campus_id",
+  "family_information",
+  "family_relationships"
  ],
  "fields": [
   {
@@ -67,6 +69,19 @@
    "options": "SIS Campus",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "family_information",
+   "fieldtype": "Section Break",
+   "label": "Family Information",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "family_relationships",
+   "fieldtype": "Table",
+   "label": "Family Relationships",
+   "options": "CRM Family",
+   "description": "List of guardians and their relationship to this student"
   }
  ],
  "index_web_pages_for_search": 1,

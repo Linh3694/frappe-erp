@@ -20,7 +20,9 @@
   "guardian_id",
   "guardian_name",
   "phone_number",
-  "email"
+  "email",
+  "family_information",
+  "student_relationships"
  ],
  "fields": [
   {
@@ -57,6 +59,19 @@
    "label": "Email",
    "reqd": 0,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "family_information",
+   "fieldtype": "Section Break",
+   "label": "Family Information",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "student_relationships",
+   "fieldtype": "Table",
+   "label": "Student Relationships",
+   "options": "CRM Family",
+   "description": "List of students under this guardian's care"
   }
  ],
  "index_web_pages_for_search": 1,
