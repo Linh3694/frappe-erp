@@ -40,14 +40,21 @@ def microsoft_login_redirect():
         redirect_url = f"{auth_url}?{urllib.parse.urlencode(params)}"
         
         return {
-            "status": "success",
-            "redirect_url": redirect_url,
-            "state": state
+            "success": True,
+            "data": {
+                "redirect_url": redirect_url,
+                "state": state
+            },
+            "message": "Microsoft login URL generated successfully"
         }
         
     except Exception as e:
         frappe.log_error("Microsoft Auth", f"Microsoft login redirect error: {str(e)}")
-        frappe.throw(_("Error generating Microsoft login URL: {0}").format(str(e)))
+        return {
+            "success": False,
+            "message": f"Error generating Microsoft login URL: {str(e)}",
+            "error": str(e)
+        }
 
 
 @frappe.whitelist(allow_guest=True)
@@ -253,7 +260,7 @@ def get_microsoft_config():
     missing_fields = [field for field in required_fields if not config.get(field)]
     
     if missing_fields:
-        frappe.throw(_(f"Missing Microsoft configuration: {', '.join(missing_fields)}. Please check your site_config.json"))
+        raise Exception(f"Missing Microsoft configuration: {', '.join(missing_fields)}. Please check your site_config.json")
     
     return config
 
