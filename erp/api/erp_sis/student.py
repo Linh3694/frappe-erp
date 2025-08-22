@@ -28,8 +28,8 @@ def get_all_students(page=1, limit=20):
         
         frappe.logger().info(f"Using campus_id: {campus_id}")
         
-        # Re-enable campus filtering for security
-        filters = {"campus_id": campus_id}
+        # Temporarily disable campus filtering for debugging
+        filters = {}  # {"campus_id": campus_id}
         
         # Calculate offset for pagination
         offset = (page - 1) * limit
@@ -114,21 +114,21 @@ def get_student_data():
         
         # Build filters based on what parameter we have
         if student_id:
-            # Re-enable campus filtering for security
+            # Temporarily disable campus filtering for debugging
             student = frappe.get_doc("CRM Student", student_id)
-            # Verify campus access after getting document
-            if student.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Student not found or access denied"
-                }
+            # Temporarily disable campus verification
+            # if student.campus_id != campus_id:
+            #     return {
+            #         "success": False,
+            #         "data": {},
+            #         "message": "Student not found or access denied"
+            #     }
         elif student_code:
-            # Search by student_code with campus filtering
+            # Search by student_code without campus filtering (for debugging)
             students = frappe.get_all("CRM Student", 
                 filters={
                     "student_code": student_code,
-                    "campus_id": campus_id
+                    # "campus_id": campus_id
                 }, 
                 fields=["name"], 
                 limit=1)
@@ -147,14 +147,13 @@ def get_student_data():
             search_name = student_slug.replace('-', ' ')
             frappe.logger().info(f"Searching for student with name pattern: {search_name}")
             
-            # Search by student_name with campus filtering - use LIKE for flexible matching
+            # Search by student_name without campus filtering - use LIKE for flexible matching
             students = frappe.db.sql("""
                 SELECT name, student_name 
                 FROM `tabCRM Student` 
                 WHERE LOWER(student_name) LIKE %s 
-                AND campus_id = %s
                 LIMIT 1
-            """, (f'%{search_name.lower()}%', campus_id), as_dict=True)
+            """, (f'%{search_name.lower()}%',), as_dict=True)
             
             if not students:
                 return {
@@ -535,12 +534,16 @@ def search_students(search_term=None, page=1, limit=20):
         if not campus_id:
             campus_id = "campus-1"
         
-        # Build search query with campus filtering for security
-        conditions = f"campus_id = '{campus_id}'"
+        # Build search query - temporarily disable campus filtering for debugging
         if search_term and search_term.strip():
-            search_condition = f" AND (student_name LIKE '%{search_term}%' OR student_code LIKE '%{search_term}%')"
-            conditions += search_condition
-            frappe.logger().info(f"Added search condition: {search_condition}")
+            conditions = f"(student_name LIKE '%{search_term}%' OR student_code LIKE '%{search_term}%')"
+            frappe.logger().info(f"Search conditions: {conditions}")
+        else:
+            conditions = "1=1"  # Show all if no search term
+            frappe.logger().info("No search term, showing all students")
+        
+        # Add campus filtering (commented out for debugging)
+        # conditions = f"campus_id = '{campus_id}' AND ({conditions})"
         
         frappe.logger().info(f"Final conditions: {conditions}")
         
