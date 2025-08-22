@@ -190,14 +190,17 @@ def create_student():
         student_doc.insert()
         frappe.db.commit()
         
-        # Return the created data - follow Education Stage pattern
-        frappe.msgprint(_("Student created successfully"))
+        # Return consistent API response format
         return {
-            "name": student_doc.name,
-            "student_name": student_doc.student_name,
-            "dob": student_doc.dob,
-            "gender": student_doc.gender,
-            "campus_id": student_doc.campus_id
+            "success": True,
+            "data": {
+                "name": student_doc.name,
+                "student_name": student_doc.student_name,
+                "dob": student_doc.dob,
+                "gender": student_doc.gender,
+                "campus_id": student_doc.campus_id
+            },
+            "message": "Student created successfully"
         }
         
     except Exception as e:
