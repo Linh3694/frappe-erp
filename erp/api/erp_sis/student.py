@@ -313,9 +313,18 @@ def create_student():
 
 
 @frappe.whitelist(allow_guest=False)
-def update_student(student_id, student_name=None, student_code=None, dob=None, gender=None):
+def update_student():
     """Update an existing student"""
     try:
+        # Get data from form_dict like other functions
+        student_id = frappe.local.form_dict.get("student_id")
+        student_name = frappe.local.form_dict.get("student_name")
+        student_code = frappe.local.form_dict.get("student_code") 
+        dob = frappe.local.form_dict.get("dob")
+        gender = frappe.local.form_dict.get("gender")
+        
+        frappe.logger().info(f"update_student called with form_dict: {frappe.local.form_dict}")
+        
         if not student_id:
             return {
                 "success": False,
