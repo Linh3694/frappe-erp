@@ -9,9 +9,27 @@ from erp.utils.campus_utils import get_current_campus_from_context, get_campus_i
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_students(page=1, limit=20):
+def get_all_students():
     """Get all students with basic information and pagination"""
     try:
+        # Try to get data from POST request body first
+        data = {}
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
+        # Fallback to form_dict if no POST data
+        if not data:
+            data = frappe.local.form_dict
+        
+        # Get parameters with defaults
+        page = int(data.get("page", 1))
+        limit = int(data.get("limit", 20))
+        
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
         
@@ -23,7 +41,7 @@ def get_all_students(page=1, limit=20):
         filters = {"campus_id": campus_id}
         
         # Calculate offset for pagination
-        offset = (int(page) - 1) * int(limit)
+        offset = (page - 1) * limit
             
         students = frappe.get_all(
             "CRM Student",
@@ -40,22 +58,22 @@ def get_all_students(page=1, limit=20):
             filters=filters,
             order_by="student_name asc",
             limit_start=offset,
-            limit_page_length=int(limit)
+            limit_page_length=limit
         )
         
         # Get total count
         total_count = frappe.db.count("CRM Student", filters=filters)
-        total_pages = (total_count + int(limit) - 1) // int(limit)
+        total_pages = (total_count + limit - 1) // limit
         
         return {
             "success": True,
             "data": students,
             "total_count": total_count,
             "pagination": {
-                "current_page": int(page),
+                "current_page": page,
                 "total_pages": total_pages,
                 "total_count": total_count,
-                "limit": int(limit),
+                "limit": limit,
                 "offset": offset
             },
             "message": "Students fetched successfully"
@@ -75,12 +93,26 @@ def get_all_students(page=1, limit=20):
 def get_student_data():
     """Get a specific student by ID or code"""
     try:
-        # Get parameters from form_dict
-        student_id = frappe.local.form_dict.get("student_id")
-        student_code = frappe.local.form_dict.get("student_code")
+        # Try to get data from POST request body first
+        data = {}
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
+        # Fallback to form_dict if no POST data
+        if not data:
+            data = frappe.local.form_dict
+        
+        # Get parameters from data
+        student_id = data.get("student_id")
+        student_code = data.get("student_code")
         
         frappe.logger().info(f"get_student_data called - student_id: {student_id}, student_code: {student_code}")
-        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"data: {data}")
         
         if not student_id and not student_code:
             return {
@@ -484,9 +516,28 @@ def get_students_for_selection():
 
 
 @frappe.whitelist(allow_guest=False)
-def search_students(search_term, page=1, limit=20):
+def search_students():
     """Search students with pagination"""
     try:
+        # Try to get data from POST request body first
+        data = {}
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
+        # Fallback to form_dict if no POST data
+        if not data:
+            data = frappe.local.form_dict
+        
+        # Get parameters with defaults
+        search_term = data.get("search_term")
+        page = int(data.get("page", 1))
+        limit = int(data.get("limit", 20))
+        
         # Get current user's campus
         campus_id = get_current_campus_from_context()
         
@@ -495,11 +546,11 @@ def search_students(search_term, page=1, limit=20):
         
         # Build search query
         conditions = f"campus_id = '{campus_id}'"
-        if search_term:
+        if search_term and search_term.strip():
             conditions += f" AND (student_name LIKE '%{search_term}%' OR student_code LIKE '%{search_term}%')"
         
         # Calculate offset
-        offset = (int(page) - 1) * int(limit)
+        offset = (page - 1) * limit
         
         # Get students with search
         students = frappe.db.sql(f"""
@@ -525,17 +576,17 @@ def search_students(search_term, page=1, limit=20):
             WHERE {conditions}
         """, as_dict=True)[0]['count']
         
-        total_pages = (total_count + int(limit) - 1) // int(limit)
+        total_pages = (total_count + limit - 1) // limit
         
         return {
             "success": True,
             "data": students,
             "total_count": total_count,
             "pagination": {
-                "current_page": int(page),
+                "current_page": page,
                 "total_pages": total_pages,
                 "total_count": total_count,
-                "limit": int(limit),
+                "limit": limit,
                 "offset": offset
             },
             "message": "Students search completed successfully"
@@ -547,10 +598,10 @@ def search_students(search_term, page=1, limit=20):
             "success": False,
             "data": [],
             "pagination": {
-                "current_page": int(page),
+                "current_page": page,
                 "total_pages": 0,
                 "total_count": 0,
-                "limit": int(limit),
+                "limit": limit,
                 "offset": 0
             },
             "message": f"Error searching students: {str(e)}"
