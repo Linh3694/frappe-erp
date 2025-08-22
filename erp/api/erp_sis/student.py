@@ -28,8 +28,8 @@ def get_all_students(page=1, limit=20):
         
         frappe.logger().info(f"Using campus_id: {campus_id}")
         
-        # Temporarily disable campus filtering for debugging
-        filters = {}  # {"campus_id": campus_id}
+        # Re-enable campus filtering for security
+        filters = {"campus_id": campus_id}
         
         # Calculate offset for pagination
         offset = (page - 1) * limit
@@ -94,15 +94,16 @@ def get_student_data():
         # Get parameters from form_dict
         student_id = frappe.local.form_dict.get("student_id")
         student_code = frappe.local.form_dict.get("student_code")
+        student_slug = frappe.local.form_dict.get("student_slug")
         
-        frappe.logger().info(f"get_student_data called - student_id: {student_id}, student_code: {student_code}")
+        frappe.logger().info(f"get_student_data called - student_id: {student_id}, student_code: {student_code}, student_slug: {student_slug}")
         frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
         
-        if not student_id and not student_code:
+        if not student_id and not student_code and not student_slug:
             return {
                 "success": False,
                 "data": {},
-                "message": "Student ID or code is required"
+                "message": "Student ID, code, or slug is required"
             }
         
         # Get current user's campus
@@ -113,18 +114,21 @@ def get_student_data():
         
         # Build filters based on what parameter we have
         if student_id:
-            # Temporarily disable campus filtering for debugging
-            # filters = {
-            #     "name": student_id,
-            #     "campus_id": campus_id
-            # }
+            # Re-enable campus filtering for security
             student = frappe.get_doc("CRM Student", student_id)
-        else:
-            # Search by student_code - temporarily disable campus filtering for debugging
+            # Verify campus access after getting document
+            if student.campus_id != campus_id:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Student not found or access denied"
+                }
+        elif student_code:
+            # Search by student_code with campus filtering
             students = frappe.get_all("CRM Student", 
                 filters={
                     "student_code": student_code,
-                    # "campus_id": campus_id
+                    "campus_id": campus_id
                 }, 
                 fields=["name"], 
                 limit=1)
@@ -137,14 +141,29 @@ def get_student_data():
                 }
             
             student = frappe.get_doc("CRM Student", students[0].name)
-        
-        # Temporarily disable campus access verification for debugging
-        # if student.campus_id != campus_id:
-        #     return {
-        #         "success": False,
-        #         "data": {},
-        #         "message": "Student not found or access denied"
-        #     }
+        elif student_slug:
+            # Convert slug back to name pattern and search by student_name
+            # Convert "nguyen-van-a" to "nguyen van a" for searching
+            search_name = student_slug.replace('-', ' ')
+            frappe.logger().info(f"Searching for student with name pattern: {search_name}")
+            
+            # Search by student_name with campus filtering - use LIKE for flexible matching
+            students = frappe.db.sql("""
+                SELECT name, student_name 
+                FROM `tabCRM Student` 
+                WHERE LOWER(student_name) LIKE %s 
+                AND campus_id = %s
+                LIMIT 1
+            """, (f'%{search_name.lower()}%', campus_id), as_dict=True)
+            
+            if not students:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Student not found"
+                }
+            
+            student = frappe.get_doc("CRM Student", students[0].name)
         
         if not student:
             return {
@@ -508,16 +527,22 @@ def search_students(search_term=None, page=1, limit=20):
         page = int(page)
         limit = int(limit)
         
+        frappe.logger().info(f"search_students called with search_term: '{search_term}', page: {page}, limit: {limit}")
+        
         # Get current user's campus
         campus_id = get_current_campus_from_context()
         
         if not campus_id:
             campus_id = "campus-1"
         
-        # Build search query - temporarily disable campus filtering for debugging
-        conditions = "1=1"  # f"campus_id = '{campus_id}'"
+        # Build search query with campus filtering for security
+        conditions = f"campus_id = '{campus_id}'"
         if search_term and search_term.strip():
-            conditions += f" AND (student_name LIKE '%{search_term}%' OR student_code LIKE '%{search_term}%')"
+            search_condition = f" AND (student_name LIKE '%{search_term}%' OR student_code LIKE '%{search_term}%')"
+            conditions += search_condition
+            frappe.logger().info(f"Added search condition: {search_condition}")
+        
+        frappe.logger().info(f"Final conditions: {conditions}")
         
         # Calculate offset
         offset = (page - 1) * limit
