@@ -56,7 +56,7 @@
    "fieldname": "period_type",
    "fieldtype": "Select",
    "label": "Period Type",
-   "options": "study\\nnon-study",
+   "options": "study\nnon-study",
    "reqd": 1
   },
   {
