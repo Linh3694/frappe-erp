@@ -9,8 +9,8 @@ from erp.utils.campus_utils import get_current_campus_from_context, get_campus_i
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_students():
-    """Get all students with basic information - SIMPLE VERSION"""
+def get_all_students(page=1, limit=20):
+    """Get all students with basic information and pagination"""
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -21,6 +21,9 @@ def get_all_students():
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         filters = {"campus_id": campus_id}
+        
+        # Calculate offset for pagination
+        offset = (int(page) - 1) * int(limit)
             
         students = frappe.get_all(
             "CRM Student",
@@ -35,13 +38,26 @@ def get_all_students():
                 "modified"
             ],
             filters=filters,
-            order_by="student_name asc"
+            order_by="student_name asc",
+            limit_start=offset,
+            limit_page_length=int(limit)
         )
+        
+        # Get total count
+        total_count = frappe.db.count("CRM Student", filters=filters)
+        total_pages = (total_count + int(limit) - 1) // int(limit)
         
         return {
             "success": True,
             "data": students,
-            "total_count": len(students),
+            "total_count": total_count,
+            "pagination": {
+                "current_page": int(page),
+                "total_pages": total_pages,
+                "total_count": total_count,
+                "limit": int(limit),
+                "offset": offset
+            },
             "message": "Students fetched successfully"
         }
         
@@ -480,6 +496,7 @@ def search_students(search_term, page=1, limit=20):
         return {
             "success": True,
             "data": students,
+            "total_count": total_count,
             "pagination": {
                 "current_page": int(page),
                 "total_pages": total_pages,
