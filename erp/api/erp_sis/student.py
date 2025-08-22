@@ -27,6 +27,7 @@ def get_all_students():
             fields=[
                 "name",
                 "student_name",
+                "student_code",
                 "dob",
                 "gender",
                 "campus_id",
@@ -90,6 +91,7 @@ def get_student_by_id(student_id):
             "data": {
                 "name": student.name,
                 "student_name": student.student_name,
+                "student_code": student.student_code,
                 "dob": student.dob,
                 "gender": student.gender,
                 "campus_id": student.campus_id
@@ -134,12 +136,13 @@ def create_student():
         
         # Extract values from data
         student_name = data.get("student_name")
+        student_code = data.get("student_code")
         dob = data.get("dob")
         gender = data.get("gender")
         
         # Input validation
-        if not student_name or not dob or not gender:
-            frappe.throw(_("Student name, date of birth, and gender are required"))
+        if not student_name or not student_code or not dob or not gender:
+            frappe.throw(_("Student name, student code, date of birth, and gender are required"))
         
         # Validate gender
         if gender not in ['male', 'female', 'others']:
@@ -167,7 +170,7 @@ def create_student():
                 frappe.logger().info(f"Created default campus: {campus_id}")
         
         # Check if student name already exists for this campus
-        existing = frappe.db.exists(
+        existing_name = frappe.db.exists(
             "CRM Student",
             {
                 "student_name": student_name,
@@ -175,13 +178,26 @@ def create_student():
             }
         )
         
-        if existing:
+        if existing_name:
             frappe.throw(_(f"Student with name '{student_name}' already exists"))
+        
+        # Check if student code already exists for this campus
+        existing_code = frappe.db.exists(
+            "CRM Student",
+            {
+                "student_code": student_code,
+                "campus_id": campus_id
+            }
+        )
+        
+        if existing_code:
+            frappe.throw(_(f"Student with code '{student_code}' already exists"))
         
         # Create new student with validation bypass
         student_doc = frappe.get_doc({
             "doctype": "CRM Student",
             "student_name": student_name,
+            "student_code": student_code,
             "dob": dob,
             "gender": gender,
             "campus_id": campus_id
@@ -198,6 +214,7 @@ def create_student():
             "data": {
                 "name": student_doc.name,
                 "student_name": student_doc.student_name,
+                "student_code": student_doc.student_code,
                 "dob": student_doc.dob,
                 "gender": student_doc.gender,
                 "campus_id": student_doc.campus_id
@@ -211,7 +228,7 @@ def create_student():
 
 
 @frappe.whitelist(allow_guest=False)
-def update_student(student_id, student_name=None, dob=None, gender=None):
+def update_student(student_id, student_name=None, student_code=None, dob=None, gender=None):
     """Update an existing student"""
     try:
         if not student_id:
@@ -249,7 +266,7 @@ def update_student(student_id, student_name=None, dob=None, gender=None):
         # Update fields if provided
         if student_name and student_name != student_doc.student_name:
             # Check for duplicate student name
-            existing = frappe.db.exists(
+            existing_name = frappe.db.exists(
                 "CRM Student",
                 {
                     "student_name": student_name,
@@ -257,13 +274,31 @@ def update_student(student_id, student_name=None, dob=None, gender=None):
                     "name": ["!=", student_id]
                 }
             )
-            if existing:
+            if existing_name:
                 return {
                     "success": False,
                     "data": {},
                     "message": f"Student with name '{student_name}' already exists"
                 }
             student_doc.student_name = student_name
+        
+        if student_code and student_code != student_doc.student_code:
+            # Check for duplicate student code
+            existing_code = frappe.db.exists(
+                "CRM Student",
+                {
+                    "student_code": student_code,
+                    "campus_id": campus_id,
+                    "name": ["!=", student_id]
+                }
+            )
+            if existing_code:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": f"Student with code '{student_code}' already exists"
+                }
+            student_doc.student_code = student_code
         
         if dob and dob != student_doc.dob:
             student_doc.dob = dob
@@ -286,6 +321,7 @@ def update_student(student_id, student_name=None, dob=None, gender=None):
             "data": {
                 "name": student_doc.name,
                 "student_name": student_doc.student_name,
+                "student_code": student_doc.student_code,
                 "dob": student_doc.dob,
                 "gender": student_doc.gender,
                 "campus_id": student_doc.campus_id
@@ -374,6 +410,7 @@ def get_students_for_selection():
             fields=[
                 "name",
                 "student_name",
+                "student_code",
                 "dob",
                 "gender"
             ],
@@ -409,7 +446,7 @@ def search_students(search_term, page=1, limit=20):
         # Build search query
         conditions = f"campus_id = '{campus_id}'"
         if search_term:
-            conditions += f" AND student_name LIKE '%{search_term}%'"
+            conditions += f" AND (student_name LIKE '%{search_term}%' OR student_code LIKE '%{search_term}%')"
         
         # Calculate offset
         offset = (int(page) - 1) * int(limit)
@@ -419,6 +456,7 @@ def search_students(search_term, page=1, limit=20):
             SELECT 
                 name,
                 student_name,
+                student_code,
                 dob,
                 gender,
                 campus_id,
