@@ -536,7 +536,9 @@ def search_students(search_term=None, page=1, limit=20):
         
         # Build search query - temporarily disable campus filtering for debugging
         if search_term and search_term.strip():
-            conditions = f"(student_name LIKE '%{search_term}%' OR student_code LIKE '%{search_term}%')"
+            # Use case-insensitive search and escape search term
+            escaped_term = search_term.replace("'", "''")  # Simple SQL injection prevention
+            conditions = f"(LOWER(student_name) LIKE LOWER('%{escaped_term}%') OR LOWER(student_code) LIKE LOWER('%{escaped_term}%'))"
             frappe.logger().info(f"Search conditions: {conditions}")
         else:
             conditions = "1=1"  # Show all if no search term
