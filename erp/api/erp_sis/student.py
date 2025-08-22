@@ -575,6 +575,32 @@ def search_students(search_term=None, page=1, limit=20):
         students = frappe.db.sql(sql_query, params + [limit, offset], as_dict=True)
 
         frappe.logger().info(f"SQL QUERY RETURNED {len(students)} students")
+
+        # Post-filter in Python for better VN diacritics handling and strict contains
+        def normalize_text(text: str) -> str:
+            try:
+                import unicodedata
+                if not text:
+                    return ''
+                text = unicodedata.normalize('NFD', text)
+                text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
+                # Handle Vietnamese specific characters
+                text = text.replace('đ', 'd').replace('Đ', 'D')
+                return text.lower()
+            except Exception:
+                return (text or '').lower()
+
+        if search_term and str(search_term).strip():
+            norm_q = normalize_text(str(search_term).strip())
+            pre_count = len(students)
+            students = [
+                s for s in students
+                if (
+                    normalize_text(s.get('student_name', '')) .find(norm_q) != -1
+                    or (s.get('student_code') or '').lower().find(norm_q.lower()) != -1
+                )
+            ]
+            frappe.logger().info(f"POST-FILTERED {pre_count} -> {len(students)} using normalized query='{norm_q}'")
         
         # Get total count (parameterized)
         count_query = (
