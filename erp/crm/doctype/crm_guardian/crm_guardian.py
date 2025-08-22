@@ -6,4 +6,12 @@ from frappe.model.document import Document
 
 
 class CRMGuardian(Document):
-    pass
+    def before_save(self):
+        """Set default values before saving"""
+        if not self.relationship:
+            self.relationship = "other"
+    
+    def validate(self):
+        """Validate guardian data"""
+        if self.key_person and self.parent_account:
+            frappe.throw("A guardian cannot be both key person and parent account")

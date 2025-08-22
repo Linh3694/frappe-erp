@@ -17,10 +17,10 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
-  "user_id",
-  "relationship",
-  "key_person",
-  "parent_account"
+  "guardian_id",
+  "guardian_name",
+  "phone_number",
+  "email"
  ],
  "fields": [
   {
@@ -29,33 +29,34 @@
    "label": "Basic Information"
   },
   {
-   "fieldname": "user_id",
-   "fieldtype": "Link",
-   "label": "User",
-   "options": "User",
+   "fieldname": "guardian_id",
+   "fieldtype": "Data",
+   "label": "Guardian ID",
    "reqd": 1,
    "unique": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "relationship",
-   "fieldtype": "Select",
-   "label": "Relationship",
-   "options": "dad\\nmom\\ngrandfather\\ngrandmother\\nuncle\\naunt\\nsibling\\nother",
+   "fieldname": "guardian_name",
+   "fieldtype": "Data",
+   "label": "Guardian Name",
    "reqd": 1,
+   "unique": 0,
    "in_list_view": 1
   },
   {
-   "fieldname": "key_person",
-   "fieldtype": "Check",
-   "label": "Key Person",
-   "default": "0"
+   "fieldname": "phone_number",
+   "fieldtype": "Phone",
+   "label": "Phone Number",
+   "reqd": 0,
+   "in_list_view": 1
   },
   {
-   "fieldname": "parent_account",
-   "fieldtype": "Check",
-   "label": "Parent Account",
-   "default": "0"
+   "fieldname": "email",
+   "fieldtype": "Email",
+   "label": "Email",
+   "reqd": 0,
+   "in_list_view": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -83,6 +84,6 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "user_id",
+ "title_field": "guardian_name",
  "track_changes": 1
 }

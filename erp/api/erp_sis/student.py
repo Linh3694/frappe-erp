@@ -314,10 +314,7 @@ def create_student():
 def update_student(student_id=None, student_name=None, student_code=None, dob=None, gender=None):
     """Update an existing student"""
     try:
-        # Simple debug - avoid long messages
-        print(f"[SIMPLE DEBUG] Function params: ID={student_id}, name={student_name}, code={student_code}")
-        
-        # Fallback to form_dict if parameters are None
+        # Get parameters from multiple sources for flexibility
         if not student_id:
             student_id = frappe.local.form_dict.get("student_id")
         if not student_name:  
@@ -328,10 +325,8 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
             dob = frappe.local.form_dict.get("dob")
         if not gender:
             gender = frappe.local.form_dict.get("gender")
-            
-        print(f"[SIMPLE DEBUG] After form_dict: ID={student_id}, code={student_code}")
         
-        # Try to get from JSON if still None
+        # Fallback to JSON data if form_dict is empty
         if not student_id and frappe.request.data:
             try:
                 import json
@@ -341,41 +336,8 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
                 student_code = json_data.get("student_code")
                 dob = json_data.get("dob")
                 gender = json_data.get("gender")
-                print(f"[SIMPLE DEBUG] From JSON: ID={student_id}, code={student_code}")
-            except Exception as e:
-                print(f"[SIMPLE DEBUG] JSON parse error: {str(e)[:50]}")
-                
-        print(f"[SIMPLE DEBUG] Final: ID={student_id}, code={student_code}")
-    
-    except Exception as outer_error:
-        frappe.msgprint(f"ERROR: {str(outer_error)}")
-        return {"success": False, "message": str(outer_error)}
-        
-    # Continue with main logic
-    try:
-        
-        # Minimal debug to avoid log truncation
-        print(f"[DEBUG] Method: {getattr(frappe.request, 'method', 'unknown')}")
-        print(f"[DEBUG] Has request.data: {bool(frappe.request.data)}")
-        print(f"[DEBUG] Form dict keys: {list(frappe.local.form_dict.keys())}")
-        
-        # Short decoded data preview
-        decoded_preview = "None"
-        if frappe.request.data:
-            try:
-                decoded = frappe.request.data.decode('utf-8')
-                decoded_preview = decoded[:100] + "..." if len(decoded) > 100 else decoded
-            except:
-                decoded_preview = "Decode failed"
-        
-        # Compact debug info to avoid truncation
-        debug_info = {
-            "received_params": bool(student_id),
-            "has_form_data": len(frappe.local.form_dict) > 0,
-            "has_request_data": bool(frappe.request.data),
-            "final_student_id": student_id,
-            "final_student_code": student_code
-        }
+            except Exception:
+                pass
         
         if not student_id:
             return {
@@ -384,28 +346,9 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
                 "message": "Student ID is required"
             }
         
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            campus_id = "campus-1"
-        
-        frappe.logger().info(f"Using campus_id: {campus_id}")
-        
         # Get existing document
         try:
             student_doc = frappe.get_doc("CRM Student", student_id)
-            frappe.logger().info(f"Found student doc: {student_doc.name}, current values - name: {student_doc.student_name}, code: {student_doc.student_code}, dob: {student_doc.dob}, gender: {student_doc.gender}")
-            frappe.logger().info(f"Student campus_id: {student_doc.campus_id}, user campus_id: {campus_id}")
-            
-            # Temporarily disable campus permission check for debugging
-            # if student_doc.campus_id != campus_id:
-            #     return {
-            #         "success": False,
-            #         "data": {},
-            #         "message": "Access denied: You don't have permission to modify this student"
-            #     }
-                
         except frappe.DoesNotExistError:
             return {
                 "success": False,
@@ -423,100 +366,45 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
                 return ""
             return str(val).strip()
         
-        # Update fields if provided - ALWAYS UPDATE if we have values
-        print(f"[DEBUG] About to check fields for changes...")
-        print(f"[DEBUG] student_name check: '{student_name}' vs current '{student_doc.student_name}'")
-        
+        # Update fields if provided
         if student_name and normalize_value(student_name) != normalize_value(student_doc.student_name):
-            print(f"[DEBUG] Will update student_name from '{student_doc.student_name}' to '{student_name}'")
             student_doc.student_name = student_name
             changes_made = True
-        elif student_name:
-            print(f"[DEBUG] student_name same, no update needed")
-        else:
-            print(f"[DEBUG] No student_name provided")
-        
-        print(f"[DEBUG] student_code check: '{student_code}' vs current '{student_doc.student_code}'")
-        print(f"[DEBUG] Normalized: '{normalize_value(student_code)}' vs '{normalize_value(student_doc.student_code)}'")
         
         if student_code and normalize_value(student_code) != normalize_value(student_doc.student_code):
-            print(f"[DEBUG] Will update student_code from '{student_doc.student_code}' to '{student_code}'")
             student_doc.student_code = student_code
             changes_made = True
-            print(f"[DEBUG] student_code updated, changes_made = {changes_made}")
-        elif student_code:
-            print(f"[DEBUG] student_code same, no update needed")
-        else:
-            print(f"[DEBUG] No student_code provided")
 
-        print(f"[DEBUG] dob check: '{dob}' vs current '{student_doc.dob}'")
         if dob and normalize_value(dob) != normalize_value(student_doc.dob):
-            print(f"[DEBUG] Will update dob from '{student_doc.dob}' to '{dob}'")
             student_doc.dob = dob
             changes_made = True
-        elif dob:
-            print(f"[DEBUG] dob same, no update needed")
-        else:
-            print(f"[DEBUG] No dob provided")
             
-        print(f"[DEBUG] gender check: '{gender}' vs current '{student_doc.gender}'")
         if gender and normalize_value(gender) != normalize_value(student_doc.gender):
-            print(f"[DEBUG] Will update gender from '{student_doc.gender}' to '{gender}'")
+            if gender not in ['male', 'female', 'others']:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Gender must be 'male', 'female', or 'others'"
+                }
             student_doc.gender = gender
             changes_made = True
-        elif gender:
-            print(f"[DEBUG] gender same, no update needed")
-        else:
-            print(f"[DEBUG] No gender provided")
-            
-        print(f"[DEBUG] FINAL RESULT: changes_made = {changes_made}")
         
-        if not changes_made:
-            print(f"[DEBUG] No changes detected, but will try to save anyway")
-        
-        
-        # ⚠️ DO NOT RELOAD - it will lose all changes!
-        # student_doc.reload()  # This was causing the issue!
-        
-        print(f"[DEBUG] About to save - doc values: name={student_doc.student_name}, code={student_doc.student_code}, dob={student_doc.dob}, gender={student_doc.gender}")
-        print(f"[DEBUG] Changes made flag: {changes_made}")
-        print(f"[DEBUG] Will proceed with save regardless of changes_made flag")
-        
+        # Save the document with validation disabled
         try:
-            print(f"[DEBUG] About to save document with ignore_validate=True")
-            
-            # Try saving with ignore_validate first to bypass Frappe validation
             student_doc.flags.ignore_validate = True
             student_doc.save(ignore_permissions=True)
-            print(f"[DEBUG] Document saved successfully!")
-        except Exception as save_error:
-            print(f"[DEBUG] Save error: {str(save_error)[:100]}")
-            
-            # Return error instead of throwing
-            return {
-                "success": False,
-                "message": f"Save failed: {str(save_error)[:100]}",
-                "debug_info": debug_info
-            }
-            
-        try:
-            print(f"[DEBUG] About to commit to database...")
             frappe.db.commit()
-            print(f"[DEBUG] Database committed successfully!")
-        except Exception as commit_error:
-            print(f"[DEBUG] Commit error: {str(commit_error)[:100]}")
+        except Exception as save_error:
             return {
                 "success": False,
-                "message": f"Commit failed: {str(commit_error)[:100]}",
-                "debug_info": debug_info
+                "data": {},
+                "message": f"Failed to save student: {str(save_error)}"
             }
         
         # Reload to get the final saved data from database
         student_doc.reload()
-        print(f"[DEBUG] After save and reload - doc values: name={student_doc.student_name}, code={student_doc.student_code}, dob={student_doc.dob}, gender={student_doc.gender}")
-        print(f"[DEBUG] Document has been successfully saved to database!")
         
-        response_data = {
+        return {
             "success": True,
             "data": {
                 "name": student_doc.name,
@@ -526,20 +414,14 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
                 "gender": student_doc.gender,
                 "campus_id": student_doc.campus_id
             },
-            "message": f"Student updated successfully",
-            "debug_info": debug_info,
-            "changes_made": changes_made
+            "message": "Student updated successfully"
         }
         
-        print(f"[DEBUG] Success! Returning with changes_made={changes_made}")
-        return response_data
-        
     except Exception as e:
-        print(f"[DEBUG] Outer exception: {str(e)[:100]}")
         return {
             "success": False,
             "data": {},
-            "message": f"Update failed: {str(e)[:100]}"
+            "message": f"Error updating student: {str(e)}"
         }
 
 
