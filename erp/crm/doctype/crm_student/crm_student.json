@@ -77,10 +77,19 @@
    "collapsible": 1
   },
   {
+   "fieldname": "family_code",
+   "fieldtype": "Link",
+   "label": "Family Code",
+   "options": "CRM Family",
+   "reqd": 0,
+   "in_list_view": 1,
+   "description": "Link to the family this student belongs to"
+  },
+  {
    "fieldname": "family_relationships",
    "fieldtype": "Table",
    "label": "Family Relationships",
-   "options": "CRM Family",
+   "options": "CRM Family Relationship",
    "description": "List of guardians and their relationship to this student"
   }
  ],

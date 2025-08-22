@@ -6,7 +6,7 @@ import json
 
 @frappe.whitelist(allow_guest=False)
 def get_all_families(page=1, limit=20):
-    """Get all families with basic information and pagination"""
+    """Get all families with basic information and pagination - NEW STRUCTURE"""
     try:
         # Get parameters with defaults
         page = int(page)
@@ -22,23 +22,21 @@ def get_all_families(page=1, limit=20):
         frappe.logger().info(f"Query filters: {filters}")
         frappe.logger().info(f"Query pagination: offset={offset}, limit={limit}")
         
-        families = frappe.get_all(
-            "CRM Family",
-            fields=[
-                "name",
-                "student_id",
-                "guardian_id", 
-                "relationship",
-                "key_person",
-                "access",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="student_id asc, guardian_id asc",
-            limit_start=offset,
-            limit_page_length=limit
-        )
+        # Get families with relationships and student/guardian details
+        families = frappe.db.sql("""
+            SELECT 
+                f.name,
+                f.family_code,
+                f.creation,
+                f.modified,
+                COUNT(DISTINCT fr.student) as student_count,
+                COUNT(DISTINCT fr.guardian) as guardian_count
+            FROM `tabCRM Family` f
+            LEFT JOIN `tabCRM Family Relationship` fr ON f.name = fr.parent
+            GROUP BY f.name, f.family_code, f.creation, f.modified
+            ORDER BY f.family_code ASC
+            LIMIT %s OFFSET %s
+        """, (limit, offset), as_dict=True)
         
         frappe.logger().info(f"Found {len(families)} families")
         
@@ -208,9 +206,9 @@ def get_family_data():
 
 @frappe.whitelist(allow_guest=False)
 def create_family():
-    """Create a new family relationship - ROBUST VERSION"""
+    """Create a new family with multiple students and guardians - NEW STRUCTURE"""
     try:
-        # Get data from request - follow Student pattern
+        # Get data from request
         data = {}
         
         # First try to get JSON data from request body
@@ -233,72 +231,113 @@ def create_family():
             frappe.logger().info(f"No request data, using form_dict for create_family: {data}")
         
         # Extract values from data
-        student_id = data.get("student_id")
-        guardian_id = data.get("guardian_id")
-        relationship = data.get("relationship")
-        key_person = data.get("key_person", False)
-        access = data.get("access", False)
+        students = data.get("students", [])  # List of student IDs
+        guardians = data.get("guardians", [])  # List of guardian IDs
+        relationships = data.get("relationships", [])  # List of relationship objects
         
         # Input validation
-        if not student_id or not guardian_id or not relationship:
-            frappe.throw(_("Student ID, Guardian ID, and Relationship are required"))
+        if not students or not guardians or not relationships:
+            frappe.throw(_("Students, Guardians, and Relationships are required"))
         
-        # Validate relationship
-        valid_relationships = ["dad", "mom", "foster_parent", "grandparent", "uncle_aunt", "sibling", "other"]
-        if relationship not in valid_relationships:
-            frappe.throw(_(f"Relationship must be one of: {', '.join(valid_relationships)}"))
+        if len(students) == 0 or len(guardians) == 0:
+            frappe.throw(_("At least one student and one guardian are required"))
         
-        # Check if this exact family relationship already exists
-        existing_family = frappe.db.exists(
-            "CRM Family", 
-            {
-                "student_id": student_id,
-                "guardian_id": guardian_id
-            }
-        )
-        if existing_family:
-            frappe.throw(_(f"Family relationship between student '{student_id}' and guardian '{guardian_id}' already exists"))
+        # Generate family code
+        last_family = frappe.db.sql("""
+            SELECT family_code FROM `tabCRM Family` 
+            WHERE family_code LIKE 'FAM-%' 
+            ORDER BY CAST(SUBSTRING(family_code, 5) AS UNSIGNED) DESC 
+            LIMIT 1
+        """, as_dict=True)
         
-        # Verify student exists
-        if not frappe.db.exists("CRM Student", student_id):
-            frappe.throw(_(f"Student '{student_id}' not found"))
+        if last_family:
+            last_number = int(last_family[0].family_code.split('-')[1])
+            new_number = last_number + 1
+        else:
+            new_number = 1
+            
+        family_code = f"FAM-{new_number}"
         
-        # Verify guardian exists
-        if not frappe.db.exists("CRM Guardian", guardian_id):
-            frappe.throw(_(f"Guardian '{guardian_id}' not found"))
+        # Verify all students exist
+        for student_id in students:
+            if not frappe.db.exists("CRM Student", student_id):
+                frappe.throw(_(f"Student '{student_id}' not found"))
         
-        # Create new family relationship with validation bypass
+        # Verify all guardians exist
+        for guardian_id in guardians:
+            if not frappe.db.exists("CRM Guardian", guardian_id):
+                frappe.throw(_(f"Guardian '{guardian_id}' not found"))
+        
+        # Create new family with relationships
         family_doc = frappe.get_doc({
             "doctype": "CRM Family",
-            "student_id": student_id,
-            "guardian_id": guardian_id,
-            "relationship": relationship,
-            "key_person": int(key_person) if key_person else 0,
-            "access": int(access) if access else 0
+            "family_code": family_code,
+            "relationships": relationships
         })
         
         # Bypass validation temporarily due to doctype cache issue
         family_doc.flags.ignore_validate = True
         family_doc.insert(ignore_permissions=True)
+        
+        # Update students with family_code and family_relationships
+        for student_id in students:
+            student_doc = frappe.get_doc("CRM Student", student_id)
+            student_doc.family_code = family_code
+            
+            # Add family relationships for this student
+            student_relationships = []
+            for rel in relationships:
+                if rel.get("student") == student_id:
+                    student_relationships.append({
+                        "guardian": rel.get("guardian"),
+                        "relationship_type": rel.get("relationship_type"),
+                        "key_person": rel.get("key_person", False),
+                        "access": rel.get("access", False)
+                    })
+            
+            student_doc.family_relationships = student_relationships
+            student_doc.save(ignore_permissions=True)
+        
+        # Update guardians with family_code and student_relationships
+        for guardian_id in guardians:
+            guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
+            guardian_doc.family_code = family_code
+            
+            # Add student relationships for this guardian
+            student_relationships = []
+            for rel in relationships:
+                if rel.get("guardian") == guardian_id:
+                    student_relationships.append({
+                        "student": rel.get("student"),
+                        "relationship_type": rel.get("relationship_type"),
+                        "key_person": rel.get("key_person", False),
+                        "access": rel.get("access", False)
+                    })
+            
+            guardian_doc.student_relationships = student_relationships
+            guardian_doc.save(ignore_permissions=True)
+        
         frappe.db.commit()
         
         # Return consistent API response format
         return {
             "success": True,
             "data": {
-                "name": family_doc.name,
-                "student_id": family_doc.student_id,
-                "guardian_id": family_doc.guardian_id,
-                "relationship": family_doc.relationship,
-                "key_person": family_doc.key_person,
-                "access": family_doc.access
+                "family_code": family_code,
+                "students": students,
+                "guardians": guardians,
+                "relationships": relationships
             },
-            "message": "Family relationship created successfully"
+            "message": "Family created successfully"
         }
         
     except Exception as e:
         frappe.log_error(f"Error creating family: {str(e)}")
-        frappe.throw(_(f"Error creating family: {str(e)}"))
+        return {
+            "success": False,
+            "data": {},
+            "message": f"Error creating family: {str(e)}"
+        }
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
@@ -479,8 +518,8 @@ def search_families(search_term=None, page=1, limit=20):
         params = []
         if search_term and str(search_term).strip():
             like = f"%{str(search_term).strip()}%"
-            where_clauses.append("(LOWER(f.student_id) LIKE LOWER(%s) OR LOWER(f.guardian_id) LIKE LOWER(%s) OR LOWER(f.relationship) LIKE LOWER(%s) OR LOWER(s.student_name) LIKE LOWER(%s) OR LOWER(g.guardian_name) LIKE LOWER(%s))")
-            params.extend([like, like, like, like, like])
+            where_clauses.append("(LOWER(f.family_code) LIKE LOWER(%s) OR LOWER(s.student_name) LIKE LOWER(%s) OR LOWER(g.guardian_name) LIKE LOWER(%s))")
+            params.extend([like, like, like])
         
         conditions = " AND ".join(where_clauses)
         frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
@@ -493,20 +532,20 @@ def search_families(search_term=None, page=1, limit=20):
             """
             SELECT 
                 f.name,
-                f.student_id,
-                f.guardian_id,
-                f.relationship,
-                f.key_person,
-                f.access,
+                f.family_code,
                 f.creation,
                 f.modified,
-                s.student_name,
-                g.guardian_name
+                COUNT(DISTINCT fr.student) as student_count,
+                COUNT(DISTINCT fr.guardian) as guardian_count,
+                GROUP_CONCAT(DISTINCT s.student_name SEPARATOR ', ') as student_names,
+                GROUP_CONCAT(DISTINCT g.guardian_name SEPARATOR ', ') as guardian_names
             FROM `tabCRM Family` f
-            LEFT JOIN `tabCRM Student` s ON f.student_id = s.name
-            LEFT JOIN `tabCRM Guardian` g ON f.guardian_id = g.name
+            LEFT JOIN `tabCRM Family Relationship` fr ON f.name = fr.parent
+            LEFT JOIN `tabCRM Student` s ON fr.student = s.name
+            LEFT JOIN `tabCRM Guardian` g ON fr.guardian = g.name
             WHERE {where}
-            ORDER BY f.student_id ASC, f.guardian_id ASC
+            GROUP BY f.name, f.family_code, f.creation, f.modified
+            ORDER BY f.family_code ASC
             LIMIT %s OFFSET %s
             """
         ).format(where=conditions)
@@ -520,10 +559,11 @@ def search_families(search_term=None, page=1, limit=20):
         # Get total count (parameterized)
         count_query = (
             """
-            SELECT COUNT(*) as count
+            SELECT COUNT(DISTINCT f.name) as count
             FROM `tabCRM Family` f
-            LEFT JOIN `tabCRM Student` s ON f.student_id = s.name
-            LEFT JOIN `tabCRM Guardian` g ON f.guardian_id = g.name
+            LEFT JOIN `tabCRM Family Relationship` fr ON f.name = fr.parent
+            LEFT JOIN `tabCRM Student` s ON fr.student = s.name
+            LEFT JOIN `tabCRM Guardian` g ON fr.guardian = g.name
             WHERE {where}
             """
         ).format(where=conditions)
@@ -568,22 +608,22 @@ def search_families(search_term=None, page=1, limit=20):
 
 @frappe.whitelist(allow_guest=False)
 def get_families_for_selection():
-    """Get families for dropdown selection"""
+    """Get families for dropdown selection - NEW STRUCTURE"""
     try:
         families = frappe.db.sql("""
             SELECT 
                 f.name,
-                f.student_id,
-                f.guardian_id,
-                f.relationship,
-                f.key_person,
-                f.access,
-                s.student_name,
-                g.guardian_name
+                f.family_code,
+                COUNT(DISTINCT fr.student) as student_count,
+                COUNT(DISTINCT fr.guardian) as guardian_count,
+                GROUP_CONCAT(DISTINCT s.student_name SEPARATOR ', ') as student_names,
+                GROUP_CONCAT(DISTINCT g.guardian_name SEPARATOR ', ') as guardian_names
             FROM `tabCRM Family` f
-            LEFT JOIN `tabCRM Student` s ON f.student_id = s.name
-            LEFT JOIN `tabCRM Guardian` g ON f.guardian_id = g.name
-            ORDER BY s.student_name ASC, g.guardian_name ASC
+            LEFT JOIN `tabCRM Family Relationship` fr ON f.name = fr.parent
+            LEFT JOIN `tabCRM Student` s ON fr.student = s.name
+            LEFT JOIN `tabCRM Guardian` g ON fr.guardian = g.name
+            GROUP BY f.name, f.family_code
+            ORDER BY f.family_code ASC
         """, as_dict=True)
         
         return {

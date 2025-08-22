@@ -17,12 +17,9 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
-  "student_id",
-  "guardian_id",
-  "relationship",
-  "column_break_1",
-  "key_person",
-  "access"
+  "family_code",
+  "relationships_section",
+  "relationships"
  ],
  "fields": [
   {
@@ -31,46 +28,27 @@
    "label": "Basic Information"
   },
   {
-   "fieldname": "student_id",
-   "fieldtype": "Link",
-   "label": "Student",
-   "options": "CRM Student",
+   "fieldname": "family_code",
+   "fieldtype": "Data",
+   "label": "Family Code",
    "reqd": 1,
-   "in_list_view": 1
+   "unique": 1,
+   "in_list_view": 1,
+   "read_only": 1,
+   "description": "Auto-generated family code (FAM-1, FAM-2, ...)"
   },
   {
-   "fieldname": "guardian_id",
-   "fieldtype": "Link",
-   "label": "Guardian",
-   "options": "CRM Guardian",
-   "reqd": 1,
-   "in_list_view": 1
+   "fieldname": "relationships_section",
+   "fieldtype": "Section Break",
+   "label": "Family Relationships",
+   "collapsible": 1
   },
   {
-   "fieldname": "relationship",
-   "fieldtype": "Select",
-   "label": "Relationship",
-   "options": "\ndad\nmom\nfoster_parent\ngrandparent\nuncle_aunt\nsibling\nother",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "column_break_1",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "key_person",
-   "fieldtype": "Check",
-   "label": "Key Person",
-   "description": "Primary contact for this family relationship",
-   "default": 0
-  },
-  {
-   "fieldname": "access",
-   "fieldtype": "Check", 
-   "label": "Access Granted",
-   "description": "Whether this guardian has access to student information",
-   "default": 0
+   "fieldname": "relationships",
+   "fieldtype": "Table",
+   "label": "Relationships",
+   "options": "CRM Family Relationship",
+   "description": "List of relationships between students and guardians"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -98,6 +76,6 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "student_id",
+ "title_field": "family_code",
  "track_changes": 1
 }
