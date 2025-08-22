@@ -72,9 +72,12 @@ def get_all_students(page=1, limit=20):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_student_by_id(student_id):
+def get_student_by_id():
     """Get a specific student by ID"""
     try:
+        # Get student_id from query parameters
+        student_id = frappe.local.form_dict.get("student_id")
+        
         if not student_id:
             return {
                 "success": False,
