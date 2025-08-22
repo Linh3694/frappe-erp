@@ -72,15 +72,16 @@ def get_all_students(page=1, limit=20):
 
 
 @frappe.whitelist(allow_guest=False)  
-def get_student_info(student_id=None, student_code=None):
+def get_student_data():
     """Get a specific student by ID or code"""
     try:
-        # Handle both student_id and student_code
-        if not student_id and not student_code:
-            # Try to get from form_dict  
-            student_id = frappe.local.form_dict.get("student_id")
-            student_code = frappe.local.form_dict.get("student_code")
-            
+        # Get parameters from form_dict
+        student_id = frappe.local.form_dict.get("student_id")
+        student_code = frappe.local.form_dict.get("student_code")
+        
+        frappe.logger().info(f"get_student_data called - student_id: {student_id}, student_code: {student_code}")
+        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
+        
         if not student_id and not student_code:
             return {
                 "success": False,
