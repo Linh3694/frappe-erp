@@ -522,14 +522,15 @@ def get_students_for_selection():
 def search_students(search_term=None, page=1, limit=20):
     """Search students with pagination"""
     try:
-        # Get parameters with defaults
-        page = int(page)
-        limit = int(limit)
-        
+        # Normalize parameters: prefer form_dict values if provided
+        form = frappe.local.form_dict or {}
+        if 'search_term' in form and (search_term is None or str(search_term).strip() == ''):
+            search_term = form.get('search_term')
+        # Coerce page/limit from form if present
+        page = int(form.get('page', page))
+        limit = int(form.get('limit', limit))
+
         frappe.logger().info(f"search_students called with search_term: '{search_term}', page: {page}, limit: {limit}")
-        frappe.logger().info(f"search_term type: {type(search_term)}")
-        frappe.logger().info(f"search_term is None: {search_term is None}")
-        frappe.logger().info(f"search_term after strip: '{search_term.strip() if search_term else 'None'}'")
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -537,36 +538,22 @@ def search_students(search_term=None, page=1, limit=20):
         if not campus_id:
             campus_id = "campus-1"
         
-        # Build search query - temporarily disable campus filtering for debugging
-        frappe.logger().info(f"About to check search_term condition...")
-        frappe.logger().info(f"search_term value: '{search_term}'")
-        frappe.logger().info(f"search_term repr: {repr(search_term)}")
-        frappe.logger().info(f"search_term truthy: {bool(search_term)}")
-        frappe.logger().info(f"search_term.strip() truthy: {bool(search_term.strip()) if search_term else False}")
-        
-        # Force debug - temporarily hardcode search for specific term
-        if search_term and search_term.strip():
-            # Use case-insensitive search and escape search term
-            escaped_term = search_term.strip().replace("'", "''")  # Simple SQL injection prevention
-            conditions = f"(LOWER(student_name) LIKE LOWER('%{escaped_term}%') OR LOWER(student_code) LIKE LOWER('%{escaped_term}%'))"
-            frappe.logger().info(f"Using SEARCH conditions: {conditions}")
-        elif search_term == "" or search_term is None:
-            conditions = "1=1"  # Show all if no search term
-            frappe.logger().info("NO SEARCH TERM (empty or None), using conditions: 1=1 (showing all students)")
-        else:
-            frappe.logger().info(f"UNEXPECTED search_term state: {repr(search_term)}")
-            conditions = "1=1"
-        
-        # Add campus filtering (commented out for debugging)
-        # conditions = f"campus_id = '{campus_id}' AND ({conditions})"
-        
-        frappe.logger().info(f"FINAL conditions for SQL: {conditions}")
+        # Build search terms and campus filter (use parameterized queries)
+        where_clauses = ["campus_id = %s"]
+        params = [campus_id]
+        if search_term and str(search_term).strip():
+            like = f"%{str(search_term).strip()}%"
+            where_clauses.append("(LOWER(student_name) LIKE LOWER(%s) OR LOWER(student_code) LIKE LOWER(%s))")
+            params.extend([like, like])
+        conditions = " AND ".join(where_clauses)
+        frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
         
         # Calculate offset
         offset = (page - 1) * limit
         
-        # Get students with search
-        sql_query = f"""
+        # Get students with search (parameterized)
+        sql_query = (
+            """
             SELECT 
                 name,
                 student_name,
@@ -577,27 +564,30 @@ def search_students(search_term=None, page=1, limit=20):
                 creation,
                 modified
             FROM `tabCRM Student`
-            WHERE {conditions}
+            WHERE {where}
             ORDER BY student_name ASC
-            LIMIT {limit} OFFSET {offset}
-        """
-        
-        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query}")
-        
-        students = frappe.db.sql(sql_query, as_dict=True)
-        
+            LIMIT %s OFFSET %s
+            """
+        ).format(where=conditions)
+
+        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params + [limit, offset]}")
+
+        students = frappe.db.sql(sql_query, params + [limit, offset], as_dict=True)
+
         frappe.logger().info(f"SQL QUERY RETURNED {len(students)} students")
         
-        # Get total count
-        count_query = f"""
+        # Get total count (parameterized)
+        count_query = (
+            """
             SELECT COUNT(*) as count
             FROM `tabCRM Student`
-            WHERE {conditions}
-        """
+            WHERE {where}
+            """
+        ).format(where=conditions)
         
-        frappe.logger().info(f"EXECUTING COUNT QUERY: {count_query}")
+        frappe.logger().info(f"EXECUTING COUNT QUERY: {count_query} | params={params}")
         
-        total_count = frappe.db.sql(count_query, as_dict=True)[0]['count']
+        total_count = frappe.db.sql(count_query, params, as_dict=True)[0]['count']
         
         frappe.logger().info(f"COUNT QUERY RETURNED: {total_count}")
         
