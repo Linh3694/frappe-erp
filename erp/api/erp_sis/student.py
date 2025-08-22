@@ -9,26 +9,14 @@ from erp.utils.campus_utils import get_current_campus_from_context, get_campus_i
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_students():
+def get_all_students(page=1, limit=20):
     """Get all students with basic information and pagination"""
     try:
-        # Try to get data from POST request body first
-        data = {}
-        if frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-            except (json.JSONDecodeError, TypeError):
-                pass
-        
-        # Fallback to form_dict if no POST data
-        if not data:
-            data = frappe.local.form_dict
-        
         # Get parameters with defaults
-        page = int(data.get("page", 1))
-        limit = int(data.get("limit", 20))
+        page = int(page)
+        limit = int(limit)
+        
+        frappe.logger().info(f"get_all_students called with page: {page}, limit: {limit}")
         
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -38,11 +26,17 @@ def get_all_students():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        filters = {"campus_id": campus_id}
+        frappe.logger().info(f"Using campus_id: {campus_id}")
+        
+        # Temporarily disable campus filtering for debugging
+        filters = {}  # {"campus_id": campus_id}
         
         # Calculate offset for pagination
         offset = (page - 1) * limit
             
+        frappe.logger().info(f"Query filters: {filters}")
+        frappe.logger().info(f"Query pagination: offset={offset}, limit={limit}")
+        
         students = frappe.get_all(
             "CRM Student",
             fields=[
@@ -61,9 +55,13 @@ def get_all_students():
             limit_page_length=limit
         )
         
+        frappe.logger().info(f"Found {len(students)} students")
+        
         # Get total count
         total_count = frappe.db.count("CRM Student", filters=filters)
         total_pages = (total_count + limit - 1) // limit
+        
+        frappe.logger().info(f"Total count: {total_count}, Total pages: {total_pages}")
         
         return {
             "success": True,
@@ -93,26 +91,12 @@ def get_all_students():
 def get_student_data():
     """Get a specific student by ID or code"""
     try:
-        # Try to get data from POST request body first
-        data = {}
-        if frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-            except (json.JSONDecodeError, TypeError):
-                pass
-        
-        # Fallback to form_dict if no POST data
-        if not data:
-            data = frappe.local.form_dict
-        
-        # Get parameters from data
-        student_id = data.get("student_id")
-        student_code = data.get("student_code")
+        # Get parameters from form_dict
+        student_id = frappe.local.form_dict.get("student_id")
+        student_code = frappe.local.form_dict.get("student_code")
         
         frappe.logger().info(f"get_student_data called - student_id: {student_id}, student_code: {student_code}")
-        frappe.logger().info(f"data: {data}")
+        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
         
         if not student_id and not student_code:
             return {
@@ -129,17 +113,18 @@ def get_student_data():
         
         # Build filters based on what parameter we have
         if student_id:
-            filters = {
-                "name": student_id,
-                "campus_id": campus_id
-            }
+            # Temporarily disable campus filtering for debugging
+            # filters = {
+            #     "name": student_id,
+            #     "campus_id": campus_id
+            # }
             student = frappe.get_doc("CRM Student", student_id)
         else:
-            # Search by student_code
+            # Search by student_code - temporarily disable campus filtering for debugging
             students = frappe.get_all("CRM Student", 
                 filters={
                     "student_code": student_code,
-                    "campus_id": campus_id
+                    # "campus_id": campus_id
                 }, 
                 fields=["name"], 
                 limit=1)
@@ -153,13 +138,13 @@ def get_student_data():
             
             student = frappe.get_doc("CRM Student", students[0].name)
         
-        # Verify campus access
-        if student.campus_id != campus_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Student not found or access denied"
-            }
+        # Temporarily disable campus access verification for debugging
+        # if student.campus_id != campus_id:
+        #     return {
+        #         "success": False,
+        #         "data": {},
+        #         "message": "Student not found or access denied"
+        #     }
         
         if not student:
             return {
@@ -516,27 +501,12 @@ def get_students_for_selection():
 
 
 @frappe.whitelist(allow_guest=False)
-def search_students():
+def search_students(search_term=None, page=1, limit=20):
     """Search students with pagination"""
     try:
-        # Try to get data from POST request body first
-        data = {}
-        if frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-            except (json.JSONDecodeError, TypeError):
-                pass
-        
-        # Fallback to form_dict if no POST data
-        if not data:
-            data = frappe.local.form_dict
-        
         # Get parameters with defaults
-        search_term = data.get("search_term")
-        page = int(data.get("page", 1))
-        limit = int(data.get("limit", 20))
+        page = int(page)
+        limit = int(limit)
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -544,8 +514,8 @@ def search_students():
         if not campus_id:
             campus_id = "campus-1"
         
-        # Build search query
-        conditions = f"campus_id = '{campus_id}'"
+        # Build search query - temporarily disable campus filtering for debugging
+        conditions = "1=1"  # f"campus_id = '{campus_id}'"
         if search_term and search_term.strip():
             conditions += f" AND (student_name LIKE '%{search_term}%' OR student_code LIKE '%{search_term}%')"
         
