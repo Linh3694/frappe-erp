@@ -326,9 +326,19 @@ def update_student():
         frappe.logger().info(f"update_student called with form_dict: {frappe.local.form_dict}")
         frappe.logger().info(f"Received data - student_id: {student_id}, student_name: {student_name}, student_code: {student_code}, dob: {dob}, gender: {gender}")
         
-        # Debug print directly to stdout (will show in browser network tab)
-        print(f"[DEBUG] update_student called - ID: {student_id}")
-        print(f"[DEBUG] Received data: name={student_name}, code={student_code}, dob={dob}, gender={gender}")
+        # Debug using frappe.msgprint (will show in browser as popup)
+        frappe.msgprint(f"DEBUG: update_student called - ID: {student_id}")
+        frappe.msgprint(f"DEBUG: Received data: name={student_name}, code={student_code}, dob={dob}, gender={gender}")
+        
+        # Also add to response for debugging
+        debug_info = {
+            "form_dict": dict(frappe.local.form_dict),
+            "student_id": student_id,
+            "student_name": student_name, 
+            "student_code": student_code,
+            "dob": dob,
+            "gender": gender
+        }
         
         if not student_id:
             return {
@@ -495,9 +505,12 @@ def update_student():
                 "gender": student_doc.gender,
                 "campus_id": student_doc.campus_id
             },
-            "message": f"Student updated successfully{' (with changes)' if changes_made else ' (no changes detected)'}"
+            "message": f"Student updated successfully{' (with changes)' if changes_made else ' (no changes detected)'}",
+            "debug_info": debug_info,
+            "changes_made": changes_made
         }
         
+        frappe.msgprint(f"DEBUG: Returning response with changes_made={changes_made}")
         print(f"[DEBUG] Returning response: {response_data}")
         return response_data
         
