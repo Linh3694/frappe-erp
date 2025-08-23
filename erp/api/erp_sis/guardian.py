@@ -167,32 +167,41 @@ def get_guardian_data():
 def create_guardian():
     """Create a new guardian - ROBUST VERSION"""
     try:
-        # Get data from request - follow Student pattern
+        # Get data from request - handle both JSON and form data
         data = {}
         
-        # First try to get JSON data from request body
+        # Log all available data sources for debugging
+        frappe.logger().info(f"Request method: {frappe.request.method}")
+        frappe.logger().info(f"Request data: {frappe.request.data}")
+        frappe.logger().info(f"Form dict: {frappe.local.form_dict}")
+        
+        # Try multiple data sources
         if frappe.request.data:
             try:
-                json_data = json.loads(frappe.request.data)
+                # Handle bytes data
+                if isinstance(frappe.request.data, bytes):
+                    json_data = json.loads(frappe.request.data.decode('utf-8'))
+                else:
+                    json_data = json.loads(frappe.request.data)
+                
                 if json_data:
                     data = json_data
-                    frappe.logger().info(f"Received JSON data for create_guardian: {data}")
-                else:
-                    data = frappe.local.form_dict
-                    frappe.logger().info(f"Received form data for create_guardian: {data}")
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
+                    frappe.logger().info(f"Successfully parsed JSON data: {data}")
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+                frappe.logger().error(f"JSON parsing failed: {str(e)}")
                 data = frappe.local.form_dict
-                frappe.logger().info(f"JSON parsing failed, using form data for create_guardian: {data}")
-        else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
-            frappe.logger().info(f"No request data, using form_dict for create_guardian: {data}")
         
-        # Extract values from data
-        guardian_name = data.get("guardian_name")
-        phone_number = data.get("phone_number", "")
-        email = data.get("email", "")
+        # Fallback to form_dict if no JSON data
+        if not data:
+            data = frappe.local.form_dict
+            frappe.logger().info(f"Using form_dict data: {data}")
+        
+        # Extract values from data with multiple possible field names
+        guardian_name = data.get("guardian_name") or data.get("guardianName") or data.get("name")
+        phone_number = data.get("phone_number") or data.get("phoneNumber") or ""
+        email = data.get("email") or ""
+        
+        frappe.logger().info(f"Extracted values - Name: {guardian_name}, Phone: {phone_number}, Email: {email}")
         
         # Input validation
         if not guardian_name:
