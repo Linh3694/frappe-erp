@@ -288,7 +288,9 @@ def create_family():
             try:
                 frappe.logger().info(f"Updating student {student_id} with family_code {family_code}")
                 student_doc = frappe.get_doc("CRM Student", student_id)
+                frappe.logger().info(f"Student doc before update: family_code = {student_doc.family_code}")
                 student_doc.family_code = family_code
+                frappe.logger().info(f"Student doc after setting: family_code = {student_doc.family_code}")
                 
                 # Add family relationships for this student
                 student_relationships = []
@@ -314,7 +316,9 @@ def create_family():
             try:
                 frappe.logger().info(f"Updating guardian {guardian_id} with family_code {family_code}")
                 guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
+                frappe.logger().info(f"Guardian doc before update: family_code = {guardian_doc.family_code}")
                 guardian_doc.family_code = family_code
+                frappe.logger().info(f"Guardian doc after setting: family_code = {guardian_doc.family_code}")
                 
                 # Add student relationships for this guardian
                 student_relationships = []
