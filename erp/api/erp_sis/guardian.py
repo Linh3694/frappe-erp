@@ -28,10 +28,10 @@ def get_all_guardians(page=1, limit=20):
             "CRM Guardian",
             fields=[
                 "name",
-                "guardian_id",
                 "guardian_name",
                 "phone_number",
                 "email",
+                "family_code",
                 "creation",
                 "modified"
             ],
@@ -191,18 +191,27 @@ def create_guardian():
         
         # Extract values from data
         guardian_name = data.get("guardian_name")
-        guardian_id = data.get("guardian_id")
         phone_number = data.get("phone_number", "")
         email = data.get("email", "")
         
         # Input validation
-        if not guardian_name or not guardian_id:
-            frappe.throw(_("Guardian name and guardian ID are required"))
+        if not guardian_name:
+            frappe.throw(_("Guardian name is required"))
         
-        # Check if guardian ID already exists
-        existing_id = frappe.db.exists("CRM Guardian", {"guardian_id": guardian_id})
-        if existing_id:
-            frappe.throw(_(f"Guardian with ID '{guardian_id}' already exists"))
+        # Auto-generate guardian_id
+        # Get the last guardian to generate next ID
+        last_guardian = frappe.db.sql("""
+            SELECT guardian_id FROM `tabCRM Guardian` 
+            WHERE guardian_id LIKE 'GH%' 
+            ORDER BY CAST(SUBSTRING(guardian_id, 3) AS UNSIGNED) DESC 
+            LIMIT 1
+        """, as_dict=True)
+        
+        if last_guardian:
+            last_number = int(last_guardian[0]['guardian_id'][2:])
+            guardian_id = f"GH{last_number + 1}"
+        else:
+            guardian_id = "GH1"
         
         # Check if guardian name already exists
         existing_name = frappe.db.exists("CRM Guardian", {"guardian_name": guardian_name})
