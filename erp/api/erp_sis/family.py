@@ -30,9 +30,13 @@ def get_all_families(page=1, limit=20):
                 f.creation,
                 f.modified,
                 COUNT(DISTINCT fr.student) as student_count,
-                COUNT(DISTINCT fr.guardian) as guardian_count
+                COUNT(DISTINCT fr.guardian) as guardian_count,
+                GROUP_CONCAT(DISTINCT s.student_name ORDER BY s.student_name SEPARATOR ', ') as student_names,
+                GROUP_CONCAT(DISTINCT g.guardian_name ORDER BY g.guardian_name SEPARATOR ', ') as guardian_names
             FROM `tabCRM Family` f
             LEFT JOIN `tabCRM Family Relationship` fr ON f.name = fr.parent
+            LEFT JOIN `tabCRM Student` s ON fr.student = s.name
+            LEFT JOIN `tabCRM Guardian` g ON fr.guardian = g.name
             GROUP BY f.name, f.family_code, f.creation, f.modified
             ORDER BY f.family_code ASC
             LIMIT %s OFFSET %s
@@ -281,41 +285,55 @@ def create_family():
         
         # Update students with family_code and family_relationships
         for student_id in students:
-            student_doc = frappe.get_doc("CRM Student", student_id)
-            student_doc.family_code = family_code
-            
-            # Add family relationships for this student
-            student_relationships = []
-            for rel in relationships:
-                if rel.get("student") == student_id:
-                    student_relationships.append({
-                        "guardian": rel.get("guardian"),
-                        "relationship_type": rel.get("relationship_type"),
-                        "key_person": rel.get("key_person", False),
-                        "access": rel.get("access", False)
-                    })
-            
-            student_doc.family_relationships = student_relationships
-            student_doc.save(ignore_permissions=True)
+            try:
+                frappe.logger().info(f"Updating student {student_id} with family_code {family_code}")
+                student_doc = frappe.get_doc("CRM Student", student_id)
+                student_doc.family_code = family_code
+                
+                # Add family relationships for this student
+                student_relationships = []
+                for rel in relationships:
+                    if rel.get("student") == student_id:
+                        student_relationships.append({
+                            "guardian": rel.get("guardian"),
+                            "relationship_type": rel.get("relationship_type"),
+                            "key_person": rel.get("key_person", False),
+                            "access": rel.get("access", False)
+                        })
+                
+                frappe.logger().info(f"Student {student_id} relationships: {student_relationships}")
+                student_doc.family_relationships = student_relationships
+                student_doc.save(ignore_permissions=True)
+                frappe.logger().info(f"Successfully updated student {student_id}")
+            except Exception as e:
+                frappe.logger().error(f"Error updating student {student_id}: {str(e)}")
+                raise
         
         # Update guardians with family_code and student_relationships
         for guardian_id in guardians:
-            guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
-            guardian_doc.family_code = family_code
-            
-            # Add student relationships for this guardian
-            student_relationships = []
-            for rel in relationships:
-                if rel.get("guardian") == guardian_id:
-                    student_relationships.append({
-                        "student": rel.get("student"),
-                        "relationship_type": rel.get("relationship_type"),
-                        "key_person": rel.get("key_person", False),
-                        "access": rel.get("access", False)
-                    })
-            
-            guardian_doc.student_relationships = student_relationships
-            guardian_doc.save(ignore_permissions=True)
+            try:
+                frappe.logger().info(f"Updating guardian {guardian_id} with family_code {family_code}")
+                guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
+                guardian_doc.family_code = family_code
+                
+                # Add student relationships for this guardian
+                student_relationships = []
+                for rel in relationships:
+                    if rel.get("guardian") == guardian_id:
+                        student_relationships.append({
+                            "student": rel.get("student"),
+                            "relationship_type": rel.get("relationship_type"),
+                            "key_person": rel.get("key_person", False),
+                            "access": rel.get("access", False)
+                        })
+                
+                frappe.logger().info(f"Guardian {guardian_id} relationships: {student_relationships}")
+                guardian_doc.student_relationships = student_relationships
+                guardian_doc.save(ignore_permissions=True)
+                frappe.logger().info(f"Successfully updated guardian {guardian_id}")
+            except Exception as e:
+                frappe.logger().error(f"Error updating guardian {guardian_id}: {str(e)}")
+                raise
         
         frappe.db.commit()
         
