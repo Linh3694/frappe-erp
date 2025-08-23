@@ -20,7 +20,7 @@ class CRMFamilyRelationship(Document):
 		parent: DF.Data
 		parentfield: DF.Data
 		parenttype: DF.Data
-		relationship_type: DF.Literal["dad", "mom", "foster_parent", "grandparent", "uncle_aunt", "sibling", "other"]
+		relationship_type: DF.Data
 		student: DF.Link | None
 	# end: auto-generated types
 

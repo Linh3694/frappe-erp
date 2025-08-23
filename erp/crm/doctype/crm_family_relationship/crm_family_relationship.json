@@ -48,11 +48,11 @@
   },
   {
    "fieldname": "relationship_type",
-   "fieldtype": "Select",
+   "fieldtype": "Data",
    "label": "Relationship Type",
-   "options": "\ndad\nmom\nfoster_parent\ngrandparent\nuncle_aunt\nsibling\nother",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Relationship between guardian and student (e.g., Father, Mother, Grandfather, etc.)"
   },
   {
    "fieldname": "column_break_1",
