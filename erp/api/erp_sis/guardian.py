@@ -201,6 +201,15 @@ def create_guardian():
         phone_number = data.get("phone_number") or data.get("phoneNumber") or ""
         email = data.get("email") or ""
         
+        # Format phone number for Vietnam if needed
+        if phone_number and not phone_number.startswith('+'):
+            # Add Vietnam country code if phone starts with 0
+            if phone_number.startswith('0'):
+                phone_number = '+84' + phone_number[1:]
+            # Add + if it's just numbers
+            elif phone_number.isdigit() and len(phone_number) >= 9:
+                phone_number = '+84' + phone_number
+        
         frappe.logger().info(f"Extracted values - Name: {guardian_name}, Phone: {phone_number}, Email: {email}")
         
         # Input validation with detailed debugging

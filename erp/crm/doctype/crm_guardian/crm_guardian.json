@@ -41,7 +41,7 @@
   },
   {
    "fieldname": "phone_number",
-   "fieldtype": "Phone",
+   "fieldtype": "Data",
    "label": "Phone Number",
    "reqd": 0,
    "in_list_view": 1
