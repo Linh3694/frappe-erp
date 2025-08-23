@@ -197,39 +197,30 @@ def create_guardian():
         # Input validation
         if not guardian_name:
             frappe.throw(_("Guardian name is required"))
-        
-        # Auto-generate guardian_id
-        # Get the last guardian to generate next ID
-        last_guardian = frappe.db.sql("""
-            SELECT guardian_id FROM `tabCRM Guardian` 
-            WHERE guardian_id LIKE 'GH%' 
-            ORDER BY CAST(SUBSTRING(guardian_id, 3) AS UNSIGNED) DESC 
-            LIMIT 1
-        """, as_dict=True)
-        
-        if last_guardian:
-            last_number = int(last_guardian[0]['guardian_id'][2:])
-            guardian_id = f"GH{last_number + 1}"
-        else:
-            guardian_id = "GH1"
-        
+                
         # Check if guardian name already exists
         existing_name = frappe.db.exists("CRM Guardian", {"guardian_name": guardian_name})
         if existing_name:
             frappe.throw(_(f"Guardian with name '{guardian_name}' already exists"))
         
+        frappe.logger().info(f"Creating guardian with Name: {guardian_name}")
+        
         # Create new guardian with validation bypass
         guardian_doc = frappe.get_doc({
             "doctype": "CRM Guardian",
-            "guardian_id": guardian_id,
             "guardian_name": guardian_name,
-            "phone_number": phone_number,
-            "email": email
+            "phone_number": phone_number or "",
+            "email": email or ""
         })
+        
+        frappe.logger().info(f"Guardian doc created: {guardian_doc.as_dict()}")
         
         # Bypass validation temporarily due to doctype cache issue
         guardian_doc.flags.ignore_validate = True
+        guardian_doc.flags.ignore_permissions = True
         guardian_doc.insert(ignore_permissions=True)
+        
+        frappe.logger().info(f"Guardian inserted successfully with name: {guardian_doc.name}")
         frappe.db.commit()
         
         # Return consistent API response format
@@ -237,7 +228,6 @@ def create_guardian():
             "success": True,
             "data": {
                 "name": guardian_doc.name,
-                "guardian_id": guardian_doc.guardian_id,
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
                 "email": guardian_doc.email
@@ -246,8 +236,13 @@ def create_guardian():
         }
         
     except Exception as e:
-        frappe.log_error(f"Error creating guardian: {str(e)}")
-        frappe.throw(_(f"Error creating guardian: {str(e)}"))
+        frappe.log_error(f"Error creating guardian: {str(e)}", "Guardian Creation Error")
+        frappe.logger().error(f"Full error details: {str(e)}")
+        return {
+            "success": False,
+            "data": {},
+            "message": f"Error creating guardian: {str(e)}"
+        }
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
