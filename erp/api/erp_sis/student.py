@@ -44,6 +44,7 @@ def get_all_students(page=1, limit=20):
                 "dob",
                 "gender",
                 "campus_id",
+                "family_code",
                 "creation",
                 "modified"
             ],

@@ -61,12 +61,11 @@
   },
   {
    "fieldname": "family_code",
-   "fieldtype": "Link",
+   "fieldtype": "Data",
    "label": "Family Code",
-   "options": "CRM Family",
    "reqd": 0,
    "in_list_view": 1,
-   "description": "Link to the family this guardian belongs to"
+   "description": "Family code this guardian belongs to"
   },
   {
    "fieldname": "student_relationships",
