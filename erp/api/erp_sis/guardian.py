@@ -203,8 +203,19 @@ def create_guardian():
         
         frappe.logger().info(f"Extracted values - Name: {guardian_name}, Phone: {phone_number}, Email: {email}")
         
-        # Input validation
+        # Input validation with detailed debugging
         if not guardian_name:
+            # Log all available data for debugging
+            frappe.logger().error(f"Guardian name validation failed!")
+            frappe.logger().error(f"Raw request data: {frappe.request.data}")
+            frappe.logger().error(f"Form dict: {frappe.local.form_dict}")
+            frappe.logger().error(f"Parsed data: {data}")
+            frappe.logger().error(f"Guardian name extracted: '{guardian_name}'")
+            
+            # Also try to get data directly from form_dict with different keys
+            alt_name = frappe.local.form_dict.get('guardian_name') or frappe.local.form_dict.get('guardianName')
+            frappe.logger().error(f"Alternative name from form_dict: '{alt_name}'")
+            
             frappe.throw(_("Guardian name is required"))
                 
         # Check if guardian name already exists
