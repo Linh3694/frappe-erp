@@ -373,25 +373,25 @@ def create_guardian():
 def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, email=None):
     """Update an existing guardian"""
     try:
-        # Get parameters from multiple sources for flexibility
-        if not guardian_id:
-            guardian_id = frappe.local.form_dict.get("guardian_id")
-        if not guardian_name:  
-            guardian_name = frappe.local.form_dict.get("guardian_name")
-        if not phone_number:
-            phone_number = frappe.local.form_dict.get("phone_number")
-        if not email:
-            email = frappe.local.form_dict.get("email")
-        
-        # Fallback to JSON data if form_dict is empty
-        if not guardian_id and frappe.request.data:
+        # Collect parameters from multiple sources and MERGE (do not depend on presence of guardian_id)
+        form = frappe.local.form_dict or {}
+        guardian_id = guardian_id or form.get("guardian_id") or form.get("id") or form.get("name")
+        guardian_name = guardian_name if guardian_name is not None else form.get("guardian_name")
+        phone_number = phone_number if phone_number is not None else form.get("phone_number")
+        email = email if email is not None else form.get("email")
+
+        # Merge JSON body (if present)
+        if frappe.request.data:
             try:
-                import json
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                guardian_id = json_data.get("guardian_id")
-                guardian_name = json_data.get("guardian_name")
-                phone_number = json_data.get("phone_number")
-                email = json_data.get("email")
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                json_data = json.loads(body)
+                guardian_id = json_data.get("guardian_id") or json_data.get("id") or json_data.get("name") or guardian_id
+                if json_data.get("guardian_name") is not None:
+                    guardian_name = json_data.get("guardian_name")
+                if json_data.get("phone_number") is not None:
+                    phone_number = json_data.get("phone_number")
+                if json_data.get("email") is not None:
+                    email = json_data.get("email")
             except Exception:
                 pass
         
