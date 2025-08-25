@@ -365,15 +365,33 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
                 "message": "Guardian ID is required"
             }
         
-        # Get existing document
+        # Resolve real docname from name/code/slug, then get existing document
+        resolved_docname = None
+        if guardian_id and frappe.db.exists("CRM Guardian", guardian_id):
+            resolved_docname = guardian_id
+        elif guardian_id:
+            hit = frappe.get_all("CRM Guardian", filters={"guardian_id": guardian_id}, fields=["name"], limit=1)
+            if hit:
+                resolved_docname = hit[0].name
+            elif '-' in str(guardian_id):
+                search_name = str(guardian_id).replace('-', ' ')
+                name_hit = frappe.db.sql(
+                    """
+                    SELECT name FROM `tabCRM Guardian`
+                    WHERE LOWER(guardian_name) LIKE %s LIMIT 1
+                    """,
+                    (f"%{search_name.lower()}%",),
+                    as_dict=True,
+                )
+                if name_hit:
+                    resolved_docname = name_hit[0].name
+        if not resolved_docname:
+            return {"success": False, "data": {}, "message": "Guardian not found"}
+
         try:
-            guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
+            guardian_doc = frappe.get_doc("CRM Guardian", resolved_docname)
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Guardian not found"
-            }
+            return {"success": False, "data": {}, "message": "Guardian not found"}
         
         # Track if any changes were made
         changes_made = False
