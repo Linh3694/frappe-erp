@@ -228,43 +228,43 @@ def update_class(class_id: str = None):
         raw_academic_level = (data.get("academic_level") or "").strip()
         raw_class_type = (data.get("class_type") or "").strip()
 
-        # update fields defensively (skip academic_level to avoid strict Select validation)
+        # Normalize academic_level before setting to avoid validation errors
+        normalized_academic_level = None
+        if raw_academic_level:
+            allowed = ["Level 1", "Level 2", "Level 3", "Level 4"]
+            normalized_academic_level = raw_academic_level
+            if raw_academic_level not in allowed:
+                for opt in allowed:
+                    if opt.lower() == raw_academic_level.lower():
+                        normalized_academic_level = opt
+                        break
+
+        # Normalize class_type before setting
+        normalized_class_type = None
+        if raw_class_type:
+            allowed_ct = ["regular", "mixed"]
+            normalized_class_type = raw_class_type
+            if raw_class_type not in allowed_ct:
+                for opt in allowed_ct:
+                    if opt.lower() == raw_class_type.lower():
+                        normalized_class_type = opt
+                        break
+
+        # update fields defensively
         for key in ["title","short_title","campus_id","school_year_id","education_grade","academic_program","homeroom_teacher","vice_homeroom_teacher","room","start_date","end_date"]:
             if data.get(key) is not None:
                 setattr(doc, key, data.get(key))
                 
+        # Set normalized values directly to avoid validation issues
+        if normalized_academic_level:
+            doc.academic_level = normalized_academic_level
+        if normalized_class_type:
+            doc.class_type = normalized_class_type
+                
         doc.flags.ignore_validate = True
         doc.save(ignore_permissions=True)
-
-        # After save, normalize and set academic_level via DB to bypass edge-case validation
-        try:
-            if raw_academic_level:
-                allowed = ["Level 1", "Level 2", "Level 3", "Level 4"]
-                normalized = raw_academic_level
-                if raw_academic_level not in allowed:
-                    for opt in allowed:
-                        if opt.lower() == raw_academic_level.lower():
-                            normalized = opt
-                            break
-                frappe.db.set_value("SIS Class", doc.name, "academic_level", normalized)
-        except Exception:
-            pass
-
-        # Also normalize class_type if needed
-        try:
-            if raw_class_type:
-                allowed_ct = ["regular", "mixed"]
-                normalized_ct = raw_class_type
-                if raw_class_type not in allowed_ct:
-                    for opt in allowed_ct:
-                        if opt.lower() == raw_class_type.lower():
-                            normalized_ct = opt
-                            break
-                frappe.db.set_value("SIS Class", doc.name, "class_type", normalized_ct)
-        except Exception:
-            pass
-            
         frappe.db.commit()
+        
         return {"success": True, "data": doc.as_dict(), "message": "Class updated successfully"}
     except Exception as e:
         frappe.log_error(f"Error updating class: {str(e)}")
