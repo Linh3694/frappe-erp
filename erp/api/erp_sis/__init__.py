@@ -4,3 +4,4 @@
 from .family import *
 from .student import *
 from .guardian import *
+from .sis_class import *

@@ -19,13 +19,17 @@
   "basic_information",
   "campus_id",
   "title",
+  "short_title",
   "school_year_id",
   "education_grade",
   "academic_program",
   "homeroom_teacher",
   "vice_homeroom_teacher",
   "room",
-  "academic_level"
+  "academic_level",
+  "start_date",
+  "end_date",
+  "class_type"
  ],
  "fields": [
   {
@@ -48,6 +52,12 @@
    "reqd": 1,
    "unique": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "short_title",
+   "fieldtype": "Data",
+   "label": "Short Title",
+   "in_list_view": 0
   },
   {
    "fieldname": "school_year_id",
@@ -93,6 +103,23 @@
    "fieldtype": "Select",
    "label": "Academic Level",
    "options": "Level 1\\nLevel 2\\nLevel 3\\nLevel 4"
+  }
+  ,
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Start Date"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "End Date"
+  },
+  {
+   "fieldname": "class_type",
+   "fieldtype": "Select",
+   "label": "Class Type",
+   "options": "regular\\nmixed"
   }
  ],
  "index_web_pages_for_search": 1,
