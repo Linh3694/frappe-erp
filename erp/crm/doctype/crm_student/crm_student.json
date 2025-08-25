@@ -23,6 +23,7 @@
   "gender",
   "campus_id",
   "family_information",
+  "family_code",
   "family_relationships"
  ],
  "fields": [
