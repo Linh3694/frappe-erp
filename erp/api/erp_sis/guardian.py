@@ -422,17 +422,17 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
                 return ""
             return str(val).strip()
         
-        # Update fields if provided
-        if guardian_name and normalize_value(guardian_name) != normalize_value(guardian_doc.guardian_name):
-            guardian_doc.guardian_name = guardian_name
+        # Update fields (allow clearing with empty string)
+        if guardian_name is not None and normalize_value(guardian_name) != normalize_value(guardian_doc.guardian_name):
+            guardian_doc.guardian_name = guardian_name or ""
             changes_made = True
         
-        if phone_number and normalize_value(phone_number) != normalize_value(guardian_doc.phone_number):
-            guardian_doc.phone_number = phone_number
+        if phone_number is not None and normalize_value(phone_number) != normalize_value(guardian_doc.phone_number):
+            guardian_doc.phone_number = phone_number or ""
             changes_made = True
 
-        if email and normalize_value(email) != normalize_value(guardian_doc.email):
-            guardian_doc.email = email
+        if email is not None and normalize_value(email) != normalize_value(guardian_doc.email):
+            guardian_doc.email = email or ""
             changes_made = True
         
         # Save the document with validation disabled
