@@ -222,50 +222,51 @@ def update_class(class_id: str = None):
         if not class_id:
             return {"success": False, "data": {}, "message": "Class ID is required"}
             
-        doc = frappe.get_doc("SIS Class", class_id)
+        # Get existing doc
+        existing_doc = frappe.get_doc("SIS Class", class_id)
         
-        # capture raw select values for safe post-save update
+        # Prepare update data
+        update_data = {}
+        for key in ["title", "short_title", "campus_id", "school_year_id", "education_grade", "academic_program", "homeroom_teacher", "vice_homeroom_teacher", "room", "start_date", "end_date"]:
+            if data.get(key) is not None:
+                update_data[key] = data.get(key)
+        
+        # Handle academic_level and class_type separately to avoid validation issues
         raw_academic_level = (data.get("academic_level") or "").strip()
         raw_class_type = (data.get("class_type") or "").strip()
-
-        # Normalize academic_level before setting to avoid validation errors
-        normalized_academic_level = None
+        
+        # Update basic fields first
+        if update_data:
+            frappe.db.set_value("SIS Class", class_id, update_data)
+        
+        # Handle academic_level
         if raw_academic_level:
             allowed = ["Level 1", "Level 2", "Level 3", "Level 4"]
-            normalized_academic_level = raw_academic_level
+            normalized = raw_academic_level
             if raw_academic_level not in allowed:
                 for opt in allowed:
                     if opt.lower() == raw_academic_level.lower():
-                        normalized_academic_level = opt
+                        normalized = opt
                         break
-
-        # Normalize class_type before setting
-        normalized_class_type = None
+            frappe.db.set_value("SIS Class", class_id, "academic_level", normalized)
+        
+        # Handle class_type
         if raw_class_type:
             allowed_ct = ["regular", "mixed"]
-            normalized_class_type = raw_class_type
+            normalized_ct = raw_class_type
             if raw_class_type not in allowed_ct:
                 for opt in allowed_ct:
                     if opt.lower() == raw_class_type.lower():
-                        normalized_class_type = opt
+                        normalized_ct = opt
                         break
-
-        # update fields defensively
-        for key in ["title","short_title","campus_id","school_year_id","education_grade","academic_program","homeroom_teacher","vice_homeroom_teacher","room","start_date","end_date"]:
-            if data.get(key) is not None:
-                setattr(doc, key, data.get(key))
-                
-        # Set normalized values directly to avoid validation issues
-        if normalized_academic_level:
-            doc.academic_level = normalized_academic_level
-        if normalized_class_type:
-            doc.class_type = normalized_class_type
-                
-        doc.flags.ignore_validate = True
-        doc.save(ignore_permissions=True)
+            frappe.db.set_value("SIS Class", class_id, "class_type", normalized_ct)
+        
         frappe.db.commit()
         
-        return {"success": True, "data": doc.as_dict(), "message": "Class updated successfully"}
+        # Return updated data
+        updated_doc = frappe.get_doc("SIS Class", class_id)
+        return {"success": True, "data": updated_doc.as_dict(), "message": "Class updated successfully"}
+        
     except Exception as e:
         frappe.log_error(f"Error updating class: {str(e)}")
         return {"success": False, "data": {}, "message": f"Error updating class: {str(e)}"}
