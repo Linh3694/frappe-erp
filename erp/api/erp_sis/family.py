@@ -14,6 +14,16 @@ def get_family_details(family_id=None, family_code=None):
             family_id = form.get("family_id") or form.get("id") or form.get("name")
         if not family_code:
             family_code = form.get("family_code") or form.get("code")
+        # Also check request.args (GET query)
+        try:
+            args = getattr(frappe.request, 'args', None)
+            if args:
+                if not family_id:
+                    family_id = args.get('family_id') or args.get('id') or args.get('name')
+                if not family_code:
+                    family_code = args.get('family_code') or args.get('code')
+        except Exception:
+            pass
 
         if (not family_id and not family_code) and frappe.request and frappe.request.data:
             try:
