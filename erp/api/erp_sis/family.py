@@ -218,17 +218,23 @@ def create_family():
         # First try to get JSON data from request body
         if frappe.request.data:
             try:
-                json_data = json.loads(frappe.request.data)
+                # Support both bytes and string payloads
+                if isinstance(frappe.request.data, bytes):
+                    json_data = json.loads(frappe.request.data.decode('utf-8'))
+                else:
+                    json_data = json.loads(frappe.request.data)
+
                 if json_data:
                     data = json_data
                     frappe.logger().info(f"Received JSON data for create_family: {data}")
                 else:
                     data = frappe.local.form_dict
-                    frappe.logger().info(f"Received form data for create_family: {data}")
-            except (json.JSONDecodeError, TypeError):
+                    frappe.logger().info(f"Received form data for create_family (empty JSON body): {data}")
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
                 # If JSON parsing fails, use form_dict
+                frappe.logger().error(f"JSON parsing failed in create_family: {str(e)}")
                 data = frappe.local.form_dict
-                frappe.logger().info(f"JSON parsing failed, using form data for create_family: {data}")
+                frappe.logger().info(f"Using form data for create_family after JSON failure: {data}")
         else:
             # Fallback to form_dict
             data = frappe.local.form_dict
