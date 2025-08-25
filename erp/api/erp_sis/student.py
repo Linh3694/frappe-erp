@@ -506,7 +506,13 @@ def delete_student(student_id=None):
                 "data": {},
                 "message": "Student not found"
             }
-        
+        # Before delete: remove child table links referencing this student to avoid link constraints
+        try:
+            frappe.logger().info(f"Deleting CRM Family Relationship children for student {student_id}")
+            frappe.db.delete("CRM Family Relationship", {"student": student_id})
+        except Exception as e:
+            frappe.logger().error(f"Failed to cleanup relationships for student {student_id}: {str(e)}")
+
         # Delete the document
         frappe.delete_doc("CRM Student", student_id)
         frappe.db.commit()

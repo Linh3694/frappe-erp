@@ -79,13 +79,33 @@ def get_guardian_data():
     """Get a specific guardian by ID, code or slug"""
     try:
         # Get parameters from form_dict
-        guardian_id = frappe.local.form_dict.get("guardian_id")
-        guardian_code = frappe.local.form_dict.get("guardian_code")
-        guardian_slug = frappe.local.form_dict.get("guardian_slug")
+        form = frappe.local.form_dict or {}
+        guardian_id = form.get("guardian_id") or form.get("id") or form.get("name")
+        guardian_code = form.get("guardian_code")
+        guardian_slug = form.get("guardian_slug")
         
         frappe.logger().info(f"get_guardian_data called - guardian_id: {guardian_id}, guardian_code: {guardian_code}, guardian_slug: {guardian_slug}")
         frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
         
+        # Also parse GET args and JSON body for robustness
+        if not (guardian_id or guardian_code or guardian_slug):
+            try:
+                if hasattr(frappe.request, 'args') and frappe.request.args:
+                    guardian_id = guardian_id or frappe.request.args.get('guardian_id')
+                    guardian_code = guardian_code or frappe.request.args.get('guardian_code')
+                    guardian_slug = guardian_slug or frappe.request.args.get('guardian_slug')
+            except Exception:
+                pass
+            if not (guardian_id or guardian_code or guardian_slug) and frappe.request.data:
+                try:
+                    body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                    data = json.loads(body)
+                    guardian_id = data.get('guardian_id') or data.get('id') or data.get('name')
+                    guardian_code = guardian_code or data.get('guardian_code')
+                    guardian_slug = guardian_slug or data.get('guardian_slug')
+                except Exception:
+                    pass
+
         if not guardian_id and not guardian_code and not guardian_slug:
             return {
                 "success": False,
@@ -400,7 +420,16 @@ def delete_guardian():
     """Delete a guardian"""
     try:
         # Get guardian ID from form_dict
-        guardian_id = frappe.local.form_dict.get("guardian_id")
+        guardian_id = (frappe.local.form_dict or {}).get("guardian_id")
+        if not guardian_id and hasattr(frappe.request, 'args') and frappe.request.args:
+            guardian_id = frappe.request.args.get('guardian_id')
+        if not guardian_id and frappe.request.data:
+            try:
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body)
+                guardian_id = data.get('guardian_id') or data.get('id') or data.get('name')
+            except Exception:
+                pass
         
         frappe.logger().info(f"delete_guardian called - guardian_id: {guardian_id}")
         
@@ -421,6 +450,12 @@ def delete_guardian():
                 "message": "Guardian not found"
             }
         
+        # Cleanup relationships before delete
+        try:
+            frappe.db.delete("CRM Family Relationship", {"guardian": guardian_id})
+        except Exception as e:
+            frappe.logger().error(f"Failed to cleanup relationships for guardian {guardian_id}: {str(e)}")
+
         # Delete the document
         frappe.delete_doc("CRM Guardian", guardian_id)
         frappe.db.commit()
