@@ -693,8 +693,18 @@ def update_family(family_id=None, relationship=None, key_person=None, access=Non
 def delete_family():
     """Delete a family relationship"""
     try:
-        # Get family ID from form_dict
-        family_id = frappe.local.form_dict.get("family_id")
+        # Get family ID from multiple sources
+        form = frappe.local.form_dict or {}
+        family_id = form.get("family_id") or form.get("id") or form.get("name")
+        if not family_id and frappe.request and frappe.request.data:
+            try:
+                body = frappe.request.data
+                if isinstance(body, bytes):
+                    body = body.decode('utf-8')
+                json_body = json.loads(body or '{}')
+                family_id = json_body.get('family_id') or family_id
+            except Exception:
+                pass
         
         frappe.logger().info(f"delete_family called - family_id: {family_id}")
         
