@@ -375,7 +375,7 @@ def delete_teacher(teacher_id):
 def get_users_for_selection():
     """Get users for dropdown selection"""
     try:
-        # Get all enabled users
+        # Get all enabled users with avatar information
         users = frappe.get_all(
             "User",
             fields=[
@@ -383,7 +383,9 @@ def get_users_for_selection():
                 "email",
                 "full_name",
                 "first_name",
-                "last_name"
+                "last_name",
+                "user_image",
+                "avatar_url"
             ],
             filters={"enabled": 1},
             order_by="full_name asc"
