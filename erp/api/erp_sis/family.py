@@ -706,6 +706,13 @@ def delete_family():
         # Get family ID from multiple sources
         form = frappe.local.form_dict or {}
         family_id = form.get("family_id") or form.get("id") or form.get("name")
+        # Also from query string
+        try:
+            args = getattr(frappe.request, 'args', None)
+            if args and not family_id:
+                family_id = args.get('family_id') or args.get('id') or args.get('name')
+        except Exception:
+            pass
         if not family_id and frappe.request and frappe.request.data:
             try:
                 body = frappe.request.data
