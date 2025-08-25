@@ -10,18 +10,18 @@ from erp.utils.campus_utils import get_current_campus_from_context, get_campus_i
 
 @frappe.whitelist(allow_guest=False)
 def get_all_teachers():
-    """Get all teachers with basic information - SIMPLE VERSION"""
+    """Get all teachers with detailed information including user profile data"""
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
             # Fallback to default if no campus found
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
+
         filters = {"campus_id": campus_id}
-            
+
         teachers = frappe.get_all(
             "SIS Teacher",
             fields=[
@@ -35,14 +35,75 @@ def get_all_teachers():
             filters=filters,
             order_by="user_id asc"
         )
-        
+
+        # Enhance teachers with user information
+        enhanced_teachers = []
+        for teacher in teachers:
+            enhanced_teacher = teacher.copy()
+
+            # Get user information
+            if teacher.get("user_id"):
+                user_info = frappe.get_all(
+                    "User",
+                    fields=[
+                        "name",
+                        "email",
+                        "full_name",
+                        "first_name",
+                        "last_name",
+                        "user_image",
+                        "avatar_url"
+                    ],
+                    filters={"name": teacher["user_id"]},
+                    limit=1
+                )
+
+                if user_info:
+                    user = user_info[0]
+                    enhanced_teacher.update({
+                        "email": user.get("email"),
+                        "full_name": user.get("full_name"),
+                        "first_name": user.get("first_name"),
+                        "last_name": user.get("last_name"),
+                        "user_image": user.get("user_image"),
+                        "avatar_url": user.get("avatar_url"),
+                        "teacher_name": user.get("full_name") or user.get("name")
+                    })
+
+                # Try to get employee information from Employee doctype
+                employee_info = frappe.get_all(
+                    "Employee",
+                    fields=[
+                        "name",
+                        "employee_number",
+                        "employee_name",
+                        "designation",
+                        "department",
+                        "branch"
+                    ],
+                    filters={"user_id": teacher["user_id"]},
+                    limit=1
+                )
+
+                if employee_info:
+                    employee = employee_info[0]
+                    enhanced_teacher.update({
+                        "employee_code": employee.get("employee_number"),
+                        "employee_name": employee.get("employee_name"),
+                        "designation": employee.get("designation"),
+                        "department": employee.get("department"),
+                        "branch": employee.get("branch")
+                    })
+
+            enhanced_teachers.append(enhanced_teacher)
+
         return {
             "success": True,
-            "data": teachers,
-            "total_count": len(teachers),
+            "data": enhanced_teachers,
+            "total_count": len(enhanced_teachers),
             "message": "Teachers fetched successfully"
         }
-        
+
     except Exception as e:
         frappe.log_error(f"Error fetching teachers: {str(e)}")
         return {

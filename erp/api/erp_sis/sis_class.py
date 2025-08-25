@@ -60,12 +60,149 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
             limit_page_length=limit,
         )
 
+        # Enhance classes with teacher information
+        enhanced_classes = []
+        for class_data in classes:
+            enhanced_class = class_data.copy()
+
+            # Get homeroom teacher details
+            if class_data.get("homeroom_teacher"):
+                teacher_info = frappe.get_all(
+                    "SIS Teacher",
+                    fields=["user_id"],
+                    filters={"name": class_data["homeroom_teacher"]},
+                    limit=1
+                )
+
+                if teacher_info:
+                    teacher = teacher_info[0]
+                    if teacher.get("user_id"):
+                        # Get user information
+                        user_info = frappe.get_all(
+                            "User",
+                            fields=[
+                                "name",
+                                "email",
+                                "full_name",
+                                "first_name",
+                                "last_name",
+                                "user_image",
+                                "avatar_url"
+                            ],
+                            filters={"name": teacher["user_id"]},
+                            limit=1
+                        )
+
+                        if user_info:
+                            user = user_info[0]
+                            enhanced_class["homeroom_teacher_info"] = {
+                                "name": class_data["homeroom_teacher"],
+                                "user_id": teacher["user_id"],
+                                "email": user.get("email"),
+                                "full_name": user.get("full_name"),
+                                "first_name": user.get("first_name"),
+                                "last_name": user.get("last_name"),
+                                "user_image": user.get("user_image"),
+                                "avatar_url": user.get("avatar_url"),
+                                "teacher_name": user.get("full_name") or user.get("name")
+                            }
+
+                        # Get employee information
+                        employee_info = frappe.get_all(
+                            "Employee",
+                            fields=[
+                                "employee_number",
+                                "employee_name",
+                                "designation",
+                                "department"
+                            ],
+                            filters={"user_id": teacher["user_id"]},
+                            limit=1
+                        )
+
+                        if employee_info:
+                            employee = employee_info[0]
+                            if enhanced_class.get("homeroom_teacher_info"):
+                                enhanced_class["homeroom_teacher_info"].update({
+                                    "employee_code": employee.get("employee_number"),
+                                    "employee_name": employee.get("employee_name"),
+                                    "designation": employee.get("designation"),
+                                    "department": employee.get("department")
+                                })
+
+            # Get vice homeroom teacher details
+            if class_data.get("vice_homeroom_teacher"):
+                teacher_info = frappe.get_all(
+                    "SIS Teacher",
+                    fields=["user_id"],
+                    filters={"name": class_data["vice_homeroom_teacher"]},
+                    limit=1
+                )
+
+                if teacher_info:
+                    teacher = teacher_info[0]
+                    if teacher.get("user_id"):
+                        # Get user information
+                        user_info = frappe.get_all(
+                            "User",
+                            fields=[
+                                "name",
+                                "email",
+                                "full_name",
+                                "first_name",
+                                "last_name",
+                                "user_image",
+                                "avatar_url"
+                            ],
+                            filters={"name": teacher["user_id"]},
+                            limit=1
+                        )
+
+                        if user_info:
+                            user = user_info[0]
+                            enhanced_class["vice_homeroom_teacher_info"] = {
+                                "name": class_data["vice_homeroom_teacher"],
+                                "user_id": teacher["user_id"],
+                                "email": user.get("email"),
+                                "full_name": user.get("full_name"),
+                                "first_name": user.get("first_name"),
+                                "last_name": user.get("last_name"),
+                                "user_image": user.get("user_image"),
+                                "avatar_url": user.get("avatar_url"),
+                                "teacher_name": user.get("full_name") or user.get("name")
+                            }
+
+                        # Get employee information
+                        employee_info = frappe.get_all(
+                            "Employee",
+                            fields=[
+                                "employee_number",
+                                "employee_name",
+                                "designation",
+                                "department"
+                            ],
+                            filters={"user_id": teacher["user_id"]},
+                            limit=1
+                        )
+
+                        if employee_info:
+                            employee = employee_info[0]
+                            if enhanced_class.get("vice_homeroom_teacher_info"):
+                                enhanced_class["vice_homeroom_teacher_info"].update({
+                                    "employee_code": employee.get("employee_number"),
+                                    "employee_name": employee.get("employee_name"),
+                                    "designation": employee.get("designation"),
+                                    "department": employee.get("department")
+                                })
+
+            enhanced_classes.append(enhanced_class)
+
         total_count = frappe.db.count("SIS Class", filters=filters)
         total_pages = (total_count + limit - 1) // limit
 
         return {
             "success": True,
-            "data": classes,
+            "data": enhanced_classes,
             "total_count": total_count,
             "pagination": {
                 "current_page": page,
@@ -91,8 +228,141 @@ def get_class(class_id: str = None):
                 class_id = frappe.request.args.get('class_id') or frappe.request.args.get('name')
         if not class_id:
             return {"success": False, "data": {}, "message": "Class ID is required"}
+
         doc = frappe.get_doc("SIS Class", class_id)
-        return {"success": True, "data": doc.as_dict(), "message": "Class fetched successfully"}
+        class_data = doc.as_dict()
+
+        # Enhance with teacher information
+        if class_data.get("homeroom_teacher"):
+            teacher_info = frappe.get_all(
+                "SIS Teacher",
+                fields=["user_id"],
+                filters={"name": class_data["homeroom_teacher"]},
+                limit=1
+            )
+
+            if teacher_info:
+                teacher = teacher_info[0]
+                if teacher.get("user_id"):
+                    # Get user information
+                    user_info = frappe.get_all(
+                        "User",
+                        fields=[
+                            "name",
+                            "email",
+                            "full_name",
+                            "first_name",
+                            "last_name",
+                            "user_image",
+                            "avatar_url"
+                        ],
+                        filters={"name": teacher["user_id"]},
+                        limit=1
+                    )
+
+                    if user_info:
+                        user = user_info[0]
+                        class_data["homeroom_teacher_info"] = {
+                            "name": class_data["homeroom_teacher"],
+                            "user_id": teacher["user_id"],
+                            "email": user.get("email"),
+                            "full_name": user.get("full_name"),
+                            "first_name": user.get("first_name"),
+                            "last_name": user.get("last_name"),
+                            "user_image": user.get("user_image"),
+                            "avatar_url": user.get("avatar_url"),
+                            "teacher_name": user.get("full_name") or user.get("name")
+                        }
+
+                    # Get employee information
+                    employee_info = frappe.get_all(
+                        "Employee",
+                        fields=[
+                            "employee_number",
+                            "employee_name",
+                            "designation",
+                            "department"
+                        ],
+                        filters={"user_id": teacher["user_id"]},
+                        limit=1
+                    )
+
+                    if employee_info:
+                        employee = employee_info[0]
+                        if class_data.get("homeroom_teacher_info"):
+                            class_data["homeroom_teacher_info"].update({
+                                "employee_code": employee.get("employee_number"),
+                                "employee_name": employee.get("employee_name"),
+                                "designation": employee.get("designation"),
+                                "department": employee.get("department")
+                            })
+
+        # Get vice homeroom teacher details
+        if class_data.get("vice_homeroom_teacher"):
+            teacher_info = frappe.get_all(
+                "SIS Teacher",
+                fields=["user_id"],
+                filters={"name": class_data["vice_homeroom_teacher"]},
+                limit=1
+            )
+
+            if teacher_info:
+                teacher = teacher_info[0]
+                if teacher.get("user_id"):
+                    # Get user information
+                    user_info = frappe.get_all(
+                        "User",
+                        fields=[
+                            "name",
+                            "email",
+                            "full_name",
+                            "first_name",
+                            "last_name",
+                            "user_image",
+                            "avatar_url"
+                        ],
+                        filters={"name": teacher["user_id"]},
+                        limit=1
+                    )
+
+                    if user_info:
+                        user = user_info[0]
+                        class_data["vice_homeroom_teacher_info"] = {
+                            "name": class_data["vice_homeroom_teacher"],
+                            "user_id": teacher["user_id"],
+                            "email": user.get("email"),
+                            "full_name": user.get("full_name"),
+                            "first_name": user.get("first_name"),
+                            "last_name": user.get("last_name"),
+                            "user_image": user.get("user_image"),
+                            "avatar_url": user.get("avatar_url"),
+                            "teacher_name": user.get("full_name") or user.get("name")
+                        }
+
+                    # Get employee information
+                    employee_info = frappe.get_all(
+                        "Employee",
+                        fields=[
+                            "employee_number",
+                            "employee_name",
+                            "designation",
+                            "department"
+                        ],
+                        filters={"user_id": teacher["user_id"]},
+                        limit=1
+                    )
+
+                    if employee_info:
+                        employee = employee_info[0]
+                        if class_data.get("vice_homeroom_teacher_info"):
+                            class_data["vice_homeroom_teacher_info"].update({
+                                "employee_code": employee.get("employee_number"),
+                                "employee_name": employee.get("employee_name"),
+                                "designation": employee.get("designation"),
+                                "department": employee.get("department")
+                            })
+
+        return {"success": True, "data": class_data, "message": "Class fetched successfully"}
     except Exception as e:
         return {"success": False, "data": {}, "message": f"Error fetching class: {str(e)}"}
 
@@ -198,7 +468,73 @@ def create_class():
         except Exception:
             pass
         frappe.db.commit()
-        return {"success": True, "data": doc.as_dict(), "message": "Class created successfully"}
+
+        # Enhance the response with teacher information
+        response_data = doc.as_dict()
+
+        # Add homeroom teacher info
+        if response_data.get("homeroom_teacher"):
+            teacher_info = frappe.get_all(
+                "SIS Teacher",
+                fields=["user_id"],
+                filters={"name": response_data["homeroom_teacher"]},
+                limit=1
+            )
+            if teacher_info:
+                teacher = teacher_info[0]
+                if teacher.get("user_id"):
+                    user_info = frappe.get_all(
+                        "User",
+                        fields=["full_name", "first_name", "last_name", "user_image", "avatar_url", "email"],
+                        filters={"name": teacher["user_id"]},
+                        limit=1
+                    )
+                    if user_info:
+                        user = user_info[0]
+                        response_data["homeroom_teacher_info"] = {
+                            "name": response_data["homeroom_teacher"],
+                            "user_id": teacher["user_id"],
+                            "teacher_name": user.get("full_name") or user.get("name"),
+                            "email": user.get("email"),
+                            "full_name": user.get("full_name"),
+                            "first_name": user.get("first_name"),
+                            "last_name": user.get("last_name"),
+                            "user_image": user.get("user_image"),
+                            "avatar_url": user.get("avatar_url")
+                        }
+
+        # Add vice homeroom teacher info
+        if response_data.get("vice_homeroom_teacher"):
+            teacher_info = frappe.get_all(
+                "SIS Teacher",
+                fields=["user_id"],
+                filters={"name": response_data["vice_homeroom_teacher"]},
+                limit=1
+            )
+            if teacher_info:
+                teacher = teacher_info[0]
+                if teacher.get("user_id"):
+                    user_info = frappe.get_all(
+                        "User",
+                        fields=["full_name", "first_name", "last_name", "user_image", "avatar_url", "email"],
+                        filters={"name": teacher["user_id"]},
+                        limit=1
+                    )
+                    if user_info:
+                        user = user_info[0]
+                        response_data["vice_homeroom_teacher_info"] = {
+                            "name": response_data["vice_homeroom_teacher"],
+                            "user_id": teacher["user_id"],
+                            "teacher_name": user.get("full_name") or user.get("name"),
+                            "email": user.get("email"),
+                            "full_name": user.get("full_name"),
+                            "first_name": user.get("first_name"),
+                            "last_name": user.get("last_name"),
+                            "user_image": user.get("user_image"),
+                            "avatar_url": user.get("avatar_url")
+                        }
+
+        return {"success": True, "data": response_data, "message": "Class created successfully"}
     except Exception as e:
         frappe.log_error(f"Error creating class: {str(e)}")
         return {"success": False, "data": {}, "message": f"Error creating class: {str(e)}"}
@@ -263,9 +599,73 @@ def update_class(class_id: str = None):
         
         frappe.db.commit()
         
-        # Return updated data
+        # Return updated data with teacher information
         updated_doc = frappe.get_doc("SIS Class", class_id)
-        return {"success": True, "data": updated_doc.as_dict(), "message": "Class updated successfully"}
+        response_data = updated_doc.as_dict()
+
+        # Add homeroom teacher info
+        if response_data.get("homeroom_teacher"):
+            teacher_info = frappe.get_all(
+                "SIS Teacher",
+                fields=["user_id"],
+                filters={"name": response_data["homeroom_teacher"]},
+                limit=1
+            )
+            if teacher_info:
+                teacher = teacher_info[0]
+                if teacher.get("user_id"):
+                    user_info = frappe.get_all(
+                        "User",
+                        fields=["full_name", "first_name", "last_name", "user_image", "avatar_url", "email"],
+                        filters={"name": teacher["user_id"]},
+                        limit=1
+                    )
+                    if user_info:
+                        user = user_info[0]
+                        response_data["homeroom_teacher_info"] = {
+                            "name": response_data["homeroom_teacher"],
+                            "user_id": teacher["user_id"],
+                            "teacher_name": user.get("full_name") or user.get("name"),
+                            "email": user.get("email"),
+                            "full_name": user.get("full_name"),
+                            "first_name": user.get("first_name"),
+                            "last_name": user.get("last_name"),
+                            "user_image": user.get("user_image"),
+                            "avatar_url": user.get("avatar_url")
+                        }
+
+        # Add vice homeroom teacher info
+        if response_data.get("vice_homeroom_teacher"):
+            teacher_info = frappe.get_all(
+                "SIS Teacher",
+                fields=["user_id"],
+                filters={"name": response_data["vice_homeroom_teacher"]},
+                limit=1
+            )
+            if teacher_info:
+                teacher = teacher_info[0]
+                if teacher.get("user_id"):
+                    user_info = frappe.get_all(
+                        "User",
+                        fields=["full_name", "first_name", "last_name", "user_image", "avatar_url", "email"],
+                        filters={"name": teacher["user_id"]},
+                        limit=1
+                    )
+                    if user_info:
+                        user = user_info[0]
+                        response_data["vice_homeroom_teacher_info"] = {
+                            "name": response_data["vice_homeroom_teacher"],
+                            "user_id": teacher["user_id"],
+                            "teacher_name": user.get("full_name") or user.get("name"),
+                            "email": user.get("email"),
+                            "full_name": user.get("full_name"),
+                            "first_name": user.get("first_name"),
+                            "last_name": user.get("last_name"),
+                            "user_image": user.get("user_image"),
+                            "avatar_url": user.get("avatar_url")
+                        }
+
+        return {"success": True, "data": response_data, "message": "Class updated successfully"}
         
     except Exception as e:
         frappe.log_error(f"Error updating class: {str(e)}")
