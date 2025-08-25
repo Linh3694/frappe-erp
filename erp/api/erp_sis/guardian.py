@@ -115,7 +115,25 @@ def get_guardian_data():
         
         # Build filters based on what parameter we have
         if guardian_id:
-            guardian = frappe.get_doc("CRM Guardian", guardian_id)
+            # Try resolve by Doc name first
+            guardian = None
+            if frappe.db.exists("CRM Guardian", guardian_id):
+                guardian = frappe.get_doc("CRM Guardian", guardian_id)
+            else:
+                # Try resolve by guardian_id field
+                code_hit = frappe.get_all("CRM Guardian", filters={"guardian_id": guardian_id}, fields=["name"], limit=1)
+                if code_hit:
+                    guardian = frappe.get_doc("CRM Guardian", code_hit[0].name)
+                else:
+                    # If looks like slug, resolve by guardian_name LIKE
+                    if isinstance(guardian_id, str) and '-' in guardian_id:
+                        search_name = guardian_id.replace('-', ' ')
+                        name_hit = frappe.db.sql("""
+                            SELECT name FROM `tabCRM Guardian` 
+                            WHERE LOWER(guardian_name) LIKE %s LIMIT 1
+                        """, (f"%{search_name.lower()}%",), as_dict=True)
+                        if name_hit:
+                            guardian = frappe.get_doc("CRM Guardian", name_hit[0].name)
         elif guardian_code:
             # Search by guardian_id (which acts as code)
             guardians = frappe.get_all("CRM Guardian", 
@@ -440,24 +458,33 @@ def delete_guardian():
                 "message": "Guardian ID is required"
             }
         
-        # Get guardian document
-        try:
-            guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
-        except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Guardian not found"
-            }
+        # Resolve real docname from name/code/slug
+        docname = None
+        if frappe.db.exists("CRM Guardian", guardian_id):
+            docname = guardian_id
+        else:
+            hit = frappe.get_all("CRM Guardian", filters={"guardian_id": guardian_id}, fields=["name"], limit=1)
+            if hit:
+                docname = hit[0].name
+            elif '-' in str(guardian_id):
+                search_name = str(guardian_id).replace('-', ' ')
+                name_hit = frappe.db.sql("""
+                    SELECT name FROM `tabCRM Guardian` 
+                    WHERE LOWER(guardian_name) LIKE %s LIMIT 1
+                """, (f"%{search_name.lower()}%",), as_dict=True)
+                if name_hit:
+                    docname = name_hit[0].name
+        if not docname:
+            return {"success": False, "data": {}, "message": "Guardian not found"}
         
         # Cleanup relationships before delete
         try:
-            frappe.db.delete("CRM Family Relationship", {"guardian": guardian_id})
+            frappe.db.delete("CRM Family Relationship", {"guardian": docname})
         except Exception as e:
-            frappe.logger().error(f"Failed to cleanup relationships for guardian {guardian_id}: {str(e)}")
+            frappe.logger().error(f"Failed to cleanup relationships for guardian {docname}: {str(e)}")
 
         # Delete the document
-        frappe.delete_doc("CRM Guardian", guardian_id)
+        frappe.delete_doc("CRM Guardian", docname)
         frappe.db.commit()
         
         return {
