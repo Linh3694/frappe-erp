@@ -207,26 +207,32 @@ def create_class():
 @frappe.whitelist(allow_guest=False, methods=['POST'])
 def update_class(class_id: str = None):
     try:
-        form = frappe.local.form_dict or {}
-        class_id = class_id or form.get("class_id") or form.get("name")
-        if not class_id and frappe.request and frappe.request.data:
+        # Get data consistently like create_class
+        data = {}
+        if frappe.request and frappe.request.data:
             try:
                 body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
                 data = json.loads(body or '{}')
-                class_id = data.get('class_id') or data.get('name')
             except Exception:
-                pass
+                data = frappe.local.form_dict or {}
+        else:
+            data = frappe.local.form_dict or {}
+            
+        class_id = class_id or data.get("class_id") or data.get("name")
         if not class_id:
             return {"success": False, "data": {}, "message": "Class ID is required"}
+            
         doc = frappe.get_doc("SIS Class", class_id)
+        
         # capture raw select values for safe post-save update
-        raw_academic_level = (form.get("academic_level") or "").strip()
-        raw_class_type = (form.get("class_type") or "").strip()
+        raw_academic_level = (data.get("academic_level") or "").strip()
+        raw_class_type = (data.get("class_type") or "").strip()
 
         # update fields defensively (skip academic_level to avoid strict Select validation)
         for key in ["title","short_title","campus_id","school_year_id","education_grade","academic_program","homeroom_teacher","vice_homeroom_teacher","room","start_date","end_date"]:
-            if form.get(key) is not None:
-                setattr(doc, key, form.get(key))
+            if data.get(key) is not None:
+                setattr(doc, key, data.get(key))
+                
         doc.flags.ignore_validate = True
         doc.save(ignore_permissions=True)
 
@@ -257,6 +263,7 @@ def update_class(class_id: str = None):
                 frappe.db.set_value("SIS Class", doc.name, "class_type", normalized_ct)
         except Exception:
             pass
+            
         frappe.db.commit()
         return {"success": True, "data": doc.as_dict(), "message": "Class updated successfully"}
     except Exception as e:
