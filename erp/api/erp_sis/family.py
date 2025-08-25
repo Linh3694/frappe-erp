@@ -17,11 +17,19 @@ def get_family_details(family_id=None, family_code=None):
             if res:
                 family_id = res[0].name
 
-        family = frappe.get_doc("CRM Family", family_id)
+        # Fetch family basic info using db API to avoid permission issues
+        fam_row = None
+        if family_id:
+            fam_row = frappe.db.get_value("CRM Family", family_id, ["name", "family_code"], as_dict=True)
+        if not fam_row and family_code:
+            fam_row = frappe.db.get_value("CRM Family", {"family_code": family_code}, ["name", "family_code"], as_dict=True)
+        if not fam_row:
+            return {"success": False, "data": {}, "message": "Family not found"}
+        family_name = fam_row.get("name")
 
         rels = frappe.get_all(
             "CRM Family Relationship",
-            filters={"parent": family.name},
+            filters={"parent": family_name},
             fields=["student", "guardian", "relationship_type", "key_person", "access"],
         )
 
@@ -41,8 +49,8 @@ def get_family_details(family_id=None, family_code=None):
         return {
             "success": True,
             "data": {
-                "name": family.name,
-                "family_code": getattr(family, "family_code", None),
+                "name": family_name,
+                "family_code": fam_row.get("family_code"),
                 "relationships": rels,
                 "students": student_names,
                 "guardians": guardian_names,
