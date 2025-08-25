@@ -329,20 +329,20 @@ def create_family():
                 frappe.logger().info(f"Student doc before update: family_code = {student_doc.family_code}")
                 student_doc.family_code = family_code
                 frappe.logger().info(f"Student doc after setting: family_code = {student_doc.family_code}")
-                
-                # Add family relationships for this student
-                student_relationships = []
+
+                # Reset and append family relationships for this student (use child table API)
+                student_doc.set("family_relationships", [])
                 for rel in relationships:
                     if rel.get("student") == student_id:
-                        student_relationships.append({
+                        student_doc.append("family_relationships", {
+                            "student": student_id,
                             "guardian": rel.get("guardian"),
-                            "relationship_type": rel.get("relationship_type"),
-                            "key_person": rel.get("key_person", False),
-                            "access": rel.get("access", False)
+                            "relationship_type": rel.get("relationship_type", ""),
+                            "key_person": int(rel.get("key_person", False)),
+                            "access": int(rel.get("access", False))
                         })
-                
-                frappe.logger().info(f"Student {student_id} relationships: {student_relationships}")
-                student_doc.family_relationships = student_relationships
+
+                student_doc.flags.ignore_validate = True
                 student_doc.save(ignore_permissions=True)
                 frappe.logger().info(f"Successfully updated student {student_id}")
             except Exception as e:
@@ -357,20 +357,20 @@ def create_family():
                 frappe.logger().info(f"Guardian doc before update: family_code = {guardian_doc.family_code}")
                 guardian_doc.family_code = family_code
                 frappe.logger().info(f"Guardian doc after setting: family_code = {guardian_doc.family_code}")
-                
-                # Add student relationships for this guardian
-                student_relationships = []
+
+                # Reset and append student relationships for this guardian (use child table API)
+                guardian_doc.set("student_relationships", [])
                 for rel in relationships:
                     if rel.get("guardian") == guardian_id:
-                        student_relationships.append({
+                        guardian_doc.append("student_relationships", {
                             "student": rel.get("student"),
-                            "relationship_type": rel.get("relationship_type"),
-                            "key_person": rel.get("key_person", False),
-                            "access": rel.get("access", False)
+                            "guardian": guardian_id,
+                            "relationship_type": rel.get("relationship_type", ""),
+                            "key_person": int(rel.get("key_person", False)),
+                            "access": int(rel.get("access", False))
                         })
-                
-                frappe.logger().info(f"Guardian {guardian_id} relationships: {student_relationships}")
-                guardian_doc.student_relationships = student_relationships
+
+                guardian_doc.flags.ignore_validate = True
                 guardian_doc.save(ignore_permissions=True)
                 frappe.logger().info(f"Successfully updated guardian {guardian_id}")
             except Exception as e:
