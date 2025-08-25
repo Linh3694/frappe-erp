@@ -168,7 +168,6 @@ def create_class():
             "room": data.get("room"),
             "start_date": data.get("start_date"),
             "end_date": data.get("end_date"),
-            "class_type": raw_class_type,
         }
         doc = frappe.get_doc(payload)
         doc.flags.ignore_validate = True
