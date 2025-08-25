@@ -442,6 +442,12 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
         try:
             guardian_doc.flags.ignore_validate = True
             guardian_doc.save(ignore_permissions=True)
+            # Force-set using db API to avoid any override by hooks/server scripts
+            frappe.db.set_value("CRM Guardian", guardian_doc.name, {
+                "guardian_name": guardian_doc.guardian_name,
+                "phone_number": guardian_doc.phone_number,
+                "email": guardian_doc.email or "",
+            })
             frappe.db.commit()
         except Exception as save_error:
             return {
