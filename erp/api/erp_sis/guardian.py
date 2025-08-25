@@ -422,16 +422,16 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
                 return ""
             return str(val).strip()
         
-        # Update fields (allow clearing with empty string)
-        if guardian_name is not None and normalize_value(guardian_name) != normalize_value(guardian_doc.guardian_name):
+        # Update fields (allow clearing with empty string) - assign unconditionally if key provided
+        if guardian_name is not None:
             guardian_doc.guardian_name = guardian_name or ""
             changes_made = True
         
-        if phone_number is not None and normalize_value(phone_number) != normalize_value(guardian_doc.phone_number):
+        if phone_number is not None:
             guardian_doc.phone_number = phone_number or ""
             changes_made = True
 
-        if email is not None and normalize_value(email) != normalize_value(guardian_doc.email):
+        if email is not None:
             guardian_doc.email = email or ""
             changes_made = True
         
