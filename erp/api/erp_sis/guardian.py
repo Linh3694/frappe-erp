@@ -108,7 +108,7 @@ def get_all_guardians(page=1, limit=20):
                 "guardian_id",
                 "guardian_name",
                 "phone_number",
-                "IFNULL(email, '') as email",
+                "email",
                 "family_code",
                 "creation",
                 "modified"
@@ -118,6 +118,10 @@ def get_all_guardians(page=1, limit=20):
             limit_start=offset,
             limit_page_length=limit
         )
+        # Normalize nullable fields for FE
+        for g in guardians:
+            if g.get("email") is None:
+                g["email"] = ""
         
         frappe.logger().info(f"Found {len(guardians)} guardians")
         
