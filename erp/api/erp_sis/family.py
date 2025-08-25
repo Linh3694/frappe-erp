@@ -189,8 +189,7 @@ def get_all_families(page=1, limit=20):
         
         frappe.logger().info(f"Found {len(families)} families")
         
-        # Get total count
-        total_count = frappe.db.count("CRM Family", filters=filters)
+        total_count = frappe.db.sql("SELECT COUNT(*) as cnt FROM `tabCRM Family`", as_dict=True)[0]["cnt"]
         total_pages = (total_count + limit - 1) // limit
         
         frappe.logger().info(f"Total count: {total_count}, Total pages: {total_pages}")
