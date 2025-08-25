@@ -55,6 +55,28 @@ def get_all_students(page=1, limit=20):
         )
         
         frappe.logger().info(f"Found {len(students)} students")
+        try:
+            student_ids = [s.get("name") for s in students if s.get("name")]
+            if student_ids:
+                rows = frappe.db.sql(
+                    """
+                    SELECT fr.student as student, f.name as family_name, f.family_code
+                    FROM `tabCRM Family Relationship` fr
+                    INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+                    WHERE fr.student IN %(ids)s
+                    ORDER BY f.family_code ASC
+                    """,
+                    {"ids": tuple(student_ids)},
+                    as_dict=True,
+                )
+                mapping = {}
+                for r in rows:
+                    mapping.setdefault(r["student"], []).append({"name": r["family_name"], "family_code": r["family_code"]})
+                for s in students:
+                    sid = s.get("name")
+                    s["family_codes"] = mapping.get(sid, [])
+        except Exception as e:
+            frappe.logger().error(f"Failed to enrich students with family codes: {str(e)}")
         
         # Get total count
         total_count = frappe.db.count("CRM Student", filters=filters)
@@ -655,6 +677,30 @@ def search_students(search_term=None, page=1, limit=20):
                 )
             ]
             frappe.logger().info(f"POST-FILTERED {pre_count} -> {len(students)} using normalized query='{norm_q}'")
+
+        # Enrich with family codes
+        try:
+            student_ids = [s.get("name") for s in students if s.get("name")]
+            if student_ids:
+                rows = frappe.db.sql(
+                    """
+                    SELECT fr.student as student, f.name as family_name, f.family_code
+                    FROM `tabCRM Family Relationship` fr
+                    INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+                    WHERE fr.student IN %(ids)s
+                    ORDER BY f.family_code ASC
+                    """,
+                    {"ids": tuple(student_ids)},
+                    as_dict=True,
+                )
+                mapping = {}
+                for r in rows:
+                    mapping.setdefault(r["student"], []).append({"name": r["family_name"], "family_code": r["family_code"]})
+                for s in students:
+                    sid = s.get("name")
+                    s["family_codes"] = mapping.get(sid, [])
+        except Exception as e:
+            frappe.logger().error(f"Failed to enrich search students with family codes: {str(e)}")
         
         # Get total count (parameterized)
         count_query = (

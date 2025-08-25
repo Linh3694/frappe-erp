@@ -122,6 +122,29 @@ def get_all_guardians(page=1, limit=20):
         for g in guardians:
             if g.get("email") is None:
                 g["email"] = ""
+        # Enrich with all family codes per guardian
+        try:
+            guardian_ids = [g.get("name") for g in guardians if g.get("name")]
+            if guardian_ids:
+                rows = frappe.db.sql(
+                    """
+                    SELECT fr.guardian as guardian, f.name as family_name, f.family_code
+                    FROM `tabCRM Family Relationship` fr
+                    INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+                    WHERE fr.guardian IN %(ids)s
+                    ORDER BY f.family_code ASC
+                    """,
+                    {"ids": tuple(guardian_ids)},
+                    as_dict=True,
+                )
+                mapping = {}
+                for r in rows:
+                    mapping.setdefault(r["guardian"], []).append({"name": r["family_name"], "family_code": r["family_code"]})
+                for g in guardians:
+                    gid = g.get("name")
+                    g["family_codes"] = mapping.get(gid, [])
+        except Exception as e:
+            frappe.logger().error(f"Failed to enrich guardians with family codes: {str(e)}")
         
         frappe.logger().info(f"Found {len(guardians)} guardians")
         

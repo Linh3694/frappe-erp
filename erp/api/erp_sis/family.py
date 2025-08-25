@@ -893,6 +893,72 @@ def get_families_for_selection():
             "data": families,
             "message": "Families fetched successfully"
         }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_family_codes(student_id=None, guardian_id=None):
+    """Return list of families (name, family_code) for a given student or guardian.
+    Accepts params from query args, form_dict, or JSON body.
+    """
+    try:
+        form = frappe.local.form_dict or {}
+        if not student_id and not guardian_id:
+            student_id = form.get("student_id")
+            guardian_id = form.get("guardian_id")
+        # From query args
+        try:
+            args = getattr(frappe.request, 'args', None)
+            if args and not (student_id or guardian_id):
+                student_id = args.get('student_id')
+                guardian_id = args.get('guardian_id')
+        except Exception:
+            pass
+        # From JSON body
+        if not (student_id or guardian_id) and frappe.request and frappe.request.data:
+            try:
+                body = frappe.request.data
+                if isinstance(body, bytes):
+                    body = body.decode('utf-8')
+                json_body = json.loads(body or '{}')
+                student_id = json_body.get('student_id') or student_id
+                guardian_id = json_body.get('guardian_id') or guardian_id
+            except Exception:
+                pass
+
+        if not student_id and not guardian_id:
+            return {"success": False, "data": [], "message": "student_id or guardian_id is required"}
+
+        if student_id:
+            rows = frappe.db.sql(
+                """
+                SELECT f.name, f.family_code
+                FROM `tabCRM Family` f
+                INNER JOIN `tabCRM Family Relationship` fr ON fr.parent = f.name
+                WHERE fr.student = %s
+                GROUP BY f.name, f.family_code
+                ORDER BY f.family_code ASC
+                """,
+                (student_id,),
+                as_dict=True,
+            )
+        else:
+            rows = frappe.db.sql(
+                """
+                SELECT f.name, f.family_code
+                FROM `tabCRM Family` f
+                INNER JOIN `tabCRM Family Relationship` fr ON fr.parent = f.name
+                WHERE fr.guardian = %s
+                GROUP BY f.name, f.family_code
+                ORDER BY f.family_code ASC
+                """,
+                (guardian_id,),
+                as_dict=True,
+            )
+
+        return {"success": True, "data": rows, "message": "Family codes fetched"}
+    except Exception as e:
+        frappe.log_error(f"Error get_family_codes: {str(e)}")
+        return {"success": False, "data": [], "message": f"Error fetching family codes: {str(e)}"}
         
     except Exception as e:
         frappe.log_error(f"Error fetching families for selection: {str(e)}")
