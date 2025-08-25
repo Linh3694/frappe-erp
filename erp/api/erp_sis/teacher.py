@@ -68,30 +68,34 @@ def get_all_teachers():
                         "teacher_name": user.get("full_name") or user.get("name")
                     })
 
-                # Try to get employee information from Employee doctype
-                employee_info = frappe.get_all(
-                    "Employee",
-                    fields=[
-                        "name",
-                        "employee_number",
-                        "employee_name",
-                        "designation",
-                        "department",
-                        "branch"
-                    ],
-                    filters={"user_id": teacher["user_id"]},
-                    limit=1
-                )
+                # Try to get employee information from Employee doctype (if available)
+                try:
+                    employee_info = frappe.get_all(
+                        "Employee",
+                        fields=[
+                            "name",
+                            "employee_number",
+                            "employee_name",
+                            "designation",
+                            "department",
+                            "branch"
+                        ],
+                        filters={"user_id": teacher["user_id"]},
+                        limit=1
+                    )
 
-                if employee_info:
-                    employee = employee_info[0]
-                    enhanced_teacher.update({
-                        "employee_code": employee.get("employee_number"),
-                        "employee_name": employee.get("employee_name"),
-                        "designation": employee.get("designation"),
-                        "department": employee.get("department"),
-                        "branch": employee.get("branch")
-                    })
+                    if employee_info:
+                        employee = employee_info[0]
+                        enhanced_teacher.update({
+                            "employee_code": employee.get("employee_number"),
+                            "employee_name": employee.get("employee_name"),
+                            "designation": employee.get("designation"),
+                            "department": employee.get("department"),
+                            "branch": employee.get("branch")
+                        })
+                except Exception:
+                    # Employee doctype might not exist or be accessible
+                    pass
 
             enhanced_teachers.append(enhanced_teacher)
 

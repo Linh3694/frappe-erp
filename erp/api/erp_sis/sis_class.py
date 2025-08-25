@@ -105,28 +105,31 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                                 "teacher_name": user.get("full_name") or user.get("name")
                             }
 
-                        # Get employee information
-                        employee_info = frappe.get_all(
-                            "Employee",
-                            fields=[
-                                "employee_number",
-                                "employee_name",
-                                "designation",
-                                "department"
-                            ],
-                            filters={"user_id": teacher["user_id"]},
-                            limit=1
-                        )
+                        # Try to get employee information from Employee doctype (if available)
+                        try:
+                            employee_info = frappe.get_all(
+                                "Employee",
+                                fields=[
+                                    "employee_number",
+                                    "employee_name",
+                                    "designation",
+                                    "department"
+                                ],
+                                filters={"user_id": teacher["user_id"]},
+                                limit=1
+                            )
 
-                        if employee_info:
-                            employee = employee_info[0]
-                            if enhanced_class.get("homeroom_teacher_info"):
+                            if employee_info and enhanced_class.get("homeroom_teacher_info"):
+                                employee = employee_info[0]
                                 enhanced_class["homeroom_teacher_info"].update({
                                     "employee_code": employee.get("employee_number"),
                                     "employee_name": employee.get("employee_name"),
                                     "designation": employee.get("designation"),
                                     "department": employee.get("department")
                                 })
+                        except Exception:
+                            # Employee doctype might not exist or be accessible
+                            pass
 
             # Get vice homeroom teacher details
             if class_data.get("vice_homeroom_teacher"):
@@ -168,28 +171,31 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                                 "teacher_name": user.get("full_name") or user.get("name")
                             }
 
-                        # Get employee information
-                        employee_info = frappe.get_all(
-                            "Employee",
-                            fields=[
-                                "employee_number",
-                                "employee_name",
-                                "designation",
-                                "department"
-                            ],
-                            filters={"user_id": teacher["user_id"]},
-                            limit=1
-                        )
+                        # Try to get employee information from Employee doctype (if available)
+                        try:
+                            employee_info = frappe.get_all(
+                                "Employee",
+                                fields=[
+                                    "employee_number",
+                                    "employee_name",
+                                    "designation",
+                                    "department"
+                                ],
+                                filters={"user_id": teacher["user_id"]},
+                                limit=1
+                            )
 
-                        if employee_info:
-                            employee = employee_info[0]
-                            if enhanced_class.get("vice_homeroom_teacher_info"):
+                            if employee_info and enhanced_class.get("vice_homeroom_teacher_info"):
+                                employee = employee_info[0]
                                 enhanced_class["vice_homeroom_teacher_info"].update({
                                     "employee_code": employee.get("employee_number"),
                                     "employee_name": employee.get("employee_name"),
                                     "designation": employee.get("designation"),
                                     "department": employee.get("department")
                                 })
+                        except Exception:
+                            # Employee doctype might not exist or be accessible
+                            pass
 
             enhanced_classes.append(enhanced_class)
 
@@ -269,28 +275,31 @@ def get_class(class_id: str = None):
                             "teacher_name": user.get("full_name") or user.get("name")
                         }
 
-                    # Get employee information
-                    employee_info = frappe.get_all(
-                        "Employee",
-                        fields=[
-                            "employee_number",
-                            "employee_name",
-                            "designation",
-                            "department"
-                        ],
-                        filters={"user_id": teacher["user_id"]},
-                        limit=1
-                    )
+                    # Try to get employee information from Employee doctype (if available)
+                    try:
+                        employee_info = frappe.get_all(
+                            "Employee",
+                            fields=[
+                                "employee_number",
+                                "employee_name",
+                                "designation",
+                                "department"
+                            ],
+                            filters={"user_id": teacher["user_id"]},
+                            limit=1
+                        )
 
-                    if employee_info:
-                        employee = employee_info[0]
-                        if class_data.get("homeroom_teacher_info"):
+                        if employee_info and class_data.get("homeroom_teacher_info"):
+                            employee = employee_info[0]
                             class_data["homeroom_teacher_info"].update({
                                 "employee_code": employee.get("employee_number"),
                                 "employee_name": employee.get("employee_name"),
                                 "designation": employee.get("designation"),
                                 "department": employee.get("department")
                             })
+                    except Exception:
+                        # Employee doctype might not exist or be accessible
+                        pass
 
         # Get vice homeroom teacher details
         if class_data.get("vice_homeroom_teacher"):
@@ -333,28 +342,31 @@ def get_class(class_id: str = None):
                             "teacher_name": user.get("full_name") or user.get("name")
                         }
 
-                    # Get employee information
-                    employee_info = frappe.get_all(
-                        "Employee",
-                        fields=[
-                            "employee_number",
-                            "employee_name",
-                            "designation",
-                            "department"
-                        ],
-                        filters={"user_id": teacher["user_id"]},
-                        limit=1
-                    )
+                    # Try to get employee information from Employee doctype (if available)
+                    try:
+                        employee_info = frappe.get_all(
+                            "Employee",
+                            fields=[
+                                "employee_number",
+                                "employee_name",
+                                "designation",
+                                "department"
+                            ],
+                            filters={"user_id": teacher["user_id"]},
+                            limit=1
+                        )
 
-                    if employee_info:
-                        employee = employee_info[0]
-                        if class_data.get("vice_homeroom_teacher_info"):
+                        if employee_info and class_data.get("vice_homeroom_teacher_info"):
+                            employee = employee_info[0]
                             class_data["vice_homeroom_teacher_info"].update({
                                 "employee_code": employee.get("employee_number"),
                                 "employee_name": employee.get("employee_name"),
                                 "designation": employee.get("designation"),
                                 "department": employee.get("department")
                             })
+                    except Exception:
+                        # Employee doctype might not exist or be accessible
+                        pass
 
         return {"success": True, "data": class_data, "message": "Class fetched successfully"}
     except Exception as e:
@@ -479,7 +491,7 @@ def create_class():
                 if teacher.get("user_id"):
                     user_info = frappe.get_all(
                         "User",
-                        fields=["full_name", "first_name", "last_name", "user_image", "avatar_url", "email"],
+                        fields=["full_name", "first_name", "last_name", "user_image", "email"],
                         filters={"name": teacher["user_id"]},
                         limit=1
                     )
@@ -509,7 +521,7 @@ def create_class():
                 if teacher.get("user_id"):
                     user_info = frappe.get_all(
                         "User",
-                        fields=["full_name", "first_name", "last_name", "user_image", "avatar_url", "email"],
+                        fields=["full_name", "first_name", "last_name", "user_image", "email"],
                         filters={"name": teacher["user_id"]},
                         limit=1
                     )
@@ -608,7 +620,7 @@ def update_class(class_id: str = None):
                 if teacher.get("user_id"):
                     user_info = frappe.get_all(
                         "User",
-                        fields=["full_name", "first_name", "last_name", "user_image", "avatar_url", "email"],
+                        fields=["full_name", "first_name", "last_name", "user_image", "email"],
                         filters={"name": teacher["user_id"]},
                         limit=1
                     )
@@ -638,7 +650,7 @@ def update_class(class_id: str = None):
                 if teacher.get("user_id"):
                     user_info = frappe.get_all(
                         "User",
-                        fields=["full_name", "first_name", "last_name", "user_image", "avatar_url", "email"],
+                        fields=["full_name", "first_name", "last_name", "user_image", "email"],
                         filters={"name": teacher["user_id"]},
                         limit=1
                     )
