@@ -438,7 +438,7 @@ def delete_student(student_id=None):
 
         # Accept student_id from multiple sources
         if not student_id:
-            form = frappe.local.form_dict or {}
+            form = frappe.local.form_dict or getattr(frappe, 'form_dict', {}) or {}
             # Direct keys
             student_id = (
                 form.get("student_id")
@@ -453,6 +453,19 @@ def delete_student(student_id=None):
                     student_id = args_obj.get("student_id") or args_obj.get("id") or args_obj.get("name")
                 except Exception:
                     pass
+
+        # Request-level helpers
+        if not student_id:
+            try:
+                if hasattr(frappe.request, 'args') and frappe.request.args:
+                    student_id = frappe.request.args.get('student_id') or student_id
+            except Exception:
+                pass
+            try:
+                if hasattr(frappe.request, 'form') and frappe.request.form:
+                    student_id = frappe.request.form.get('student_id') or student_id
+            except Exception:
+                pass
 
         # Fallback: parse JSON body
         if not student_id and frappe.request.data:
