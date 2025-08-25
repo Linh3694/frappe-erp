@@ -4,6 +4,7 @@ from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 import unicodedata
+from typing import Optional
 
 
 def _normalize_text(text: str) -> str:
@@ -16,7 +17,7 @@ def _normalize_text(text: str) -> str:
         return (text or '').lower()
 
 
-def _resolve_guardian_docname(identifier: str | None = None, guardian_code: str | None = None, guardian_slug: str | None = None) -> str | None:
+def _resolve_guardian_docname(identifier: Optional[str] = None, guardian_code: Optional[str] = None, guardian_slug: Optional[str] = None) -> Optional[str]:
     """Resolve CRM Guardian docname from various identifiers: docname, guardian_id (code), or slug.
     Returns the docname or None.
     """
@@ -43,6 +44,16 @@ def _resolve_guardian_docname(identifier: str | None = None, guardian_code: str 
         )
         if ci:
             return ci[0].name
+        # Fuzzy guardian_id LIKE
+        like = frappe.db.sql(
+            """
+            SELECT name FROM `tabCRM Guardian` WHERE LOWER(guardian_id) LIKE LOWER(%s) LIMIT 1
+            """,
+            (f"%{ident}%",),
+            as_dict=True,
+        )
+        if like:
+            return like[0].name
 
     # guardian_code explicit
     if code:
