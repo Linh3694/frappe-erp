@@ -199,8 +199,23 @@ def create_guardian():
         
         # Extract values from data with multiple possible field names
         guardian_name = data.get("guardian_name") or data.get("guardianName") or data.get("name")
+        guardian_id = data.get("guardian_id") or data.get("guardianId") or ""
         phone_number = data.get("phone_number") or data.get("phoneNumber") or ""
         email = data.get("email") or ""
+        
+        # Generate guardian_id if not provided
+        if not guardian_id and guardian_name:
+            import re
+            # Create simple ID from name (remove spaces, Vietnamese chars, make lowercase)
+            guardian_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
+            guardian_id = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', guardian_id)
+            guardian_id = re.sub(r'[ìíịỉĩ]', 'i', guardian_id)
+            guardian_id = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', guardian_id)
+            guardian_id = re.sub(r'[ùúụủũưừứựửữ]', 'u', guardian_id)
+            guardian_id = re.sub(r'[ỳýỵỷỹ]', 'y', guardian_id)
+            guardian_id = guardian_id.replace('đ', 'd')
+            guardian_id = re.sub(r'[^a-z0-9]', '-', guardian_id)
+            guardian_id = re.sub(r'-+', '-', guardian_id).strip('-') + '-' + str(nowdate().replace('-', ''))[-4:]
         
         # Format phone number for Vietnam if needed
         if phone_number and not phone_number.startswith('+'):
