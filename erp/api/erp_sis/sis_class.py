@@ -292,7 +292,9 @@ def get_class(class_id: str = None):
                         if employee_info and class_data.get("homeroom_teacher_info"):
                             employee = employee_info[0]
                             class_data["homeroom_teacher_info"].update({
-                                "employee_code": employee.get("employee_number"),
+                                "employee_code": employee.get("name"),  # Use 'name' field as employee code
+                                "employee_id": employee.get("name"),    # Alias for compatibility
+                                "employee_number": employee.get("employee_number"),  # Keep original field
                                 "employee_name": employee.get("employee_name"),
                                 "designation": employee.get("designation"),
                                 "department": employee.get("department")
@@ -505,8 +507,33 @@ def create_class():
                             "full_name": user.get("full_name"),
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image")
+                            "user_image": user.get("user_image"),
+                            "employee_code": "",  # Will be populated if employee exists
+                            "employee_name": "",
+                            "designation": "",
+                            "department": ""
                         }
+
+                        # Try to populate employee info for homeroom teacher
+                        try:
+                            employee_info = frappe.get_all(
+                                "Employee",
+                                fields=["name", "employee_number", "employee_name", "designation", "department"],
+                                filters={"user_id": teacher["user_id"]},
+                                limit=1
+                            )
+                            if employee_info and response_data.get("homeroom_teacher_info"):
+                                employee = employee_info[0]
+                                response_data["homeroom_teacher_info"].update({
+                                    "employee_code": employee.get("name"),
+                                    "employee_id": employee.get("name"),
+                                    "employee_number": employee.get("employee_number"),
+                                    "employee_name": employee.get("employee_name"),
+                                    "designation": employee.get("designation"),
+                                    "department": employee.get("department")
+                                })
+                        except Exception:
+                            pass
 
         # Add vice homeroom teacher info
         if response_data.get("vice_homeroom_teacher"):
@@ -535,8 +562,33 @@ def create_class():
                             "full_name": user.get("full_name"),
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image")
+                            "user_image": user.get("user_image"),
+                            "employee_code": "",  # Will be populated if employee exists
+                            "employee_name": "",
+                            "designation": "",
+                            "department": ""
                         }
+
+                        # Try to populate employee info for vice homeroom teacher
+                        try:
+                            employee_info = frappe.get_all(
+                                "Employee",
+                                fields=["name", "employee_number", "employee_name", "designation", "department"],
+                                filters={"user_id": teacher["user_id"]},
+                                limit=1
+                            )
+                            if employee_info and response_data.get("vice_homeroom_teacher_info"):
+                                employee = employee_info[0]
+                                response_data["vice_homeroom_teacher_info"].update({
+                                    "employee_code": employee.get("name"),
+                                    "employee_id": employee.get("name"),
+                                    "employee_number": employee.get("employee_number"),
+                                    "employee_name": employee.get("employee_name"),
+                                    "designation": employee.get("designation"),
+                                    "department": employee.get("department")
+                                })
+                        except Exception:
+                            pass
 
         return {"success": True, "data": response_data, "message": "Class created successfully"}
     except Exception as e:
@@ -634,8 +686,33 @@ def update_class(class_id: str = None):
                             "full_name": user.get("full_name"),
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image")
+                            "user_image": user.get("user_image"),
+                            "employee_code": "",  # Will be populated if employee exists
+                            "employee_name": "",
+                            "designation": "",
+                            "department": ""
                         }
+
+                        # Try to populate employee info for homeroom teacher
+                        try:
+                            employee_info = frappe.get_all(
+                                "Employee",
+                                fields=["name", "employee_number", "employee_name", "designation", "department"],
+                                filters={"user_id": teacher["user_id"]},
+                                limit=1
+                            )
+                            if employee_info and response_data.get("homeroom_teacher_info"):
+                                employee = employee_info[0]
+                                response_data["homeroom_teacher_info"].update({
+                                    "employee_code": employee.get("name"),
+                                    "employee_id": employee.get("name"),
+                                    "employee_number": employee.get("employee_number"),
+                                    "employee_name": employee.get("employee_name"),
+                                    "designation": employee.get("designation"),
+                                    "department": employee.get("department")
+                                })
+                        except Exception:
+                            pass
 
         # Add vice homeroom teacher info
         if response_data.get("vice_homeroom_teacher"):
@@ -664,8 +741,33 @@ def update_class(class_id: str = None):
                             "full_name": user.get("full_name"),
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image")
+                            "user_image": user.get("user_image"),
+                            "employee_code": "",  # Will be populated if employee exists
+                            "employee_name": "",
+                            "designation": "",
+                            "department": ""
                         }
+
+                        # Try to populate employee info for vice homeroom teacher
+                        try:
+                            employee_info = frappe.get_all(
+                                "Employee",
+                                fields=["name", "employee_number", "employee_name", "designation", "department"],
+                                filters={"user_id": teacher["user_id"]},
+                                limit=1
+                            )
+                            if employee_info and response_data.get("vice_homeroom_teacher_info"):
+                                employee = employee_info[0]
+                                response_data["vice_homeroom_teacher_info"].update({
+                                    "employee_code": employee.get("name"),
+                                    "employee_id": employee.get("name"),
+                                    "employee_number": employee.get("employee_number"),
+                                    "employee_name": employee.get("employee_name"),
+                                    "designation": employee.get("designation"),
+                                    "department": employee.get("department")
+                                })
+                        except Exception:
+                            pass
 
         return {"success": True, "data": response_data, "message": "Class updated successfully"}
         

@@ -51,7 +51,9 @@ def get_all_teachers():
                         "full_name",
                         "first_name",
                         "last_name",
-                                            "user_image"
+                        "user_image",
+                        "employee_code",
+                        "employee_id"
                     ],
                     filters={"name": teacher["user_id"]},
                     limit=1
@@ -65,6 +67,8 @@ def get_all_teachers():
                         "first_name": user.get("first_name"),
                         "last_name": user.get("last_name"),
                         "user_image": user.get("user_image"),
+                        "employee_code": user.get("employee_code"),
+                        "employee_id": user.get("employee_id"),
                         "teacher_name": user.get("full_name") or user.get("name")
                     })
 
@@ -87,7 +91,9 @@ def get_all_teachers():
                     if employee_info:
                         employee = employee_info[0]
                         enhanced_teacher.update({
-                            "employee_code": employee.get("employee_number"),
+                            "employee_code": employee.get("name"),  # Use 'name' field as employee code (like get_current_user.py)
+                            "employee_id": employee.get("name"),    # Alias for compatibility
+                            "employee_number": employee.get("employee_number"),  # Keep original field
                             "employee_name": employee.get("employee_name"),
                             "designation": employee.get("designation"),
                             "department": employee.get("department"),
@@ -447,7 +453,9 @@ def get_users_for_selection():
                 "full_name",
                 "first_name",
                 "last_name",
-                                    "user_image"
+                "user_image",
+                "employee_code",
+                "employee_id",
             ],
             filters={"enabled": 1},
             order_by="full_name asc"
