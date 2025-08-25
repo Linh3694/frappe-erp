@@ -109,7 +109,7 @@ def create_class():
         else:
             data = frappe.local.form_dict or {}
 
-        required = ["title", "school_year_id", "education_grade", "academic_program"]
+        required = ["title", "school_year_id", "education_grade", "academic_program", "campus_id"]
         for field in required:
             if not data.get(field):
                 return {"success": False, "data": {}, "message": f"{field} is required"}
@@ -118,6 +118,7 @@ def create_class():
             "doctype": "SIS Class",
             "title": data.get("title"),
             "short_title": data.get("short_title"),
+            "campus_id": data.get("campus_id"),
             "school_year_id": data.get("school_year_id"),
             "education_grade": data.get("education_grade"),
             "academic_program": data.get("academic_program"),
@@ -155,7 +156,7 @@ def update_class(class_id: str = None):
             return {"success": False, "data": {}, "message": "Class ID is required"}
         doc = frappe.get_doc("SIS Class", class_id)
         # update fields defensively
-        for key in ["title","short_title","school_year_id","education_grade","academic_program","homeroom_teacher","vice_homeroom_teacher","room","academic_level","start_date","end_date","class_type"]:
+        for key in ["title","short_title","campus_id","school_year_id","education_grade","academic_program","homeroom_teacher","vice_homeroom_teacher","room","academic_level","start_date","end_date","class_type"]:
             if form.get(key) is not None:
                 setattr(doc, key, form.get(key))
         doc.flags.ignore_validate = True
