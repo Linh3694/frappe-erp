@@ -893,6 +893,13 @@ def get_families_for_selection():
             "data": families,
             "message": "Families fetched successfully"
         }
+    except Exception as e:
+        frappe.log_error(f"Error fetching families for selection: {str(e)}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Error fetching families: {str(e)}"
+        }
 
 
 @frappe.whitelist(allow_guest=False)
@@ -959,11 +966,3 @@ def get_family_codes(student_id=None, guardian_id=None):
     except Exception as e:
         frappe.log_error(f"Error get_family_codes: {str(e)}")
         return {"success": False, "data": [], "message": f"Error fetching family codes: {str(e)}"}
-        
-    except Exception as e:
-        frappe.log_error(f"Error fetching families for selection: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching families: {str(e)}"
-        }
