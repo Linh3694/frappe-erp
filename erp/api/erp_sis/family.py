@@ -234,18 +234,40 @@ def create_family():
             data = frappe.local.form_dict
             frappe.logger().info(f"No request data, using form_dict for create_family: {data}")
         
-                # Extract values from data - handle both JSON and form data
-        students = data.get("students", [])
-        guardians = data.get("guardians", [])
-        relationships = data.get("relationships", [])
+        # Extract values from data - handle both JSON and form data
+        # Try to get from main data first, then from form_dict
+        students = data.get("students") or frappe.local.form_dict.get("students", [])
+        guardians = data.get("guardians") or frappe.local.form_dict.get("guardians", [])
+        relationships = data.get("relationships") or frappe.local.form_dict.get("relationships", [])
+        
+        frappe.logger().info(f"Raw students: {students} (type: {type(students)})")
+        frappe.logger().info(f"Raw guardians: {guardians} (type: {type(guardians)})")
+        frappe.logger().info(f"Raw relationships: {relationships} (type: {type(relationships)})")
         
         # Parse JSON strings if they come from form data
         if isinstance(students, str):
-            students = json.loads(students)
+            try:
+                students = json.loads(students)
+                frappe.logger().info(f"Parsed students from JSON: {students}")
+            except json.JSONDecodeError as e:
+                frappe.logger().error(f"Failed to parse students JSON: {e}")
+                students = []
+                
         if isinstance(guardians, str):
-            guardians = json.loads(guardians)
+            try:
+                guardians = json.loads(guardians)
+                frappe.logger().info(f"Parsed guardians from JSON: {guardians}")
+            except json.JSONDecodeError as e:
+                frappe.logger().error(f"Failed to parse guardians JSON: {e}")
+                guardians = []
+                
         if isinstance(relationships, str):
-            relationships = json.loads(relationships)
+            try:
+                relationships = json.loads(relationships)
+                frappe.logger().info(f"Parsed relationships from JSON: {relationships}")
+            except json.JSONDecodeError as e:
+                frappe.logger().error(f"Failed to parse relationships JSON: {e}")
+                relationships = []
         
         frappe.logger().info(f"Received data: {data}")
         frappe.logger().info(f"Students: {students}")
