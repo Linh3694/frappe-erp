@@ -426,13 +426,34 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
         }
 
 
-@frappe.whitelist(allow_guest=False) 
+@frappe.whitelist(allow_guest=False)
 def delete_student(student_id=None):
     """Delete a student"""
     try:
-        # Accept student_id from form_dict if not provided positionally
+        # Log incoming payload for troubleshooting
+        try:
+            frappe.logger().info(f"delete_student form_dict: {frappe.local.form_dict}")
+        except Exception:
+            pass
+
+        # Accept student_id from multiple sources
         if not student_id:
-            student_id = frappe.local.form_dict.get("student_id")
+            form = frappe.local.form_dict or {}
+            # Direct keys
+            student_id = (
+                form.get("student_id")
+                or form.get("id")
+                or form.get("name")
+                or form.get("studentId")
+            )
+            # args payload sometimes contains JSON string
+            if not student_id and form.get("args"):
+                try:
+                    args_obj = json.loads(form.get("args"))
+                    student_id = args_obj.get("student_id") or args_obj.get("id") or args_obj.get("name")
+                except Exception:
+                    pass
+
         # Fallback: parse JSON body
         if not student_id and frappe.request.data:
             try:
