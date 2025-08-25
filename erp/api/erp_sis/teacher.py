@@ -51,8 +51,7 @@ def get_all_teachers():
                         "full_name",
                         "first_name",
                         "last_name",
-                        "user_image",
-                        "avatar_url"
+                                            "user_image"
                     ],
                     filters={"name": teacher["user_id"]},
                     limit=1
@@ -66,7 +65,6 @@ def get_all_teachers():
                         "first_name": user.get("first_name"),
                         "last_name": user.get("last_name"),
                         "user_image": user.get("user_image"),
-                        "avatar_url": user.get("avatar_url"),
                         "teacher_name": user.get("full_name") or user.get("name")
                     })
 
@@ -445,8 +443,7 @@ def get_users_for_selection():
                 "full_name",
                 "first_name",
                 "last_name",
-                "user_image",
-                "avatar_url"
+                                    "user_image"
             ],
             filters={"enabled": 1},
             order_by="full_name asc"

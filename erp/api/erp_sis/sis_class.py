@@ -86,8 +86,7 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                                 "full_name",
                                 "first_name",
                                 "last_name",
-                                "user_image",
-                                "avatar_url"
+                                "user_image"
                             ],
                             filters={"name": teacher["user_id"]},
                             limit=1
@@ -103,7 +102,6 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                                 "first_name": user.get("first_name"),
                                 "last_name": user.get("last_name"),
                                 "user_image": user.get("user_image"),
-                                "avatar_url": user.get("avatar_url"),
                                 "teacher_name": user.get("full_name") or user.get("name")
                             }
 
@@ -151,8 +149,7 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                                 "full_name",
                                 "first_name",
                                 "last_name",
-                                "user_image",
-                                "avatar_url"
+                                "user_image"
                             ],
                             filters={"name": teacher["user_id"]},
                             limit=1
@@ -168,7 +165,6 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                                 "first_name": user.get("first_name"),
                                 "last_name": user.get("last_name"),
                                 "user_image": user.get("user_image"),
-                                "avatar_url": user.get("avatar_url"),
                                 "teacher_name": user.get("full_name") or user.get("name")
                             }
 
@@ -270,7 +266,6 @@ def get_class(class_id: str = None):
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
                             "user_image": user.get("user_image"),
-                            "avatar_url": user.get("avatar_url"),
                             "teacher_name": user.get("full_name") or user.get("name")
                         }
 
@@ -335,7 +330,6 @@ def get_class(class_id: str = None):
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
                             "user_image": user.get("user_image"),
-                            "avatar_url": user.get("avatar_url"),
                             "teacher_name": user.get("full_name") or user.get("name")
                         }
 
@@ -499,8 +493,7 @@ def create_class():
                             "full_name": user.get("full_name"),
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image"),
-                            "avatar_url": user.get("avatar_url")
+                            "user_image": user.get("user_image")
                         }
 
         # Add vice homeroom teacher info
@@ -530,8 +523,7 @@ def create_class():
                             "full_name": user.get("full_name"),
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image"),
-                            "avatar_url": user.get("avatar_url")
+                            "user_image": user.get("user_image")
                         }
 
         return {"success": True, "data": response_data, "message": "Class created successfully"}
@@ -630,8 +622,7 @@ def update_class(class_id: str = None):
                             "full_name": user.get("full_name"),
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image"),
-                            "avatar_url": user.get("avatar_url")
+                            "user_image": user.get("user_image")
                         }
 
         # Add vice homeroom teacher info
@@ -661,8 +652,7 @@ def update_class(class_id: str = None):
                             "full_name": user.get("full_name"),
                             "first_name": user.get("first_name"),
                             "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image"),
-                            "avatar_url": user.get("avatar_url")
+                            "user_image": user.get("user_image")
                         }
 
         return {"success": True, "data": response_data, "message": "Class updated successfully"}
