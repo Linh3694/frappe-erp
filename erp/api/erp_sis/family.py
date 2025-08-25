@@ -150,6 +150,7 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
     except Exception as e:
         frappe.log_error(f"Error updating family members: {str(e)}")
         return {"success": False, "data": {}, "message": f"Error updating family members: {str(e)}"}
+@frappe.whitelist(allow_guest=False)
 def get_all_families(page=1, limit=20):
     """Get all families with basic information and pagination - NEW STRUCTURE"""
     try:

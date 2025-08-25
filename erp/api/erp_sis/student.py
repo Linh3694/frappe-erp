@@ -427,9 +427,12 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
 
 
 @frappe.whitelist(allow_guest=False) 
-def delete_student(student_id):
+def delete_student(student_id=None):
     """Delete a student"""
     try:
+        # Accept student_id from form_dict if not provided positionally
+        if not student_id:
+            student_id = frappe.local.form_dict.get("student_id")
         if not student_id:
             return {
                 "success": False,
