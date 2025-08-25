@@ -181,62 +181,22 @@ def get_guardian_data():
         
         # Build filters based on what parameter we have
         if guardian_id:
-            # Try resolve by Doc name first
-            guardian = None
-            if frappe.db.exists("CRM Guardian", guardian_id):
-                guardian = frappe.get_doc("CRM Guardian", guardian_id)
+            docname = _resolve_guardian_docname(identifier=guardian_id)
+            if docname:
+                guardian = frappe.get_doc("CRM Guardian", docname)
             else:
-                # Try resolve by guardian_id field
-                code_hit = frappe.get_all("CRM Guardian", filters={"guardian_id": guardian_id}, fields=["name"], limit=1)
-                if code_hit:
-                    guardian = frappe.get_doc("CRM Guardian", code_hit[0].name)
-                else:
-                    # If looks like slug, resolve by guardian_name LIKE
-                    if isinstance(guardian_id, str) and '-' in guardian_id:
-                        search_name = guardian_id.replace('-', ' ')
-                        name_hit = frappe.db.sql("""
-                            SELECT name FROM `tabCRM Guardian` 
-                            WHERE LOWER(guardian_name) LIKE %s LIMIT 1
-                        """, (f"%{search_name.lower()}%",), as_dict=True)
-                        if name_hit:
-                            guardian = frappe.get_doc("CRM Guardian", name_hit[0].name)
+                guardian = None
         elif guardian_code:
             # Search by guardian_id (which acts as code)
-            guardians = frappe.get_all("CRM Guardian", 
-                filters={"guardian_id": guardian_code}, 
-                fields=["name"], 
-                limit=1)
-            
-            if not guardians:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Guardian not found"
-                }
-            
-            guardian = frappe.get_doc("CRM Guardian", guardians[0].name)
+            docname = _resolve_guardian_docname(guardian_code=guardian_code)
+            if not docname:
+                return {"success": False, "data": {}, "message": "Guardian not found"}
+            guardian = frappe.get_doc("CRM Guardian", docname)
         elif guardian_slug:
-            # Convert slug back to name pattern and search by guardian_name
-            # Convert "nguyen-van-a" to "nguyen van a" for searching
-            search_name = guardian_slug.replace('-', ' ')
-            frappe.logger().info(f"Searching for guardian with name pattern: {search_name}")
-            
-            # Search by guardian_name - use LIKE for flexible matching
-            guardians = frappe.db.sql("""
-                SELECT name, guardian_name 
-                FROM `tabCRM Guardian` 
-                WHERE LOWER(guardian_name) LIKE %s 
-                LIMIT 1
-            """, (f'%{search_name.lower()}%',), as_dict=True)
-            
-            if not guardians:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Guardian not found"
-                }
-            
-            guardian = frappe.get_doc("CRM Guardian", guardians[0].name)
+            docname = _resolve_guardian_docname(guardian_slug=guardian_slug)
+            if not docname:
+                return {"success": False, "data": {}, "message": "Guardian not found"}
+            guardian = frappe.get_doc("CRM Guardian", docname)
         
         if not guardian:
             return {
