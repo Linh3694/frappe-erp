@@ -8,6 +8,24 @@ import json
 def get_family_details(family_id=None, family_code=None):
     """Get a family with full relationships (students and guardians)."""
     try:
+        # Accept params from multiple sources: function args, form/query params, JSON body
+        form = frappe.local.form_dict or {}
+        if not family_id:
+            family_id = form.get("family_id") or form.get("id") or form.get("name")
+        if not family_code:
+            family_code = form.get("family_code") or form.get("code")
+
+        if (not family_id and not family_code) and frappe.request and frappe.request.data:
+            try:
+                body = frappe.request.data
+                if isinstance(body, bytes):
+                    body = body.decode("utf-8")
+                json_body = json.loads(body or "{}")
+                family_id = json_body.get("family_id") or family_id
+                family_code = json_body.get("family_code") or family_code
+            except Exception:
+                pass
+
         if not family_id and not family_code:
             return {"success": False, "data": {}, "message": "Family ID or code is required"}
 
@@ -70,8 +88,10 @@ def get_family_details(family_id=None, family_code=None):
 def update_family_members(family_id=None, students=None, guardians=None, relationships=None):
     """Replace students/guardians and relationships of an existing family."""
     try:
+        # Accept params from multiple sources
+        form = frappe.local.form_dict or {}
         if not family_id:
-            family_id = frappe.local.form_dict.get("family_id")
+            family_id = form.get("family_id") or form.get("id") or form.get("name")
         # Parse JSON strings if sent as form
         def parse_json(value):
             if isinstance(value, str):
@@ -81,12 +101,13 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                     return []
             return value or []
 
-        if frappe.request.data and (students is None or guardians is None or relationships is None):
+        if frappe.request.data and (students is None or guardians is None or relationships is None or not family_id):
             try:
                 body = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 students = body.get("students", students)
                 guardians = body.get("guardians", guardians)
                 relationships = body.get("relationships", relationships)
+                family_id = body.get("family_id", family_id)
             except Exception:
                 pass
 
