@@ -3,6 +3,72 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+import unicodedata
+
+
+def _normalize_text(text: str) -> str:
+    try:
+        text = unicodedata.normalize('NFD', text or '')
+        text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
+        text = text.replace('đ', 'd').replace('Đ', 'D')
+        return text.lower()
+    except Exception:
+        return (text or '').lower()
+
+
+def _resolve_guardian_docname(identifier: str | None = None, guardian_code: str | None = None, guardian_slug: str | None = None) -> str | None:
+    """Resolve CRM Guardian docname from various identifiers: docname, guardian_id (code), or slug.
+    Returns the docname or None.
+    """
+    # Prefer direct docname
+    ident = (identifier or '').strip()
+    code = (guardian_code or '').strip()
+    slug = (guardian_slug or '').strip().lower()
+
+    if ident and frappe.db.exists("CRM Guardian", ident):
+        return ident
+
+    # Exact guardian_id match
+    if ident:
+        hit = frappe.get_all("CRM Guardian", filters={"guardian_id": ident}, fields=["name"], limit=1)
+        if hit:
+            return hit[0].name
+        # Case-insensitive guardian_id
+        ci = frappe.db.sql(
+            """
+            SELECT name FROM `tabCRM Guardian` WHERE LOWER(guardian_id)=LOWER(%s) LIMIT 1
+            """,
+            (ident,),
+            as_dict=True,
+        )
+        if ci:
+            return ci[0].name
+
+    # guardian_code explicit
+    if code:
+        hit = frappe.get_all("CRM Guardian", filters={"guardian_id": code}, fields=["name"], limit=1)
+        if hit:
+            return hit[0].name
+
+    # Slug by normalized guardian_name
+    slug_candidate = slug or (ident if '-' in ident else '')
+    if slug_candidate:
+        search_words = slug_candidate.replace('-', ' ')
+        candidates = frappe.db.sql(
+            """
+            SELECT name, guardian_name FROM `tabCRM Guardian`
+            WHERE LOWER(guardian_name) LIKE %s LIMIT 100
+            """,
+            (f"%{search_words.lower()}%",),
+            as_dict=True,
+        )
+        norm_slug = slug_candidate
+        for row in candidates:
+            name_slug = _normalize_text(row.get('guardian_name', '')).replace(' ', '-').replace('--', '-')
+            if name_slug == norm_slug:
+                return row['name']
+
+    return None
 
 
 @frappe.whitelist(allow_guest=False)
