@@ -152,8 +152,9 @@ def create_class():
         if not campus_id:
             return {"success": False, "data": {}, "message": "Campus not found"}
 
-        # Sanitize academic_level to avoid Select validation edge-cases
+        # Sanitize select-type fields to avoid validation edge-cases
         raw_academic_level = (data.get("academic_level") or "").strip()
+        raw_class_type = (data.get("class_type") or "").strip()
         payload = {
             "doctype": "SIS Class",
             "title": data.get("title"),
@@ -167,7 +168,7 @@ def create_class():
             "room": data.get("room"),
             "start_date": data.get("start_date"),
             "end_date": data.get("end_date"),
-            "class_type": data.get("class_type"),
+            "class_type": raw_class_type,
         }
         doc = frappe.get_doc(payload)
         doc.flags.ignore_validate = True
@@ -183,6 +184,18 @@ def create_class():
                             raw_academic_level = opt
                             break
                 frappe.db.set_value("SIS Class", doc.name, "academic_level", raw_academic_level)
+        except Exception:
+            pass
+        # Normalize class_type as well
+        try:
+            if raw_class_type:
+                allowed_ct = ["regular", "mixed"]
+                if raw_class_type not in allowed_ct:
+                    for opt in allowed_ct:
+                        if opt.lower() == raw_class_type.lower():
+                            raw_class_type = opt
+                            break
+                frappe.db.set_value("SIS Class", doc.name, "class_type", raw_class_type)
         except Exception:
             pass
         frappe.db.commit()
