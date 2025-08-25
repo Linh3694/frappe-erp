@@ -354,7 +354,7 @@ def create_guardian():
                 "guardian_id": guardian_doc.guardian_id,
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
-                "email": guardian_doc.email
+                "email": guardian_doc.email if guardian_doc.email is not None else (email or "")
             },
             "message": "Guardian created successfully"
         }
@@ -421,7 +421,6 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
             if val is None or val == "null" or val == "":
                 return ""
             return str(val).strip()
-        
         # Update fields (allow clearing with empty string) - assign unconditionally if key provided
         if guardian_name is not None:
             guardian_doc.guardian_name = guardian_name or ""
@@ -457,7 +456,7 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
                 "guardian_id": guardian_doc.guardian_id,
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
-                "email": guardian_doc.email
+                "email": guardian_doc.email if guardian_doc.email is not None else (email or "")
             },
             "message": "Guardian updated successfully"
         }
