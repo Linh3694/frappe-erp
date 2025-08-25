@@ -246,21 +246,21 @@ def create_family():
         if len(students) == 0 or len(guardians) == 0:
             frappe.throw(_("At least one student and one guardian are required"))
         
-        # Generate family code
-        last_family = frappe.db.sql("""
-            SELECT family_code FROM `tabCRM Family` 
-            WHERE family_code LIKE 'FAM-%' 
-            ORDER BY CAST(SUBSTRING(family_code, 5) AS UNSIGNED) DESC 
-            LIMIT 1
-        """, as_dict=True)
+        # Create family first to get auto-generated FAM-xxx code
+        family_doc = frappe.get_doc({
+            "doctype": "CRM Family",
+            "relationships": []
+        })
         
-        if last_family:
-            last_number = int(last_family[0].family_code.split('-')[1])
-            new_number = last_number + 1
-        else:
-            new_number = 1
-            
-        family_code = f"FAM-{new_number}"
+        # Insert to get auto-generated name (FAM-1, FAM-2, etc.)
+        family_doc.flags.ignore_validate = True
+        family_doc.insert(ignore_permissions=True)
+        
+        # Use the auto-generated name as family_code
+        family_code = family_doc.name  # This will be FAM-1, FAM-2, etc.
+        
+        # Now update the family_code field to match the name
+        family_doc.family_code = family_code
         
         # Verify all students exist
         for student_id in students:
@@ -272,16 +272,18 @@ def create_family():
             if not frappe.db.exists("CRM Guardian", guardian_id):
                 frappe.throw(_(f"Guardian '{guardian_id}' not found"))
         
-        # Create new family with relationships
-        family_doc = frappe.get_doc({
-            "doctype": "CRM Family",
-            "family_code": family_code,
-            "relationships": relationships
-        })
+        # Add relationships to the existing family_doc
+        for rel in relationships:
+            family_doc.append("relationships", {
+                "student": rel.get("student"),
+                "guardian": rel.get("guardian"),
+                "relationship_type": rel.get("relationship_type", ""),
+                "key_person": int(rel.get("key_person", False)),
+                "access": int(rel.get("access", True))
+            })
         
-        # Bypass validation temporarily due to doctype cache issue
-        family_doc.flags.ignore_validate = True
-        family_doc.insert(ignore_permissions=True)
+        # Save the family with relationships
+        family_doc.save(ignore_permissions=True)
         
         # Update students with family_code and family_relationships
         for student_id in students:

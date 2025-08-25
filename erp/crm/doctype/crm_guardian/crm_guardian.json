@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
+  "guardian_id",
   "guardian_name",
   "phone_number",
   "email",
@@ -30,7 +31,14 @@
    "fieldtype": "Section Break",
    "label": "Basic Information"
   },
-
+  {
+   "fieldname": "guardian_id",
+   "fieldtype": "Data",
+   "label": "Guardian ID",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
   {
    "fieldname": "guardian_name",
    "fieldtype": "Data",
