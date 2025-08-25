@@ -253,10 +253,13 @@ def create_guardian():
         # Create new guardian with validation bypass
         guardian_doc = frappe.get_doc({
             "doctype": "CRM Guardian",
+            "guardian_id": guardian_id,
             "guardian_name": guardian_name,
             "phone_number": phone_number or "",
             "email": email or ""
         })
+        
+        frappe.logger().info(f"Creating guardian with ID: {guardian_id}, Name: {guardian_name}")
         
         frappe.logger().info(f"Guardian doc created: {guardian_doc.as_dict()}")
         
@@ -273,6 +276,7 @@ def create_guardian():
             "success": True,
             "data": {
                 "name": guardian_doc.name,
+                "guardian_id": guardian_doc.guardian_id,
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
                 "email": guardian_doc.email
