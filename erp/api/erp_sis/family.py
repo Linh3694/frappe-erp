@@ -5,6 +5,143 @@ import json
 
 
 @frappe.whitelist(allow_guest=False)
+def get_family_details(family_id=None, family_code=None):
+    """Get a family with full relationships (students and guardians)."""
+    try:
+        if not family_id and not family_code:
+            return {"success": False, "data": {}, "message": "Family ID or code is required"}
+
+        if family_code and not family_id:
+            # Resolve by code
+            res = frappe.get_all("CRM Family", filters={"family_code": family_code}, fields=["name"], limit=1)
+            if res:
+                family_id = res[0].name
+
+        family = frappe.get_doc("CRM Family", family_id)
+
+        rels = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"parent": family.name},
+            fields=["student", "guardian", "relationship_type", "key_person", "access"],
+        )
+
+        # Fetch student/guardian display
+        student_names = {}
+        guardian_names = {}
+        if rels:
+            student_ids = list({r["student"] for r in rels if r.get("student")})
+            guardian_ids = list({r["guardian"] for r in rels if r.get("guardian")})
+            if student_ids:
+                for s in frappe.get_all("CRM Student", filters={"name": ["in", student_ids]}, fields=["name", "student_name", "student_code", "family_code"]):
+                    student_names[s.name] = s
+            if guardian_ids:
+                for g in frappe.get_all("CRM Guardian", filters={"name": ["in", guardian_ids]}, fields=["name", "guardian_name", "guardian_id", "family_code", "phone_number", "email"]):
+                    guardian_names[g.name] = g
+
+        return {
+            "success": True,
+            "data": {
+                "name": family.name,
+                "family_code": getattr(family, "family_code", None),
+                "relationships": rels,
+                "students": student_names,
+                "guardians": guardian_names,
+            },
+            "message": "Family details fetched successfully",
+        }
+    except Exception as e:
+        frappe.log_error(f"Error fetching family details: {str(e)}")
+        return {"success": False, "data": {}, "message": f"Error fetching family details: {str(e)}"}
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def update_family_members(family_id=None, students=None, guardians=None, relationships=None):
+    """Replace students/guardians and relationships of an existing family."""
+    try:
+        if not family_id:
+            family_id = frappe.local.form_dict.get("family_id")
+        # Parse JSON strings if sent as form
+        def parse_json(value):
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except Exception:
+                    return []
+            return value or []
+
+        if frappe.request.data and (students is None or guardians is None or relationships is None):
+            try:
+                body = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                students = body.get("students", students)
+                guardians = body.get("guardians", guardians)
+                relationships = body.get("relationships", relationships)
+            except Exception:
+                pass
+
+        students = parse_json(students)
+        guardians = parse_json(guardians)
+        relationships = parse_json(relationships)
+
+        if not family_id:
+            return {"success": False, "data": {}, "message": "Family ID is required"}
+
+        family_doc = frappe.get_doc("CRM Family", family_id)
+        # Reset relationships
+        family_doc.set("relationships", [])
+        for rel in relationships:
+            family_doc.append("relationships", {
+                "student": rel.get("student"),
+                "guardian": rel.get("guardian"),
+                "relationship_type": rel.get("relationship_type", ""),
+                "key_person": int(rel.get("key_person", False)),
+                "access": int(rel.get("access", True)),
+            })
+        family_doc.flags.ignore_validate = True
+        family_doc.save(ignore_permissions=True)
+
+        # Update students and guardians docs similar to create_family
+        family_code = getattr(family_doc, 'family_code', family_doc.name)
+
+        for student_id in students:
+            if frappe.db.exists("CRM Student", student_id):
+                student_doc = frappe.get_doc("CRM Student", student_id)
+                student_doc.family_code = family_code
+                student_doc.set("family_relationships", [])
+                for rel in relationships:
+                    if rel.get("student") == student_id:
+                        student_doc.append("family_relationships", {
+                            "student": student_id,
+                            "guardian": rel.get("guardian"),
+                            "relationship_type": rel.get("relationship_type", ""),
+                            "key_person": int(rel.get("key_person", False)),
+                            "access": int(rel.get("access", False)),
+                        })
+                student_doc.flags.ignore_validate = True
+                student_doc.save(ignore_permissions=True)
+
+        for guardian_id in guardians:
+            if frappe.db.exists("CRM Guardian", guardian_id):
+                guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
+                guardian_doc.family_code = family_code
+                guardian_doc.set("student_relationships", [])
+                for rel in relationships:
+                    if rel.get("guardian") == guardian_id:
+                        guardian_doc.append("student_relationships", {
+                            "student": rel.get("student"),
+                            "guardian": guardian_id,
+                            "relationship_type": rel.get("relationship_type", ""),
+                            "key_person": int(rel.get("key_person", False)),
+                            "access": int(rel.get("access", False)),
+                        })
+                guardian_doc.flags.ignore_validate = True
+                guardian_doc.save(ignore_permissions=True)
+
+        frappe.db.commit()
+
+        return {"success": True, "data": {"family_id": family_doc.name}, "message": "Family members updated successfully"}
+    except Exception as e:
+        frappe.log_error(f"Error updating family members: {str(e)}")
+        return {"success": False, "data": {}, "message": f"Error updating family members: {str(e)}"}
 def get_all_families(page=1, limit=20):
     """Get all families with basic information and pagination - NEW STRUCTURE"""
     try:
@@ -188,11 +325,7 @@ def get_family_data():
             "success": True,
             "data": {
                 "name": family.name,
-                "student_id": family.student_id,
-                "guardian_id": family.guardian_id,
-                "relationship": family.relationship,
-                "key_person": family.key_person,
-                "access": family.access,
+                "family_code": getattr(family, "family_code", None),
                 "creation": family.creation.isoformat() if family.creation else None,
                 "modified": family.modified.isoformat() if family.modified else None
             },
