@@ -296,13 +296,16 @@ def create_family():
         
         # Insert to get auto-generated name (FAM-1, FAM-2, etc.)
         family_doc.flags.ignore_validate = True
-        family_doc.insert(ignore_permissions=True)
+        # Bypass mandatory since family_code is required but will be set to name after insert
+        family_doc.insert(ignore_permissions=True, ignore_mandatory=True)
         
         # Use the auto-generated name as family_code
         family_code = family_doc.name  # This will be FAM-1, FAM-2, etc.
         
-        # Now update the family_code field to match the name
+        # Now update the family_code field to match the name (required field)
         family_doc.family_code = family_code
+        family_doc.flags.ignore_validate = True
+        family_doc.save(ignore_permissions=True)
         
         # Verify all students exist
         for student_id in students:
