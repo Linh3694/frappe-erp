@@ -433,6 +433,14 @@ def delete_student(student_id=None):
         # Accept student_id from form_dict if not provided positionally
         if not student_id:
             student_id = frappe.local.form_dict.get("student_id")
+        # Fallback: parse JSON body
+        if not student_id and frappe.request.data:
+            try:
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body)
+                student_id = data.get('student_id') or data.get('id') or data.get('name')
+            except Exception:
+                pass
         if not student_id:
             return {
                 "success": False,
