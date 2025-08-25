@@ -493,7 +493,8 @@ def delete_guardian():
     """Delete a guardian"""
     try:
         # Get guardian ID from form_dict
-        guardian_id = (frappe.local.form_dict or {}).get("guardian_id")
+        form = frappe.local.form_dict or {}
+        guardian_id = form.get("guardian_id") or form.get("id") or form.get("name")
         if not guardian_id and hasattr(frappe.request, 'args') and frappe.request.args:
             guardian_id = frappe.request.args.get('guardian_id')
         if not guardian_id and frappe.request.data:
