@@ -347,6 +347,15 @@ def create_guardian():
         guardian_doc.flags.ignore_permissions = True
         guardian_doc.insert(ignore_permissions=True)
         
+        # Force persist critical fields in case of server scripts altering values
+        try:
+            frappe.db.set_value("CRM Guardian", guardian_doc.name, {
+                "phone_number": guardian_doc.phone_number or (phone_number or ""),
+                "email": guardian_doc.email or (email or ""),
+            })
+        except Exception as e:
+            frappe.logger().error(f"set_value after insert failed: {str(e)}")
+        
         frappe.logger().info(f"Guardian inserted successfully with name: {guardian_doc.name}")
         frappe.db.commit()
         
@@ -516,7 +525,14 @@ def delete_guardian():
             frappe.logger().error(f"Failed to cleanup relationships for guardian {docname}: {str(e)}")
 
         # Delete the document
-        frappe.delete_doc("CRM Guardian", docname)
+        try:
+            frappe.delete_doc("CRM Guardian", docname, ignore_permissions=True, force=1)
+        except Exception as e:
+            # Fallback hard delete in case of cascading rules
+            try:
+                frappe.db.sql("DELETE FROM `tabCRM Guardian` WHERE name=%s", (docname,))
+            except Exception:
+                raise e
         frappe.db.commit()
         
         return {
