@@ -234,13 +234,27 @@ def create_family():
             data = frappe.local.form_dict
             frappe.logger().info(f"No request data, using form_dict for create_family: {data}")
         
-        # Extract values from data
-        students = data.get("students", [])  # List of student IDs
-        guardians = data.get("guardians", [])  # List of guardian IDs
-        relationships = data.get("relationships", [])  # List of relationship objects
+                # Extract values from data - handle both JSON and form data
+        students = data.get("students", [])
+        guardians = data.get("guardians", [])
+        relationships = data.get("relationships", [])
+        
+        # Parse JSON strings if they come from form data
+        if isinstance(students, str):
+            students = json.loads(students)
+        if isinstance(guardians, str):
+            guardians = json.loads(guardians)
+        if isinstance(relationships, str):
+            relationships = json.loads(relationships)
+        
+        frappe.logger().info(f"Received data: {data}")
+        frappe.logger().info(f"Students: {students}")
+        frappe.logger().info(f"Guardians: {guardians}")
+        frappe.logger().info(f"Relationships: {relationships}")
         
         # Input validation
         if not students or not guardians or not relationships:
+            frappe.logger().error(f"Validation failed - students: {len(students) if students else 0}, guardians: {len(guardians) if guardians else 0}, relationships: {len(relationships) if relationships else 0}")
             frappe.throw(_("Students, Guardians, and Relationships are required"))
         
         if len(students) == 0 or len(guardians) == 0:
