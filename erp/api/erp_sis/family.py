@@ -40,7 +40,11 @@ def get_family_details(family_id=None, family_code=None):
             student_ids = list({r["student"] for r in rels if r.get("student")})
             guardian_ids = list({r["guardian"] for r in rels if r.get("guardian")})
             if student_ids:
-                for s in frappe.get_all("CRM Student", filters={"name": ["in", student_ids]}, fields=["name", "student_name", "student_code", "family_code"]):
+                for s in frappe.get_all(
+                    "CRM Student",
+                    filters={"name": ["in", student_ids]},
+                    fields=["name", "student_name", "student_code", "dob", "gender", "family_code"],
+                ):
                     student_names[s.name] = s
             if guardian_ids:
                 for g in frappe.get_all("CRM Guardian", filters={"name": ["in", guardian_ids]}, fields=["name", "guardian_name", "guardian_id", "family_code", "phone_number", "email"]):
