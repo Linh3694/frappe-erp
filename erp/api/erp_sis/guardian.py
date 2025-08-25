@@ -108,7 +108,7 @@ def get_all_guardians(page=1, limit=20):
                 "guardian_id",
                 "guardian_name",
                 "phone_number",
-                "email",
+                "IFNULL(email, '') as email",
                 "family_code",
                 "creation",
                 "modified"
