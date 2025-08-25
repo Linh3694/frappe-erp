@@ -492,11 +492,19 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
 def delete_guardian():
     """Delete a guardian"""
     try:
-        # Get guardian ID from form_dict
+        # Get guardian ID from multiple possible sources
         form = frappe.local.form_dict or {}
-        guardian_id = form.get("guardian_id") or form.get("id") or form.get("name")
+        guardian_id = form.get("guardian_id") or form.get("id") or form.get("name") or form.get("docname")
+        # Fallback aliases
+        if not guardian_id and hasattr(frappe, 'form_dict') and frappe.form_dict:
+            guardian_id = frappe.form_dict.get('guardian_id') or frappe.form_dict.get('id') or frappe.form_dict.get('name')
+        if not guardian_id and hasattr(frappe.request, 'form') and frappe.request.form:
+            try:
+                guardian_id = frappe.request.form.get('guardian_id') or frappe.request.form.get('id') or frappe.request.form.get('name')
+            except Exception:
+                pass
         if not guardian_id and hasattr(frappe.request, 'args') and frappe.request.args:
-            guardian_id = frappe.request.args.get('guardian_id')
+            guardian_id = frappe.request.args.get('guardian_id') or frappe.request.args.get('id') or frappe.request.args.get('name')
         if not guardian_id and frappe.request.data:
             try:
                 body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
@@ -504,6 +512,7 @@ def delete_guardian():
                 guardian_id = data.get('guardian_id') or data.get('id') or data.get('name')
             except Exception:
                 pass
+        guardian_id = (guardian_id or '').strip()
         
         frappe.logger().info(f"delete_guardian called - guardian_id: {guardian_id}")
         
