@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 import json
+from erp.utils.campus_utils import get_current_campus_from_context
 
 
 @frappe.whitelist(allow_guest=False)
@@ -114,11 +115,48 @@ def create_class():
             if not data.get(field):
                 return {"success": False, "data": {}, "message": f"{field} is required"}
 
+        # Resolve campus id robustly in case FE sends display text or alias
+        campus_input = data.get("campus_id")
+        campus_id = None
+        if campus_input and frappe.db.exists("SIS Campus", campus_input):
+            campus_id = campus_input
+        else:
+            # Try resolve by titles
+            try:
+                hit = frappe.get_all(
+                    "SIS Campus",
+                    filters={"title_vn": campus_input},
+                    fields=["name"],
+                    limit=1,
+                ) or frappe.get_all(
+                    "SIS Campus",
+                    filters={"title_en": campus_input},
+                    fields=["name"],
+                    limit=1,
+                )
+                if hit:
+                    campus_id = hit[0].name
+            except Exception:
+                pass
+        # Fallback to current campus from context, then first campus
+        if not campus_id:
+            try:
+                ctx = get_current_campus_from_context()
+                if ctx and frappe.db.exists("SIS Campus", ctx):
+                    campus_id = ctx
+            except Exception:
+                pass
+        if not campus_id:
+            first_campus = frappe.get_all("SIS Campus", fields=["name"], limit=1)
+            campus_id = first_campus[0].name if first_campus else None
+        if not campus_id:
+            return {"success": False, "data": {}, "message": "Campus not found"}
+
         payload = {
             "doctype": "SIS Class",
             "title": data.get("title"),
             "short_title": data.get("short_title"),
-            "campus_id": data.get("campus_id"),
+            "campus_id": campus_id,
             "school_year_id": data.get("school_year_id"),
             "education_grade": data.get("education_grade"),
             "academic_program": data.get("academic_program"),
