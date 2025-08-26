@@ -72,27 +72,34 @@ def check_student_code_availability():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_students(page=1, limit=20):
+def get_all_students(page=1, limit=20, include_all_campuses=0):
     """Get all students with basic information and pagination"""
     try:
         # Get parameters with defaults
         page = int(page)
         limit = int(limit)
-        
-        frappe.logger().info(f"get_all_students called with page: {page}, limit: {limit}")
-        
-        # Get current user's campus information from roles
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
-        frappe.logger().info(f"Using campus_id: {campus_id}")
-        
-        # Apply campus filtering for data isolation
-        filters = {"campus_id": campus_id}
+        include_all_campuses = int(include_all_campuses)
+
+        frappe.logger().info(f"get_all_students called with page: {page}, limit: {limit}, include_all_campuses: {include_all_campuses}")
+
+        if include_all_campuses:
+            # Get filter for all user's campuses
+            from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
+            filters = get_campus_filter_for_all_user_campuses()
+            frappe.logger().info(f"Using all user campuses filter: {filters}")
+        else:
+            # Get current user's campus information from roles
+            campus_id = get_current_campus_from_context()
+
+            if not campus_id:
+                # Fallback to default if no campus found
+                campus_id = "campus-1"
+                frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+
+            frappe.logger().info(f"Using campus_id: {campus_id}")
+
+            # Apply campus filtering for data isolation
+            filters = {"campus_id": campus_id}
         
         # Calculate offset for pagination
         offset = (page - 1) * limit

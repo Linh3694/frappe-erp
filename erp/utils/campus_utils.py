@@ -20,8 +20,20 @@ def get_campus_id_from_user_roles(user_email=None):
         if not campus_roles:
             return None
         
+        # Check if user has multiple campus roles
+        if len(campus_roles) > 1:
+            frappe.logger().info(f"User {user_email} has multiple campus roles: {campus_roles}")
+
+            # Try to get user's current selected campus first
+            current_campus = get_current_user_campus()
+            if current_campus:
+                frappe.logger().info(f"User {user_email} has selected campus: {current_campus}")
+                return current_campus
+
+            # If no current campus selected, use first campus role
+            frappe.logger().info(f"Using first campus role for user {user_email} with multiple roles")
+
         # Extract campus title from role (remove "Campus " prefix)
-        # For now, take the first campus role
         campus_role = campus_roles[0]
         campus_title = campus_role.replace("Campus ", "")
         
@@ -82,29 +94,54 @@ def get_all_campus_ids_from_user_roles(user_email=None):
     try:
         if not user_email:
             user_email = frappe.session.user
-        
+
         # Get user roles
         user_roles = frappe.get_roles(user_email)
-        
+
         # Find all campus roles
         campus_roles = [role for role in user_roles if role.startswith("Campus ")]
-        
+
         campus_ids = []
         for i, campus_role in enumerate(campus_roles):
             campus_title = campus_role.replace("Campus ", "")
             campus_id = find_campus_id_by_title(campus_title)
-            
+
             if campus_id:
                 campus_ids.append(campus_id)
             else:
                 # Use default format
                 campus_ids.append(f"campus-{i + 1}")
-        
+
+        frappe.logger().info(f"User {user_email} has access to campuses: {campus_ids}")
         return campus_ids
-        
+
     except Exception as e:
         frappe.logger().error(f"Error getting all campus IDs from user roles: {str(e)}")
         return []
+
+
+def get_campus_filter_for_all_user_campuses(user_email=None):
+    """
+    Get campus filter that includes all campuses user has access to
+    Useful for queries that should show data from all user's campuses
+    """
+    try:
+        if not user_email:
+            user_email = frappe.session.user
+
+        campus_ids = get_all_campus_ids_from_user_roles(user_email)
+
+        if not campus_ids:
+            return {"campus_id": ""}  # Return impossible condition
+
+        if len(campus_ids) == 1:
+            return {"campus_id": campus_ids[0]}
+        else:
+            return {"campus_id": ["in", campus_ids]}
+
+    except Exception as e:
+        frappe.logger().error(f"Error getting campus filter for all user campuses: {str(e)}")
+        return {"campus_id": ""}
 
 
 def validate_user_campus_access(user_email, campus_id):
