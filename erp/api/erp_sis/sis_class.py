@@ -256,7 +256,7 @@ def get_class(class_id: str = None):
                             "first_name",
                             "last_name",
                             "user_image",
-                            "avatar_url"
+
                         ],
                         filters={"name": teacher["user_id"]},
                         limit=1
@@ -325,7 +325,7 @@ def get_class(class_id: str = None):
                             "first_name",
                             "last_name",
                             "user_image",
-                            "avatar_url"
+
                         ],
                         filters={"name": teacher["user_id"]},
                         limit=1
