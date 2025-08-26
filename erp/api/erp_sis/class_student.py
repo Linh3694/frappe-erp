@@ -71,22 +71,25 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         }
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["POST"])
 def assign_student(class_id=None, student_id=None, school_year_id=None, class_type="regular"):
     """Assign a student to a class"""
     try:
         # Get parameters from form_dict if not provided
         form = frappe.local.form_dict or {}
-        if not class_id:
-            class_id = form.get('class_id')
-        if not student_id:
-            student_id = form.get('student_id')
-        if not school_year_id:
-            school_year_id = form.get('school_year_id')
-        if not class_type:
-            class_type = form.get('class_type', 'regular')
-            
-        frappe.logger().info(f"assign_student called with: class_id={class_id}, student_id={student_id}, school_year_id={school_year_id}, class_type={class_type}")
+
+        # Debug logging
+        frappe.logger().info(f"Initial function args - class_id: {class_id}, student_id: {student_id}, school_year_id: {school_year_id}")
+        frappe.logger().info(f"form_dict content: {form}")
+        frappe.logger().info(f"Request method: {frappe.local.request.method if hasattr(frappe.local, 'request') else 'Unknown'}")
+
+        # Try to get parameters from form_dict first, then from function args
+        class_id = form.get('class_id') or class_id
+        student_id = form.get('student_id') or student_id
+        school_year_id = form.get('school_year_id') or school_year_id
+        class_type = form.get('class_type') or class_type or 'regular'
+
+        frappe.logger().info(f"Final parameters - class_id={class_id}, student_id={student_id}, school_year_id={school_year_id}, class_type={class_type}")
         
         # Validate required parameters
         if not class_id or not student_id or not school_year_id:
