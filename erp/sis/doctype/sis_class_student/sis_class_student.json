@@ -62,9 +62,10 @@
   },
   {
    "fieldname": "class_type",
-   "fieldtype": "Link",
+   "fieldtype": "Select",
    "label": "Class Type",
-   "options": "SIS Class"
+   "options": "regular\\nmixed",
+   "default": "regular"
   }
  ],
  "index_web_pages_for_search": 1,
