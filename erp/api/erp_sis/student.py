@@ -6,14 +6,42 @@ import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def check_student_code_availability():
     """Check if student code is available (not already taken)"""
     try:
-        # Extract student_code from form_dict or query params
-        student_code = frappe.form_dict.get("student_code") or frappe.local.form_dict.get("student_code")
+        # Extract student_code from multiple sources
+        student_code = None
 
-        if not student_code:
+        # Try from form_dict (POST with form data)
+        if frappe.form_dict and frappe.form_dict.get("student_code"):
+            student_code = frappe.form_dict.get("student_code")
+            frappe.logger().info(f"Found student_code in form_dict: {student_code}")
+
+        # Try from local.form_dict
+        if not student_code and frappe.local.form_dict and frappe.local.form_dict.get("student_code"):
+            student_code = frappe.local.form_dict.get("student_code")
+            frappe.logger().info(f"Found student_code in local.form_dict: {student_code}")
+
+        # Try from URL query parameters (GET request)
+        if not student_code and hasattr(frappe.request, 'args') and frappe.request.args:
+            student_code = frappe.request.args.get("student_code")
+            frappe.logger().info(f"Found student_code in URL args: {student_code}")
+
+        # Try from request data if it's JSON
+        if not student_code and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                student_code = json_data.get("student_code")
+                frappe.logger().info(f"Found student_code in JSON data: {student_code}")
+            except Exception as e:
+                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
+
+        frappe.logger().info(f"Final student_code value: '{student_code}'")
+
+        if not student_code or student_code.strip() == "":
+            frappe.logger().info("No valid student_code found")
             return {
                 "success": False,
                 "message": "Thiếu tham số mã học sinh",
