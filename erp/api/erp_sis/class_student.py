@@ -21,7 +21,7 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             filters['class_id'] = class_id
             
         # Get campus filter from context
-        from erp.sis.utils.campus_permissions import get_current_campus_from_context
+        from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
         if campus_id:
             filters['campus_id'] = campus_id
@@ -96,7 +96,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
             }
         
         # Get campus from context
-        from erp.sis.utils.campus_permissions import get_current_campus_from_context
+        from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
         if not campus_id:
             campus_id = "campus-1"  # Default fallback
