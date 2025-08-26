@@ -822,3 +822,59 @@ def search_students(search_term=None, page=1, limit=20):
             },
             "message": f"Error searching students: {str(e)}"
         }
+
+
+@frappe.whitelist(allow_guest=False)
+def debug_campus_info():
+    """Debug API to check campus information for current user"""
+    try:
+        user = frappe.session.user
+        user_roles = frappe.get_roles(user)
+
+        # Get campus roles
+        campus_roles = [role for role in user_roles if role.startswith("Campus ")]
+
+        # Get current campus
+        from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles, get_all_campus_ids_from_user_roles
+        current_campus = get_current_campus_from_context()
+        role_based_campus = get_campus_id_from_user_roles(user)
+        all_campus_ids = get_all_campus_ids_from_user_roles(user)
+
+        # Get all available campuses
+        all_campuses = frappe.db.get_all("SIS Campus", fields=["name", "title_vn", "title_en"])
+
+        # Test permission query
+        from erp.sis.utils.permission_query import get_campus_permission_query
+        permission_query = get_campus_permission_query("SIS Class", user)
+
+        # Test actual query with current campus
+        test_filters = {"campus_id": role_based_campus} if role_based_campus else {}
+        test_students = frappe.get_all(
+            "CRM Student",
+            filters=test_filters,
+            fields=["name", "student_name", "student_code", "campus_id"],
+            limit=5
+        )
+
+        return {
+            "success": True,
+            "data": {
+                "user": user,
+                "user_roles": user_roles,
+                "campus_roles": campus_roles,
+                "current_campus": current_campus,
+                "role_based_campus": role_based_campus,
+                "all_user_campus_ids": all_campus_ids,
+                "all_available_campuses": all_campuses,
+                "permission_query": permission_query,
+                "test_students_count": len(test_students),
+                "test_students_sample": test_students[:3]
+            }
+        }
+
+    except Exception as e:
+        frappe.logger().error(f"Error in debug_campus_info: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}"
+        }

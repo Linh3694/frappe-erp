@@ -41,7 +41,18 @@ def get_campus_permission_query(doctype, user):
     """Generic permission query function for SIS doctypes with campus_id"""
     if user == "Administrator":
         return ""
-    
+
+    # Check if doctype has campus_id field
+    try:
+        meta = frappe.get_meta(doctype)
+        has_campus_field = any(field.fieldname == "campus_id" for field in meta.fields)
+
+        if not has_campus_field:
+            return ""  # No campus filter for doctypes without campus_id
+    except Exception as e:
+        frappe.logger().error(f"Error checking doctype meta for {doctype}: {str(e)}")
+        return ""
+
     campus_filter = get_campus_filter(doctype, user)
     if campus_filter and "campus_id" in campus_filter:
         if isinstance(campus_filter["campus_id"], list) and campus_filter["campus_id"][0] == "in":
@@ -53,7 +64,7 @@ def get_campus_permission_query(doctype, user):
                 return "1=0"  # No access
         else:
             return f"`tab{doctype}`.`campus_id` = '{campus_filter['campus_id']}'"
-    
+
     return ""
 
 

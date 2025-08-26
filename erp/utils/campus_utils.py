@@ -61,37 +61,54 @@ def get_campus_id_from_user_roles(user_email=None):
 def find_campus_id_by_title(campus_title):
     """
     Find campus_id by matching title_vn or title_en
+    Handles both exact match and partial match
     """
     try:
         frappe.logger().info(f"Searching for SIS Campus with title: '{campus_title}'")
 
-        # Try to find by title_vn first
-        campus_id = frappe.db.get_value(
-            "SIS Campus",
-            {"title_vn": campus_title},
-            "name"
-        )
-
-        if campus_id:
-            frappe.logger().info(f"Found SIS Campus by title_vn: '{campus_id}'")
-            return campus_id
-
-        # Try to find by title_en
-        campus_id = frappe.db.get_value(
-            "SIS Campus",
-            {"title_en": campus_title},
-            "name"
-        )
-
-        if campus_id:
-            frappe.logger().info(f"Found SIS Campus by title_en: '{campus_id}'")
-            return campus_id
-
-        # Log all available campuses for debugging
+        # Get all campuses for debugging
         all_campuses = frappe.db.get_all("SIS Campus", fields=["name", "title_vn", "title_en"])
         frappe.logger().info(f"All available SIS Campuses: {all_campuses}")
 
-        frappe.logger().warning(f"No SIS Campus found with title: '{campus_title}'")
+        # Extract campus name from role (remove "Campus " prefix)
+        campus_name = campus_title.replace("Campus ", "").strip()
+        frappe.logger().info(f"Extracted campus name: '{campus_name}'")
+
+        # Try to find by title_vn first (exact match)
+        campus_id = frappe.db.get_value(
+            "SIS Campus",
+            {"title_vn": campus_name},
+            "name"
+        )
+
+        if campus_id:
+            frappe.logger().info(f"Found SIS Campus by title_vn exact match: '{campus_id}'")
+            return campus_id
+
+        # Try to find by title_en (exact match)
+        campus_id = frappe.db.get_value(
+            "SIS Campus",
+            {"title_en": campus_name},
+            "name"
+        )
+
+        if campus_id:
+            frappe.logger().info(f"Found SIS Campus by title_en exact match: '{campus_id}'")
+            return campus_id
+
+        # Try partial match for title_vn (contains campus_name)
+        for campus in all_campuses:
+            if campus_name.lower() in campus.get("title_vn", "").lower():
+                frappe.logger().info(f"Found SIS Campus by title_vn partial match: '{campus['name']}'")
+                return campus['name']
+
+        # Try partial match for title_en (contains campus_name)
+        for campus in all_campuses:
+            if campus_name.lower() in campus.get("title_en", "").lower():
+                frappe.logger().info(f"Found SIS Campus by title_en partial match: '{campus['name']}'")
+                return campus['name']
+
+        frappe.logger().warning(f"No SIS Campus found with title: '{campus_title}' (campus_name: '{campus_name}')")
         return None
 
     except Exception as e:
