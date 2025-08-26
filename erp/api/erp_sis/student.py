@@ -7,6 +7,33 @@ from erp.utils.campus_utils import get_current_campus_from_context, get_campus_i
 
 
 @frappe.whitelist(allow_guest=False)
+def check_student_code_availability(student_code):
+    """Check if student code is available (not already taken)"""
+    try:
+        # Check if student with this code already exists
+        existing = frappe.db.exists("CRM Student", {"student_code": student_code})
+        if existing:
+            return {
+                "success": False,
+                "message": "Mã học sinh đã tồn tại trong hệ thống",
+                "available": False
+            }
+        else:
+            return {
+                "success": True,
+                "message": "Mã học sinh có thể sử dụng",
+                "available": True
+            }
+    except Exception as e:
+        frappe.log_error(f"Error checking student code availability: {str(e)}")
+        return {
+            "success": False,
+            "message": "Lỗi hệ thống khi kiểm tra mã học sinh",
+            "available": False
+        }
+
+
+@frappe.whitelist(allow_guest=False)
 def get_all_students(page=1, limit=20):
     """Get all students with basic information and pagination"""
     try:
@@ -284,20 +311,11 @@ def create_student():
             }
         )
         
-        if existing_name:
-            frappe.throw(_(f"Student with name '{student_name}' already exists"))
-        
-        # Check if student code already exists for this campus
-        existing_code = frappe.db.exists(
-            "CRM Student",
-            {
-                "student_code": student_code,
-                "campus_id": campus_id
-            }
-        )
-        
+        # Check if student code already exists (system-wide unique)
+        existing_code = frappe.db.exists("CRM Student", {"student_code": student_code})
+
         if existing_code:
-            frappe.throw(_(f"Student with code '{student_code}' already exists"))
+            frappe.throw(_(f"Mã học sinh '{student_code}' đã tồn tại trong hệ thống"))
         
         # Create new student with validation bypass
         student_doc = frappe.get_doc({
@@ -329,8 +347,16 @@ def create_student():
         }
         
     except Exception as e:
-        frappe.log_error(f"Error creating student: {str(e)}")
-        frappe.throw(_(f"Error creating student: {str(e)}"))
+        error_msg = str(e)
+        # Handle specific error types
+        if "student_code" in error_msg.lower() and "unique" in error_msg.lower():
+            frappe.throw(_("Mã học sinh đã tồn tại trong hệ thống"))
+        elif "student_name" in error_msg.lower() and "unique" in error_msg.lower():
+            frappe.throw(_("Tên học sinh đã tồn tại trong hệ thống"))
+        else:
+            # Log error with short message for debugging
+            frappe.log_error(f"Student creation error: {error_msg[:200]}...")
+            frappe.throw(_("Lỗi hệ thống khi tạo học sinh. Vui lòng thử lại."))
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])

@@ -37,7 +37,7 @@
    "fieldtype": "Data",
    "label": "Student Name",
    "reqd": 1,
-   "unique": 1,
+   "unique": 0,
    "in_list_view": 1
   },
   {
