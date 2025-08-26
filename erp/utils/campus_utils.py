@@ -207,6 +207,37 @@ def get_current_campus_from_context():
             else:
                 frappe.logger().warning(f"User {user} does not have access to campus {campus_id}")
 
+        # Try to get from filters parameter (for GET requests with filters)
+        filters = frappe.local.form_dict.get("filters")
+        if filters:
+            try:
+                if isinstance(filters, str):
+                    import json
+                    filters = json.loads(filters)
+                if isinstance(filters, dict) and "campus_id" in filters:
+                    campus_id_from_filters = filters["campus_id"]
+                    frappe.logger().info(f"Campus_id from filters: '{campus_id_from_filters}'")
+                    if validate_user_campus_access(user, campus_id_from_filters):
+                        frappe.logger().info(f"User {user} has access to campus from filters {campus_id_from_filters}, returning it")
+                        return campus_id_from_filters
+            except Exception as e:
+                frappe.logger().error(f"Error parsing filters for campus_id: {str(e)}")
+
+        # Try to get from request body (for POST/PUT requests)
+        if frappe.request and frappe.request.data:
+            try:
+                import json
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body or '{}')
+                campus_id_from_body = data.get('campus_id')
+                if campus_id_from_body:
+                    frappe.logger().info(f"Campus_id from request body: '{campus_id_from_body}'")
+                    if validate_user_campus_access(user, campus_id_from_body):
+                        frappe.logger().info(f"User {user} has access to campus from body {campus_id_from_body}, returning it")
+                        return campus_id_from_body
+            except Exception as e:
+                frappe.logger().error(f"Error parsing request body for campus_id: {str(e)}")
+
         # Fall back to user's default campus from roles
         frappe.logger().info(f"No campus_id in context, falling back to user roles for user: {user}")
         role_based_campus = get_campus_id_from_user_roles(user)
