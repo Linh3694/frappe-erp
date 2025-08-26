@@ -36,18 +36,22 @@ def get_campus_id_from_user_roles(user_email=None):
         # Extract campus title from role (remove "Campus " prefix)
         campus_role = campus_roles[0]
         campus_title = campus_role.replace("Campus ", "")
-        
+
+        frappe.logger().info(f"Processing campus_role: '{campus_role}' -> campus_title: '{campus_title}'")
+
         # Try to find matching SIS Campus by title
         campus_id = find_campus_id_by_title(campus_title)
-        
+
         if campus_id:
+            frappe.logger().info(f"Found campus_id: '{campus_id}' for title: '{campus_title}'")
             return campus_id
-        
+
         # If not found, create default campus_id from role index
         # This matches frontend logic: campus-1, campus-2, etc.
         campus_index = campus_roles.index(campus_role) + 1
         default_campus_id = f"campus-{campus_index}"
-        
+        frappe.logger().warning(f"SIS Campus not found for title '{campus_title}', using default: '{default_campus_id}'")
+
         return default_campus_id
         
     except Exception as e:
@@ -59,29 +63,37 @@ def find_campus_id_by_title(campus_title):
     Find campus_id by matching title_vn or title_en
     """
     try:
+        frappe.logger().info(f"Searching for SIS Campus with title: '{campus_title}'")
+
         # Try to find by title_vn first
         campus_id = frappe.db.get_value(
-            "SIS Campus", 
-            {"title_vn": campus_title}, 
+            "SIS Campus",
+            {"title_vn": campus_title},
             "name"
         )
-        
+
         if campus_id:
+            frappe.logger().info(f"Found SIS Campus by title_vn: '{campus_id}'")
             return campus_id
-        
+
         # Try to find by title_en
         campus_id = frappe.db.get_value(
-            "SIS Campus", 
-            {"title_en": campus_title}, 
+            "SIS Campus",
+            {"title_en": campus_title},
             "name"
         )
-        
+
         if campus_id:
+            frappe.logger().info(f"Found SIS Campus by title_en: '{campus_id}'")
             return campus_id
-        
-        frappe.logger().info(f"No SIS Campus found with title: {campus_title}")
+
+        # Log all available campuses for debugging
+        all_campuses = frappe.db.get_all("SIS Campus", fields=["name", "title_vn", "title_en"])
+        frappe.logger().info(f"All available SIS Campuses: {all_campuses}")
+
+        frappe.logger().warning(f"No SIS Campus found with title: '{campus_title}'")
         return None
-        
+
     except Exception as e:
         frappe.logger().error(f"Error finding campus by title: {str(e)}")
         return None
@@ -164,20 +176,26 @@ def get_current_campus_from_context():
     """
     try:
         user = frappe.session.user
-        
+        frappe.logger().info(f"get_current_campus_from_context called for user: {user}")
+
         # First try to get from request context (if passed from frontend)
         campus_id = frappe.local.form_dict.get("campus_id")
-        
+        frappe.logger().info(f"Campus_id from form_dict: '{campus_id}'")
+
         if campus_id:
             # Validate user has access to this campus
             if validate_user_campus_access(user, campus_id):
+                frappe.logger().info(f"User {user} has access to campus {campus_id}, returning it")
                 return campus_id
             else:
                 frappe.logger().warning(f"User {user} does not have access to campus {campus_id}")
-        
+
         # Fall back to user's default campus from roles
-        return get_campus_id_from_user_roles(user)
-        
+        frappe.logger().info(f"No campus_id in context, falling back to user roles for user: {user}")
+        role_based_campus = get_campus_id_from_user_roles(user)
+        frappe.logger().info(f"Role-based campus for user {user}: '{role_based_campus}'")
+        return role_based_campus
+
     except Exception as e:
         frappe.logger().error(f"Error getting current campus from context: {str(e)}")
         return None

@@ -100,6 +100,10 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
 
             # Apply campus filtering for data isolation
             filters = {"campus_id": campus_id}
+
+        frappe.logger().info(f"Final filters applied: {filters}")
+        frappe.logger().info(f"Current user: {frappe.session.user}")
+        frappe.logger().info(f"User roles: {frappe.get_roles(frappe.session.user)}")
         
         # Calculate offset for pagination
         offset = (page - 1) * limit
