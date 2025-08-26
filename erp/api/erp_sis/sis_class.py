@@ -12,7 +12,15 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
         limit = int(limit or 20)
         offset = (page - 1) * limit
 
-        filters = {}
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            # Fallback to default if no campus found
+            campus_id = "campus-1"
+
+        # Apply campus filtering for data isolation
+        filters = {"campus_id": campus_id}
         # accept school_year_id from query/form/body
         if not school_year_id:
             form = frappe.local.form_dict or {}

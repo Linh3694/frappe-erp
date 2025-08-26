@@ -12,45 +12,33 @@ def get_campus_id_from_user_roles(user_email=None):
     """
     try:
         if not user_email:
-            user_email = frappe.session.user
-        
-        frappe.logger().info(f"Getting campus from roles for user: {user_email}")
-        
+            user_email = frappe.session.user             
         # Get user roles
-        user_roles = frappe.get_roles(user_email)
-        frappe.logger().info(f"User roles: {user_roles}")
-        
+        user_roles = frappe.get_roles(user_email)     
         # Find campus roles (roles that start with "Campus ")
-        campus_roles = [role for role in user_roles if role.startswith("Campus ")]
-        frappe.logger().info(f"Campus roles found: {campus_roles}")
-        
+        campus_roles = [role for role in user_roles if role.startswith("Campus ")] 
         if not campus_roles:
-            frappe.logger().warning(f"No campus roles found for user {user_email}")
             return None
         
         # Extract campus title from role (remove "Campus " prefix)
         # For now, take the first campus role
         campus_role = campus_roles[0]
         campus_title = campus_role.replace("Campus ", "")
-        frappe.logger().info(f"Extracted campus title: {campus_title}")
         
         # Try to find matching SIS Campus by title
         campus_id = find_campus_id_by_title(campus_title)
         
         if campus_id:
-            frappe.logger().info(f"Found campus_id: {campus_id}")
             return campus_id
         
         # If not found, create default campus_id from role index
         # This matches frontend logic: campus-1, campus-2, etc.
         campus_index = campus_roles.index(campus_role) + 1
         default_campus_id = f"campus-{campus_index}"
-        frappe.logger().info(f"Using default campus_id: {default_campus_id}")
         
         return default_campus_id
         
     except Exception as e:
-        frappe.logger().error(f"Error getting campus from user roles: {str(e)}")
         return None
 
 
