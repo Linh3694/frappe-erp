@@ -75,31 +75,29 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
 def assign_student(class_id=None, student_id=None, school_year_id=None, class_type="regular"):
     """Assign a student to a class"""
     try:
-        # Get parameters from multiple sources
-        form = frappe.local.form_dict or {}
+        # Get parameters from form_dict if not provided (following Frappe pattern)
+        if not class_id:
+            class_id = frappe.local.form_dict.get("class_id")
+        if not student_id:
+            student_id = frappe.local.form_dict.get("student_id")
+        if not school_year_id:
+            school_year_id = frappe.local.form_dict.get("school_year_id")
+        if not class_type:
+            class_type = frappe.local.form_dict.get("class_type", "regular")
+
+        # Fallback to JSON data if form_dict is empty
+        if not class_id and hasattr(frappe, 'request') and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8'))
+                class_id = json_data.get('class_id') or class_id
+                student_id = json_data.get('student_id') or student_id
+                school_year_id = json_data.get('school_year_id') or school_year_id
+                class_type = json_data.get('class_type') or class_type or 'regular'
+            except:
+                pass
 
         # Debug logging
-        frappe.logger().info(f"Initial function args - class_id: {class_id}, student_id: {student_id}, school_year_id: {school_year_id}")
-        frappe.logger().info(f"form_dict content: {form}")
-
-        # Comprehensive parameter extraction
-        class_id = (form.get('class_id') or
-                   class_id or
-                   frappe.local.request.args.get('class_id') if hasattr(frappe.local, 'request') and frappe.local.request.args else None)
-
-        student_id = (form.get('student_id') or
-                     student_id or
-                     frappe.local.request.args.get('student_id') if hasattr(frappe.local, 'request') and frappe.local.request.args else None)
-
-        school_year_id = (form.get('school_year_id') or
-                         school_year_id or
-                         frappe.local.request.args.get('school_year_id') if hasattr(frappe.local, 'request') and frappe.local.request.args else None)
-
-        class_type = (form.get('class_type') or
-                     class_type or
-                     frappe.local.request.args.get('class_type') if hasattr(frappe.local, 'request') and frappe.local.request.args else None or
-                     'regular')
-
         frappe.logger().info(f"Final parameters - class_id={class_id}, student_id={student_id}, school_year_id={school_year_id}, class_type={class_type}")
         
         # Validate required parameters
