@@ -6,10 +6,20 @@ import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 
 
-@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
-def check_student_code_availability(student_code):
+@frappe.whitelist(allow_guest=False)
+def check_student_code_availability():
     """Check if student code is available (not already taken)"""
     try:
+        # Extract student_code from form_dict or query params
+        student_code = frappe.form_dict.get("student_code") or frappe.local.form_dict.get("student_code")
+
+        if not student_code:
+            return {
+                "success": False,
+                "message": "Thiếu tham số mã học sinh",
+                "available": False
+            }
+
         # Check if student with this code already exists
         existing = frappe.db.exists("CRM Student", {"student_code": student_code})
         if existing:
