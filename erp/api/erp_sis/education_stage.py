@@ -59,9 +59,29 @@ def get_education_stage_by_id():
         # Try to get stage_id from different sources based on request method
         stage_id = None
 
+        print("=== DEBUG get_education_stage_by_id ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Request args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+        print(f"Request query_string: {frappe.request.query_string if hasattr(frappe.request, 'query_string') else 'No query_string'}")
+
         if frappe.request.method == 'GET':
             # For GET requests, stage_id comes from query parameters
             stage_id = frappe.form_dict.get('stage_id')
+            print(f"GET - stage_id from form_dict: {stage_id}")
+
+            # If not found in form_dict, try request.args (alternative for query params)
+            if not stage_id and hasattr(frappe.request, 'args'):
+                stage_id = frappe.request.args.get('stage_id')
+                print(f"GET - stage_id from request.args: {stage_id}")
+
+            # Also try direct query string parsing
+            if not stage_id and hasattr(frappe.request, 'query_string'):
+                from urllib.parse import parse_qs
+                query_params = parse_qs(frappe.request.query_string.decode('utf-8'))
+                stage_id = query_params.get('stage_id', [None])[0]
+                print(f"GET - stage_id from query_string: {stage_id}")
         else:
             # For POST/PUT requests, try JSON first, then form data
             try:
@@ -85,6 +105,8 @@ def get_education_stage_by_id():
             # If not found in JSON, try form data
             if not stage_id:
                 stage_id = frappe.form_dict.get('stage_id')
+
+        print(f"Final stage_id: {stage_id}")
 
         if not stage_id:
             return {
