@@ -55,23 +55,35 @@ def get_all_education_stages():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_education_stage_by_id(stage_id):
+def get_education_stage_by_id():
     """Get education stage details by ID"""
     try:
+        # Get stage_id from form data or request data
+        stage_id = frappe.form_dict.get('stage_id') or frappe.request.data
+
+        # If request data is JSON, parse it
+        if isinstance(stage_id, str) and stage_id.startswith('{'):
+            try:
+                import json
+                json_data = json.loads(stage_id)
+                stage_id = json_data.get('stage_id', stage_id)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         if not stage_id:
             return {
                 "success": False,
                 "message": "Stage ID is required"
             }
-            
+
         stage = frappe.get_doc("SIS Education Stage", stage_id)
-        
+
         if not stage:
             return {
                 "success": False,
                 "message": "Education stage not found"
             }
-            
+
         return {
             "success": True,
             "data": {
@@ -79,7 +91,7 @@ def get_education_stage_by_id(stage_id):
             },
             "message": "Education stage fetched successfully"
         }
-        
+
     except frappe.DoesNotExistError:
         return {
             "success": False,

@@ -16,17 +16,14 @@ def check_student_code_availability():
         # Try from form_dict (POST with form data)
         if frappe.form_dict and frappe.form_dict.get("student_code"):
             student_code = frappe.form_dict.get("student_code")
-            frappe.logger().info(f"Found student_code in form_dict: {student_code}")
 
         # Try from local.form_dict
         if not student_code and frappe.local.form_dict and frappe.local.form_dict.get("student_code"):
             student_code = frappe.local.form_dict.get("student_code")
-            frappe.logger().info(f"Found student_code in local.form_dict: {student_code}")
 
         # Try from URL query parameters (GET request)
         if not student_code and hasattr(frappe.request, 'args') and frappe.request.args:
             student_code = frappe.request.args.get("student_code")
-            frappe.logger().info(f"Found student_code in URL args: {student_code}")
 
         # Try from request data if it's JSON
         if not student_code and frappe.request.data:
@@ -34,7 +31,6 @@ def check_student_code_availability():
                 import json
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 student_code = json_data.get("student_code")
-                frappe.logger().info(f"Found student_code in JSON data: {student_code}")
             except Exception as e:
                 frappe.logger().info(f"Could not parse JSON data: {str(e)}")
 
@@ -822,5 +818,3 @@ def search_students(search_term=None, page=1, limit=20):
             },
             "message": f"Error searching students: {str(e)}"
         }
-
-
