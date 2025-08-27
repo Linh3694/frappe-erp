@@ -57,15 +57,18 @@ def get_all_education_grades():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_education_grade_by_id(grade_id):
+def get_education_grade_by_id():
     """Get education grade details by ID"""
     try:
+        # Get grade_id from form_dict (query parameters)
+        grade_id = frappe.form_dict.get('grade_id')
+
         if not grade_id:
             return {
                 "success": False,
                 "message": "Grade ID is required"
             }
-            
+
         grade = frappe.get_doc("SIS Education Grade", grade_id)
         
         if not grade:
@@ -386,9 +389,13 @@ def delete_education_grade():
 
 
 @frappe.whitelist(allow_guest=False)
-def check_grade_code_availability(grade_code, grade_id=None):
+def check_grade_code_availability():
     """Check if a grade code is available for the current campus"""
     try:
+        # Get parameters from form_dict (query parameters)
+        grade_code = frappe.form_dict.get('grade_code')
+        grade_id = frappe.form_dict.get('grade_id')
+
         if not grade_code:
             return {
                 "success": False,
