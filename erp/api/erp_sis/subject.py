@@ -715,24 +715,66 @@ def get_rooms_for_selection():
 def get_education_stages_for_selection():
     """Get education stages for dropdown selection"""
     try:
+        # Debug: Log campus information
+        print("=== DEBUG get_education_stages_for_selection ===")
+
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+        print(f"Campus ID from context: {campus_id}")
+
         if not campus_id:
             campus_id = "campus-1"
-        
+            print(f"Using default campus: {campus_id}")
+
         filters = {"campus_id": campus_id}
-            
+        print(f"Filters: {filters}")
+
+        # First, check total count of education stages
+        total_count = frappe.db.count("SIS Education Stage")
+        print(f"Total education stages in database: {total_count}")
+
+        # Check education stages with current campus
+        campus_count = frappe.db.count("SIS Education Stage", filters)
+        print(f"Education stages with campus {campus_id}: {campus_count}")
+
         education_stages = frappe.get_all(
             "SIS Education Stage",
             fields=[
                 "name",
                 "title_vn",
-                "title_en"
+                "title_en",
+                "campus_id"
             ],
             filters=filters,
             order_by="title_vn asc"
         )
+
+        print(f"Query result count: {len(education_stages)}")
+        if education_stages:
+            print(f"First education stage: {education_stages[0]}")
+        else:
+            print("No education stages found with current campus filter")
+            # Try without campus filter to see if there are any education stages
+            all_stages = frappe.get_all(
+                "SIS Education Stage",
+                fields=["name", "title_vn", "title_en", "campus_id"],
+                limit=5
+            )
+            print(f"All education stages (first 5): {all_stages}")
+
+            # If no stages at all, return all stages regardless of campus
+            if not all_stages:
+                print("No education stages found in database at all")
+                education_stages = []
+            else:
+                print("Education stages exist but campus filter doesn't match")
+                # Temporarily return all stages for testing
+                education_stages = frappe.get_all(
+                    "SIS Education Stage",
+                    fields=["name", "title_vn", "title_en", "campus_id"],
+                    order_by="title_vn asc"
+                )
+                print(f"Returning all stages for testing: {len(education_stages)}")
         
         return {
             "success": True,
@@ -753,24 +795,65 @@ def get_education_stages_for_selection():
 def get_timetable_subjects_for_selection():
     """Get timetable subjects for dropdown selection"""
     try:
+        # Debug: Log campus information
+        print("=== DEBUG get_timetable_subjects_for_selection ===")
+
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+        print(f"Campus ID from context: {campus_id}")
+
         if not campus_id:
             campus_id = "campus-1"
-        
+            print(f"Using default campus: {campus_id}")
+
         filters = {"campus_id": campus_id}
-            
+        print(f"Filters: {filters}")
+
+        # First, check total count
+        total_count = frappe.db.count("SIS Timetable Subject")
+        print(f"Total timetable subjects in database: {total_count}")
+
+        campus_count = frappe.db.count("SIS Timetable Subject", filters)
+        print(f"Timetable subjects with campus {campus_id}: {campus_count}")
+
         timetable_subjects = frappe.get_all(
             "SIS Timetable Subject",
             fields=[
                 "name",
                 "title_vn",
-                "title_en"
+                "title_en",
+                "campus_id"
             ],
             filters=filters,
             order_by="title_vn asc"
         )
+
+        print(f"Query result count: {len(timetable_subjects)}")
+        if timetable_subjects:
+            print(f"First timetable subject: {timetable_subjects[0]}")
+        else:
+            print("No timetable subjects found with current campus filter")
+            # Try without campus filter
+            all_subjects = frappe.get_all(
+                "SIS Timetable Subject",
+                fields=["name", "title_vn", "title_en", "campus_id"],
+                limit=5
+            )
+            print(f"All timetable subjects (first 5): {all_subjects}")
+
+            # If no subjects at all, return empty
+            if not all_subjects:
+                print("No timetable subjects found in database at all")
+                timetable_subjects = []
+            else:
+                print("Timetable subjects exist but campus filter doesn't match")
+                # Temporarily return all subjects for testing
+                timetable_subjects = frappe.get_all(
+                    "SIS Timetable Subject",
+                    fields=["name", "title_vn", "title_en", "campus_id"],
+                    order_by="title_vn asc"
+                )
+                print(f"Returning all timetable subjects for testing: {len(timetable_subjects)}")
         
         return {
             "success": True,
@@ -791,26 +874,72 @@ def get_timetable_subjects_for_selection():
 def get_actual_subjects_for_selection():
     """Get actual subjects for dropdown selection"""
     try:
+        # Debug: Log campus information
+        print("=== DEBUG get_actual_subjects_for_selection ===")
+
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+        print(f"Campus ID from context: {campus_id}")
+
         if not campus_id:
             campus_id = "campus-1"
-        
+            print(f"Using default campus: {campus_id}")
+
         # Get actual subjects for this campus
+        filters = {
+            "campus_id": campus_id,
+            "curriculum_id": ["!=", ""]  # Ensure it has a curriculum
+        }
+        print(f"Filters: {filters}")
+
+        # First, check total count
+        total_count = frappe.db.count("SIS Actual Subject")
+        print(f"Total actual subjects in database: {total_count}")
+
+        campus_count = frappe.db.count("SIS Actual Subject", {"campus_id": campus_id})
+        print(f"Actual subjects with campus {campus_id}: {campus_count}")
+
         actual_subjects = frappe.get_all(
             "SIS Actual Subject",
             fields=[
                 "name",
                 "title_vn",
-                "title_en"
+                "title_en",
+                "campus_id",
+                "curriculum_id"
             ],
-            filters={
-                "campus_id": campus_id,
-                "curriculum_id": ["!=", ""]  # Ensure it has a curriculum
-            },
+            filters=filters,
             order_by="title_vn asc"
         )
+
+        print(f"Query result count: {len(actual_subjects)}")
+        if actual_subjects:
+            print(f"First actual subject: {actual_subjects[0]}")
+        else:
+            print("No actual subjects found with current filters")
+            # Try without curriculum filter
+            all_subjects = frappe.get_all(
+                "SIS Actual Subject",
+                fields=["name", "title_vn", "title_en", "campus_id", "curriculum_id"],
+                filters={"campus_id": campus_id},
+                limit=5
+            )
+            print(f"Actual subjects with campus only (first 5): {all_subjects}")
+
+            # If no subjects at all, return empty
+            if not all_subjects:
+                print("No actual subjects found in database at all")
+                actual_subjects = []
+            else:
+                print("Actual subjects exist but curriculum filter doesn't match")
+                # Temporarily return all subjects for testing
+                actual_subjects = frappe.get_all(
+                    "SIS Actual Subject",
+                    fields=["name", "title_vn", "title_en", "campus_id", "curriculum_id"],
+                    filters={"campus_id": campus_id},
+                    order_by="title_vn asc"
+                )
+                print(f"Returning all actual subjects for testing: {len(actual_subjects)}")
         
         return {
             "success": True,
