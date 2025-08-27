@@ -187,17 +187,67 @@ def create_education_grade():
 
 
 @frappe.whitelist(allow_guest=False)
-def update_education_grade(grade_id):
+def update_education_grade():
     """Update an existing education grade"""
     try:
+        # Debug: Print all available request data
+        print("=== DEBUG update_education_grade ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Request args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+        print(f"Request data type: {type(frappe.request.data)}")
+
+        # Get grade_id from multiple sources (form data or JSON)
+        grade_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        grade_id = frappe.form_dict.get('grade_id')
+        print(f"Grade ID from form_dict: {grade_id}")
+
+        # Try from JSON payload if not found
+        if not grade_id and frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                grade_id = json_data.get('grade_id')
+                print(f"Grade ID from JSON payload: {grade_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final extracted grade_id: {grade_id}")
+
         if not grade_id:
             return {
                 "success": False,
-                "message": "Grade ID is required"
+                "message": "Grade ID is required",
+                "debug": {
+                    "request_method": frappe.request.method,
+                    "content_type": frappe.request.headers.get('Content-Type'),
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
+                    "grade_id_value": repr(grade_id),
+                    "grade_id_type": type(grade_id).__name__
+                }
             }
-        
-        # Get data from request
-        data = frappe.local.form_dict
+
+        # Get data from request (support both form data and JSON)
+        data = {}
+
+        # Start with form_dict data
+        if frappe.local.form_dict:
+            data.update(dict(frappe.local.form_dict))
+
+        # If JSON payload exists, merge it (JSON takes precedence)
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                data.update(json_data)
+                print(f"Merged JSON data: {json_data}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON data merge failed: {e}")
+
+        print(f"Final data to update: {data}")
         
         # Get existing grade
         grade_doc = frappe.get_doc("SIS Education Grade", grade_id)
@@ -262,13 +312,43 @@ def update_education_grade(grade_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def delete_education_grade(grade_id):
+def delete_education_grade():
     """Delete an education grade"""
     try:
+        # Debug: Print request data
+        print("=== DEBUG delete_education_grade ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get grade_id from multiple sources (form data or JSON)
+        grade_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        grade_id = frappe.form_dict.get('grade_id')
+        print(f"Grade ID from form_dict: {grade_id}")
+
+        # If not found, try from JSON payload
+        if not grade_id and frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                grade_id = json_data.get('grade_id')
+                print(f"Grade ID from JSON payload: {grade_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final extracted grade_id: {grade_id}")
+
         if not grade_id:
             return {
                 "success": False,
-                "message": "Grade ID is required"
+                "message": "Grade ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
+                    "grade_id_value": repr(grade_id)
+                }
             }
         
         # Check if grade exists
