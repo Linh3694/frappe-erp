@@ -18,7 +18,6 @@ def get_all_education_stages():
         if not campus_id:
             # Fallback to default if no campus found
             campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         filters = {"campus_id": campus_id}
             
@@ -58,14 +57,8 @@ def get_all_education_stages():
 def get_education_stage_by_id():
     """Get education stage details by ID"""
     try:
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Form dict: {dict(frappe.form_dict)}")
-        frappe.logger().info(f"Request data: {frappe.request.data}")
-        frappe.logger().info(f"Request data type: {type(frappe.request.data)}")
-
         # Get stage_id from form data first
         stage_id = frappe.form_dict.get('stage_id')
-        frappe.logger().info(f"Stage ID from form_dict: {stage_id}")
 
         # Try to get from JSON if not found in form data
         if not stage_id:
@@ -73,24 +66,19 @@ def get_education_stage_by_id():
                 # Try frappe.request.json first (for JSON requests)
                 if hasattr(frappe.request, 'json') and frappe.request.json:
                     stage_id = frappe.request.json.get('stage_id')
-                    frappe.logger().info(f"Stage ID from request.json: {stage_id}")
                 elif frappe.request.data:
                     import json
                     if isinstance(frappe.request.data, str):
                         json_data = json.loads(frappe.request.data)
-                        frappe.logger().info(f"Parsed JSON data: {json_data}")
                     else:
                         json_data = frappe.request.data
-                        frappe.logger().info(f"Request data object: {json_data}")
 
                     if isinstance(json_data, dict):
                         stage_id = json_data.get('stage_id')
                     elif hasattr(json_data, 'get'):
                         stage_id = json_data.get('stage_id')
             except (json.JSONDecodeError, TypeError, AttributeError) as e:
-                frappe.logger().warning(f"Could not parse request data for stage_id: {str(e)}")
-
-        frappe.logger().info(f"Final stage_id: {stage_id}")
+                pass
 
         if not stage_id:
             return {
@@ -107,7 +95,6 @@ def get_education_stage_by_id():
             }
 
         stage_data = stage.as_dict()
-        frappe.logger().info(f"Found education stage: {stage_data.get('name')}")
 
         return {
             "success": True,
@@ -135,13 +122,8 @@ def get_education_stage_by_id():
 def create_education_stage():
     """Create a new education stage - SIMPLE VERSION"""
     try:
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Form dict: {dict(frappe.form_dict)}")
-        frappe.logger().info(f"Request data: {frappe.request.data}")
-
         # Get data from form_dict (FormData will be available here)
         data = frappe.local.form_dict
-        frappe.logger().info(f"Using form data for create_education_stage: {data}")
         
         # Validate required fields
         required_fields = ["title_vn", "title_en", "short_title"]
@@ -156,9 +138,6 @@ def create_education_stage():
             if not campus_id:
                 # Fallback to default if no campus found
                 campus_id = "campus-1"
-                frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
-        frappe.logger().info(f"Using campus_id: {campus_id}")
         
         # Check if short_title already exists for this campus
         existing_stage = frappe.db.exists("SIS Education Stage", {
@@ -179,17 +158,14 @@ def create_education_stage():
         })
         
         stage_doc.insert(ignore_permissions=True)
-        
-        frappe.logger().info(f"Created education stage: {stage_doc.name}")
-        
+
         return {
             "success": True,
             "data": stage_doc.as_dict(),
             "message": "Education stage created successfully"
         }
-        
+
     except Exception as e:
-        frappe.logger().error(f"Error creating education stage: {str(e)}")
         return {
             "success": False,
             "message": f"Error creating education stage: {str(e)}",
@@ -203,9 +179,6 @@ def update_education_stage():
     try:
         # Get stage_id from form data
         stage_id = frappe.form_dict.get('stage_id')
-
-        frappe.logger().info(f"Updating education stage with ID: {stage_id}")
-        frappe.logger().info(f"Form dict: {dict(frappe.form_dict)}")
 
         if not stage_id:
             return {
@@ -276,8 +249,6 @@ def delete_education_stage():
         # Get stage_id from form data
         stage_id = frappe.form_dict.get('stage_id')
 
-        frappe.logger().info(f"Deleting education stage with ID: {stage_id}")
-
         if not stage_id:
             return {
                 "success": False,
@@ -325,8 +296,6 @@ def check_short_title_availability():
         # Get parameters from form data
         short_title = frappe.form_dict.get('short_title')
         stage_id = frappe.form_dict.get('stage_id')
-
-        frappe.logger().info(f"Checking short title availability: {short_title}, stage_id: {stage_id}")
 
         if not short_title:
             return {
