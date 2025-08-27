@@ -135,27 +135,13 @@ def get_education_stage_by_id():
 def create_education_stage():
     """Create a new education stage - SIMPLE VERSION"""
     try:
-        # Get data from request - support both JSON and form data
-        data = {}
-        
-        # First try to get JSON data from request body
-        if frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-                    frappe.logger().info(f"Received JSON data for create_education_stage: {data}")
-                else:
-                    data = frappe.local.form_dict
-                    frappe.logger().info(f"Received form data for create_education_stage: {data}")
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
-                data = frappe.local.form_dict
-                frappe.logger().info(f"JSON parsing failed, using form data for create_education_stage: {data}")
-        else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
-            frappe.logger().info(f"No request data, using form_dict for create_education_stage: {data}")
+        frappe.logger().info(f"Request method: {frappe.request.method}")
+        frappe.logger().info(f"Form dict: {dict(frappe.form_dict)}")
+        frappe.logger().info(f"Request data: {frappe.request.data}")
+
+        # Get data from form_dict (FormData will be available here)
+        data = frappe.local.form_dict
+        frappe.logger().info(f"Using form data for create_education_stage: {data}")
         
         # Validate required fields
         required_fields = ["title_vn", "title_en", "short_title"]
@@ -212,18 +198,24 @@ def create_education_stage():
 
 
 @frappe.whitelist(allow_guest=False)
-def update_education_stage(stage_id):
+def update_education_stage():
     """Update an existing education stage"""
     try:
+        # Get stage_id from form data
+        stage_id = frappe.form_dict.get('stage_id')
+
+        frappe.logger().info(f"Updating education stage with ID: {stage_id}")
+        frappe.logger().info(f"Form dict: {dict(frappe.form_dict)}")
+
         if not stage_id:
             return {
                 "success": False,
                 "message": "Stage ID is required"
             }
-        
+
         # Get data from request
         data = frappe.local.form_dict
-        
+
         # Get existing stage
         stage_doc = frappe.get_doc("SIS Education Stage", stage_id)
         
@@ -278,15 +270,20 @@ def update_education_stage(stage_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def delete_education_stage(stage_id):
+def delete_education_stage():
     """Delete an education stage"""
     try:
+        # Get stage_id from form data
+        stage_id = frappe.form_dict.get('stage_id')
+
+        frappe.logger().info(f"Deleting education stage with ID: {stage_id}")
+
         if not stage_id:
             return {
                 "success": False,
                 "message": "Stage ID is required"
             }
-        
+
         # Check if stage exists
         stage_doc = frappe.get_doc("SIS Education Stage", stage_id)
         
@@ -322,9 +319,15 @@ def delete_education_stage(stage_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def check_short_title_availability(short_title, stage_id=None):
+def check_short_title_availability():
     """Check if a short title is available for the current campus"""
     try:
+        # Get parameters from form data
+        short_title = frappe.form_dict.get('short_title')
+        stage_id = frappe.form_dict.get('stage_id')
+
+        frappe.logger().info(f"Checking short title availability: {short_title}, stage_id: {stage_id}")
+
         if not short_title:
             return {
                 "success": False,
