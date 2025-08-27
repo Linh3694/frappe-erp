@@ -55,9 +55,24 @@ def get_all_buildings():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_building_by_id(building_id):
-    """Get a specific building by ID"""
+def get_building_by_id(building_id=None):
+    """Get a specific building by ID - SIMPLE VERSION with JSON payload support"""
     try:
+        # Get building_id from parameter or from JSON payload
+        if not building_id:
+            # Try to get from JSON payload
+            if frappe.request.data:
+                try:
+                    json_data = json.loads(frappe.request.data)
+                    if json_data and 'building_id' in json_data:
+                        building_id = json_data['building_id']
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Fallback to form_dict
+            if not building_id:
+                building_id = frappe.local.form_dict.get('building_id')
+
         if not building_id:
             return {
                 "success": False,
@@ -76,7 +91,23 @@ def get_building_by_id(building_id):
             "campus_id": campus_id
         }
         
-        building = frappe.get_doc("ERP Administrative Building", filters)
+        buildings = frappe.get_all(
+            "ERP Administrative Building",
+            filters=filters,
+            fields=[
+                "name", "title_vn", "title_en", "short_title",
+                "campus_id", "creation", "modified"
+            ]
+        )
+
+        if not buildings:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Building not found"
+            }
+
+        building = buildings[0]
         
         if not building:
             return {
@@ -367,6 +398,45 @@ def delete_building(building_id):
             "success": False,
             "data": {},
             "message": f"Error deleting building: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_buildings_for_selection():
+    """Get buildings for dropdown selection - SIMPLE VERSION"""
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
+        filters = {"campus_id": campus_id}
+
+        buildings = frappe.get_all(
+            "ERP Administrative Building",
+            fields=[
+                "name",
+                "title_vn",
+                "title_en",
+                "short_title"
+            ],
+            filters=filters,
+            order_by="title_vn asc"
+        )
+
+        return {
+            "success": True,
+            "data": buildings,
+            "message": "Buildings fetched successfully"
+        }
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching buildings for selection: {str(e)}")
+        return {
+            "success": False,
+            "message": "Error fetching buildings for selection",
+            "error": str(e)
         }
 
 
