@@ -55,14 +55,42 @@ def get_all_academic_programs():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_academic_program_by_id(program_id):
+def get_academic_program_by_id():
     """Get a specific academic program by ID"""
     try:
+        # Debug: Print all request data
+        print("=== DEBUG get_academic_program_by_id ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get program_id from multiple sources (form data or JSON payload)
+        program_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        program_id = frappe.form_dict.get('program_id')
+        print(f"Program ID from form_dict: {program_id}")
+
+        # If not found, try from JSON payload
+        if not program_id and frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                program_id = json_data.get('program_id')
+                print(f"Program ID from JSON payload: {program_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final program_id: {repr(program_id)}")
+
         if not program_id:
             return {
                 "success": False,
-                "data": {},
-                "message": "Program ID is required"
+                "message": "Program ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
+                }
             }
         
         # Get current user's campus
@@ -230,14 +258,44 @@ def create_academic_program():
 
 
 @frappe.whitelist(allow_guest=False)
-def update_academic_program(program_id, title_vn=None, title_en=None, short_title=None):
+def update_academic_program():
     """Update an existing academic program"""
     try:
+        # Debug: Print all request data
+        print("=== DEBUG update_academic_program ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get data from multiple sources (form data or JSON payload)
+        data = {}
+
+        # Start with form_dict data
+        if frappe.local.form_dict:
+            data.update(dict(frappe.local.form_dict))
+
+        # If JSON payload exists, merge it (JSON takes precedence)
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                data.update(json_data)
+                print(f"Merged JSON data: {json_data}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON data merge failed: {e}")
+
+        program_id = data.get('program_id')
+        print(f"Final program_id: {repr(program_id)}")
+
         if not program_id:
             return {
                 "success": False,
-                "data": {},
-                "message": "Program ID is required"
+                "message": "Program ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
+                    "final_data": data
+                }
             }
         
         # Get campus from user context
