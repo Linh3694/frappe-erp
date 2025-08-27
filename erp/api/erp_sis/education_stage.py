@@ -83,32 +83,44 @@ def get_education_stage_by_id():
                 stage_id = query_params.get('stage_id', [None])[0]
                 print(f"GET - stage_id from query_string: {stage_id}")
         else:
-            # For POST/PUT requests, try JSON first, then form data
-            try:
-                import json
-                # Try frappe.request.json first (for JSON requests)
-                if hasattr(frappe.request, 'json') and frappe.request.json:
+            # For POST/PUT requests, try multiple approaches
+            import json
+
+            # Approach 1: Try frappe.request.data as JSON string
+            if frappe.request.data and isinstance(frappe.request.data, str):
+                try:
+                    json_data = json.loads(frappe.request.data)
+                    stage_id = json_data.get('stage_id')
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    pass
+
+            # Approach 2: If not found, try frappe.request.json
+            if not stage_id and hasattr(frappe.request, 'json') and frappe.request.json:
+                try:
                     stage_id = frappe.request.json.get('stage_id')
-                elif frappe.request.data:
-                    if isinstance(frappe.request.data, str):
-                        json_data = json.loads(frappe.request.data)
-                    else:
-                        json_data = frappe.request.data
+                except (TypeError, AttributeError):
+                    pass
 
-                    if isinstance(json_data, dict):
-                        stage_id = json_data.get('stage_id')
-                    elif hasattr(json_data, 'get'):
-                        stage_id = json_data.get('stage_id')
-            except (json.JSONDecodeError, TypeError, AttributeError) as e:
-                pass
-
-            # If not found in JSON, try form data
+            # Approach 3: Try form data as fallback
             if not stage_id:
                 stage_id = frappe.form_dict.get('stage_id')
 
         print(f"Final stage_id: {stage_id}")
 
+        # Return debug info in response if stage_id is missing (for debugging)
         if not stage_id:
+            return {
+                "success": False,
+                "message": "Stage ID is required",
+                "debug": {
+                    "request_method": frappe.request.method,
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:200] + "..." if frappe.request.data else None,
+                    "request_data_type": type(frappe.request.data).__name__,
+                    "has_json_attr": hasattr(frappe.request, 'json'),
+                    "json_content": frappe.request.json if hasattr(frappe.request, 'json') and frappe.request.json else None
+                }
+            }
             return {
                 "success": False,
                 "message": "Stage ID is required"
