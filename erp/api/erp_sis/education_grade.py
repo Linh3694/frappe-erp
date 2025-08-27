@@ -116,17 +116,31 @@ def get_education_grade_by_id():
             }
 
         grade = frappe.get_doc("SIS Education Grade", grade_id)
-        
+
         if not grade:
             return {
                 "success": False,
                 "message": "Education grade not found"
             }
-            
+
+        # Convert to dict with consistent field names (same as get_all_education_grades)
+        grade_dict = grade.as_dict()
+        grade_data = {
+            "name": grade_dict.get("name"),
+            "grade_name": grade_dict.get("title_vn"),  # Use consistent field name
+            "title_en": grade_dict.get("title_en"),
+            "grade_code": grade_dict.get("grade_code"),
+            "education_stage": grade_dict.get("education_stage_id"),  # Use consistent field name
+            "sort_order": grade_dict.get("sort_order"),
+            "campus_id": grade_dict.get("campus_id"),
+            "creation": grade_dict.get("creation"),
+            "modified": grade_dict.get("modified")
+        }
+
         return {
             "success": True,
             "data": {
-                "education_grade": grade.as_dict()
+                "education_grade": grade_data
             },
             "message": "Education grade fetched successfully"
         }
