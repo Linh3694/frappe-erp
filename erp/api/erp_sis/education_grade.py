@@ -60,13 +60,45 @@ def get_all_education_grades():
 def get_education_grade_by_id():
     """Get education grade details by ID"""
     try:
-        # Get grade_id from form_dict (query parameters)
+        # Debug: Print all request data
+        print("=== DEBUG get_education_grade_by_id ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Query string: {frappe.request.query_string}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request args: {getattr(frappe.request, 'args', 'No args')}")
+
+        # Get grade_id from multiple sources
         grade_id = frappe.form_dict.get('grade_id')
+        print(f"Grade ID from form_dict: {grade_id}")
+
+        # Also try from request.args if available
+        if not grade_id and hasattr(frappe.request, 'args'):
+            grade_id = frappe.request.args.get('grade_id')
+            print(f"Grade ID from request.args: {grade_id}")
+
+        # Parse query string manually for GET requests
+        if not grade_id and frappe.request.query_string:
+            try:
+                from urllib.parse import parse_qs
+                query_params = parse_qs(frappe.request.query_string.decode('utf-8'))
+                grade_id = query_params.get('grade_id', [None])[0]
+                print(f"Grade ID from query string: {grade_id}")
+            except Exception as e:
+                print(f"Query string parsing error: {e}")
+
+        print(f"Final grade_id: {repr(grade_id)}")
 
         if not grade_id:
             return {
                 "success": False,
-                "message": "Grade ID is required"
+                "message": "Grade ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "query_string": str(frappe.request.query_string),
+                    "request_args": str(getattr(frappe.request, 'args', {})),
+                    "grade_id_type": type(grade_id).__name__
+                }
             }
 
         grade = frappe.get_doc("SIS Education Grade", grade_id)
