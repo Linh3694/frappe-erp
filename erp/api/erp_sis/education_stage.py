@@ -175,15 +175,8 @@ def create_education_stage():
 def update_education_stage():
     """Update an existing education stage"""
     try:
-        # Debug: log what we're receiving
-        print("=== DEBUG update_education_stage ===")
-        print(f"form_dict: {dict(frappe.form_dict)}")
-        print(f"request.data: {frappe.request.data}")
-        print(f"request.method: {frappe.request.method}")
-
         # Get stage_id from form data
         stage_id = frappe.form_dict.get('stage_id')
-        print(f"stage_id: {stage_id}")
 
         if not stage_id:
             return {
