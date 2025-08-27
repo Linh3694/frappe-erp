@@ -486,3 +486,96 @@ def check_short_title_availability(short_title, building_id=None):
             "short_title": short_title,
             "message": f"Error checking availability: {str(e)}"
         }
+
+
+@frappe.whitelist(allow_guest=False)
+def update_building():
+    """Update an existing building - SIMPLE VERSION with JSON payload support"""
+    try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+
+        building_id = data.get('building_id')
+        if not building_id:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Building ID is required"
+            }
+
+        # Get campus from user context
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
+        # Get existing document
+        try:
+            building_doc = frappe.get_doc("ERP Administrative Building", building_id)
+
+            # Check campus permission
+            if building_doc.campus_id != campus_id:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Access denied: You don't have permission to modify this building"
+                }
+
+        except frappe.DoesNotExistError:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Building not found"
+            }
+
+        # Update fields if provided
+        title_vn = data.get('title_vn')
+        title_en = data.get('title_en')
+        short_title = data.get('short_title')
+
+        if title_vn and title_vn != building_doc.title_vn:
+            building_doc.title_vn = title_vn
+
+        if title_en is not None and title_en != building_doc.title_en:
+            building_doc.title_en = title_en
+
+        if short_title and short_title != building_doc.short_title:
+            building_doc.short_title = short_title
+
+        building_doc.save()
+        frappe.db.commit()
+
+        return {
+            "success": True,
+            "data": {
+                "building": {
+                    "name": building_doc.name,
+                    "title_vn": building_doc.title_vn,
+                    "title_en": building_doc.title_en,
+                    "short_title": building_doc.short_title,
+                    "campus_id": building_doc.campus_id
+                }
+            },
+            "message": "Building updated successfully"
+        }
+
+    except Exception as e:
+        frappe.log_error(f"Error updating building: {str(e)}")
+        return {
+            "success": False,
+            "data": {},
+            "message": f"Error updating building: {str(e)}"
+        }
