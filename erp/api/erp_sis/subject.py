@@ -252,14 +252,44 @@ def create_subject():
 
 
 @frappe.whitelist(allow_guest=False)
-def update_subject(subject_id, title=None, education_stage=None, timetable_subject_id=None, actual_subject_id=None, room_id=None):
+def update_subject():
     """Update an existing subject"""
     try:
+        # Debug: Print all request data
+        print("=== DEBUG update_subject ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get data from multiple sources (form data or JSON payload)
+        data = {}
+
+        # Start with form_dict data
+        if frappe.local.form_dict:
+            data.update(dict(frappe.local.form_dict))
+
+        # If JSON payload exists, merge it (JSON takes precedence)
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                data.update(json_data)
+                print(f"Merged JSON data: {json_data}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON data merge failed: {e}")
+
+        subject_id = data.get('subject_id')
+        print(f"Final subject_id: {repr(subject_id)}")
+
         if not subject_id:
             return {
                 "success": False,
-                "data": {},
-                "message": "Subject ID is required"
+                "message": "Subject ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
+                    "final_data": data
+                }
             }
         
         # Get campus from user context
@@ -288,6 +318,14 @@ def update_subject(subject_id, title=None, education_stage=None, timetable_subje
             }
         
         # Update fields if provided
+        title = data.get('title')
+        education_stage = data.get('education_stage')
+        timetable_subject_id = data.get('timetable_subject_id')
+        actual_subject_id = data.get('actual_subject_id')
+        room_id = data.get('room_id')
+
+        print(f"Updating with: title={title}, education_stage={education_stage}, timetable_subject_id={timetable_subject_id}, actual_subject_id={actual_subject_id}, room_id={room_id}")
+
         if title and title != subject_doc.title:
             # Check for duplicate subject title
             existing = frappe.db.exists(
@@ -359,15 +397,43 @@ def update_subject(subject_id, title=None, education_stage=None, timetable_subje
         }
 
 
-@frappe.whitelist(allow_guest=False) 
-def delete_subject(subject_id):
+@frappe.whitelist(allow_guest=False)
+def delete_subject():
     """Delete a subject"""
     try:
+        # Debug: Print request data
+        print("=== DEBUG delete_subject ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get subject_id from multiple sources (form data or JSON payload)
+        subject_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        subject_id = frappe.form_dict.get('subject_id')
+        print(f"Subject ID from form_dict: {subject_id}")
+
+        # If not found, try from JSON payload
+        if not subject_id and frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                subject_id = json_data.get('subject_id')
+                print(f"Subject ID from JSON payload: {subject_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final subject_id: {repr(subject_id)}")
+
         if not subject_id:
             return {
                 "success": False,
-                "data": {},
-                "message": "Subject ID is required"
+                "message": "Subject ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
+                }
             }
         
         # Get campus from user context
