@@ -107,7 +107,7 @@ def get_education_stage_by_id():
 
         print(f"Final stage_id: {stage_id}")
 
-        # Return debug info in response if stage_id is missing (for debugging)
+        # Always return debug info for troubleshooting
         if not stage_id:
             return {
                 "success": False,
@@ -115,16 +115,19 @@ def get_education_stage_by_id():
                 "debug": {
                     "request_method": frappe.request.method,
                     "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:200] + "..." if frappe.request.data else None,
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
                     "request_data_type": type(frappe.request.data).__name__,
                     "has_json_attr": hasattr(frappe.request, 'json'),
-                    "json_content": frappe.request.json if hasattr(frappe.request, 'json') and frappe.request.json else None
+                    "json_content": frappe.request.json if hasattr(frappe.request, 'json') and frappe.request.json else None,
+                    "stage_id_value": repr(stage_id),
+                    "stage_id_type": type(stage_id).__name__
                 }
             }
-            return {
-                "success": False,
-                "message": "Stage ID is required"
-            }
+
+        # If stage_id is found, also include debug info
+        print(f"=== SUCCESS DEBUG ===")
+        print(f"Found stage_id: {stage_id}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
 
         stage = frappe.get_doc("SIS Education Stage", stage_id)
 
@@ -216,17 +219,66 @@ def create_education_stage():
 def update_education_stage():
     """Update an existing education stage"""
     try:
-        # Get stage_id from form data
+        # Debug: Print all available request data
+        print("=== DEBUG update_education_stage ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Request args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+        print(f"Request data type: {type(frappe.request.data)}")
+
+        # Get stage_id from multiple sources (form data or JSON)
+        stage_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
         stage_id = frappe.form_dict.get('stage_id')
+        print(f"Stage ID from form_dict: {stage_id}")
+
+        # If not found, try from JSON payload
+        if not stage_id and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                stage_id = json_data.get('stage_id')
+                print(f"Stage ID from JSON payload: {stage_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final extracted stage_id: {stage_id}")
 
         if not stage_id:
             return {
                 "success": False,
-                "message": "Stage ID is required"
+                "message": "Stage ID is required",
+                "debug": {
+                    "request_method": frappe.request.method,
+                    "content_type": frappe.request.headers.get('Content-Type'),
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
+                    "stage_id_value": repr(stage_id),
+                    "stage_id_type": type(stage_id).__name__
+                }
             }
 
-        # Get data from request
-        data = frappe.local.form_dict
+        # Get data from request (support both form data and JSON)
+        data = {}
+
+        # Start with form_dict data
+        if frappe.local.form_dict:
+            data.update(dict(frappe.local.form_dict))
+
+        # If JSON payload exists, merge it (JSON takes precedence)
+        if frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                data.update(json_data)
+                print(f"Merged JSON data: {json_data}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON data merge failed: {e}")
+
+        print(f"Final data to update: {data}")
 
         # Get existing stage
         stage_doc = frappe.get_doc("SIS Education Stage", stage_id)
@@ -284,13 +336,41 @@ def update_education_stage():
 def delete_education_stage():
     """Delete an education stage"""
     try:
-        # Get stage_id from form data
+        # Debug: Print request data
+        print("=== DEBUG delete_education_stage ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get stage_id from multiple sources (form data or JSON)
+        stage_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
         stage_id = frappe.form_dict.get('stage_id')
+        print(f"Stage ID from form_dict: {stage_id}")
+
+        # If not found, try from JSON payload
+        if not stage_id and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                stage_id = json_data.get('stage_id')
+                print(f"Stage ID from JSON payload: {stage_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final extracted stage_id: {stage_id}")
 
         if not stage_id:
             return {
                 "success": False,
-                "message": "Stage ID is required"
+                "message": "Stage ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
+                    "stage_id_value": repr(stage_id)
+                }
             }
 
         # Check if stage exists
