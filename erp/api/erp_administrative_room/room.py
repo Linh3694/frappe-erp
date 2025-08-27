@@ -12,12 +12,6 @@ from erp.utils.campus_utils import get_current_campus_from_context
 def get_all_rooms():
     """Get all rooms with basic information"""
     try:
-        # Get current user's campus information from roles
-        campus_id = get_current_campus_from_context()
-
-        if not campus_id:
-            campus_id = "campus-1"
-
         rooms = frappe.get_all(
             "ERP Administrative Room",
             fields=[
@@ -33,7 +27,6 @@ def get_all_rooms():
                 "created_at",
                 "updated_at"
             ],
-            filters={"campus_id": campus_id},
             order_by="room_name asc"
         )
 
@@ -80,18 +73,11 @@ def get_room_by_id(room_id=None):
                 "message": "Room ID is required"
             }
 
-        # Get current user's campus
-        campus_id = get_current_campus_from_context()
-
-        if not campus_id:
-            campus_id = "campus-1"
-
-        # Get room with campus filter
+        # Get room by ID
         rooms = frappe.get_all(
             "ERP Administrative Room",
             filters={
-                "name": room_id,
-                "campus_id": campus_id
+                "name": room_id
             },
             fields=[
                 "name", "room_name", "room_name_en", "short_title",
@@ -419,12 +405,6 @@ def create_room():
         if not title_vn or not room_type:
             frappe.throw(_("Title VN and room type are required"))
 
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
-
-        if not campus_id:
-            campus_id = "campus-1"
-
         # Create new room document directly
         room_doc = frappe.get_doc({
             "doctype": "ERP Administrative Room",
@@ -436,7 +416,6 @@ def create_room():
             "periods_per_day": 10,
             "is_homeroom": 0,
             "building_id": building_id,
-            "campus_id": campus_id,
             "description": f"{short_title} - Room created via frontend" if short_title else ""
         })
 
