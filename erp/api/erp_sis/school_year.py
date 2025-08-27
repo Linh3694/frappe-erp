@@ -41,8 +41,10 @@ def get_all_school_years():
         
         return {
             "success": True,
-            "data": school_years,
-            "total_count": len(school_years),
+            "data": {
+                "school_years": school_years,
+                "total_count": len(school_years)
+            },
             "message": "School years fetched successfully"
         }
         
@@ -50,8 +52,10 @@ def get_all_school_years():
         frappe.log_error(f"Error fetching school years: {str(e)}")
         return {
             "success": False,
-            "data": [],
-            "total_count": 0,
+            "data": {
+                "school_years": [],
+                "total_count": 0
+            },
             "message": f"Error fetching school years: {str(e)}"
         }
 
@@ -81,22 +85,26 @@ def get_school_year_by_id(school_year_id):
         school_year = frappe.get_doc("SIS School Year", filters)
         
         if not school_year:
-            return {
-                "success": False,
-                "data": {},
-                "message": "School year not found or access denied"
-            }
+                    return {
+            "success": False,
+            "data": {
+                "school_year": {}
+            },
+            "message": "School year not found or access denied"
+        }
         
         return {
             "success": True,
             "data": {
-                "name": school_year.name,
-                "title_vn": school_year.title_vn,
-                "title_en": school_year.title_en,
-                "start_date": school_year.start_date,
-                "end_date": school_year.end_date,
-                "is_enable": school_year.is_enable,
-                "campus_id": school_year.campus_id
+                "school_year": {
+                    "name": school_year.name,
+                    "title_vn": school_year.title_vn,
+                    "title_en": school_year.title_en,
+                    "start_date": str(school_year.start_date),
+                    "end_date": str(school_year.end_date),
+                    "is_enable": school_year.is_enable,
+                    "campus_id": school_year.campus_id
+                }
             },
             "message": "School year fetched successfully"
         }
@@ -105,7 +113,9 @@ def get_school_year_by_id(school_year_id):
         frappe.log_error(f"Error fetching school year {school_year_id}: {str(e)}")
         return {
             "success": False,
-            "data": {},
+            "data": {
+                "school_year": {}
+            },
             "message": f"Error fetching school year: {str(e)}"
         }
 
@@ -221,15 +231,18 @@ def create_school_year():
             raise doc_error
         
         # Return the created data - follow Education Stage pattern
-        frappe.msgprint(_("School year created successfully"))
         return {
-            "name": school_year_doc.name,
-            "title_vn": school_year_doc.title_vn,
-            "title_en": school_year_doc.title_en,
-            "start_date": str(school_year_doc.start_date),
-            "end_date": str(school_year_doc.end_date),
-            "is_enable": school_year_doc.is_enable,
-            "campus_id": school_year_doc.campus_id
+            "success": True,
+            "data": {
+                "name": school_year_doc.name,
+                "title_vn": school_year_doc.title_vn,
+                "title_en": school_year_doc.title_en,
+                "start_date": str(school_year_doc.start_date),
+                "end_date": str(school_year_doc.end_date),
+                "is_enable": school_year_doc.is_enable,
+                "campus_id": school_year_doc.campus_id
+            },
+            "message": "School year created successfully"
         }
         
     except Exception as e:
@@ -238,42 +251,66 @@ def create_school_year():
 
 
 @frappe.whitelist(allow_guest=False)
-def update_school_year(school_year_id, title_vn=None, title_en=None, start_date=None, end_date=None, is_enable=None):
-    """Update an existing school year"""
+def update_school_year():
+    """Update an existing school year - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+
+        school_year_id = data.get('school_year_id')
         if not school_year_id:
             return {
                 "success": False,
-                "data": {},
+                "data": {
+                    "school_year": {}
+                },
                 "message": "School Year ID is required"
             }
-        
+
         # Get campus from user context
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
             campus_id = "campus-1"
-        
+
         # Get existing document
         try:
             school_year_doc = frappe.get_doc("SIS School Year", school_year_id)
-            
+
             # Check campus permission
             if school_year_doc.campus_id != campus_id:
                 return {
                     "success": False,
-                    "data": {},
+                    "data": {
+                        "school_year": {}
+                    },
                     "message": "Access denied: You don't have permission to modify this school year"
                 }
-                
+
         except frappe.DoesNotExistError:
             return {
                 "success": False,
-                "data": {},
+                "data": {
+                    "school_year": {}
+                },
                 "message": "School year not found"
             }
-        
+
         # Update fields if provided
+        title_vn = data.get('title_vn')
         if title_vn and title_vn != school_year_doc.title_vn:
             # Check for duplicate school year title
             existing = frappe.db.exists(
@@ -287,14 +324,18 @@ def update_school_year(school_year_id, title_vn=None, title_en=None, start_date=
             if existing:
                 return {
                     "success": False,
-                    "data": {},
+                    "data": {
+                        "school_year": {}
+                    },
                     "message": f"School year with title '{title_vn}' already exists"
                 }
             school_year_doc.title_vn = title_vn
-        
-        if title_en and title_en != school_year_doc.title_en:
+
+        title_en = data.get('title_en')
+        if title_en is not None and title_en != school_year_doc.title_en:
             school_year_doc.title_en = title_en
-            
+
+        start_date = data.get('start_date')
         if start_date and str(start_date) != str(school_year_doc.start_date):
             try:
                 start_date = getdate(start_date)
@@ -302,10 +343,13 @@ def update_school_year(school_year_id, title_vn=None, title_en=None, start_date=
             except Exception:
                 return {
                     "success": False,
-                    "data": {},
+                    "data": {
+                        "school_year": {}
+                    },
                     "message": "Invalid start date format"
                 }
-                
+
+        end_date = data.get('end_date')
         if end_date and str(end_date) != str(school_year_doc.end_date):
             try:
                 end_date = getdate(end_date)
@@ -313,7 +357,9 @@ def update_school_year(school_year_id, title_vn=None, title_en=None, start_date=
             except Exception:
                 return {
                     "success": False,
-                    "data": {},
+                    "data": {
+                        "school_year": {}
+                    },
                     "message": "Invalid end date format"
                 }
                 
@@ -321,26 +367,31 @@ def update_school_year(school_year_id, title_vn=None, title_en=None, start_date=
         if school_year_doc.start_date >= school_year_doc.end_date:
             return {
                 "success": False,
-                "data": {},
+                "data": {
+                    "school_year": {}
+                },
                 "message": "Start date must be before end date"
             }
-            
+
+        is_enable = data.get('is_enable')
         if is_enable is not None:
             school_year_doc.is_enable = int(is_enable)
-        
+
         school_year_doc.save()
         frappe.db.commit()
-        
+
         return {
             "success": True,
             "data": {
-                "name": school_year_doc.name,
-                "title_vn": school_year_doc.title_vn,
-                "title_en": school_year_doc.title_en,
-                "start_date": str(school_year_doc.start_date),
-                "end_date": str(school_year_doc.end_date),
-                "is_enable": school_year_doc.is_enable,
-                "campus_id": school_year_doc.campus_id
+                "school_year": {
+                    "name": school_year_doc.name,
+                    "title_vn": school_year_doc.title_vn,
+                    "title_en": school_year_doc.title_en,
+                    "start_date": str(school_year_doc.start_date),
+                    "end_date": str(school_year_doc.end_date),
+                    "is_enable": school_year_doc.is_enable,
+                    "campus_id": school_year_doc.campus_id
+                }
             },
             "message": "School year updated successfully"
         }
@@ -349,32 +400,51 @@ def update_school_year(school_year_id, title_vn=None, title_en=None, start_date=
         frappe.log_error(f"Error updating school year {school_year_id}: {str(e)}")
         return {
             "success": False,
-            "data": {},
+            "data": {
+                "school_year": {}
+            },
             "message": f"Error updating school year: {str(e)}"
         }
 
 
-@frappe.whitelist(allow_guest=False) 
-def delete_school_year(school_year_id):
-    """Delete a school year"""
+@frappe.whitelist(allow_guest=False)
+def delete_school_year():
+    """Delete a school year - SIMPLE VERSION"""
     try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+
+        school_year_id = data.get('school_year_id')
         if not school_year_id:
             return {
                 "success": False,
                 "data": {},
                 "message": "School Year ID is required"
             }
-        
+
         # Get campus from user context
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
             campus_id = "campus-1"
-        
+
         # Get existing document
         try:
             school_year_doc = frappe.get_doc("SIS School Year", school_year_id)
-            
+
             # Check campus permission
             if school_year_doc.campus_id != campus_id:
                 return {
@@ -382,18 +452,18 @@ def delete_school_year(school_year_id):
                     "data": {},
                     "message": "Access denied: You don't have permission to delete this school year"
                 }
-                
+
         except frappe.DoesNotExistError:
             return {
                 "success": False,
                 "data": {},
                 "message": "School year not found"
             }
-        
+
         # Delete the document
         frappe.delete_doc("SIS School Year", school_year_id)
         frappe.db.commit()
-        
+
         return {
             "success": True,
             "data": {},
