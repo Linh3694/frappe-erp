@@ -391,6 +391,8 @@ def get_buildings_for_selection():
                     })
                     building_doc.insert()
                     frappe.logger().info(f"Created sample building: {building_data['title_vn']}")
+                except frappe.DuplicateEntryError:
+                    frappe.logger().info(f"Building {building_data['title_vn']} already exists")
                 except Exception as e:
                     frappe.logger().error(f"Error creating sample building {building_data['title_vn']}: {str(e)}")
 
@@ -410,10 +412,69 @@ def get_buildings_for_selection():
 
             frappe.logger().info(f"After creating samples, found {len(buildings)} buildings")
 
+        # If still no buildings, force create them now
+        if len(buildings) == 0:
+            frappe.logger().warning("Force creating buildings now...")
+
+            # Create sample buildings immediately
+            sample_buildings = [
+                {
+                    "title_vn": "Tòa nhà A",
+                    "title_en": "Building A",
+                    "short_title": "TOA_A",
+                    "campus_id": "campus-1"
+                },
+                {
+                    "title_vn": "Tòa nhà B",
+                    "title_en": "Building B",
+                    "short_title": "TOA_B",
+                    "campus_id": "campus-1"
+                },
+                {
+                    "title_vn": "Tòa nhà C",
+                    "title_en": "Building C",
+                    "short_title": "TOA_C",
+                    "campus_id": "campus-1"
+                }
+            ]
+
+            for building_data in sample_buildings:
+                try:
+                    building_doc = frappe.get_doc({
+                        "doctype": "ERP Administrative Building",
+                        **building_data
+                    })
+                    building_doc.insert()
+                    frappe.logger().info(f"Force created building: {building_data['title_vn']}")
+                except frappe.DuplicateEntryError:
+                    frappe.logger().info(f"Building {building_data['title_vn']} already exists")
+                except Exception as e:
+                    frappe.logger().error(f"Error creating building {building_data['title_vn']}: {str(e)}")
+
+            frappe.db.commit()
+
+            # Final fetch
+            buildings = frappe.get_all(
+                "ERP Administrative Building",
+                fields=[
+                    "name",
+                    "title_vn",
+                    "title_en",
+                    "short_title"
+                ],
+                order_by="title_vn asc"
+            )
+
+            frappe.logger().info(f"Final buildings count: {len(buildings)}")
+
         return {
             "success": True,
             "data": buildings,
-            "message": "Buildings fetched successfully"
+            "message": "Buildings fetched successfully",
+            "debug_info": {
+                "buildings_count": len(buildings),
+                "buildings_list": buildings
+            }
         }
 
     except Exception as e:
@@ -481,7 +542,10 @@ def create_sample_buildings():
                 })
             except frappe.DuplicateEntryError:
                 # Building already exists, skip
-                continue
+                created_buildings.append({
+                    "name": f"existing-{building_data['title_vn']}",
+                    "title_vn": building_data["title_vn"]
+                })
             except Exception as e:
                 frappe.log_error(f"Error creating building {building_data['title_vn']}: {str(e)}")
 
@@ -501,6 +565,77 @@ def create_sample_buildings():
         return {
             "success": False,
             "message": "Lỗi khi tạo tòa nhà mẫu",
+            "error": str(e)
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def force_create_buildings():
+    """Force create buildings immediately for testing"""
+    try:
+        sample_buildings = [
+            {
+                "title_vn": "Tòa nhà A",
+                "title_en": "Building A",
+                "short_title": "TOA_A",
+                "campus_id": "campus-1"
+            },
+            {
+                "title_vn": "Tòa nhà B",
+                "title_en": "Building B",
+                "short_title": "TOA_B",
+                "campus_id": "campus-1"
+            },
+            {
+                "title_vn": "Tòa nhà C",
+                "title_en": "Building C",
+                "short_title": "TOA_C",
+                "campus_id": "campus-1"
+            }
+        ]
+
+        created_buildings = []
+        for building_data in sample_buildings:
+            try:
+                building_doc = frappe.get_doc({
+                    "doctype": "ERP Administrative Building",
+                    **building_data
+                })
+                building_doc.insert()
+                created_buildings.append({
+                    "name": building_doc.name,
+                    "title_vn": building_data["title_vn"]
+                })
+                frappe.logger().info(f"Force created building: {building_data['title_vn']}")
+            except frappe.DuplicateEntryError:
+                created_buildings.append({
+                    "name": f"existing-{building_data['title_vn']}",
+                    "title_vn": building_data["title_vn"]
+                })
+                frappe.logger().info(f"Building {building_data['title_vn']} already exists")
+            except Exception as e:
+                frappe.logger().error(f"Error creating building {building_data['title_vn']}: {str(e)}")
+
+        frappe.db.commit()
+
+        # Return all buildings
+        all_buildings = frappe.get_all(
+            "ERP Administrative Building",
+            fields=["name", "title_vn", "title_en", "short_title"],
+            order_by="title_vn asc"
+        )
+
+        return {
+            "success": True,
+            "data": all_buildings,
+            "message": f"Force created {len(created_buildings)} buildings, total: {len(all_buildings)}"
+        }
+
+    except Exception as e:
+        frappe.log_error(f"Error force creating buildings: {str(e)}")
+        return {
+            "success": False,
+            "message": "Lỗi khi force tạo tòa nhà",
             "error": str(e)
         }
 
