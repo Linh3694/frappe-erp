@@ -47,16 +47,59 @@ def get_all_rooms():
 
 
 @frappe.whitelist()
-def get_room_by_id(room_id):
-    """Get room details by ID"""
+def get_room_by_id(room_id=None):
+    """Get room details by ID - SIMPLE VERSION with JSON payload support"""
     try:
+        # Get room_id from parameter or from JSON payload
+        if not room_id:
+            # Try to get from JSON payload
+            if frappe.request.data:
+                try:
+                    json_data = json.loads(frappe.request.data)
+                    if json_data and 'room_id' in json_data:
+                        room_id = json_data['room_id']
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Fallback to form_dict
+            if not room_id:
+                room_id = frappe.local.form_dict.get('room_id')
+
         if not room_id:
             return {
                 "success": False,
+                "data": {},
                 "message": "Room ID is required"
             }
-        
-        room = frappe.get_doc("ERP Administrative Room", room_id)
+
+        # Get current user's campus
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
+        # Get room with campus filter
+        rooms = frappe.get_all(
+            "ERP Administrative Room",
+            filters={
+                "name": room_id,
+                "campus_id": campus_id
+            },
+            fields=[
+                "name", "room_name", "room_name_en", "short_title",
+                "room_type", "capacity", "periods_per_day", "is_homeroom",
+                "building_id", "description", "created_at", "updated_at"
+            ]
+        )
+
+        if not rooms:
+            return {
+                "success": False,
+                "data": {},
+                "message": "Room not found"
+            }
+
+        room = rooms[0]
         
         return {
             "success": True,
