@@ -44,7 +44,6 @@ def get_all_education_stages():
         }
         
     except Exception as e:
-        frappe.log_error(f"Error fetching education stages: {str(e)}")
         return {
             "success": False,
             "data": [],
@@ -110,7 +109,6 @@ def get_education_stage_by_id():
             "message": "Education stage not found"
         }
     except Exception as e:
-        frappe.log_error(f"Error fetching education stage {stage_id}: {str(e)}")
         return {
             "success": False,
             "message": "Error fetching education stage",
@@ -234,7 +232,6 @@ def update_education_stage():
             "message": "Education stage not found"
         }
     except Exception as e:
-        frappe.log_error(f"Error updating education stage {stage_id}: {str(e)}")
         return {
             "success": False,
             "message": "Error updating education stage",
@@ -281,7 +278,6 @@ def delete_education_stage():
             "message": "Education stage not found"
         }
     except Exception as e:
-        frappe.log_error(f"Error deleting education stage {stage_id}: {str(e)}")
         return {
             "success": False,
             "message": "Error deleting education stage",
@@ -333,7 +329,6 @@ def check_short_title_availability():
         }
         
     except Exception as e:
-        frappe.log_error(f"Error checking short title availability: {str(e)}")
         return {
             "success": False,
             "message": "Error checking short title availability",
