@@ -324,6 +324,12 @@ def update_academic_program():
             }
         
         # Update fields if provided
+        title_vn = data.get('title_vn')
+        title_en = data.get('title_en')
+        short_title = data.get('short_title')
+
+        print(f"Updating with: title_vn={title_vn}, title_en={title_en}, short_title={short_title}")
+
         if title_vn and title_vn != academic_program_doc.title_vn:
             # Check for duplicate program title
             existing = frappe.db.exists(
@@ -341,10 +347,10 @@ def update_academic_program():
                     "message": f"Academic program with title '{title_vn}' already exists"
                 }
             academic_program_doc.title_vn = title_vn
-        
+
         if title_en and title_en != academic_program_doc.title_en:
             academic_program_doc.title_en = title_en
-            
+
         if short_title and short_title != academic_program_doc.short_title:
             # Check for duplicate short title
             existing_code = frappe.db.exists(
@@ -387,15 +393,43 @@ def update_academic_program():
         }
 
 
-@frappe.whitelist(allow_guest=False) 
-def delete_academic_program(program_id):
+@frappe.whitelist(allow_guest=False)
+def delete_academic_program():
     """Delete an academic program"""
     try:
+        # Debug: Print request data
+        print("=== DEBUG delete_academic_program ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get program_id from multiple sources (form data or JSON payload)
+        program_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        program_id = frappe.form_dict.get('program_id')
+        print(f"Program ID from form_dict: {program_id}")
+
+        # If not found, try from JSON payload
+        if not program_id and frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                program_id = json_data.get('program_id')
+                print(f"Program ID from JSON payload: {program_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final program_id: {repr(program_id)}")
+
         if not program_id:
             return {
                 "success": False,
-                "data": {},
-                "message": "Program ID is required"
+                "message": "Program ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
+                }
             }
         
         # Get campus from user context
@@ -443,15 +477,45 @@ def delete_academic_program(program_id):
 
 
 @frappe.whitelist(allow_guest=False)
-def check_short_title_availability(short_title, program_id=None):
+def check_short_title_availability():
     """Check if short title is available"""
     try:
+        # Debug: Print request data
+        print("=== DEBUG check_short_title_availability ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get parameters from multiple sources (form data or JSON payload)
+        short_title = None
+        program_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        short_title = frappe.form_dict.get('short_title')
+        program_id = frappe.form_dict.get('program_id')
+        print(f"Parameters from form_dict: short_title={short_title}, program_id={program_id}")
+
+        # If not found, try from JSON payload
+        if not short_title and frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                short_title = json_data.get('short_title')
+                program_id = json_data.get('program_id')
+                print(f"Parameters from JSON payload: short_title={short_title}, program_id={program_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
         if not short_title:
             return {
                 "success": False,
                 "is_available": False,
                 "short_title": short_title,
-                "message": "Short title is required"
+                "message": "Short title is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
+                }
             }
         
         # Get campus from user context  
