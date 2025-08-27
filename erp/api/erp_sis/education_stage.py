@@ -58,26 +58,39 @@ def get_all_education_stages():
 def get_education_stage_by_id():
     """Get education stage details by ID"""
     try:
+        frappe.logger().info(f"Request method: {frappe.request.method}")
+        frappe.logger().info(f"Form dict: {dict(frappe.form_dict)}")
+        frappe.logger().info(f"Request data: {frappe.request.data}")
+        frappe.logger().info(f"Request data type: {type(frappe.request.data)}")
+
         # Get stage_id from form data first
         stage_id = frappe.form_dict.get('stage_id')
+        frappe.logger().info(f"Stage ID from form_dict: {stage_id}")
 
-        # If not found in form data, try to parse JSON from request data
-        if not stage_id and frappe.request.data:
+        # Try to get from JSON if not found in form data
+        if not stage_id:
             try:
-                import json
-                if isinstance(frappe.request.data, str):
-                    json_data = json.loads(frappe.request.data)
-                else:
-                    json_data = frappe.request.data
+                # Try frappe.request.json first (for JSON requests)
+                if hasattr(frappe.request, 'json') and frappe.request.json:
+                    stage_id = frappe.request.json.get('stage_id')
+                    frappe.logger().info(f"Stage ID from request.json: {stage_id}")
+                elif frappe.request.data:
+                    import json
+                    if isinstance(frappe.request.data, str):
+                        json_data = json.loads(frappe.request.data)
+                        frappe.logger().info(f"Parsed JSON data: {json_data}")
+                    else:
+                        json_data = frappe.request.data
+                        frappe.logger().info(f"Request data object: {json_data}")
 
-                if isinstance(json_data, dict):
-                    stage_id = json_data.get('stage_id')
-                elif hasattr(json_data, 'get'):
-                    stage_id = json_data.get('stage_id')
+                    if isinstance(json_data, dict):
+                        stage_id = json_data.get('stage_id')
+                    elif hasattr(json_data, 'get'):
+                        stage_id = json_data.get('stage_id')
             except (json.JSONDecodeError, TypeError, AttributeError) as e:
                 frappe.logger().warning(f"Could not parse request data for stage_id: {str(e)}")
 
-        frappe.logger().info(f"Looking for education stage with ID: {stage_id}")
+        frappe.logger().info(f"Final stage_id: {stage_id}")
 
         if not stage_id:
             return {
