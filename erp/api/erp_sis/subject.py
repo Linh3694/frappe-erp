@@ -67,14 +67,42 @@ def get_all_subjects():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_subject_by_id(subject_id):
+def get_subject_by_id():
     """Get a specific subject by ID"""
     try:
+        # Debug: Print all request data
+        print("=== DEBUG get_subject_by_id ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get subject_id from multiple sources (form data or JSON payload)
+        subject_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        subject_id = frappe.form_dict.get('subject_id')
+        print(f"Subject ID from form_dict: {subject_id}")
+
+        # If not found, try from JSON payload
+        if not subject_id and frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                subject_id = json_data.get('subject_id')
+                print(f"Subject ID from JSON payload: {subject_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final subject_id: {repr(subject_id)}")
+
         if not subject_id:
             return {
                 "success": False,
-                "data": {},
-                "message": "Subject ID is required"
+                "message": "Subject ID is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
+                }
             }
         
         # Get current user's campus
