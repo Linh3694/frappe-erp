@@ -429,6 +429,7 @@ def update_subject():
         room_id = data.get('room_id')
 
         print(f"Updating with: title={title}, education_stage={education_stage}, timetable_subject_id={timetable_subject_id}, actual_subject_id={actual_subject_id}, room_id={room_id}")
+        print(f"Request data keys: {list(data.keys())}")
 
         if title and title != subject_doc.title:
             # Check for duplicate subject title
@@ -466,13 +467,18 @@ def update_subject():
                 }
             subject_doc.education_stage = education_stage
             
-        if timetable_subject_id is not None and timetable_subject_id != subject_doc.timetable_subject_id:
+        # Update optional fields only if they are explicitly provided in the request
+        # This handles the case where user selects "none" - field will be in request as None
+        if 'timetable_subject_id' in data and timetable_subject_id != subject_doc.timetable_subject_id:
+            print(f"Updating timetable_subject_id: {subject_doc.timetable_subject_id} -> {timetable_subject_id}")
             subject_doc.timetable_subject_id = timetable_subject_id
-            
-        if actual_subject_id is not None and actual_subject_id != subject_doc.actual_subject_id:
+
+        if 'actual_subject_id' in data and actual_subject_id != subject_doc.actual_subject_id:
+            print(f"Updating actual_subject_id: {subject_doc.actual_subject_id} -> {actual_subject_id}")
             subject_doc.actual_subject_id = actual_subject_id
-            
-        if room_id is not None and room_id != subject_doc.room_id:
+
+        if 'room_id' in data and room_id != subject_doc.room_id:
+            print(f"Updating room_id: {subject_doc.room_id} -> {room_id}")
             subject_doc.room_id = room_id
         
         subject_doc.save()
