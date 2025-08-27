@@ -313,23 +313,9 @@ def delete_building(building_id):
                 "message": "Building ID is required"
             }
         
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            campus_id = "campus-1"
-        
         # Get existing document
         try:
             building_doc = frappe.get_doc("ERP Administrative Building", building_id)
-            
-            # Check campus permission
-            if building_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this building"
-                }
                 
         except frappe.DoesNotExistError:
             return {
