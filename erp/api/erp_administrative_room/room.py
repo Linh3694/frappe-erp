@@ -5,7 +5,6 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, nowdate
 import json
-from erp.utils.campus_utils import get_current_campus_from_context
 
 
 @frappe.whitelist()
@@ -494,16 +493,6 @@ def update_room():
         try:
             room_doc = frappe.get_doc("ERP Administrative Room", room_id)
 
-            # Check campus permission
-            if room_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {
-                        "room": {}
-                    },
-                    "message": "Access denied: You don't have permission to modify this room"
-                }
-
         except frappe.DoesNotExistError:
             return {
                 "success": False,
@@ -598,23 +587,9 @@ def delete_room():
                 "message": "Room ID is required"
             }
 
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
-
-        if not campus_id:
-            campus_id = "campus-1"
-
         # Get existing document
         try:
             room_doc = frappe.get_doc("ERP Administrative Room", room_id)
-
-            # Check campus permission
-            if room_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this room"
-                }
 
         except frappe.DoesNotExistError:
             return {

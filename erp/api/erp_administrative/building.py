@@ -5,23 +5,12 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
-from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 
 
 @frappe.whitelist(allow_guest=False)
 def get_all_buildings():
     """Get all buildings with basic information - SIMPLE VERSION"""
     try:
-        # Get current user's campus information from roles
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
-        filters = {"campus_id": campus_id}
-            
         buildings = frappe.get_all(
             "ERP Administrative Building",
             fields=[
@@ -33,7 +22,6 @@ def get_all_buildings():
                 "creation",
                 "modified"
             ],
-            filters=filters,
             order_by="title_vn asc"
         )
         
@@ -80,20 +68,11 @@ def get_building_by_id(building_id=None):
                 "message": "Building ID is required"
             }
         
-        # Get current user's campus
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            campus_id = "campus-1"
-            
-        filters = {
-            "name": building_id,
-            "campus_id": campus_id
-        }
-        
         buildings = frappe.get_all(
             "ERP Administrative Building",
-            filters=filters,
+            filters={
+                "name": building_id
+            },
             fields=[
                 "name", "title_vn", "title_en", "short_title",
                 "campus_id", "creation", "modified"
@@ -176,35 +155,26 @@ def create_building():
                 "message": "Title VN and short title are required"
             }
         
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
-        # Check if building title already exists for this campus
+        # Check if building title already exists
         existing = frappe.db.exists(
             "ERP Administrative Building",
             {
-                "title_vn": title_vn,
-                "campus_id": campus_id
+                "title_vn": title_vn
             }
         )
-        
+
         if existing:
             return {
                 "success": False,
                 "data": {},
                 "message": f"Building with title '{title_vn}' already exists"
             }
-            
-        # Check if short title already exists for this campus
+
+        # Check if short title already exists
         existing_code = frappe.db.exists(
             "ERP Administrative Building",
             {
-                "short_title": short_title,
-                "campus_id": campus_id
+                "short_title": short_title
             }
         )
         
@@ -221,7 +191,7 @@ def create_building():
             "title_vn": title_vn,
             "title_en": title_en,
             "short_title": short_title,
-            "campus_id": campus_id
+            "campus_id": "campus-1"  # Default campus
         })
         
         building_doc.insert()
@@ -257,23 +227,9 @@ def update_building(building_id, title_vn=None, title_en=None, short_title=None)
                 "message": "Building ID is required"
             }
         
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            campus_id = "campus-1"
-        
         # Get existing document
         try:
             building_doc = frappe.get_doc("ERP Administrative Building", building_id)
-            
-            # Check campus permission
-            if building_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to modify this building"
-                }
                 
         except frappe.DoesNotExistError:
             return {
@@ -405,14 +361,6 @@ def delete_building(building_id):
 def get_buildings_for_selection():
     """Get buildings for dropdown selection - SIMPLE VERSION"""
     try:
-        # Get current user's campus information from roles
-        campus_id = get_current_campus_from_context()
-
-        if not campus_id:
-            campus_id = "campus-1"
-
-        filters = {"campus_id": campus_id}
-
         buildings = frappe.get_all(
             "ERP Administrative Building",
             fields=[
@@ -421,7 +369,6 @@ def get_buildings_for_selection():
                 "title_en",
                 "short_title"
             ],
-            filters=filters,
             order_by="title_vn asc"
         )
 
