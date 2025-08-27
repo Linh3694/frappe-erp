@@ -125,6 +125,11 @@ def get_education_grade_by_id():
 
         # Convert to dict with consistent field names (same as get_all_education_grades)
         grade_dict = grade.as_dict()
+        print(f"=== DEBUG grade_dict ===")
+        print(f"grade_dict: {grade_dict}")
+        print(f"grade_dict.title_vn: {grade_dict.get('title_vn')}")
+        print(f"grade_dict.education_stage_id: {grade_dict.get('education_stage_id')}")
+
         grade_data = {
             "name": grade_dict.get("name"),
             "grade_name": grade_dict.get("title_vn"),  # Use consistent field name
@@ -136,6 +141,9 @@ def get_education_grade_by_id():
             "creation": grade_dict.get("creation"),
             "modified": grade_dict.get("modified")
         }
+
+        print(f"=== DEBUG grade_data ===")
+        print(f"grade_data: {grade_data}")
 
         return {
             "success": True,
