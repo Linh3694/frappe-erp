@@ -66,13 +66,26 @@ def get_education_grade_by_id():
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Query string: {frappe.request.query_string}")
         print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request args: {getattr(frappe.request, 'args', 'No args')}")
+        print(f"Request data: {frappe.request.data}")
 
-        # Get grade_id from multiple sources
+        # Get grade_id from multiple sources (form data or JSON payload)
+        grade_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
         grade_id = frappe.form_dict.get('grade_id')
         print(f"Grade ID from form_dict: {grade_id}")
 
-        # Also try from request.args if available
+        # If not found, try from JSON payload
+        if not grade_id and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                grade_id = json_data.get('grade_id')
+                print(f"Grade ID from JSON payload: {grade_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
+
+        # Also try from request.args if available (for GET requests)
         if not grade_id and hasattr(frappe.request, 'args'):
             grade_id = frappe.request.args.get('grade_id')
             print(f"Grade ID from request.args: {grade_id}")
@@ -96,6 +109,7 @@ def get_education_grade_by_id():
                 "debug": {
                     "form_dict": dict(frappe.form_dict),
                     "query_string": str(frappe.request.query_string),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
                     "request_args": str(getattr(frappe.request, 'args', {})),
                     "grade_id_type": type(grade_id).__name__
                 }
@@ -424,14 +438,41 @@ def delete_education_grade():
 def check_grade_code_availability():
     """Check if a grade code is available for the current campus"""
     try:
-        # Get parameters from form_dict (query parameters)
+        # Debug: Print request data
+        print("=== DEBUG check_grade_code_availability ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+
+        # Get parameters from multiple sources (form data or JSON payload)
+        grade_code = None
+        grade_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
         grade_code = frappe.form_dict.get('grade_code')
         grade_id = frappe.form_dict.get('grade_id')
+        print(f"Parameters from form_dict: grade_code={grade_code}, grade_id={grade_id}")
+
+        # If not found, try from JSON payload
+        if not grade_code and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                grade_code = json_data.get('grade_code')
+                grade_id = json_data.get('grade_id')
+                print(f"Parameters from JSON payload: grade_code={grade_code}, grade_id={grade_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                print(f"JSON parsing failed: {e}")
 
         if not grade_code:
             return {
                 "success": False,
-                "message": "Grade code is required"
+                "message": "Grade code is required",
+                "debug": {
+                    "form_dict": dict(frappe.form_dict),
+                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
+                }
             }
         
         # Get current user's campus from roles
