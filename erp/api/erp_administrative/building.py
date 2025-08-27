@@ -245,7 +245,6 @@ def update_building(building_id, title_vn=None, title_en=None, short_title=None)
                 "ERP Administrative Building",
                 {
                     "title_vn": title_vn,
-                    "campus_id": campus_id,
                     "name": ["!=", building_id]
                 }
             )
@@ -266,7 +265,6 @@ def update_building(building_id, title_vn=None, title_en=None, short_title=None)
                 "ERP Administrative Building",
                 {
                     "short_title": short_title,
-                    "campus_id": campus_id,
                     "name": ["!=", building_id]
                 }
             )
@@ -385,15 +383,8 @@ def check_short_title_availability(short_title, building_id=None):
                 "message": "Short title is required"
             }
         
-        # Get campus from user context  
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            campus_id = "campus-1"
-        
         filters = {
-            "short_title": short_title,
-            "campus_id": campus_id
+            "short_title": short_title
         }
         
         # If updating existing building, exclude it from check
@@ -449,23 +440,9 @@ def update_building():
                 "message": "Building ID is required"
             }
 
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
-
-        if not campus_id:
-            campus_id = "campus-1"
-
         # Get existing document
         try:
             building_doc = frappe.get_doc("ERP Administrative Building", building_id)
-
-            # Check campus permission
-            if building_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to modify this building"
-                }
 
         except frappe.DoesNotExistError:
             return {
