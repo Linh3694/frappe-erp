@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, nowdate
 import json
+from erp.utils.campus_utils import get_current_campus_from_context
 
 
 @frappe.whitelist()
@@ -35,32 +36,6 @@ def get_all_rooms():
             filters={"campus_id": campus_id},
             order_by="room_name asc"
         )
-
-        frappe.logger().info(f"Rooms found for campus {campus_id}: {len(rooms)}")
-
-        # If no rooms found for the campus, try to get all rooms (for testing)
-        if len(rooms) == 0:
-            frappe.logger().info("No rooms found for campus, trying to get all rooms...")
-            all_rooms = frappe.get_all(
-                "ERP Administrative Room",
-                fields=[
-                    "name",
-                    "room_name",
-                    "room_name_en",
-                    "room_type",
-                    "capacity",
-                    "periods_per_day",
-                    "is_homeroom",
-                    "building_id",
-                    "description",
-                    "created_at",
-                    "updated_at"
-                ],
-                order_by="room_name asc"
-            )
-            frappe.logger().info(f"All rooms in database: {len(all_rooms)}")
-            if len(all_rooms) > 0:
-                rooms = all_rooms[:5]  # Return max 5 rooms for testing
 
         return {
             "success": True,
