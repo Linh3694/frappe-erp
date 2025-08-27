@@ -16,14 +16,6 @@ def get_all_rooms():
 
         if not campus_id:
             campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-
-        # Debug logging
-        frappe.logger().info(f"Getting rooms for campus: {campus_id}")
-
-        # Get total count first (without filters)
-        total_rooms = frappe.get_all("ERP Administrative Room", fields=["name"])
-        frappe.logger().info(f"Total rooms in database: {len(total_rooms)}")
 
         rooms = frappe.get_all(
             "ERP Administrative Room",
@@ -701,81 +693,4 @@ def delete_room():
             "success": False,
             "data": {},
             "message": f"Error deleting room: {str(e)}"
-        }
-
-
-@frappe.whitelist()
-def create_sample_rooms():
-    """Create sample rooms for testing - TEMPORARY FUNCTION"""
-    try:
-        # Get current user's campus
-        campus_id = get_current_campus_from_context()
-        if not campus_id:
-            campus_id = "campus-1"
-
-        sample_rooms = [
-            {
-                "room_name": "Phòng học A101",
-                "room_name_en": "Classroom A101",
-                "short_title": "A101",
-                "room_type": "classroom",
-                "capacity": 30,
-                "periods_per_day": 10,
-                "is_homeroom": 0,
-                "campus_id": campus_id
-            },
-            {
-                "room_name": "Phòng học A102",
-                "room_name_en": "Classroom A102",
-                "short_title": "A102",
-                "room_type": "classroom",
-                "capacity": 25,
-                "periods_per_day": 10,
-                "is_homeroom": 0,
-                "campus_id": campus_id
-            },
-            {
-                "room_name": "Phòng chức năng B001",
-                "room_name_en": "Function Room B001",
-                "short_title": "B001",
-                "room_type": "function",
-                "capacity": 50,
-                "periods_per_day": 8,
-                "is_homeroom": 0,
-                "campus_id": campus_id
-            }
-        ]
-
-        created_rooms = []
-        for room_data in sample_rooms:
-            try:
-                room_doc = frappe.get_doc({
-                    "doctype": "ERP Administrative Room",
-                    **room_data
-                })
-                room_doc.insert()
-                created_rooms.append({
-                    "name": room_doc.name,
-                    "room_name": room_data["room_name"]
-                })
-            except Exception as e:
-                frappe.logger().error(f"Error creating room {room_data['room_name']}: {str(e)}")
-
-        frappe.db.commit()
-
-        return {
-            "success": True,
-            "data": {
-                "created_rooms": created_rooms,
-                "count": len(created_rooms)
-            },
-            "message": f"Created {len(created_rooms)} sample rooms successfully"
-        }
-
-    except Exception as e:
-        frappe.logger().error(f"Error creating sample rooms: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error creating sample rooms",
-            "error": str(e)
         }
