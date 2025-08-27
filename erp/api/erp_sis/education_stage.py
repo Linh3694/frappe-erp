@@ -58,17 +58,26 @@ def get_all_education_stages():
 def get_education_stage_by_id():
     """Get education stage details by ID"""
     try:
-        # Get stage_id from form data or request data
-        stage_id = frappe.form_dict.get('stage_id') or frappe.request.data
+        # Get stage_id from form data first
+        stage_id = frappe.form_dict.get('stage_id')
 
-        # If request data is JSON, parse it
-        if isinstance(stage_id, str) and stage_id.startswith('{'):
+        # If not found in form data, try to parse JSON from request data
+        if not stage_id and frappe.request.data:
             try:
                 import json
-                json_data = json.loads(stage_id)
-                stage_id = json_data.get('stage_id', stage_id)
-            except (json.JSONDecodeError, TypeError):
-                pass
+                if isinstance(frappe.request.data, str):
+                    json_data = json.loads(frappe.request.data)
+                else:
+                    json_data = frappe.request.data
+
+                if isinstance(json_data, dict):
+                    stage_id = json_data.get('stage_id')
+                elif hasattr(json_data, 'get'):
+                    stage_id = json_data.get('stage_id')
+            except (json.JSONDecodeError, TypeError, AttributeError) as e:
+                frappe.logger().warning(f"Could not parse request data for stage_id: {str(e)}")
+
+        frappe.logger().info(f"Looking for education stage with ID: {stage_id}")
 
         if not stage_id:
             return {
@@ -84,10 +93,13 @@ def get_education_stage_by_id():
                 "message": "Education stage not found"
             }
 
+        stage_data = stage.as_dict()
+        frappe.logger().info(f"Found education stage: {stage_data.get('name')}")
+
         return {
             "success": True,
             "data": {
-                "education_stage": stage.as_dict()
+                "education_stage": stage_data
             },
             "message": "Education stage fetched successfully"
         }
