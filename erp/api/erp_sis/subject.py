@@ -24,7 +24,7 @@ def get_all_subjects():
             
         # Use SQL query to join with related tables for proper display names
         subjects_query = """
-            SELECT 
+            SELECT
                 s.name,
                 s.title,
                 s.education_stage,
@@ -34,21 +34,30 @@ def get_all_subjects():
                 s.campus_id,
                 s.creation,
                 s.modified,
-                es.title_vn as education_stage_name,
-                ts.title_vn as timetable_subject_name,
-                act.title_vn as actual_subject_name,
-                r.title_vn as room_name
+                COALESCE(es.title_vn, '') as education_stage_name,
+                COALESCE(ts.title_vn, '') as timetable_subject_name,
+                COALESCE(act.title_vn, '') as actual_subject_name,
+                COALESCE(r.title_vn, '') as room_name
             FROM `tabSIS Subject` s
-            LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name
-            LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
-            LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name
+            LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
+            LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
+            LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
             LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
             WHERE s.campus_id = %s
             ORDER BY s.title ASC
         """
         
         subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
-        
+
+        # Debug: Print first few subjects to check data
+        print("=== DEBUG get_all_subjects ===")
+        print(f"Campus ID: {campus_id}")
+        print(f"Query: {subjects_query}")
+        print(f"Number of subjects: {len(subjects)}")
+        if subjects:
+            print(f"First subject: {subjects[0]}")
+            print(f"Subject fields: {list(subjects[0].keys())}")
+
         return {
             "success": True,
             "data": subjects,
