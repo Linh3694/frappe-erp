@@ -62,11 +62,11 @@ def get_education_stage_by_id():
         # Try to get from JSON if not found in form data
         if not stage_id:
             try:
+                import json
                 # Try frappe.request.json first (for JSON requests)
                 if hasattr(frappe.request, 'json') and frappe.request.json:
                     stage_id = frappe.request.json.get('stage_id')
                 elif frappe.request.data:
-                    import json
                     if isinstance(frappe.request.data, str):
                         json_data = json.loads(frappe.request.data)
                     else:
