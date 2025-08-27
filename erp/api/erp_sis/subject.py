@@ -117,14 +117,47 @@ def get_subject_by_id():
         }
         
         subject = frappe.get_doc("SIS Subject", filters)
-        
+
         if not subject:
             return {
                 "success": False,
                 "data": {},
                 "message": "Subject not found or access denied"
             }
-        
+
+        # Get display names from linked tables
+        education_stage_name = None
+        if subject.education_stage:
+            try:
+                education_stage_doc = frappe.get_doc("SIS Education Stage", subject.education_stage)
+                education_stage_name = education_stage_doc.title_vn
+            except:
+                pass
+
+        timetable_subject_name = None
+        if subject.timetable_subject_id:
+            try:
+                timetable_subject_doc = frappe.get_doc("SIS Timetable Subject", subject.timetable_subject_id)
+                timetable_subject_name = timetable_subject_doc.title_vn
+            except:
+                pass
+
+        actual_subject_name = None
+        if subject.actual_subject_id:
+            try:
+                actual_subject_doc = frappe.get_doc("SIS Actual Subject", subject.actual_subject_id)
+                actual_subject_name = actual_subject_doc.title_vn
+            except:
+                pass
+
+        room_name = None
+        if subject.room_id:
+            try:
+                room_doc = frappe.get_doc("ERP Administrative Room", subject.room_id)
+                room_name = room_doc.title_vn
+            except:
+                pass
+
         return {
             "success": True,
             "data": {
@@ -134,7 +167,12 @@ def get_subject_by_id():
                 "timetable_subject_id": subject.timetable_subject_id,
                 "actual_subject_id": subject.actual_subject_id,
                 "room_id": subject.room_id,
-                "campus_id": subject.campus_id
+                "campus_id": subject.campus_id,
+                # Display names for UI
+                "education_stage_name": education_stage_name,
+                "timetable_subject_name": timetable_subject_name,
+                "actual_subject_name": actual_subject_name,
+                "room_name": room_name
             },
             "message": "Subject fetched successfully"
         }
@@ -233,7 +271,40 @@ def create_subject():
         
         subject_doc.insert()
         frappe.db.commit()
-        
+
+        # Get display names from linked tables
+        education_stage_name = None
+        if subject_doc.education_stage:
+            try:
+                education_stage_doc = frappe.get_doc("SIS Education Stage", subject_doc.education_stage)
+                education_stage_name = education_stage_doc.title_vn
+            except:
+                pass
+
+        timetable_subject_name = None
+        if subject_doc.timetable_subject_id:
+            try:
+                timetable_subject_doc = frappe.get_doc("SIS Timetable Subject", subject_doc.timetable_subject_id)
+                timetable_subject_name = timetable_subject_doc.title_vn
+            except:
+                pass
+
+        actual_subject_name = None
+        if subject_doc.actual_subject_id:
+            try:
+                actual_subject_doc = frappe.get_doc("SIS Actual Subject", subject_doc.actual_subject_id)
+                actual_subject_name = actual_subject_doc.title_vn
+            except:
+                pass
+
+        room_name = None
+        if subject_doc.room_id:
+            try:
+                room_doc = frappe.get_doc("ERP Administrative Room", subject_doc.room_id)
+                room_name = room_doc.title_vn
+            except:
+                pass
+
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Subject created successfully"))
         return {
@@ -243,7 +314,12 @@ def create_subject():
             "timetable_subject_id": subject_doc.timetable_subject_id,
             "actual_subject_id": subject_doc.actual_subject_id,
             "room_id": subject_doc.room_id,
-            "campus_id": subject_doc.campus_id
+            "campus_id": subject_doc.campus_id,
+            # Display names for UI
+            "education_stage_name": education_stage_name,
+            "timetable_subject_name": timetable_subject_name,
+            "actual_subject_name": actual_subject_name,
+            "room_name": room_name
         }
         
     except Exception as e:
@@ -373,7 +449,40 @@ def update_subject():
         
         subject_doc.save()
         frappe.db.commit()
-        
+
+        # Get display names from linked tables
+        education_stage_name = None
+        if subject_doc.education_stage:
+            try:
+                education_stage_doc = frappe.get_doc("SIS Education Stage", subject_doc.education_stage)
+                education_stage_name = education_stage_doc.title_vn
+            except:
+                pass
+
+        timetable_subject_name = None
+        if subject_doc.timetable_subject_id:
+            try:
+                timetable_subject_doc = frappe.get_doc("SIS Timetable Subject", subject_doc.timetable_subject_id)
+                timetable_subject_name = timetable_subject_doc.title_vn
+            except:
+                pass
+
+        actual_subject_name = None
+        if subject_doc.actual_subject_id:
+            try:
+                actual_subject_doc = frappe.get_doc("SIS Actual Subject", subject_doc.actual_subject_id)
+                actual_subject_name = actual_subject_doc.title_vn
+            except:
+                pass
+
+        room_name = None
+        if subject_doc.room_id:
+            try:
+                room_doc = frappe.get_doc("ERP Administrative Room", subject_doc.room_id)
+                room_name = room_doc.title_vn
+            except:
+                pass
+
         return {
             "success": True,
             "data": {
@@ -383,7 +492,12 @@ def update_subject():
                 "timetable_subject_id": subject_doc.timetable_subject_id,
                 "actual_subject_id": subject_doc.actual_subject_id,
                 "room_id": subject_doc.room_id,
-                "campus_id": subject_doc.campus_id
+                "campus_id": subject_doc.campus_id,
+                # Display names for UI
+                "education_stage_name": education_stage_name,
+                "timetable_subject_name": timetable_subject_name,
+                "actual_subject_name": actual_subject_name,
+                "room_name": room_name
             },
             "message": "Subject updated successfully"
         }
