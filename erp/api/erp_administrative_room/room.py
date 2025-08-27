@@ -5,12 +5,19 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, nowdate
 import json
+from erp.utils.campus_utils import get_current_campus_from_context
 
 
 @frappe.whitelist()
 def get_all_rooms():
     """Get all rooms with basic information"""
     try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
         rooms = frappe.get_all(
             "ERP Administrative Room",
             fields=[
@@ -22,10 +29,12 @@ def get_all_rooms():
                 "periods_per_day",
                 "is_homeroom",
                 "building_id",
+                "campus_id",
                 "description",
                 "created_at",
                 "updated_at"
             ],
+            filters={"campus_id": campus_id},
             order_by="room_name asc"
         )
 
@@ -72,16 +81,23 @@ def get_room_by_id(room_id=None):
                 "message": "Room ID is required"
             }
 
-        # Get room by ID
+        # Get current user's campus
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
+        # Get room with campus filter
         rooms = frappe.get_all(
             "ERP Administrative Room",
             filters={
-                "name": room_id
+                "name": room_id,
+                "campus_id": campus_id
             },
             fields=[
                 "name", "room_name", "room_name_en", "short_title",
                 "room_type", "capacity", "periods_per_day", "is_homeroom",
-                "building_id", "description", "created_at", "updated_at"
+                "building_id", "campus_id", "description", "created_at", "updated_at"
             ]
         )
 
@@ -400,6 +416,12 @@ def create_room():
         room_type = data.get("room_type")
         building_id = data.get("building_id")
 
+        # Get campus from user context
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
         # Input validation
         if not title_vn or not room_type:
             frappe.throw(_("Title VN and room type are required"))
@@ -415,6 +437,7 @@ def create_room():
             "periods_per_day": 10,
             "is_homeroom": 0,
             "building_id": building_id,
+            "campus_id": campus_id,
             "description": f"{short_title} - Room created via frontend" if short_title else ""
         })
 
@@ -438,7 +461,8 @@ def create_room():
                         "short_title": short_title,
                         "capacity": capacity,
                         "room_type": room_type,
-                        "building_id": building_id
+                        "building_id": building_id,
+                        "campus_id": campus_id
                     }
                 },
                 "message": "Room created successfully"
@@ -489,9 +513,25 @@ def update_room():
         room_type = data.get('room_type')
         building_id = data.get('building_id')
 
+        # Get campus from user context
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
         # Get existing room document
         try:
             room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+
+            # Check campus permission
+            if room_doc.campus_id != campus_id:
+                return {
+                    "success": False,
+                    "data": {
+                        "room": {}
+                    },
+                    "message": "Access denied: You don't have permission to modify this room"
+                }
 
         except frappe.DoesNotExistError:
             return {
@@ -521,6 +561,9 @@ def update_room():
         if building_id and building_id != room_doc.building_id:
             room_doc.building_id = building_id
 
+        if campus_id and campus_id != room_doc.campus_id:
+            room_doc.campus_id = campus_id
+
         room_doc.save()
         frappe.db.commit()
 
@@ -540,7 +583,8 @@ def update_room():
                         "short_title": short_title,
                         "capacity": capacity,
                         "room_type": room_type,
-                        "building_id": building_id
+                        "building_id": building_id,
+                        "campus_id": campus_id
                     }
                 },
                 "message": "Room updated successfully"
@@ -587,9 +631,23 @@ def delete_room():
                 "message": "Room ID is required"
             }
 
+        # Get campus from user context
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
         # Get existing document
         try:
             room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+
+            # Check campus permission
+            if room_doc.campus_id != campus_id:
+                return {
+                    "success": False,
+                    "data": {},
+                    "message": "Access denied: You don't have permission to delete this room"
+                }
 
         except frappe.DoesNotExistError:
             return {
