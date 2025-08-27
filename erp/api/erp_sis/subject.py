@@ -226,7 +226,14 @@ def create_subject():
         education_stage = data.get("education_stage")
         timetable_subject_id = data.get("timetable_subject_id")
         actual_subject_id = data.get("actual_subject_id")
-        room_id = data.get("room_id")
+        room_id = data.get("room_id")  # Can be None if not provided
+
+        print("=== DEBUG create_subject extracted data ===")
+        print(f"title: {title}")
+        print(f"education_stage: {education_stage}")
+        print(f"timetable_subject_id: {timetable_subject_id}")
+        print(f"actual_subject_id: {actual_subject_id}")
+        print(f"room_id: {room_id}")
         
         # Input validation
         if not title or not education_stage:
@@ -268,15 +275,25 @@ def create_subject():
             }
         
         # Create new subject
-        subject_doc = frappe.get_doc({
+        subject_data = {
             "doctype": "SIS Subject",
             "title": title,
             "education_stage": education_stage,
-            "timetable_subject_id": timetable_subject_id,
-            "actual_subject_id": actual_subject_id,
-            "room_id": room_id,
             "campus_id": campus_id
-        })
+        }
+
+        # Only add optional fields if they have values
+        if timetable_subject_id:
+            subject_data["timetable_subject_id"] = timetable_subject_id
+        if actual_subject_id:
+            subject_data["actual_subject_id"] = actual_subject_id
+        if room_id:
+            subject_data["room_id"] = room_id
+
+        print("=== DEBUG subject_data to create ===")
+        print(subject_data)
+
+        subject_doc = frappe.get_doc(subject_data)
         
         subject_doc.insert()
         frappe.db.commit()
@@ -315,20 +332,22 @@ def create_subject():
                 pass
 
         # Return the created data - follow Education Stage pattern
-        frappe.msgprint(_("Subject created successfully"))
         return {
-            "name": subject_doc.name,
-            "title": subject_doc.title,
-            "education_stage": subject_doc.education_stage,
-            "timetable_subject_id": subject_doc.timetable_subject_id,
-            "actual_subject_id": subject_doc.actual_subject_id,
-            "room_id": subject_doc.room_id,
-            "campus_id": subject_doc.campus_id,
-            # Display names for UI
-            "education_stage_name": education_stage_name,
-            "timetable_subject_name": timetable_subject_name,
-            "actual_subject_name": actual_subject_name,
-            "room_name": room_name
+            "success": True,
+            "data": {
+                "name": subject_doc.name,
+                "title": subject_doc.title,
+                "education_stage": subject_doc.education_stage,
+                "timetable_subject_id": subject_doc.timetable_subject_id,
+                "actual_subject_id": subject_doc.actual_subject_id,
+                "room_id": subject_doc.room_id,
+                "campus_id": subject_doc.campus_id,
+                "education_stage_name": education_stage_name,
+                "timetable_subject_name": timetable_subject_name,
+                "actual_subject_name": actual_subject_name,
+                "room_name": room_name
+            },
+            "message": "Subject created successfully"
         }
         
     except Exception as e:
