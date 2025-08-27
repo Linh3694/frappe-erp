@@ -56,29 +56,35 @@ def get_all_education_stages():
 def get_education_stage_by_id():
     """Get education stage details by ID"""
     try:
-        # Try to get stage_id from JSON first (for JSON requests)
+        # Try to get stage_id from different sources based on request method
         stage_id = None
-        try:
-            import json
-            # Try frappe.request.json first (for JSON requests)
-            if hasattr(frappe.request, 'json') and frappe.request.json:
-                stage_id = frappe.request.json.get('stage_id')
-            elif frappe.request.data:
-                if isinstance(frappe.request.data, str):
-                    json_data = json.loads(frappe.request.data)
-                else:
-                    json_data = frappe.request.data
 
-                if isinstance(json_data, dict):
-                    stage_id = json_data.get('stage_id')
-                elif hasattr(json_data, 'get'):
-                    stage_id = json_data.get('stage_id')
-        except (json.JSONDecodeError, TypeError, AttributeError) as e:
-            pass
-
-        # If not found in JSON, try form data
-        if not stage_id:
+        if frappe.request.method == 'GET':
+            # For GET requests, stage_id comes from query parameters
             stage_id = frappe.form_dict.get('stage_id')
+        else:
+            # For POST/PUT requests, try JSON first, then form data
+            try:
+                import json
+                # Try frappe.request.json first (for JSON requests)
+                if hasattr(frappe.request, 'json') and frappe.request.json:
+                    stage_id = frappe.request.json.get('stage_id')
+                elif frappe.request.data:
+                    if isinstance(frappe.request.data, str):
+                        json_data = json.loads(frappe.request.data)
+                    else:
+                        json_data = frappe.request.data
+
+                    if isinstance(json_data, dict):
+                        stage_id = json_data.get('stage_id')
+                    elif hasattr(json_data, 'get'):
+                        stage_id = json_data.get('stage_id')
+            except (json.JSONDecodeError, TypeError, AttributeError) as e:
+                pass
+
+            # If not found in JSON, try form data
+            if not stage_id:
+                stage_id = frappe.form_dict.get('stage_id')
 
         if not stage_id:
             return {
