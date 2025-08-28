@@ -122,7 +122,7 @@ def get_all_teachers():
         }
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=False)
 def get_teacher_by_id(teacher_id=None):
     """Get a specific teacher by ID"""
     try:
@@ -302,7 +302,7 @@ def create_teacher():
         frappe.throw(_(f"Error creating teacher: {str(e)}"))
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=False)
 def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
     """Update an existing teacher"""
     try:
@@ -343,12 +343,17 @@ def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
             # Check campus permission
             if teacher_doc.campus_id != campus_id:
                 frappe.logger().warning(f"Campus mismatch for update: Teacher={teacher_doc.campus_id}, User={campus_id}")
-                # Temporarily allow update despite campus mismatch for testing
-                # return {
-                #     "success": False,
-                #     "data": {},
-                #     "message": "Access denied: You don't have permission to modify this teacher"
-                # }
+
+                # Handle case sensitivity - try to normalize campus IDs
+                teacher_campus_normalized = teacher_doc.campus_id.upper().replace("-", "")
+                user_campus_normalized = campus_id.upper().replace("-", "")
+
+                if teacher_campus_normalized != user_campus_normalized:
+                    return {
+                        "success": False,
+                        "data": {},
+                        "message": "Access denied: You don't have permission to modify this teacher"
+                    }
                 
         except frappe.DoesNotExistError:
             return {
@@ -414,25 +419,16 @@ def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
 
                 if not education_stage_with_campus:
                     frappe.logger().warning(f"Education stage {education_stage_id} exists but campus mismatch: expected {campus_id}")
-                    # Temporarily allow update despite campus mismatch for testing
-                    # return {
-                    #     "success": False,
-                    #     "data": {},
-                    #     "message": "Selected education stage does not exist or access denied"
-                    # }
+                    return {
+                        "success": False,
+                        "data": {},
+                        "message": "Selected education stage does not exist or access denied"
+                    }
 
             teacher_doc.education_stage_id = education_stage_id
         
-        # Temporarily bypass permission checks for testing
-        original_user = frappe.session.user
-        try:
-            # Temporarily set user to Administrator to bypass permission checks
-            frappe.session.user = "Administrator"
-            teacher_doc.save()
-            frappe.db.commit()
-        finally:
-            # Restore original user
-            frappe.session.user = original_user
+        teacher_doc.save()
+        frappe.db.commit()
         
         return {
             "success": True,
