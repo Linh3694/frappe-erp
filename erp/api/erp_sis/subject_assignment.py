@@ -310,7 +310,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
         # Get assignment_id from multiple sources (form_dict, JSON payload, or direct parameter)
         frappe.logger().info(f"update_subject_assignment called with assignment_id: {assignment_id}")
         frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys())}")
-        frappe.logger().info(f"form_dict assignment_id: {frappe.form_dict.get('assignment_id')}")
+        frappe.logger().info(f"form_dict data: {dict(frappe.form_dict)}")
 
         if not assignment_id:
             assignment_id = frappe.form_dict.get('assignment_id')
@@ -331,6 +331,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 # Skip if data is empty or just whitespace
                 if json_str.strip():
                     json_data = json.loads(json_str)
+                    frappe.logger().info(f"Parsed JSON data: {json_data}")
                     assignment_id = json_data.get('assignment_id')
                     frappe.logger().info(f"Got assignment_id from JSON payload: {assignment_id}")
             except Exception as e:
@@ -339,6 +340,16 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 pass
 
         frappe.logger().info(f"Final assignment_id: {assignment_id}")
+
+        # Additional fallback: check if assignment_id is passed as keyword argument
+        if not assignment_id:
+            # This shouldn't happen but let's log all arguments
+            import inspect
+            frame = inspect.currentframe()
+            args, _, _, values = inspect.getargvalues(frame)
+            frappe.logger().info(f"All function arguments: {values}")
+            frappe.logger().info(f"frappe.form_dict content: {dict(frappe.form_dict)}")
+            frappe.logger().info(f"frappe.request.data: {frappe.request.data}")
 
         if not assignment_id:
             return {
@@ -375,6 +386,8 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
         # Update fields if provided
         frappe.logger().info(f"Before update - Current teacher_id: {assignment_doc.teacher_id}, subject_id: {assignment_doc.subject_id}")
         frappe.logger().info(f"Update requested - teacher_id: {teacher_id}, subject_id: {subject_id}")
+        frappe.logger().info(f"Teacher check: teacher_id={teacher_id}, current={assignment_doc.teacher_id}, equal={teacher_id == assignment_doc.teacher_id}")
+        frappe.logger().info(f"Subject check: subject_id={subject_id}, current={assignment_doc.subject_id}, equal={subject_id == assignment_doc.subject_id}")
 
         if teacher_id and teacher_id != assignment_doc.teacher_id:
             frappe.logger().info(f"Updating teacher_id from {assignment_doc.teacher_id} to {teacher_id}")
@@ -387,6 +400,8 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 }
             )
 
+            frappe.logger().info(f"Teacher {teacher_id} exists in campus {campus_id}: {teacher_exists}")
+
             if not teacher_exists:
                 frappe.logger().error(f"Teacher {teacher_id} does not exist in campus {campus_id}")
                 return {
@@ -396,7 +411,9 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 }
 
             assignment_doc.teacher_id = teacher_id
-            frappe.logger().info(f"Teacher ID updated successfully")
+            frappe.logger().info(f"Teacher ID updated successfully to: {assignment_doc.teacher_id}")
+        else:
+            frappe.logger().info(f"Teacher ID not updated - condition not met: teacher_id={teacher_id}, current={assignment_doc.teacher_id}")
 
         if subject_id and subject_id != assignment_doc.subject_id:
             frappe.logger().info(f"Updating subject_id from {assignment_doc.subject_id} to {subject_id}")
@@ -409,6 +426,8 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 }
             )
 
+            frappe.logger().info(f"Subject {subject_id} exists in campus {campus_id}: {subject_exists}")
+
             if not subject_exists:
                 frappe.logger().error(f"Subject {subject_id} does not exist in campus {campus_id}")
                 return {
@@ -418,7 +437,9 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 }
 
             assignment_doc.subject_id = subject_id
-            frappe.logger().info(f"Subject ID updated successfully")
+            frappe.logger().info(f"Subject ID updated successfully to: {assignment_doc.subject_id}")
+        else:
+            frappe.logger().info(f"Subject ID not updated - condition not met: subject_id={subject_id}, current={assignment_doc.subject_id}")
         
         # Check for duplicate assignment after updates
         if teacher_id or subject_id:
