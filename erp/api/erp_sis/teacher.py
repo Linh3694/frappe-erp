@@ -484,10 +484,24 @@ def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
         }
 
 
-@frappe.whitelist(allow_guest=False) 
-def delete_teacher(teacher_id):
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def delete_teacher(teacher_id=None):
     """Delete a teacher"""
     try:
+        # Get teacher_id from form_dict if not provided as parameter
+        if not teacher_id:
+            teacher_id = frappe.form_dict.get('teacher_id')
+
+        # If still no teacher_id, try to parse JSON from request body
+        if not teacher_id and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                teacher_id = json_data.get('teacher_id')
+                frappe.logger().info(f"Got teacher_id from JSON body: {teacher_id}")
+            except Exception as e:
+                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
+
         if not teacher_id:
             return {
                 "success": False,
