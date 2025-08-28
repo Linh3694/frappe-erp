@@ -126,11 +126,17 @@ def get_all_teachers():
 def get_teacher_by_id(teacher_id=None):
     """Get a specific teacher by ID"""
     try:
+        # Debug: Log form_dict to see what's being sent
+        frappe.logger().info(f"get_teacher_by_id called with teacher_id: {teacher_id}")
+        frappe.logger().info(f"form_dict: {frappe.form_dict}")
+
         # Get teacher_id from form_dict if not provided as parameter
         if not teacher_id:
             teacher_id = frappe.form_dict.get('teacher_id')
+            frappe.logger().info(f"Got teacher_id from form_dict: {teacher_id}")
 
         if not teacher_id:
+            frappe.logger().info("No teacher_id found")
             return {
                 "success": False,
                 "data": {},
