@@ -22,24 +22,28 @@ def get_all_subject_assignments():
         
         filters = {"campus_id": campus_id}
             
-        subject_assignments = frappe.get_all(
-            "SIS Subject Assignment",
-            fields=[
-                "name",
-                "teacher_id",
-                "subject_id",
-                "campus_id",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="teacher_id asc"
-        )
+        # Get subject assignments with display names
+        subject_assignments_data = frappe.db.sql("""
+            SELECT
+                sa.name,
+                sa.teacher_id,
+                sa.subject_id,
+                sa.campus_id,
+                sa.creation,
+                sa.modified,
+                t.user_id as teacher_name,
+                s.title as subject_title
+            FROM `tabSIS Subject Assignment` sa
+            LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
+            WHERE sa.campus_id = %s
+            ORDER BY sa.teacher_id asc
+        """, (campus_id,), as_dict=True)
         
         return {
             "success": True,
-            "data": subject_assignments,
-            "total_count": len(subject_assignments),
+            "data": subject_assignments_data,
+            "total_count": len(subject_assignments_data),
             "message": "Subject assignments fetched successfully"
         }
         
@@ -75,22 +79,41 @@ def get_subject_assignment_by_id(assignment_id):
             "campus_id": campus_id
         }
         
-        assignment = frappe.get_doc("SIS Subject Assignment", filters)
-        
-        if not assignment:
+        # Get assignment with display names
+        assignment_data = frappe.db.sql("""
+            SELECT
+                sa.name,
+                sa.teacher_id,
+                sa.subject_id,
+                sa.campus_id,
+                t.user_id as teacher_name,
+                s.title as subject_title
+            FROM `tabSIS Subject Assignment` sa
+            LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
+            WHERE sa.name = %s AND sa.campus_id = %s
+        """, (assignment_id, campus_id), as_dict=True)
+
+        if not assignment_data or len(assignment_data) == 0:
             return {
                 "success": False,
                 "data": {},
                 "message": "Subject assignment not found or access denied"
             }
-        
+
+        assignment = assignment_data[0]
+
         return {
             "success": True,
             "data": {
-                "name": assignment.name,
-                "teacher_id": assignment.teacher_id,
-                "subject_id": assignment.subject_id,
-                "campus_id": assignment.campus_id
+                "subject_assignment": {
+                    "name": assignment.name,
+                    "teacher_id": assignment.teacher_id,
+                    "subject_id": assignment.subject_id,
+                    "campus_id": assignment.campus_id,
+                    "teacher_name": assignment.teacher_name,
+                    "subject_title": assignment.subject_title
+                }
             },
             "message": "Subject assignment fetched successfully"
         }
