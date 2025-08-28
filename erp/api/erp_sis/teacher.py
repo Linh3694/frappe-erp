@@ -488,9 +488,18 @@ def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
 def delete_teacher(teacher_id=None):
     """Delete a teacher"""
     try:
+        # Debug: Log what we received
+        frappe.logger().info(f"delete_teacher called with teacher_id: {teacher_id}")
+        frappe.logger().info(f"form_dict: {frappe.form_dict}")
+        frappe.logger().info(f"request.data exists: {bool(frappe.request.data)}")
+        if frappe.request.data:
+            frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
+            frappe.logger().info(f"request.data content: {frappe.request.data}")
+
         # Get teacher_id from form_dict if not provided as parameter
         if not teacher_id:
             teacher_id = frappe.form_dict.get('teacher_id')
+            frappe.logger().info(f"Got teacher_id from form_dict: {teacher_id}")
 
         # If still no teacher_id, try to parse JSON from request body
         if not teacher_id and frappe.request.data:
@@ -521,11 +530,18 @@ def delete_teacher(teacher_id=None):
             
             # Check campus permission
             if teacher_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this teacher"
-                }
+                frappe.logger().warning(f"Campus mismatch for delete: Teacher={teacher_doc.campus_id}, User={campus_id}")
+
+                # Handle case sensitivity - try to normalize campus IDs
+                teacher_campus_normalized = teacher_doc.campus_id.upper().replace("-", "")
+                user_campus_normalized = campus_id.upper().replace("-", "")
+
+                if teacher_campus_normalized != user_campus_normalized:
+                    return {
+                        "success": False,
+                        "data": {},
+                        "message": "Access denied: You don't have permission to delete this teacher"
+                    }
                 
         except frappe.DoesNotExistError:
             return {
