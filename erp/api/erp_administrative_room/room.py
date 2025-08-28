@@ -60,13 +60,17 @@ def get_room_by_id(room_id=None):
     try:
         # Get room_id from parameter or from JSON payload
         if not room_id:
-            # Try to get from JSON payload
+            # Try to get from JSON payload first
             if frappe.request.data:
                 try:
-                    json_data = json.loads(frappe.request.data)
+                    # Handle both bytes and string data
+                    data_to_decode = frappe.request.data
+                    if isinstance(data_to_decode, bytes):
+                        data_to_decode = data_to_decode.decode('utf-8')
+                    json_data = json.loads(data_to_decode)
                     if json_data and 'room_id' in json_data:
                         room_id = json_data['room_id']
-                except (json.JSONDecodeError, TypeError):
+                except (json.JSONDecodeError, TypeError, UnicodeDecodeError, AttributeError):
                     pass
 
             # Fallback to form_dict
@@ -387,18 +391,23 @@ def create_room():
         # Get data from request - follow Education Stage pattern
         data = {}
 
-        # First try to get JSON data from request body
+        # Multi-source data merging - follow Education Stage pattern
+
+        # Start with form_dict data
+        if frappe.local.form_dict:
+            data.update(dict(frappe.local.form_dict))
+
+        # Merge JSON payload (takes precedence)
         if frappe.request.data:
             try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
-                data = frappe.local.form_dict
-        else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
+                # Handle both bytes and string data
+                data_to_decode = frappe.request.data
+                if isinstance(data_to_decode, bytes):
+                    data_to_decode = data_to_decode.decode('utf-8')
+                json_data = json.loads(data_to_decode)
+                data.update(json_data)
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError, AttributeError):
+                pass
 
         # Extract values from data
         title_vn = data.get("title_vn")
@@ -469,23 +478,24 @@ def create_room():
 def update_room():
     """Update an existing room - SIMPLE VERSION with JSON payload support"""
     try:
-        # Get data from request - follow Education Stage pattern
-        data = {}
+        # Multi-source ID extraction - follow Education Stage pattern
+        room_id = None
 
-        # First try to get JSON data from request body
-        if frappe.request.data:
+        # Try from form_dict first (for FormData/URLSearchParams)
+        room_id = frappe.local.form_dict.get('room_id')
+
+        # If not found, try from JSON payload
+        if not room_id and frappe.request.data:
             try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
-                data = frappe.local.form_dict
-        else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
+                # Handle both bytes and string data
+                data_to_decode = frappe.request.data
+                if isinstance(data_to_decode, bytes):
+                    data_to_decode = data_to_decode.decode('utf-8')
+                json_data = json.loads(data_to_decode)
+                room_id = json_data.get('room_id')
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError, AttributeError):
+                pass
 
-        room_id = data.get('room_id')
         if not room_id:
             return {
                 "success": False,
@@ -494,6 +504,25 @@ def update_room():
                 },
                 "message": "Room ID is required"
             }
+
+        # Multi-source data merging
+        data = {}
+
+        # Start with form_dict data
+        if frappe.local.form_dict:
+            data.update(dict(frappe.local.form_dict))
+
+        # Merge JSON payload (takes precedence)
+        if frappe.request.data:
+            try:
+                # Handle both bytes and string data
+                data_to_decode = frappe.request.data
+                if isinstance(data_to_decode, bytes):
+                    data_to_decode = data_to_decode.decode('utf-8')
+                json_data = json.loads(data_to_decode)
+                data.update(json_data)
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError, AttributeError):
+                pass
 
         # Extract values from data
         title_vn = data.get('title_vn')
@@ -597,23 +626,24 @@ def update_room():
 def delete_room():
     """Delete a room - SIMPLE VERSION with JSON payload support"""
     try:
-        # Get data from request - follow Education Stage pattern
-        data = {}
+        # Multi-source ID extraction - follow Education Stage pattern
+        room_id = None
 
-        # First try to get JSON data from request body
-        if frappe.request.data:
+        # Try from form_dict first (for FormData/URLSearchParams)
+        room_id = frappe.local.form_dict.get('room_id')
+
+        # If not found, try from JSON payload
+        if not room_id and frappe.request.data:
             try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
-                data = frappe.local.form_dict
-        else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
+                # Handle both bytes and string data
+                data_to_decode = frappe.request.data
+                if isinstance(data_to_decode, bytes):
+                    data_to_decode = data_to_decode.decode('utf-8')
+                json_data = json.loads(data_to_decode)
+                room_id = json_data.get('room_id')
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError, AttributeError):
+                pass
 
-        room_id = data.get('room_id')
         if not room_id:
             return {
                 "success": False,

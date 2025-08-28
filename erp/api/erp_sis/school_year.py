@@ -61,9 +61,27 @@ def get_all_school_years():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_school_year_by_id(school_year_id):
+def get_school_year_by_id():
     """Get a specific school year by ID"""
     try:
+        # Multi-source ID extraction - follow Education Stage pattern
+        school_year_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        school_year_id = frappe.local.form_dict.get('school_year_id')
+
+        # If not found, try from JSON payload
+        if not school_year_id and frappe.request.data:
+            try:
+                # Handle both bytes and string data
+                data_to_decode = frappe.request.data
+                if isinstance(data_to_decode, bytes):
+                    data_to_decode = data_to_decode.decode('utf-8')
+                json_data = json.loads(data_to_decode)
+                school_year_id = json_data.get('school_year_id')
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError, AttributeError):
+                pass
+
         if not school_year_id:
             return {
                 "success": False,
