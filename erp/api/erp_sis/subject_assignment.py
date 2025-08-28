@@ -59,9 +59,31 @@ def get_all_subject_assignments():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_subject_assignment_by_id(assignment_id):
+def get_subject_assignment_by_id(assignment_id=None):
     """Get a specific subject assignment by ID"""
     try:
+        # Get assignment_id from multiple sources (form_dict, JSON payload, or direct parameter)
+        if not assignment_id:
+            assignment_id = frappe.form_dict.get('assignment_id')
+
+        # Try to get from JSON payload if not in form_dict
+        if not assignment_id and frappe.request.data:
+            try:
+                import json
+                # Handle both bytes and string data
+                if isinstance(frappe.request.data, bytes):
+                    json_str = frappe.request.data.decode('utf-8')
+                else:
+                    json_str = str(frappe.request.data)
+
+                # Skip if data is empty or just whitespace
+                if json_str.strip():
+                    json_data = json.loads(json_str)
+                    assignment_id = json_data.get('assignment_id')
+            except Exception as e:
+                # Silently handle JSON parse errors
+                pass
+
         if not assignment_id:
             return {
                 "success": False,
