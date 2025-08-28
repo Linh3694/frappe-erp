@@ -119,10 +119,11 @@ def get_subject_assignment_by_id(assignment_id=None):
         """, (assignment_id, campus_id), as_dict=True)
 
         if not assignment_data or len(assignment_data) == 0:
+            frappe.logger().error(f"Subject assignment not found - ID: {assignment_id}, Campus: {campus_id}")
             return {
                 "success": False,
                 "data": {},
-                "message": "Subject assignment not found or access denied"
+                "message": f"Subject assignment not found or access denied - ID: {assignment_id}, Campus: {campus_id}"
             }
 
         assignment = assignment_data[0]
