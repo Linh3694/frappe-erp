@@ -143,7 +143,7 @@ def get_room_by_id(room_id=None):
 
 
 @frappe.whitelist()
-def add_room(room_name, room_type, capacity=None, periods_per_day=10, is_homeroom=0, description=None, room_name_en=None, building_id=None):
+def add_room(room_name, room_type, capacity=None, is_homeroom=0, description=None, room_name_en=None, building_id=None):
     """Add new room"""
     try:
         # Validate required fields
@@ -158,6 +158,7 @@ def add_room(room_name, room_type, capacity=None, periods_per_day=10, is_homeroo
             "doctype": "ERP Administrative Room",
             "title_vn": room_name,
             "title_en": room_name_en or "",
+            "short_title": room_name,  # Use room_name as short_title
             "room_type": room_type,
             "capacity": int(capacity) if capacity else None,
             "building_id": building_id
@@ -189,7 +190,7 @@ def add_room(room_name, room_type, capacity=None, periods_per_day=10, is_homeroo
 
 
 @frappe.whitelist()
-def update_room(room_id, room_name=None, room_type=None, capacity=None, periods_per_day=None, is_homeroom=None, description=None, room_name_en=None, building_id=None):
+def update_room(room_id, room_name=None, room_type=None, capacity=None, is_homeroom=None, description=None, room_name_en=None, building_id=None):
     """Update room information"""
     try:
         if not room_id:
@@ -209,8 +210,6 @@ def update_room(room_id, room_name=None, room_type=None, capacity=None, periods_
             room_doc.room_type = room_type
         if capacity is not None:
             room_doc.capacity = int(capacity) if capacity else None
-        if periods_per_day is not None:
-            room_doc.periods_per_day = int(periods_per_day)
         if is_homeroom is not None:
             room_doc.is_homeroom = int(is_homeroom)
         if building_id is not None:

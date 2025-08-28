@@ -37,10 +37,10 @@ class ERPAdministrativeBuilding(Document):
                 "ERP Administrative Room",
                 filters={"building_id": self.name},
                 fields=[
-                    "name", "room_name", "room_name_en", "room_type", 
+                    "name", "title_vn", "title_en", "short_title", "room_type",
                     "capacity", "is_homeroom", "description"
                 ],
-                order_by="room_name asc"
+                order_by="title_vn asc"
             )
             
             return {

@@ -46,9 +46,8 @@ class ERPAdministrativeRoom(Document):
     
     def before_save(self):
         """Operations before saving"""
-        # Ensure periods_per_day has default value
-        if not self.periods_per_day:
-            self.periods_per_day = 10
+        # No periods_per_day field in this DocType
+        pass
     
     def on_update(self):
         """Operations after update"""
@@ -101,7 +100,6 @@ class ERPAdministrativeRoom(Document):
             "room_id": self.name,
             "title_vn": self.title_vn,
             "capacity": self.capacity,
-            "periods_per_day": self.periods_per_day,
             "is_homeroom": self.is_homeroom,
             "utilization_percentage": 0  # To be calculated
         }
