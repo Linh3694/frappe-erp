@@ -223,15 +223,54 @@ def create_subject_assignment():
         
         assignment_doc.insert()
         frappe.db.commit()
-        
+
+        # Get created data with display names
+        created_data = frappe.db.sql("""
+            SELECT
+                sa.name,
+                sa.teacher_id,
+                sa.subject_id,
+                sa.campus_id,
+                t.user_id as teacher_name,
+                s.title as subject_title
+            FROM `tabSIS Subject Assignment` sa
+            LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
+            WHERE sa.name = %s
+        """, (assignment_doc.name,), as_dict=True)
+
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Subject assignment created successfully"))
-        return {
-            "name": assignment_doc.name,
-            "teacher_id": assignment_doc.teacher_id,
-            "subject_id": assignment_doc.subject_id,
-            "campus_id": assignment_doc.campus_id
-        }
+
+        if created_data:
+            result = created_data[0]
+            return {
+                "success": True,
+                "data": {
+                    "subject_assignment": {
+                        "name": result.name,
+                        "teacher_id": result.teacher_id,
+                        "subject_id": result.subject_id,
+                        "campus_id": result.campus_id,
+                        "teacher_name": result.teacher_name,
+                        "subject_title": result.subject_title
+                    }
+                },
+                "message": "Subject assignment created successfully"
+            }
+        else:
+            return {
+                "success": True,
+                "data": {
+                    "subject_assignment": {
+                        "name": assignment_doc.name,
+                        "teacher_id": assignment_doc.teacher_id,
+                        "subject_id": assignment_doc.subject_id,
+                        "campus_id": assignment_doc.campus_id
+                    }
+                },
+                "message": "Subject assignment created successfully"
+            }
         
     except Exception as e:
         frappe.log_error(f"Error creating subject assignment: {str(e)}")
@@ -337,17 +376,51 @@ def update_subject_assignment(assignment_id, teacher_id=None, subject_id=None):
         
         assignment_doc.save()
         frappe.db.commit()
-        
-        return {
-            "success": True,
-            "data": {
-                "name": assignment_doc.name,
-                "teacher_id": assignment_doc.teacher_id,
-                "subject_id": assignment_doc.subject_id,
-                "campus_id": assignment_doc.campus_id
-            },
-            "message": "Subject assignment updated successfully"
-        }
+
+        # Get updated data with display names
+        updated_data = frappe.db.sql("""
+            SELECT
+                sa.name,
+                sa.teacher_id,
+                sa.subject_id,
+                sa.campus_id,
+                t.user_id as teacher_name,
+                s.title as subject_title
+            FROM `tabSIS Subject Assignment` sa
+            LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
+            WHERE sa.name = %s
+        """, (assignment_doc.name,), as_dict=True)
+
+        if updated_data:
+            result = updated_data[0]
+            return {
+                "success": True,
+                "data": {
+                    "subject_assignment": {
+                        "name": result.name,
+                        "teacher_id": result.teacher_id,
+                        "subject_id": result.subject_id,
+                        "campus_id": result.campus_id,
+                        "teacher_name": result.teacher_name,
+                        "subject_title": result.subject_title
+                    }
+                },
+                "message": "Subject assignment updated successfully"
+            }
+        else:
+            return {
+                "success": True,
+                "data": {
+                    "subject_assignment": {
+                        "name": assignment_doc.name,
+                        "teacher_id": assignment_doc.teacher_id,
+                        "subject_id": assignment_doc.subject_id,
+                        "campus_id": assignment_doc.campus_id
+                    }
+                },
+                "message": "Subject assignment updated successfully"
+            }
         
     except Exception as e:
         frappe.log_error(f"Error updating subject assignment {assignment_id}: {str(e)}")
