@@ -156,23 +156,20 @@ def add_room(room_name, room_type, capacity=None, periods_per_day=10, is_homeroo
         # Create new room document
         room_doc = frappe.get_doc({
             "doctype": "ERP Administrative Room",
-            "room_name": room_name,
-            "room_name_en": room_name_en,
+            "title_vn": room_name,
+            "title_en": room_name_en or "",
             "room_type": room_type,
             "capacity": int(capacity) if capacity else None,
-            "periods_per_day": int(periods_per_day) or 10,
-            "is_homeroom": int(is_homeroom) or 0,
-            "building_id": building_id,
-            "description": description
+            "building_id": building_id
         })
-        
+
         room_doc.insert()
-        
+
         return {
             "success": True,
             "data": {
                 "room_id": room_doc.name,
-                "room_name": room_doc.room_name
+                "title_vn": room_doc.title_vn
             },
             "message": "Room added successfully"
         }
@@ -205,9 +202,9 @@ def update_room(room_id, room_name=None, room_type=None, capacity=None, periods_
         
         # Update fields if provided
         if room_name is not None:
-            room_doc.room_name = room_name
+            room_doc.title_vn = room_name
         if room_name_en is not None:
-            room_doc.room_name_en = room_name_en
+            room_doc.title_en = room_name_en
         if room_type is not None:
             room_doc.room_type = room_type
         if capacity is not None:
@@ -227,7 +224,7 @@ def update_room(room_id, room_name=None, room_type=None, capacity=None, periods_
             "success": True,
             "data": {
                 "room_id": room_doc.name,
-                "room_name": room_doc.room_name
+                "title_vn": room_doc.title_vn
             },
             "message": "Room updated successfully"
         }
@@ -257,7 +254,7 @@ def delete_room(room_id):
             }
         
         room_doc = frappe.get_doc("ERP Administrative Room", room_id)
-        room_name = room_doc.room_name
+        room_name = room_doc.title_vn
         
         # Check if room has any device assignments before deleting
         # This will be implemented when device integration is ready
