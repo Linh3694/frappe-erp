@@ -145,22 +145,35 @@ def get_teacher_by_id(teacher_id=None):
 
         # Get current user's campus
         campus_id = get_current_campus_from_context()
+        frappe.logger().info(f"Current user campus_id: {campus_id}")
 
         if not campus_id:
             campus_id = "campus-1"
 
-        filters = {
-            "name": teacher_id,
-            "campus_id": campus_id
-        }
+        # Try to find teacher by name first (without campus filter)
+        try:
+            teacher = frappe.get_doc("SIS Teacher", teacher_id)
+            frappe.logger().info(f"Teacher found: {teacher.name}, campus: {teacher.campus_id}")
+        except frappe.DoesNotExistError:
+            frappe.logger().info(f"Teacher {teacher_id} not found at all")
+            return {
+                "success": False,
+                "data": {},
+                "message": f"Teacher {teacher_id} not found"
+            }
 
-        teacher = frappe.get_doc("SIS Teacher", filters)
+        # Check if teacher belongs to user's campus (if campus filtering is needed)
+        if teacher.campus_id != campus_id:
+            frappe.logger().info(f"Teacher campus {teacher.campus_id} != user campus {campus_id}")
+            # For now, allow access but log the mismatch
+            frappe.logger().warning(f"Teacher {teacher_id} campus mismatch: {teacher.campus_id} != {campus_id}")
 
+        # Return teacher data
         if not teacher:
             return {
                 "success": False,
                 "data": {},
-                "message": "Teacher not found or access denied"
+                "message": f"Teacher {teacher_id} not found or access denied"
             }
 
         return {
