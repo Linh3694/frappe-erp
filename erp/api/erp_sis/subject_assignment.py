@@ -8,7 +8,7 @@ import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_all_subject_assignments():
     """Get all subject assignments with basic information - SIMPLE VERSION"""
     try:
@@ -58,7 +58,7 @@ def get_all_subject_assignments():
         }
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_subject_assignment_by_id(assignment_id=None):
     """Get a specific subject assignment by ID"""
     try:
@@ -151,7 +151,7 @@ def get_subject_assignment_by_id(assignment_id=None):
         }
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def create_subject_assignment():
     """Create a new subject assignment - SIMPLE VERSION"""
     try:
@@ -302,7 +302,7 @@ def create_subject_assignment():
         frappe.throw(_(f"Error creating subject assignment: {str(e)}"))
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def update_subject_assignment(assignment_id, teacher_id=None, subject_id=None):
     """Update an existing subject assignment"""
     try:
@@ -457,7 +457,7 @@ def update_subject_assignment(assignment_id, teacher_id=None, subject_id=None):
         }
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"]) 
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"]) 
 def delete_subject_assignment(assignment_id):
     """Delete a subject assignment"""
     try:
@@ -512,7 +512,7 @@ def delete_subject_assignment(assignment_id):
         }
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_teachers_for_assignment():
     """Get teachers for dropdown selection"""
     try:
@@ -549,7 +549,7 @@ def get_teachers_for_assignment():
         }
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_subjects_for_assignment():
     """Get subjects for dropdown selection"""
     try:
