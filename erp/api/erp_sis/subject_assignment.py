@@ -31,10 +31,11 @@ def get_all_subject_assignments():
                 sa.campus_id,
                 sa.creation,
                 sa.modified,
-                t.user_id as teacher_name,
+                COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 s.title as subject_title
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
             WHERE sa.campus_id = %s
             ORDER BY sa.teacher_id asc
@@ -86,10 +87,11 @@ def get_subject_assignment_by_id(assignment_id):
                 sa.teacher_id,
                 sa.subject_id,
                 sa.campus_id,
-                t.user_id as teacher_name,
+                COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 s.title as subject_title
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
             WHERE sa.name = %s AND sa.campus_id = %s
         """, (assignment_id, campus_id), as_dict=True)
@@ -231,10 +233,11 @@ def create_subject_assignment():
                 sa.teacher_id,
                 sa.subject_id,
                 sa.campus_id,
-                t.user_id as teacher_name,
+                COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 s.title as subject_title
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
             WHERE sa.name = %s
         """, (assignment_doc.name,), as_dict=True)
@@ -384,10 +387,11 @@ def update_subject_assignment(assignment_id, teacher_id=None, subject_id=None):
                 sa.teacher_id,
                 sa.subject_id,
                 sa.campus_id,
-                t.user_id as teacher_name,
+                COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 s.title as subject_title
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
             WHERE sa.name = %s
         """, (assignment_doc.name,), as_dict=True)
