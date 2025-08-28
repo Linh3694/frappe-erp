@@ -505,11 +505,19 @@ def delete_teacher(teacher_id=None):
         if not teacher_id and frappe.request.data:
             try:
                 import json
-                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                teacher_id = json_data.get('teacher_id')
-                frappe.logger().info(f"Got teacher_id from JSON body: {teacher_id}")
+                # Handle both bytes and string data
+                if isinstance(frappe.request.data, bytes):
+                    json_str = frappe.request.data.decode('utf-8')
+                else:
+                    json_str = str(frappe.request.data)
+
+                # Skip if data is empty or just whitespace
+                if json_str.strip():
+                    json_data = json.loads(json_str)
+                    teacher_id = json_data.get('teacher_id')
+                    frappe.logger().info(f"Got teacher_id from JSON body: {teacher_id}")
             except Exception as e:
-                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
+                frappe.logger().info(f"Could not parse JSON data: {str(e)}, data: {frappe.request.data}")
 
         if not teacher_id:
             return {
