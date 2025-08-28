@@ -304,9 +304,42 @@ def create_subject_assignment():
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
-def update_subject_assignment(assignment_id, teacher_id=None, subject_id=None):
+def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=None):
     """Update an existing subject assignment"""
     try:
+        # Get assignment_id from multiple sources (form_dict, JSON payload, or direct parameter)
+        frappe.logger().info(f"update_subject_assignment called with assignment_id: {assignment_id}")
+        frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys())}")
+        frappe.logger().info(f"form_dict assignment_id: {frappe.form_dict.get('assignment_id')}")
+
+        if not assignment_id:
+            assignment_id = frappe.form_dict.get('assignment_id')
+            frappe.logger().info(f"Got assignment_id from form_dict: {assignment_id}")
+
+        # Try to get from JSON payload if not in form_dict
+        if not assignment_id and frappe.request.data:
+            try:
+                import json
+                # Handle both bytes and string data
+                if isinstance(frappe.request.data, bytes):
+                    json_str = frappe.request.data.decode('utf-8')
+                else:
+                    json_str = str(frappe.request.data)
+
+                frappe.logger().info(f"Raw request data: {json_str}")
+
+                # Skip if data is empty or just whitespace
+                if json_str.strip():
+                    json_data = json.loads(json_str)
+                    assignment_id = json_data.get('assignment_id')
+                    frappe.logger().info(f"Got assignment_id from JSON payload: {assignment_id}")
+            except Exception as e:
+                # Silently handle JSON parse errors
+                frappe.logger().error(f"Error parsing JSON payload: {str(e)}")
+                pass
+
+        frappe.logger().info(f"Final assignment_id: {assignment_id}")
+
         if not assignment_id:
             return {
                 "success": False,
