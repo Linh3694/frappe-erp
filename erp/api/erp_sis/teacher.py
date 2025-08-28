@@ -123,43 +123,49 @@ def get_all_teachers():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_teacher_by_id(teacher_id):
+def get_teacher_by_id(teacher_id=None):
     """Get a specific teacher by ID"""
     try:
+        # Get teacher_id from form_dict if not provided as parameter
+        if not teacher_id:
+            teacher_id = frappe.form_dict.get('teacher_id')
+
         if not teacher_id:
             return {
                 "success": False,
                 "data": {},
                 "message": "Teacher ID is required"
             }
-        
+
         # Get current user's campus
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
             campus_id = "campus-1"
-            
+
         filters = {
             "name": teacher_id,
             "campus_id": campus_id
         }
-        
+
         teacher = frappe.get_doc("SIS Teacher", filters)
-        
+
         if not teacher:
             return {
                 "success": False,
                 "data": {},
                 "message": "Teacher not found or access denied"
             }
-        
+
         return {
             "success": True,
             "data": {
-                "name": teacher.name,
-                "user_id": teacher.user_id,
-                "education_stage_id": teacher.education_stage_id,
-                "campus_id": teacher.campus_id
+                "teacher": {
+                    "name": teacher.name,
+                    "user_id": teacher.user_id,
+                    "education_stage_id": teacher.education_stage_id,
+                    "campus_id": teacher.campus_id
+                }
             },
             "message": "Teacher fetched successfully"
         }
