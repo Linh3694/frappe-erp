@@ -122,7 +122,7 @@ def get_all_teachers():
         }
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def get_teacher_by_id(teacher_id=None):
     """Get a specific teacher by ID"""
     try:
