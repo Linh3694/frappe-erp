@@ -122,7 +122,7 @@ def get_all_teachers():
         }
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def get_teacher_by_id(teacher_id=None):
     """Get a specific teacher by ID"""
     try:
@@ -302,7 +302,7 @@ def create_teacher():
         frappe.throw(_(f"Error creating teacher: {str(e)}"))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=['POST'])
 def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
     """Update an existing teacher"""
     try:
