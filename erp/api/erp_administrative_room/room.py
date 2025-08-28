@@ -22,20 +22,19 @@ def get_all_rooms():
             "ERP Administrative Room",
             fields=[
                 "name",
-                "room_name",
-                "room_name_en",
+                "title_vn",
+                "title_en",
+                "short_title",
                 "room_type",
                 "capacity",
-                "periods_per_day",
-                "is_homeroom",
                 "building_id",
                 "campus_id",
                 "description",
-                "created_at",
-                "updated_at"
+                "creation",
+                "modified"
             ],
             filters={"campus_id": campus_id},
-            order_by="room_name asc"
+            order_by="title_vn asc"
         )
 
         return {
@@ -95,9 +94,9 @@ def get_room_by_id(room_id=None):
                 "campus_id": campus_id
             },
             fields=[
-                "name", "room_name", "room_name_en", "short_title",
-                "room_type", "capacity", "periods_per_day", "is_homeroom",
-                "building_id", "campus_id", "description", "created_at", "updated_at"
+                "name", "title_vn", "title_en", "short_title",
+                "room_type", "capacity", "building_id", "campus_id",
+                "description", "creation", "modified"
             ]
         )
 
@@ -115,16 +114,15 @@ def get_room_by_id(room_id=None):
             "data": {
                 "room": {
                     "name": room.name,
-                    "room_name": room.room_name,
-                    "room_name_en": room.room_name_en,
+                    "title_vn": room.title_vn,
+                    "title_en": room.title_en,
+                    "short_title": room.short_title,
                     "room_type": room.room_type,
                     "capacity": room.capacity,
-                    "periods_per_day": room.periods_per_day,
-                    "is_homeroom": room.is_homeroom,
                     "building_id": room.building_id,
                     "description": room.description,
-                    "created_at": room.created_at,
-                    "updated_at": room.updated_at
+                    "creation": room.creation,
+                    "modified": room.modified
                 }
             },
             "message": "Room details fetched successfully"
@@ -318,8 +316,8 @@ def get_devices_by_room(room_id):
             "data": {
                 "room": {
                     "name": room.name,
-                    "room_name": room.room_name,
-                    "room_name_en": room.room_name_en,
+                    "title_vn": room.title_vn,
+                    "title_en": room.title_en,
                     "room_type": room.room_type,
                     "capacity": room.capacity,
                     "building_id": room.building_id
@@ -359,13 +357,11 @@ def get_room_utilization(room_id):
         # This will be implemented when timetable integration is ready
         utilization_data = {
             "room_id": room.name,
-            "room_name": room.room_name,
+            "title_vn": room.title_vn,
             "capacity": room.capacity,
-            "periods_per_day": room.periods_per_day,
-            "is_homeroom": room.is_homeroom,
             "utilization_percentage": 0,  # To be calculated based on timetable data
             "scheduled_periods": 0,       # To be calculated
-            "available_periods": room.periods_per_day or 10
+            "available_periods": 10
         }
         
         return {
@@ -429,13 +425,11 @@ def create_room():
         # Create new room document directly
         room_doc = frappe.get_doc({
             "doctype": "ERP Administrative Room",
-            "room_name": title_vn,
-            "room_name_en": title_en or "",
+            "title_vn": title_vn,
+            "title_en": title_en or "",
             "short_title": short_title or "",
             "room_type": room_type,
             "capacity": int(capacity) if capacity else None,
-            "periods_per_day": 10,
-            "is_homeroom": 0,
             "building_id": building_id,
             "campus_id": campus_id,
             "description": f"{short_title} - Room created via frontend" if short_title else ""
@@ -506,8 +500,8 @@ def update_room():
             }
 
         # Extract values from data
-        room_name = data.get('room_name') or data.get('title_vn')
-        room_name_en = data.get('room_name_en') or data.get('title_en')
+        title_vn = data.get('title_vn')
+        title_en = data.get('title_en')
         short_title = data.get('short_title')
         capacity = data.get('capacity')
         room_type = data.get('room_type')
@@ -543,11 +537,11 @@ def update_room():
             }
 
         # Update fields if provided
-        if room_name and room_name != room_doc.room_name:
-            room_doc.room_name = room_name
+        if title_vn and title_vn != room_doc.title_vn:
+            room_doc.title_vn = title_vn
 
-        if room_name_en is not None and room_name_en != room_doc.room_name_en:
-            room_doc.room_name_en = room_name_en
+        if title_en is not None and title_en != room_doc.title_en:
+            room_doc.title_en = title_en
 
         if short_title and short_title != room_doc.short_title:
             room_doc.short_title = short_title
@@ -576,16 +570,16 @@ def update_room():
             return {
                 "success": True,
                 "data": {
-                    "room": {
-                        "name": room_id,
-                        "title_vn": room_name,
-                        "title_en": room_name_en,
-                        "short_title": short_title,
-                        "capacity": capacity,
-                        "room_type": room_type,
-                        "building_id": building_id,
-                        "campus_id": campus_id
-                    }
+                                    "room": {
+                    "name": room_id,
+                    "title_vn": title_vn,
+                    "title_en": title_en,
+                    "short_title": short_title,
+                    "capacity": capacity,
+                    "room_type": room_type,
+                    "building_id": building_id,
+                    "campus_id": campus_id
+                }
                 },
                 "message": "Room updated successfully"
             }
