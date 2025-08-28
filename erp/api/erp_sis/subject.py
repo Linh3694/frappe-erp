@@ -6,6 +6,15 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response,
+    error_response,
+    list_response,
+    single_item_response,
+    validation_error_response,
+    not_found_response,
+    forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -58,21 +67,11 @@ def get_all_subjects():
             print(f"First subject: {subjects[0]}")
             print(f"Subject fields: {list(subjects[0].keys())}")
 
-        return {
-            "success": True,
-            "data": subjects,
-            "total_count": len(subjects),
-            "message": "Subjects fetched successfully"
-        }
+        return list_response(subjects, "Subjects fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching subjects: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching subjects: {str(e)}"
-        }
+        return error_response(f"Error fetching subjects: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -105,14 +104,7 @@ def get_subject_by_id():
         print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
-            return {
-                "success": False,
-                "message": "Subject ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return validation_error_response({"subject_id": ["Subject ID is required"]})
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -128,11 +120,7 @@ def get_subject_by_id():
         subject = frappe.get_doc("SIS Subject", filters)
 
         if not subject:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Subject not found or access denied"
-            }
+            return not_found_response("Subject not found or access denied")
 
         # Get display names from linked tables
         education_stage_name = None
@@ -167,24 +155,21 @@ def get_subject_by_id():
             except:
                 pass
 
-        return {
-            "success": True,
-            "data": {
-                "name": subject.name,
-                "title": subject.title,
-                "education_stage": subject.education_stage,
-                "timetable_subject_id": subject.timetable_subject_id,
-                "actual_subject_id": subject.actual_subject_id,
-                "room_id": subject.room_id,
-                "campus_id": subject.campus_id,
-                # Display names for UI
-                "education_stage_name": education_stage_name,
-                "timetable_subject_name": timetable_subject_name,
-                "actual_subject_name": actual_subject_name,
-                "room_name": room_name
-            },
-            "message": "Subject fetched successfully"
+        subject_data = {
+            "name": subject.name,
+            "title": subject.title,
+            "education_stage": subject.education_stage,
+            "timetable_subject_id": subject.timetable_subject_id,
+            "actual_subject_id": subject.actual_subject_id,
+            "room_id": subject.room_id,
+            "campus_id": subject.campus_id,
+            # Display names for UI
+            "education_stage_name": education_stage_name,
+            "timetable_subject_name": timetable_subject_name,
+            "actual_subject_name": actual_subject_name,
+            "room_name": room_name
         }
+        return single_item_response(subject_data, "Subject fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching subject {subject_id}: {str(e)}")
@@ -268,11 +253,7 @@ def create_subject():
         )
         
         if not education_stage_exists:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Selected education stage does not exist or access denied"
-            }
+            return not_found_response("Selected education stage does not exist or access denied")
         
         # Create new subject
         subject_data = {
@@ -332,23 +313,20 @@ def create_subject():
                 pass
 
         # Return the created data - follow Education Stage pattern
-        return {
-            "success": True,
-            "data": {
-                "name": subject_doc.name,
-                "title": subject_doc.title,
-                "education_stage": subject_doc.education_stage,
-                "timetable_subject_id": subject_doc.timetable_subject_id,
-                "actual_subject_id": subject_doc.actual_subject_id,
-                "room_id": subject_doc.room_id,
-                "campus_id": subject_doc.campus_id,
-                "education_stage_name": education_stage_name,
-                "timetable_subject_name": timetable_subject_name,
-                "actual_subject_name": actual_subject_name,
-                "room_name": room_name
-            },
-            "message": "Subject created successfully"
+        subject_data = {
+            "name": subject_doc.name,
+            "title": subject_doc.title,
+            "education_stage": subject_doc.education_stage,
+            "timetable_subject_id": subject_doc.timetable_subject_id,
+            "actual_subject_id": subject_doc.actual_subject_id,
+            "room_id": subject_doc.room_id,
+            "campus_id": subject_doc.campus_id,
+            "education_stage_name": education_stage_name,
+            "timetable_subject_name": timetable_subject_name,
+            "actual_subject_name": actual_subject_name,
+            "room_name": room_name
         }
+        return single_item_response(subject_data, "Subject created successfully")
         
     except Exception as e:
         frappe.log_error(f"Error creating subject: {str(e)}")
@@ -575,14 +553,7 @@ def delete_subject():
         print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
-            return {
-                "success": False,
-                "message": "Subject ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return validation_error_response({"subject_id": ["Subject ID is required"]})
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()

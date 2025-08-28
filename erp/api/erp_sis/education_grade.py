@@ -6,6 +6,11 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response, error_response, list_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -39,34 +44,23 @@ def get_all_education_grades():
             order_by="sort_order asc, title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": education_grades,
-            "total_count": len(education_grades),
-            "message": "Education grades fetched successfully"
-        }
+        return list_response(
+            data=education_grades,
+            message="Education grades fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching education grades: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching education grades: {str(e)}",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error fetching education grades",
+            code="FETCH_EDUCATION_GRADES_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def get_education_grade_by_id():
     """Get education grade details by ID"""
     try:
-        # Debug: Print all request data
-        print("=== DEBUG get_education_grade_by_id ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Query string: {frappe.request.query_string}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
 
         # Get grade_id from multiple sources (form data or JSON payload)
         grade_id = None
@@ -103,32 +97,22 @@ def get_education_grade_by_id():
         print(f"Final grade_id: {repr(grade_id)}")
 
         if not grade_id:
-            return {
-                "success": False,
-                "message": "Grade ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "query_string": str(frappe.request.query_string),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
-                    "request_args": str(getattr(frappe.request, 'args', {})),
-                    "grade_id_type": type(grade_id).__name__
-                }
-            }
+            return error_response(
+                message="Grade ID is required",
+                code="MISSING_GRADE_ID"
+            )
 
         grade = frappe.get_doc("SIS Education Grade", grade_id)
 
         if not grade:
-            return {
-                "success": False,
-                "message": "Education grade not found"
-            }
+            return not_found_response(
+                message="Education grade not found",
+                code="EDUCATION_GRADE_NOT_FOUND"
+            )
 
         # Convert to dict with consistent field names (same as get_all_education_grades)
         grade_dict = grade.as_dict()
-        print(f"=== DEBUG grade_dict ===")
-        print(f"grade_dict: {grade_dict}")
-        print(f"grade_dict.title_vn: {grade_dict.get('title_vn')}")
-        print(f"grade_dict.education_stage_id: {grade_dict.get('education_stage_id')}")
+
 
         grade_data = {
             "name": grade_dict.get("name"),
@@ -142,29 +126,22 @@ def get_education_grade_by_id():
             "modified": grade_dict.get("modified")
         }
 
-        print(f"=== DEBUG grade_data ===")
-        print(f"grade_data: {grade_data}")
-
-        return {
-            "success": True,
-            "data": {
-                "education_grade": grade_data
-            },
-            "message": "Education grade fetched successfully"
-        }
+        return single_item_response(
+            data=grade_data,
+            message="Education grade fetched successfully"
+        )
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Education grade not found"
-        }
+        return not_found_response(
+            message="Education grade not found",
+            code="EDUCATION_GRADE_NOT_FOUND"
+        )
     except Exception as e:
         frappe.log_error(f"Error fetching education grade {grade_id}: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error fetching education grade",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error fetching education grade",
+            code="FETCH_EDUCATION_GRADE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -204,7 +181,10 @@ def create_education_grade():
         backend_data = {}
         for frontend_field, backend_field in required_fields.items():
             if not data.get(frontend_field):
-                frappe.throw(_(f"Field '{frontend_field}' is required"))
+                return validation_error_response(
+                    message=f"Field '{frontend_field}' is required",
+                    errors={frontend_field: ["Required"]}
+                )
             backend_data[backend_field] = data.get(frontend_field)
         
         # Get campus from user roles or form data
@@ -225,7 +205,10 @@ def create_education_grade():
         })
         
         if existing_grade:
-            frappe.throw(_("Mã khối học đã tồn tại cho trường học này"))
+            return error_response(
+                message="Mã khối học đã tồn tại cho trường học này",
+                code="GRADE_CODE_EXISTS"
+            )
         
         # Create new education grade
         grade_doc = frappe.get_doc({
@@ -242,34 +225,24 @@ def create_education_grade():
         
         frappe.logger().info(f"Created education grade: {grade_doc.name}")
         
-        return {
-            "success": True,
-            "data": grade_doc.as_dict(),
-            "message": "Education grade created successfully"
-        }
+        return single_item_response(
+            data=grade_doc.as_dict(),
+            message="Education grade created successfully"
+        )
         
     except Exception as e:
         frappe.logger().error(f"Error creating education grade: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Error creating education grade: {str(e)}",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error creating education grade",
+            code="CREATE_EDUCATION_GRADE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def update_education_grade():
     """Update an existing education grade"""
     try:
-        # Debug: Print all available request data
-        print("=== DEBUG update_education_grade ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Request args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
-        print(f"Request data type: {type(frappe.request.data)}")
-
+        
         # Get grade_id from multiple sources (form data or JSON)
         grade_id = None
 
@@ -324,10 +297,10 @@ def update_education_grade():
         grade_doc = frappe.get_doc("SIS Education Grade", grade_id)
         
         if not grade_doc:
-            return {
-                "success": False,
-                "message": "Education grade not found"
-            }
+            return not_found_response(
+                message="Education grade not found",
+                code="EDUCATION_GRADE_NOT_FOUND"
+            )
         
         # Check if grade_code already exists for this campus (excluding current grade)
         if data.get("grade_code") and data.get("grade_code") != grade_doc.grade_code:
@@ -338,10 +311,10 @@ def update_education_grade():
             })
             
             if existing_grade:
-                return {
-                    "success": False,
-                    "message": "Mã khối học đã tồn tại cho trường học này"
-                }
+                return error_response(
+                    message="Mã khối học đã tồn tại cho trường học này",
+                    code="GRADE_CODE_EXISTS"
+                )
         
         # Update fields - map from frontend to backend fields
         field_mapping = {
@@ -360,39 +333,29 @@ def update_education_grade():
         
         grade_doc.save(ignore_permissions=True)
         
-        return {
-            "success": True,
-            "data": {
-                "education_grade": grade_doc.as_dict()
-            },
-            "message": "Education grade updated successfully"
-        }
+        return single_item_response(
+            data=grade_doc.as_dict(),
+            message="Education grade updated successfully"
+        )
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Education grade not found"
-        }
+        return not_found_response(
+            message="Education grade not found",
+            code="EDUCATION_GRADE_NOT_FOUND"
+        )
     except Exception as e:
         frappe.log_error(f"Error updating education grade {grade_id}: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error updating education grade",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error updating education grade",
+            code="UPDATE_EDUCATION_GRADE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def delete_education_grade():
     """Delete an education grade"""
     try:
-        # Debug: Print request data
-        print("=== DEBUG delete_education_grade ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
-
+    
         # Get grade_id from multiple sources (form data or JSON)
         grade_id = None
 
@@ -426,10 +389,10 @@ def delete_education_grade():
         grade_doc = frappe.get_doc("SIS Education Grade", grade_id)
         
         if not grade_doc:
-            return {
-                "success": False,
-                "message": "Education grade not found"
-            }
+            return not_found_response(
+                message="Education grade not found",
+                code="EDUCATION_GRADE_NOT_FOUND"
+            )
         
         # TODO: Add validation to check if grade is being used by other documents
         # before deleting
@@ -437,35 +400,28 @@ def delete_education_grade():
         # Delete the grade
         frappe.delete_doc("SIS Education Grade", grade_id, ignore_permissions=True)
         
-        return {
-            "success": True,
-            "message": "Education grade deleted successfully"
-        }
+        return success_response(
+            message="Education grade deleted successfully"
+        )
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Education grade not found"
-        }
+        return not_found_response(
+            message="Education grade not found",
+            code="EDUCATION_GRADE_NOT_FOUND"
+        )
     except Exception as e:
         frappe.log_error(f"Error deleting education grade {grade_id}: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error deleting education grade",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error deleting education grade",
+            code="DELETE_EDUCATION_GRADE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def check_grade_code_availability():
     """Check if a grade code is available for the current campus"""
     try:
-        # Debug: Print request data
-        print("=== DEBUG check_grade_code_availability ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
+
 
         # Get parameters from multiple sources (form data or JSON payload)
         grade_code = None
@@ -474,7 +430,6 @@ def check_grade_code_availability():
         # Try from form_dict first (for FormData/URLSearchParams)
         grade_code = frappe.form_dict.get('grade_code')
         grade_id = frappe.form_dict.get('grade_id')
-        print(f"Parameters from form_dict: grade_code={grade_code}, grade_id={grade_id}")
 
         # If not found, try from JSON payload
         if not grade_code and frappe.request.data:
@@ -483,28 +438,23 @@ def check_grade_code_availability():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 grade_code = json_data.get('grade_code')
                 grade_id = json_data.get('grade_id')
-                print(f"Parameters from JSON payload: grade_code={grade_code}, grade_id={grade_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
                 print(f"JSON parsing failed: {e}")
 
         if not grade_code:
-            return {
-                "success": False,
-                "message": "Grade code is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return error_response(
+                message="Grade code is required",
+                code="MISSING_GRADE_CODE"
+            )
         
         # Get current user's campus from roles
         campus_id = get_current_campus_from_context()
         
         if not campus_id:
-            return {
-                "success": False,
-                "message": "User campus not found in roles"
-            }
+            return error_response(
+                message="User campus not found in roles",
+                code="CAMPUS_NOT_FOUND"
+            )
         
         filters = {
             "grade_code": grade_code,
@@ -517,20 +467,18 @@ def check_grade_code_availability():
         
         existing_grade = frappe.db.exists("SIS Education Grade", filters)
         
-        return {
-            "success": True,
-            "data": {
+        return success_response(
+            data={
                 "is_available": not bool(existing_grade),
                 "grade_code": grade_code
             },
-            "message": "Grade code availability checked"
-        }
+            message="Grade code availability checked"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error checking grade code availability: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error checking grade code availability",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error checking grade code availability",
+            code="CHECK_AVAILABILITY_ERROR"
+        )
 

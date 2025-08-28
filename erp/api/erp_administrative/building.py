@@ -5,6 +5,15 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
+from erp.utils.api_response import (
+    success_response,
+    error_response,
+    list_response,
+    single_item_response,
+    validation_error_response,
+    not_found_response,
+    forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -25,21 +34,11 @@ def get_all_buildings():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": buildings,
-            "total_count": len(buildings),
-            "message": "Buildings fetched successfully"
-        }
+        return list_response(buildings, "Buildings fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching buildings: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching buildings: {str(e)}"
-        }
+        return error_response(f"Error fetching buildings: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -62,11 +61,7 @@ def get_building_by_id(building_id=None):
                 building_id = frappe.local.form_dict.get('building_id')
 
         if not building_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building ID is required"
-            }
+            return validation_error_response({"building_id": ["Building ID is required"]})
         
         buildings = frappe.get_all(
             "ERP Administrative Building",
@@ -80,40 +75,25 @@ def get_building_by_id(building_id=None):
         )
 
         if not buildings:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building not found"
-            }
+            return not_found_response("Building not found")
 
         building = buildings[0]
         
         if not building:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building not found or access denied"
-            }
+            return not_found_response("Building not found or access denied")
         
-        return {
-            "success": True,
-            "data": {
-                "name": building.name,
-                "title_vn": building.title_vn,
-                "title_en": building.title_en,
-                "short_title": building.short_title,
-                "campus_id": building.campus_id
-            },
-            "message": "Building fetched successfully"
+        building_data = {
+            "name": building.name,
+            "title_vn": building.title_vn,
+            "title_en": building.title_en,
+            "short_title": building.short_title,
+            "campus_id": building.campus_id
         }
+        return single_item_response(building_data, "Building fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching building {building_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching building: {str(e)}"
-        }
+        return error_response(f"Error fetching building: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -149,11 +129,10 @@ def create_building():
         
         # Input validation
         if not title_vn or not short_title:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Title VN and short title are required"
-            }
+            return validation_error_response({
+                "title_vn": ["Title VN is required"] if not title_vn else [],
+                "short_title": ["Short title is required"] if not short_title else []
+            })
         
         # Check if building title already exists
         existing = frappe.db.exists(
@@ -164,11 +143,7 @@ def create_building():
         )
 
         if existing:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Building with title '{title_vn}' already exists"
-            }
+            return validation_error_response({"title_vn": [f"Building with title '{title_vn}' already exists"]})
 
         # Check if short title already exists
         existing_code = frappe.db.exists(
@@ -179,11 +154,7 @@ def create_building():
         )
         
         if existing_code:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Building with short title '{short_title}' already exists"
-            }
+            return validation_error_response({"short_title": [f"Building with short title '{short_title}' already exists"]})
         
         # Create new building
         building_doc = frappe.get_doc({
@@ -197,23 +168,19 @@ def create_building():
         building_doc.insert()
         frappe.db.commit()
         
-        # Return the created data - follow Frappe pattern like other services  
-        frappe.msgprint(_("Building created successfully"))
-        return {
+        # Return the created data - follow Frappe pattern like other services
+        building_data = {
             "name": building_doc.name,
             "title_vn": building_doc.title_vn,
             "title_en": building_doc.title_en,
             "short_title": building_doc.short_title,
             "campus_id": building_doc.campus_id
         }
+        return single_item_response(building_data, "Building created successfully")
         
     except Exception as e:
         frappe.log_error(f"Error creating building: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating building: {str(e)}"
-        }
+        return error_response(f"Error creating building: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -221,22 +188,14 @@ def update_building(building_id, title_vn=None, title_en=None, short_title=None)
     """Update an existing building"""
     try:
         if not building_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building ID is required"
-            }
+            return validation_error_response({"building_id": ["Building ID is required"]})
         
         # Get existing document
         try:
             building_doc = frappe.get_doc("ERP Administrative Building", building_id)
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building not found"
-            }
+            return not_found_response("Building not found")
         
         # Update fields if provided
         if title_vn and title_vn != building_doc.title_vn:
@@ -249,11 +208,7 @@ def update_building(building_id, title_vn=None, title_en=None, short_title=None)
                 }
             )
             if existing:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Building with title '{title_vn}' already exists"
-                }
+                return validation_error_response({"title_vn": [f"Building with title '{title_vn}' already exists"]})
             building_doc.title_vn = title_vn
         
         if title_en and title_en != building_doc.title_en:
@@ -269,35 +224,24 @@ def update_building(building_id, title_vn=None, title_en=None, short_title=None)
                 }
             )
             if existing_code:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Building with short title '{short_title}' already exists"
-                }
+                return validation_error_response({"short_title": [f"Building with short title '{short_title}' already exists"]})
             building_doc.short_title = short_title
         
         building_doc.save()
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {
-                "name": building_doc.name,
-                "title_vn": building_doc.title_vn,
-                "title_en": building_doc.title_en,
-                "short_title": building_doc.short_title,
-                "campus_id": building_doc.campus_id
-            },
-            "message": "Building updated successfully"
+        building_data = {
+            "name": building_doc.name,
+            "title_vn": building_doc.title_vn,
+            "title_en": building_doc.title_en,
+            "short_title": building_doc.short_title,
+            "campus_id": building_doc.campus_id
         }
+        return single_item_response(building_data, "Building updated successfully")
         
     except Exception as e:
         frappe.log_error(f"Error updating building {building_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating building: {str(e)}"
-        }
+        return error_response(f"Error updating building: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False) 
@@ -305,40 +249,24 @@ def delete_building(building_id):
     """Delete a building"""
     try:
         if not building_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building ID is required"
-            }
+            return validation_error_response({"building_id": ["Building ID is required"]})
         
         # Get existing document
         try:
             building_doc = frappe.get_doc("ERP Administrative Building", building_id)
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building not found"
-            }
+            return not_found_response("Building not found")
         
         # Delete the document
         frappe.delete_doc("ERP Administrative Building", building_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Building deleted successfully"
-        }
+        return success_response(message="Building deleted successfully")
         
     except Exception as e:
         frappe.log_error(f"Error deleting building {building_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting building: {str(e)}"
-        }
+        return error_response(f"Error deleting building: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -356,19 +284,11 @@ def get_buildings_for_selection():
             order_by="title_vn asc"
         )
 
-        return {
-            "success": True,
-            "data": buildings,
-            "message": "Buildings fetched successfully"
-        }
+        return list_response(buildings, "Buildings fetched successfully")
 
     except Exception as e:
         frappe.log_error(f"Error fetching buildings for selection: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error fetching buildings for selection",
-            "error": str(e)
-        }
+        return error_response(f"Error fetching buildings for selection: {str(e)}")
 
 
 
@@ -379,12 +299,7 @@ def check_short_title_availability(short_title, building_id=None):
     """Check if short title is available"""
     try:
         if not short_title:
-            return {
-                "success": False,
-                "is_available": False,
-                "short_title": short_title,
-                "message": "Short title is required"
-            }
+            return validation_error_response({"short_title": ["Short title is required"]})
         
         filters = {
             "short_title": short_title
@@ -398,21 +313,15 @@ def check_short_title_availability(short_title, building_id=None):
         
         is_available = not bool(existing)
         
-        return {
-            "success": True,
+        return success_response({
             "is_available": is_available,
             "short_title": short_title,
             "message": "Available" if is_available else "Short title already exists"
-        }
+        })
         
     except Exception as e:
         frappe.log_error(f"Error checking short title availability: {str(e)}")
-        return {
-            "success": False,
-            "is_available": False,
-            "short_title": short_title,
-            "message": f"Error checking availability: {str(e)}"
-        }
+        return error_response(f"Error checking short title availability: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -437,22 +346,14 @@ def update_building():
 
         building_id = data.get('building_id')
         if not building_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building ID is required"
-            }
+            return validation_error_response({"building_id": ["Building ID is required"]})
 
         # Get existing document
         try:
             building_doc = frappe.get_doc("ERP Administrative Building", building_id)
 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Building not found"
-            }
+            return not_found_response("Building not found")
 
         # Update fields if provided
         title_vn = data.get('title_vn')
@@ -471,24 +372,15 @@ def update_building():
         building_doc.save()
         frappe.db.commit()
 
-        return {
-            "success": True,
-            "data": {
-                "building": {
-                    "name": building_doc.name,
-                    "title_vn": building_doc.title_vn,
-                    "title_en": building_doc.title_en,
-                    "short_title": building_doc.short_title,
-                    "campus_id": building_doc.campus_id
-                }
-            },
-            "message": "Building updated successfully"
+        building_data = {
+            "name": building_doc.name,
+            "title_vn": building_doc.title_vn,
+            "title_en": building_doc.title_en,
+            "short_title": building_doc.short_title,
+            "campus_id": building_doc.campus_id
         }
+        return single_item_response(building_data, "Building updated successfully")
 
     except Exception as e:
         frappe.log_error(f"Error updating building: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating building: {str(e)}"
-        }
+        return error_response(f"Error updating building: {str(e)}")

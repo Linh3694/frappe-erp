@@ -4,6 +4,11 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response, error_response, paginated_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
@@ -38,33 +43,29 @@ def check_student_code_availability():
 
         if not student_code or student_code.strip() == "":
             frappe.logger().info("No valid student_code found")
-            return {
-                "success": False,
-                "message": "Thiếu tham số mã học sinh",
-                "available": False
-            }
+            return error_response(
+                message="Thiếu tham số mã học sinh",
+                code="MISSING_STUDENT_CODE"
+            )
 
         # Check if student with this code already exists
         existing = frappe.db.exists("CRM Student", {"student_code": student_code})
         if existing:
-            return {
-                "success": False,
-                "message": "Mã học sinh đã tồn tại trong hệ thống",
-                "available": False
-            }
+            return error_response(
+                message="Mã học sinh đã tồn tại trong hệ thống",
+                code="STUDENT_CODE_EXISTS"
+            )
         else:
-            return {
-                "success": True,
-                "message": "Mã học sinh có thể sử dụng",
-                "available": True
-            }
+            return success_response(
+                data={"available": True},
+                message="Mã học sinh có thể sử dụng"
+            )
     except Exception as e:
         frappe.log_error(f"Error checking student code availability: {str(e)}")
-        return {
-            "success": False,
-            "message": "Lỗi hệ thống khi kiểm tra mã học sinh",
-            "available": False
-        }
+        return error_response(
+            message="Lỗi hệ thống khi kiểm tra mã học sinh",
+            code="SYSTEM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -152,32 +153,23 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
         
         # Get total count
         total_count = frappe.db.count("CRM Student", filters=filters)
-        total_pages = (total_count + limit - 1) // limit
-        
-        frappe.logger().info(f"Total count: {total_count}, Total pages: {total_pages}")
-        
-        return {
-            "success": True,
-            "data": students,
-            "total_count": total_count,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "total_count": total_count,
-                "limit": limit,
-                "offset": offset
-            },
-            "message": "Students fetched successfully"
-        }
+
+        frappe.logger().info(f"Total count: {total_count}")
+
+        return paginated_response(
+            data=students,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Students fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching students: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching students: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching students",
+            code="FETCH_STUDENTS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)  
@@ -193,11 +185,10 @@ def get_student_data():
         frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
         
         if not student_id and not student_code and not student_slug:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Student ID, code, or slug is required"
-            }
+            return error_response(
+                message="Student ID, code, or slug is required",
+                code="MISSING_IDENTIFIER"
+            )
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -218,20 +209,19 @@ def get_student_data():
             #     }
         elif student_code:
             # Search by student_code without campus filtering (for debugging)
-            students = frappe.get_all("CRM Student", 
+            students = frappe.get_all("CRM Student",
                 filters={
                     "student_code": student_code,
                     # "campus_id": campus_id
-                }, 
-                fields=["name"], 
+                },
+                fields=["name"],
                 limit=1)
-            
+
             if not students:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Student not found"
-                }
+                return not_found_response(
+                    message="Student not found",
+                    code="STUDENT_NOT_FOUND"
+                )
             
             student = frappe.get_doc("CRM Student", students[0].name)
         elif student_slug:
@@ -249,24 +239,21 @@ def get_student_data():
             """, (f'%{search_name.lower()}%',), as_dict=True)
             
             if not students:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Student not found"
-                }
+                return not_found_response(
+                    message="Student not found",
+                    code="STUDENT_NOT_FOUND"
+                )
             
             student = frappe.get_doc("CRM Student", students[0].name)
         
         if not student:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Student not found or access denied"
-            }
+            return not_found_response(
+                message="Student not found or access denied",
+                code="STUDENT_NOT_FOUND"
+            )
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": student.name,
                 "student_name": student.student_name,
                 "student_code": student.student_code,
@@ -274,16 +261,15 @@ def get_student_data():
                 "gender": student.gender,
                 "campus_id": student.campus_id
             },
-            "message": "Student fetched successfully"
-        }
+            message="Student fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching student {student_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching student: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching student",
+            code="FETCH_STUDENT_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -320,11 +306,22 @@ def create_student():
         
         # Input validation
         if not student_name or not student_code or not dob or not gender:
-            frappe.throw(_("Student name, student code, date of birth, and gender are required"))
-        
+            return validation_error_response(
+                message="Student name, student code, date of birth, and gender are required",
+                errors={
+                    "student_name": ["Required"] if not student_name else [],
+                    "student_code": ["Required"] if not student_code else [],
+                    "dob": ["Required"] if not dob else [],
+                    "gender": ["Required"] if not gender else []
+                }
+            )
+
         # Validate gender
         if gender not in ['male', 'female', 'others']:
-            frappe.throw(_("Gender must be 'male', 'female', or 'others'"))
+            return validation_error_response(
+                message="Gender must be 'male', 'female', or 'others'",
+                errors={"gender": ["Must be 'male', 'female', or 'others'"]}
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -360,7 +357,10 @@ def create_student():
         existing_code = frappe.db.exists("CRM Student", {"student_code": student_code})
 
         if existing_code:
-            frappe.throw(_(f"Mã học sinh '{student_code}' đã tồn tại trong hệ thống"))
+            return error_response(
+                message=f"Mã học sinh '{student_code}' đã tồn tại trong hệ thống",
+                code="STUDENT_CODE_EXISTS"
+            )
         
         # Create new student with validation bypass
         student_doc = frappe.get_doc({
@@ -378,9 +378,8 @@ def create_student():
         frappe.db.commit()
         
         # Return consistent API response format
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": student_doc.name,
                 "student_name": student_doc.student_name,
                 "student_code": student_doc.student_code,
@@ -388,20 +387,29 @@ def create_student():
                 "gender": student_doc.gender,
                 "campus_id": student_doc.campus_id
             },
-            "message": "Student created successfully"
-        }
+            message="Student created successfully"
+        )
         
     except Exception as e:
         error_msg = str(e)
         # Handle specific error types
         if "student_code" in error_msg.lower() and "unique" in error_msg.lower():
-            frappe.throw(_("Mã học sinh đã tồn tại trong hệ thống"))
+            return error_response(
+                message="Mã học sinh đã tồn tại trong hệ thống",
+                code="STUDENT_CODE_EXISTS"
+            )
         elif "student_name" in error_msg.lower() and "unique" in error_msg.lower():
-            frappe.throw(_("Tên học sinh đã tồn tại trong hệ thống"))
+            return error_response(
+                message="Tên học sinh đã tồn tại trong hệ thống",
+                code="STUDENT_NAME_EXISTS"
+            )
         else:
             # Log error with short message for debugging
             frappe.log_error(f"Student creation error: {error_msg[:200]}...")
-            frappe.throw(_("Lỗi hệ thống khi tạo học sinh. Vui lòng thử lại."))
+            return error_response(
+                message="Lỗi hệ thống khi tạo học sinh. Vui lòng thử lại.",
+                code="CREATE_STUDENT_ERROR"
+            )
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
@@ -444,11 +452,10 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
         try:
             student_doc = frappe.get_doc("CRM Student", student_id)
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Student not found"
-            }
+            return not_found_response(
+                message="Student not found",
+                code="STUDENT_NOT_FOUND"
+            )
         
         # Track if any changes were made
         changes_made = False
@@ -539,13 +546,14 @@ def delete_student(student_id=None):
                 or form.get("name")
                 or form.get("studentId")
             )
-            # args payload sometimes contains JSON string
-            if not student_id and form.get("args"):
-                try:
-                    args_obj = json.loads(form.get("args"))
-                    student_id = args_obj.get("student_id") or args_obj.get("id") or args_obj.get("name")
-                except Exception:
-                    pass
+
+        # args payload sometimes contains JSON string
+        if not student_id and form.get("args"):
+            try:
+                args_obj = json.loads(form.get("args"))
+                student_id = args_obj.get("student_id") or args_obj.get("id") or args_obj.get("name")
+            except Exception:
+                pass
 
         # Request-level helpers
         if not student_id:
@@ -568,12 +576,12 @@ def delete_student(student_id=None):
                 student_id = data.get('student_id') or data.get('id') or data.get('name')
             except Exception:
                 pass
+
         if not student_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Student ID is required"
-            }
+            return error_response(
+                message="Student ID is required",
+                code="MISSING_STUDENT_ID"
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -587,18 +595,16 @@ def delete_student(student_id=None):
             
             # Check campus permission
             if student_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this student"
-                }
+                return forbidden_response(
+                    message="Access denied: You don't have permission to delete this student",
+                    code="ACCESS_DENIED"
+                )
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Student not found"
-            }
+            return not_found_response(
+                message="Student not found",
+                code="STUDENT_NOT_FOUND"
+            )
         # Before delete: remove child table links referencing this student to avoid link constraints
         try:
             frappe.logger().info(f"Deleting CRM Family Relationship children for student {student_id}")
@@ -610,19 +616,16 @@ def delete_student(student_id=None):
         frappe.delete_doc("CRM Student", student_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Student deleted successfully"
-        }
+        return success_response(
+            message="Student deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting student {student_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting student: {str(e)}"
-        }
+        return error_response(
+            message="Error deleting student",
+            code="DELETE_STUDENT_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -650,19 +653,17 @@ def get_students_for_selection():
             order_by="student_name asc"
         )
         
-        return {
-            "success": True,
-            "data": students,
-            "message": "Students fetched successfully"
-        }
+        return success_response(
+            data=students,
+            message="Students fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching students for selection: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching students: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching students",
+            code="FETCH_STUDENTS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -790,31 +791,17 @@ def search_students(search_term=None, page=1, limit=20):
         
         total_pages = (total_count + limit - 1) // limit
         
-        return {
-            "success": True,
-            "data": students,
-            "total_count": total_count,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "total_count": total_count,
-                "limit": limit,
-                "offset": offset
-            },
-            "message": "Students search completed successfully"
-        }
+        return paginated_response(
+            data=students,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Students search completed successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error searching students: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "pagination": {
-                "current_page": page,
-                "total_pages": 0,
-                "total_count": 0,
-                "limit": limit,
-                "offset": 0
-            },
-            "message": f"Error searching students: {str(e)}"
-        }
+        return error_response(
+            message="Error searching students",
+            code="SEARCH_STUDENTS_ERROR"
+        )

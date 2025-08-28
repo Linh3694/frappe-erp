@@ -2,6 +2,11 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
+from erp.utils.api_response import (
+    success_response, error_response, list_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response, paginated_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -37,7 +42,10 @@ def get_family_details(family_id=None, family_code=None):
                 pass
 
         if not family_id and not family_code:
-            return {"success": False, "data": {}, "message": "Family ID or code is required"}
+            return error_response(
+                message="Family ID or code is required",
+                code="MISSING_FAMILY_ID"
+            )
 
         if family_code and not family_id:
             # Resolve by code
@@ -52,7 +60,10 @@ def get_family_details(family_id=None, family_code=None):
         if not fam_row and family_code:
             fam_row = frappe.db.get_value("CRM Family", {"family_code": family_code}, ["name", "family_code"], as_dict=True)
         if not fam_row:
-            return {"success": False, "data": {}, "message": "Family not found"}
+            return not_found_response(
+                message="Family not found",
+                code="FAMILY_NOT_FOUND"
+            )
         family_name = fam_row.get("name")
 
         rels = frappe.get_all(
@@ -78,20 +89,22 @@ def get_family_details(family_id=None, family_code=None):
                 for g in frappe.get_all("CRM Guardian", filters={"name": ["in", guardian_ids]}, fields=["name", "guardian_name", "guardian_id", "family_code", "phone_number", "email"]):
                     guardian_names[g.name] = g
 
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": family_name,
                 "family_code": fam_row.get("family_code"),
                 "relationships": rels,
                 "students": student_names,
                 "guardians": guardian_names,
             },
-            "message": "Family details fetched successfully",
-        }
+            message="Family details fetched successfully"
+        )
     except Exception as e:
         frappe.log_error(f"Error fetching family details: {str(e)}")
-        return {"success": False, "data": {}, "message": f"Error fetching family details: {str(e)}"}
+        return error_response(
+            message="Error fetching family details",
+            code="FETCH_FAMILY_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -126,7 +139,10 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
         relationships = parse_json(relationships)
 
         if not family_id:
-            return {"success": False, "data": {}, "message": "Family ID is required"}
+            return error_response(
+                message="Family ID is required",
+                code="MISSING_FAMILY_ID"
+            )
 
         family_doc = frappe.get_doc("CRM Family", family_id)
         # Reset relationships
@@ -181,10 +197,16 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
 
         frappe.db.commit()
 
-        return {"success": True, "data": {"family_id": family_doc.name}, "message": "Family members updated successfully"}
+        return success_response(
+            data={"family_id": family_doc.name},
+            message="Family members updated successfully"
+        )
     except Exception as e:
         frappe.log_error(f"Error updating family members: {str(e)}")
-        return {"success": False, "data": {}, "message": f"Error updating family members: {str(e)}"}
+        return error_response(
+            message="Error updating family members",
+            code="UPDATE_FAMILY_ERROR"
+        )
 @frappe.whitelist(allow_guest=False)
 def get_all_families(page=1, limit=20):
     """Get all families with basic information and pagination - NEW STRUCTURE"""
@@ -230,28 +252,20 @@ def get_all_families(page=1, limit=20):
         
         frappe.logger().info(f"Total count: {total_count}, Total pages: {total_pages}")
         
-        return {
-            "success": True,
-            "data": families,
-            "total_count": total_count,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "total_count": total_count,
-                "limit": limit,
-                "offset": offset
-            },
-            "message": "Families fetched successfully"
-        }
+        return paginated_response(
+            data=families,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Families fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching families: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching families: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching families",
+            code="FETCH_FAMILIES_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)  
@@ -267,11 +281,10 @@ def get_family_data():
         frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
         
         if not family_id and not student_id and not guardian_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Family ID, Student ID, or Guardian ID is required"
-            }
+            return error_response(
+                message="Family ID, Student ID, or Guardian ID is required",
+                code="MISSING_FAMILY_ID"
+            )
         
         # Build filters based on what parameter we have
         if family_id:
@@ -287,11 +300,10 @@ def get_family_data():
                 limit=1)
             
             if not families:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Family not found"
-                }
+                return not_found_response(
+                    message="Family not found",
+                    code="FAMILY_NOT_FOUND"
+                )
             
             family = frappe.get_doc("CRM Family", families[0].name)
         elif student_id:
@@ -301,11 +313,10 @@ def get_family_data():
                 fields=["name"])
             
             if not families:
-                return {
-                    "success": False,
-                    "data": [],
-                    "message": "No families found for this student"
-                }
+                return not_found_response(
+                    message="No families found for this student",
+                    code="FAMILY_NOT_FOUND"
+                )
             
             # Return multiple families for this student
             family_data = []
@@ -320,11 +331,10 @@ def get_family_data():
                     "access": doc.access
                 })
             
-            return {
-                "success": True,
-                "data": family_data,
-                "message": "Families fetched successfully"
-            }
+            return list_response(
+                data=family_data,
+                message="Families fetched successfully"
+            )
         elif guardian_id:
             # Search by guardian only
             families = frappe.get_all("CRM Family", 
@@ -332,11 +342,10 @@ def get_family_data():
                 fields=["name"])
             
             if not families:
-                return {
-                    "success": False,
-                    "data": [],
-                    "message": "No families found for this guardian"
-                }
+                return not_found_response(
+                    message="No families found for this guardian",
+                    code="FAMILY_NOT_FOUND"
+                )
             
             # Return multiple families for this guardian
             family_data = []
@@ -351,37 +360,33 @@ def get_family_data():
                     "access": doc.access
                 })
             
-            return {
-                "success": True,
-                "data": family_data,
-                "message": "Families fetched successfully"
-            }
+            return list_response(
+                data=family_data,
+                message="Families fetched successfully"
+            )
         
         if not family:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Family not found"
-            }
+            return not_found_response(
+                message="Family not found",
+                code="FAMILY_NOT_FOUND"
+            )
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": family.name,
                 "family_code": getattr(family, "family_code", None),
                 "creation": family.creation.isoformat() if family.creation else None,
                 "modified": family.modified.isoformat() if family.modified else None
             },
-            "message": "Family fetched successfully"
-        }
+            message="Family fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching family data: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching family data: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching family data",
+            code="FETCH_FAMILY_DATA_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -459,10 +464,23 @@ def create_family():
         # Input validation
         if not students or not guardians or not relationships:
             frappe.logger().error(f"Validation failed - students: {len(students) if students else 0}, guardians: {len(guardians) if guardians else 0}, relationships: {len(relationships) if relationships else 0}")
-            frappe.throw(_("Students, Guardians, and Relationships are required"))
+            return validation_error_response(
+                message="Students, Guardians, and Relationships are required",
+                errors={
+                    "students": ["Required"] if not students else [],
+                    "guardians": ["Required"] if not guardians else [],
+                    "relationships": ["Required"] if not relationships else []
+                }
+            )
         
         if len(students) == 0 or len(guardians) == 0:
-            frappe.throw(_("At least one student and one guardian are required"))
+            return validation_error_response(
+                message="At least one student and one guardian are required",
+                errors={
+                    "students": ["At least one student required"] if len(students) == 0 else [],
+                    "guardians": ["At least one guardian required"] if len(guardians) == 0 else []
+                }
+            )
         
         # Create family first to get auto-generated FAM-xxx code
         family_doc = frappe.get_doc({
@@ -486,12 +504,18 @@ def create_family():
         # Verify all students exist
         for student_id in students:
             if not frappe.db.exists("CRM Student", student_id):
-                frappe.throw(_(f"Student '{student_id}' not found"))
+                return not_found_response(
+                    message=f"Student '{student_id}' not found",
+                    code="STUDENT_NOT_FOUND"
+                )
         
         # Verify all guardians exist
         for guardian_id in guardians:
             if not frappe.db.exists("CRM Guardian", guardian_id):
-                frappe.throw(_(f"Guardian '{guardian_id}' not found"))
+                return not_found_response(
+                    message=f"Guardian '{guardian_id}' not found",
+                    code="GUARDIAN_NOT_FOUND"
+                )
         
         # Add relationships to the existing family_doc
         for rel in relationships:
@@ -565,24 +589,22 @@ def create_family():
         frappe.db.commit()
         
         # Return consistent API response format
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "family_code": family_code,
                 "students": students,
                 "guardians": guardians,
                 "relationships": relationships
             },
-            "message": "Family created successfully"
-        }
+            message="Family created successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error creating family: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating family: {str(e)}"
-        }
+        return error_response(
+            message="Error creating family",
+            code="CREATE_FAMILY_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
@@ -612,21 +634,19 @@ def update_family(family_id=None, relationship=None, key_person=None, access=Non
                 pass
         
         if not family_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Family ID is required"
-            }
+            return error_response(
+                message="Family ID is required",
+                code="MISSING_FAMILY_ID"
+            )
         
         # Get existing document
         try:
             family_doc = frappe.get_doc("CRM Family", family_id)
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Family not found"
-            }
+            return not_found_response(
+                message="Family not found",
+                code="FAMILY_NOT_FOUND"
+            )
         
         # Track if any changes were made
         changes_made = False
@@ -643,11 +663,10 @@ def update_family(family_id=None, relationship=None, key_person=None, access=Non
             # Validate relationship
             valid_relationships = ["dad", "mom", "foster_parent", "grandparent", "uncle_aunt", "sibling", "other"]
             if relationship not in valid_relationships:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Relationship must be one of: {', '.join(valid_relationships)}"
-                }
+                return validation_error_response(
+                    message=f"Relationship must be one of: {', '.join(valid_relationships)}",
+                    errors={"relationship": ["Invalid relationship type"]}
+                )
             family_doc.relationship = relationship
             changes_made = True
         
@@ -669,18 +688,16 @@ def update_family(family_id=None, relationship=None, key_person=None, access=Non
             family_doc.save(ignore_permissions=True)
             frappe.db.commit()
         except Exception as save_error:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Failed to save family: {str(save_error)}"
-            }
+            return error_response(
+                message=f"Failed to save family",
+                code="SAVE_FAMILY_ERROR"
+            )
         
         # Reload to get the final saved data from database
         family_doc.reload()
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": family_doc.name,
                 "student_id": family_doc.student_id,
                 "guardian_id": family_doc.guardian_id,
@@ -688,15 +705,14 @@ def update_family(family_id=None, relationship=None, key_person=None, access=Non
                 "key_person": family_doc.key_person,
                 "access": family_doc.access
             },
-            "message": "Family updated successfully"
-        }
+            message="Family updated successfully"
+        )
         
     except Exception as e:
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating family: {str(e)}"
-        }
+        return error_response(
+            message="Error updating family",
+            code="UPDATE_FAMILY_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -726,39 +742,34 @@ def delete_family():
         frappe.logger().info(f"delete_family called - family_id: {family_id}")
         
         if not family_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Family ID is required"
-            }
+            return error_response(
+                message="Family ID is required",
+                code="MISSING_FAMILY_ID"
+            )
         
         # Get family document
         try:
             family_doc = frappe.get_doc("CRM Family", family_id)
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Family not found"
-            }
+            return not_found_response(
+                message="Family not found",
+                code="FAMILY_NOT_FOUND"
+            )
         
         # Delete the document
         frappe.delete_doc("CRM Family", family_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Family relationship deleted successfully"
-        }
+        return success_response(
+            message="Family relationship deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting family: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting family: {str(e)}"
-        }
+        return error_response(
+            message="Error deleting family",
+            code="DELETE_FAMILY_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -838,34 +849,20 @@ def search_families(search_term=None, page=1, limit=20):
         
         total_pages = (total_count + limit - 1) // limit
         
-        return {
-            "success": True,
-            "data": families,
-            "total_count": total_count,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "total_count": total_count,
-                "limit": limit,
-                "offset": offset
-            },
-            "message": "Family search completed successfully"
-        }
+        return paginated_response(
+            data=families,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Family search completed successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error searching families: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "pagination": {
-                "current_page": page,
-                "total_pages": 0,
-                "total_count": 0,
-                "limit": limit,
-                "offset": 0
-            },
-            "message": f"Error searching families: {str(e)}"
-        }
+        return error_response(
+            message="Error searching families",
+            code="SEARCH_FAMILIES_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -888,18 +885,16 @@ def get_families_for_selection():
             ORDER BY f.family_code ASC
         """, as_dict=True)
         
-        return {
-            "success": True,
-            "data": families,
-            "message": "Families fetched successfully"
-        }
+        return success_response(
+            data=families,
+            message="Families fetched successfully"
+        )
     except Exception as e:
         frappe.log_error(f"Error fetching families for selection: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching families: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching families",
+            code="FETCH_FAMILIES_SELECTION_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -933,7 +928,10 @@ def get_family_codes(student_id=None, guardian_id=None):
                 pass
 
         if not student_id and not guardian_id:
-            return {"success": False, "data": [], "message": "student_id or guardian_id is required"}
+            return error_response(
+                message="student_id or guardian_id is required",
+                code="MISSING_STUDENT_OR_GUARDIAN_ID"
+            )
 
         if student_id:
             rows = frappe.db.sql(
@@ -962,7 +960,13 @@ def get_family_codes(student_id=None, guardian_id=None):
                 as_dict=True,
             )
 
-        return {"success": True, "data": rows, "message": "Family codes fetched"}
+        return success_response(
+            data=rows,
+            message="Family codes fetched"
+        )
     except Exception as e:
         frappe.log_error(f"Error get_family_codes: {str(e)}")
-        return {"success": False, "data": [], "message": f"Error fetching family codes: {str(e)}"}
+        return error_response(
+            message="Error fetching family codes",
+            code="FETCH_FAMILY_CODES_ERROR"
+        )

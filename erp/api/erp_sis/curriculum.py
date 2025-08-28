@@ -6,6 +6,11 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response, error_response, list_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -37,33 +42,24 @@ def get_all_curriculums():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": curriculums,
-            "total_count": len(curriculums),
-            "message": "Curriculums fetched successfully"
-        }
+        return list_response(
+            data=curriculums,
+            message="Curriculums fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching curriculums: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching curriculums: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching curriculums",
+            code="FETCH_CURRICULUMS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def get_curriculum_by_id():
     """Get a specific curriculum by ID"""
     try:
-        # Debug: Print all request data
-        print("=== DEBUG get_curriculum_by_id ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
+       
 
         # Get curriculum_id from multiple sources (form data or JSON payload)
         curriculum_id = None
@@ -84,14 +80,10 @@ def get_curriculum_by_id():
         print(f"Final curriculum_id: {repr(curriculum_id)}")
 
         if not curriculum_id:
-            return {
-                "success": False,
-                "message": "Curriculum ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return error_response(
+                message="Curriculum ID is required",
+                code="MISSING_CURRICULUM_ID"
+            )
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -107,31 +99,28 @@ def get_curriculum_by_id():
         curriculum = frappe.get_doc("SIS Curriculum", filters)
         
         if not curriculum:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Curriculum not found or access denied"
-            }
+            return not_found_response(
+                message="Curriculum not found or access denied",
+                code="CURRICULUM_NOT_FOUND"
+            )
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": curriculum.name,
                 "title_vn": curriculum.title_vn,
                 "title_en": curriculum.title_en,
                 "short_title": curriculum.short_title,
                 "campus_id": curriculum.campus_id
             },
-            "message": "Curriculum fetched successfully"
-        }
+            message="Curriculum fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching curriculum {curriculum_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching curriculum: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching curriculum",
+            code="FETCH_CURRICULUM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -167,7 +156,13 @@ def create_curriculum():
         
         # Input validation
         if not title_vn or not short_title:
-            frappe.throw(_("Title VN and short title are required"))
+            return validation_error_response(
+                message="Title VN and short title are required",
+                errors={
+                    "title_vn": ["Required"] if not title_vn else [],
+                    "short_title": ["Required"] if not short_title else []
+                }
+            )
         
         # Get campus from user context - simplified
         try:
@@ -204,8 +199,11 @@ def create_curriculum():
         )
         
         if existing:
-            frappe.throw(_(f"Curriculum with title '{title_vn}' already exists"))
-            
+            return error_response(
+                message=f"Curriculum with title '{title_vn}' already exists",
+                code="CURRICULUM_EXISTS"
+            )
+
         # Check if short title already exists for this campus
         existing_code = frappe.db.exists(
             "SIS Curriculum",
@@ -214,9 +212,12 @@ def create_curriculum():
                 "campus_id": campus_id
             }
         )
-        
+
         if existing_code:
-            frappe.throw(_(f"Curriculum with short title '{short_title}' already exists"))
+            return error_response(
+                message=f"Curriculum with short title '{short_title}' already exists",
+                code="SHORT_TITLE_EXISTS"
+            )
         
         # Create new curriculum - with detailed debugging
         frappe.logger().info(f"Creating SIS Curriculum with data: title_vn={title_vn}, title_en={title_en}, short_title={short_title}, campus_id={campus_id}")
@@ -244,29 +245,30 @@ def create_curriculum():
         
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Curriculum created successfully"))
-        return {
-            "name": curriculum_doc.name,
-            "title_vn": curriculum_doc.title_vn,
-            "title_en": curriculum_doc.title_en,
-            "short_title": curriculum_doc.short_title,
-            "campus_id": curriculum_doc.campus_id
-        }
+        return single_item_response(
+            data={
+                "name": curriculum_doc.name,
+                "title_vn": curriculum_doc.title_vn,
+                "title_en": curriculum_doc.title_en,
+                "short_title": curriculum_doc.short_title,
+                "campus_id": curriculum_doc.campus_id
+            },
+            message="Curriculum created successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error creating curriculum: {str(e)}")
-        frappe.throw(_(f"Error creating curriculum: {str(e)}"))
+        return error_response(
+            message="Error creating curriculum",
+            code="CREATE_CURRICULUM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def update_curriculum():
     """Update an existing curriculum"""
     try:
-        # Debug: Print all request data
-        print("=== DEBUG update_curriculum ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
+       
 
         # Get data from multiple sources (form data or JSON payload)
         data = {}
@@ -310,11 +312,10 @@ def update_curriculum():
             
             # Check campus permission
             if curriculum_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to modify this curriculum"
-                }
+                                    return forbidden_response(
+                        message="Access denied: You don't have permission to modify this curriculum",
+                        code="ACCESS_DENIED"
+                    )
                 
         except frappe.DoesNotExistError:
             return {
@@ -341,11 +342,10 @@ def update_curriculum():
                 }
             )
             if existing:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Curriculum with title '{title_vn}' already exists"
-                }
+                return error_response(
+                    message=f"Curriculum with title '{title_vn}' already exists",
+                    code="CURRICULUM_EXISTS"
+                )
             curriculum_doc.title_vn = title_vn
 
         if title_en and title_en != curriculum_doc.title_en:
@@ -362,47 +362,39 @@ def update_curriculum():
                 }
             )
             if existing_code:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Curriculum with short title '{short_title}' already exists"
-                }
+                return error_response(
+                    message=f"Curriculum with short title '{short_title}' already exists",
+                    code="SHORT_TITLE_EXISTS"
+                )
             curriculum_doc.short_title = short_title
         
         curriculum_doc.save()
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": curriculum_doc.name,
                 "title_vn": curriculum_doc.title_vn,
                 "title_en": curriculum_doc.title_en,
                 "short_title": curriculum_doc.short_title,
                 "campus_id": curriculum_doc.campus_id
             },
-            "message": "Curriculum updated successfully"
-        }
+            message="Curriculum updated successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error updating curriculum {curriculum_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating curriculum: {str(e)}"
-        }
+        return error_response(
+            message="Error updating curriculum",
+            code="UPDATE_CURRICULUM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def delete_curriculum():
     """Delete a curriculum"""
     try:
-        # Debug: Print request data
-        print("=== DEBUG delete_curriculum ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
+       
 
         # Get curriculum_id from multiple sources (form data or JSON payload)
         curriculum_id = None
@@ -423,14 +415,10 @@ def delete_curriculum():
         print(f"Final curriculum_id: {repr(curriculum_id)}")
 
         if not curriculum_id:
-            return {
-                "success": False,
-                "message": "Curriculum ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return error_response(
+                message="Curriculum ID is required",
+                code="MISSING_CURRICULUM_ID"
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -444,11 +432,10 @@ def delete_curriculum():
             
             # Check campus permission
             if curriculum_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this curriculum"
-                }
+                return forbidden_response(
+                    message="Access denied: You don't have permission to delete this curriculum",
+                    code="ACCESS_DENIED"
+                )
                 
         except frappe.DoesNotExistError:
             return {
@@ -461,31 +448,23 @@ def delete_curriculum():
         frappe.delete_doc("SIS Curriculum", curriculum_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Curriculum deleted successfully"
-        }
+        return success_response(
+            message="Curriculum deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting curriculum {curriculum_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting curriculum: {str(e)}"
-        }
+        return error_response(
+            message="Error deleting curriculum",
+            code="DELETE_CURRICULUM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def check_short_title_availability():
     """Check if short title is available"""
     try:
-        # Debug: Print request data
-        print("=== DEBUG check_short_title_availability ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
+        
 
         # Get parameters from multiple sources (form data or JSON payload)
         short_title = None
@@ -507,16 +486,10 @@ def check_short_title_availability():
                 print(f"JSON parsing failed: {e}")
 
         if not short_title:
-            return {
-                "success": False,
-                "is_available": False,
-                "short_title": short_title,
-                "message": "Short title is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return error_response(
+                message="Short title is required",
+                code="MISSING_SHORT_TITLE"
+            )
         
         # Get campus from user context  
         campus_id = get_current_campus_from_context()
@@ -537,18 +510,17 @@ def check_short_title_availability():
         
         is_available = not bool(existing)
         
-        return {
-            "success": True,
-            "is_available": is_available,
-            "short_title": short_title,
-            "message": "Available" if is_available else "Short title already exists"
-        }
+        return success_response(
+            data={
+                "is_available": is_available,
+                "short_title": short_title
+            },
+            message="Available" if is_available else "Short title already exists"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error checking short title availability: {str(e)}")
-        return {
-            "success": False,
-            "is_available": False,
-            "short_title": short_title,
-            "message": f"Error checking availability: {str(e)}"
-        }
+        return error_response(
+            message="Error checking short title availability",
+            code="CHECK_AVAILABILITY_ERROR"
+        )

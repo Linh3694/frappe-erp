@@ -2,6 +2,15 @@ import frappe
 from frappe import _
 import json
 from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.api_response import (
+    success_response,
+    error_response,
+    paginated_response,
+    single_item_response,
+    validation_error_response,
+    not_found_response,
+    forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -210,22 +219,16 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
         total_count = frappe.db.count("SIS Class", filters=filters)
         total_pages = (total_count + limit - 1) // limit
 
-        return {
-            "success": True,
-            "data": enhanced_classes,
-            "total_count": total_count,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "total_count": total_count,
-                "limit": limit,
-                "offset": offset,
-            },
-            "message": "Classes fetched successfully",
-        }
+        return paginated_response(
+            data=enhanced_classes,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Classes fetched successfully"
+        )
     except Exception as e:
         frappe.log_error(f"Error fetching classes: {str(e)}")
-        return {"success": False, "data": [], "message": f"Error fetching classes: {str(e)}"}
+        return error_response(f"Error fetching classes: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -237,7 +240,7 @@ def get_class(class_id: str = None):
             if not class_id and frappe.request and frappe.request.args:
                 class_id = frappe.request.args.get('class_id') or frappe.request.args.get('name')
         if not class_id:
-            return {"success": False, "data": {}, "message": "Class ID is required"}
+            return validation_error_response({"class_id": ["Class ID is required"]})
 
         doc = frappe.get_doc("SIS Class", class_id)
         class_data = doc.as_dict()
@@ -378,9 +381,9 @@ def get_class(class_id: str = None):
                         # Employee doctype might not exist or be accessible
                         pass
 
-        return {"success": True, "data": class_data, "message": "Class fetched successfully"}
+        return single_item_response(class_data, "Class fetched successfully")
     except Exception as e:
-        return {"success": False, "data": {}, "message": f"Error fetching class: {str(e)}"}
+        return error_response(f"Error fetching class: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -399,7 +402,7 @@ def create_class():
         required = ["title", "school_year_id", "education_grade", "academic_program", "campus_id"]
         for field in required:
             if not data.get(field):
-                return {"success": False, "data": {}, "message": f"{field} is required"}
+                return validation_error_response({field: [f"{field} is required"]})
 
         # Resolve campus id robustly in case FE sends display text or alias
         campus_input = data.get("campus_id")
@@ -436,7 +439,7 @@ def create_class():
             first_campus = frappe.get_all("SIS Campus", fields=["name"], limit=1)
             campus_id = first_campus[0].name if first_campus else None
         if not campus_id:
-            return {"success": False, "data": {}, "message": "Campus not found"}
+            return not_found_response("Campus not found")
 
         # Sanitize select-type fields to avoid validation edge-cases
         raw_academic_level = (data.get("academic_level") or "").strip()
@@ -598,10 +601,10 @@ def create_class():
                         except Exception:
                             pass
 
-        return {"success": True, "data": response_data, "message": "Class created successfully"}
+        return single_item_response(response_data, "Class created successfully")
     except Exception as e:
         frappe.log_error(f"Error creating class: {str(e)}")
-        return {"success": False, "data": {}, "message": f"Error creating class: {str(e)}"}
+        return error_response(f"Error creating class: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -620,7 +623,7 @@ def update_class(class_id: str = None):
             
         class_id = class_id or data.get("class_id") or data.get("name")
         if not class_id:
-            return {"success": False, "data": {}, "message": "Class ID is required"}
+            return validation_error_response({"class_id": ["Class ID is required"]})
             
         # Get existing doc
         existing_doc = frappe.get_doc("SIS Class", class_id)
@@ -777,11 +780,11 @@ def update_class(class_id: str = None):
                         except Exception:
                             pass
 
-        return {"success": True, "data": response_data, "message": "Class updated successfully"}
+        return single_item_response(response_data, "Class updated successfully")
         
     except Exception as e:
         frappe.log_error(f"Error updating class: {str(e)}")
-        return {"success": False, "data": {}, "message": f"Error updating class: {str(e)}"}
+        return error_response(f"Error updating class: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -799,12 +802,12 @@ def delete_class(class_id: str = None):
             except Exception:
                 pass
         if not class_id:
-            return {"success": False, "data": {}, "message": "Class ID is required"}
+            return validation_error_response({"class_id": ["Class ID is required"]})
         frappe.delete_doc("SIS Class", class_id)
         frappe.db.commit()
-        return {"success": True, "data": {}, "message": "Class deleted successfully"}
+        return success_response(message="Class deleted successfully")
     except Exception as e:
         frappe.log_error(f"Error deleting class: {str(e)}")
-        return {"success": False, "data": {}, "message": f"Error deleting class: {str(e)}"}
+        return error_response(f"Error deleting class: {str(e)}")
 
 

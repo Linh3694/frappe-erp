@@ -6,6 +6,11 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response, error_response, list_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -105,21 +110,17 @@ def get_all_teachers():
 
             enhanced_teachers.append(enhanced_teacher)
 
-        return {
-            "success": True,
-            "data": enhanced_teachers,
-            "total_count": len(enhanced_teachers),
-            "message": "Teachers fetched successfully"
-        }
+        return list_response(
+            data=enhanced_teachers,
+            message="Teachers fetched successfully"
+        )
 
     except Exception as e:
         frappe.log_error(f"Error fetching teachers: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching teachers: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching teachers",
+            code="FETCH_TEACHERS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
@@ -147,11 +148,10 @@ def get_teacher_by_id(teacher_id=None):
 
         if not teacher_id:
             frappe.logger().info("No teacher_id found")
-            return {
-                "success": False,
-                "data": {},
-                "message": "Teacher ID is required"
-            }
+            return error_response(
+                message="Teacher ID is required",
+                code="MISSING_TEACHER_ID"
+            )
 
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -166,11 +166,10 @@ def get_teacher_by_id(teacher_id=None):
             frappe.logger().info(f"Teacher found: {teacher.name}, campus: {teacher.campus_id}")
         except frappe.DoesNotExistError:
             frappe.logger().info(f"Teacher {teacher_id} not found at all")
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Teacher {teacher_id} not found"
-            }
+            return not_found_response(
+                message="Teacher not found",
+                code="TEACHER_NOT_FOUND"
+            )
 
         # Check if teacher belongs to user's campus (if campus filtering is needed)
         if teacher.campus_id != campus_id:
@@ -186,26 +185,22 @@ def get_teacher_by_id(teacher_id=None):
                 "message": f"Teacher {teacher_id} not found or access denied"
             }
 
-        return {
-            "success": True,
-            "data": {
-                "teacher": {
-                    "name": teacher.name,
-                    "user_id": teacher.user_id,
-                    "education_stage_id": teacher.education_stage_id,
-                    "campus_id": teacher.campus_id
-                }
+        return single_item_response(
+            data={
+                "name": teacher.name,
+                "user_id": teacher.user_id,
+                "education_stage_id": teacher.education_stage_id,
+                "campus_id": teacher.campus_id
             },
-            "message": "Teacher fetched successfully"
-        }
+            message="Teacher fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching teacher {teacher_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching teacher: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching teacher",
+            code="FETCH_TEACHER_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -240,7 +235,10 @@ def create_teacher():
         
         # Input validation
         if not user_id:
-            frappe.throw(_("User ID is required"))
+            return validation_error_response(
+                message="User ID is required",
+                errors={"user_id": ["Required"]}
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -259,16 +257,18 @@ def create_teacher():
         )
         
         if existing:
-            frappe.throw(_(f"Teacher with user '{user_id}' already exists in this campus"))
+            return error_response(
+                message=f"Teacher with user '{user_id}' already exists in this campus",
+                code="TEACHER_EXISTS"
+            )
         
         # Verify user exists
         user_exists = frappe.db.exists("User", user_id)
         if not user_exists:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Selected user does not exist"
-            }
+            return error_response(
+                message="Selected user does not exist",
+                code="USER_NOT_FOUND"
+            )
         
         # Verify education stage exists and belongs to same campus (if provided)
         if education_stage_id:
@@ -300,16 +300,22 @@ def create_teacher():
         
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Teacher created successfully"))
-        return {
-            "name": teacher_doc.name,
-            "user_id": teacher_doc.user_id,
-            "education_stage_id": teacher_doc.education_stage_id,
-            "campus_id": teacher_doc.campus_id
-        }
+        return single_item_response(
+            data={
+                "name": teacher_doc.name,
+                "user_id": teacher_doc.user_id,
+                "education_stage_id": teacher_doc.education_stage_id,
+                "campus_id": teacher_doc.campus_id
+            },
+            message="Teacher created successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error creating teacher: {str(e)}")
-        frappe.throw(_(f"Error creating teacher: {str(e)}"))
+        return error_response(
+            message="Error creating teacher",
+            code="CREATE_TEACHER_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -355,11 +361,10 @@ def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
 
         if not teacher_id:
             frappe.logger().info("No teacher_id found for update")
-            return {
-                "success": False,
-                "data": {},
-                "message": "Teacher ID is required"
-            }
+            return error_response(
+                message="Teacher ID is required",
+                code="MISSING_TEACHER_ID"
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -388,11 +393,10 @@ def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
                     }
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Teacher not found"
-            }
+            return not_found_response(
+                message="Teacher not found",
+                code="TEACHER_NOT_FOUND"
+            )
         
         # Update fields if provided
         if user_id and user_id != teacher_doc.user_id:
@@ -451,37 +455,32 @@ def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
 
                 if not education_stage_with_campus:
                     frappe.logger().warning(f"Education stage {education_stage_id} exists but campus mismatch: expected {campus_id}")
-                    return {
-                        "success": False,
-                        "data": {},
-                        "message": "Selected education stage does not exist or access denied"
-                    }
+                    return error_response(
+                        message="Selected education stage does not exist or access denied",
+                        code="EDUCATION_STAGE_ACCESS_DENIED"
+                    )
 
             teacher_doc.education_stage_id = education_stage_id
         
         teacher_doc.save()
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {
-                "teacher": {
-                    "name": teacher_doc.name,
-                    "user_id": teacher_doc.user_id,
-                    "education_stage_id": teacher_doc.education_stage_id,
-                    "campus_id": teacher_doc.campus_id
-                }
+        return single_item_response(
+            data={
+                "name": teacher_doc.name,
+                "user_id": teacher_doc.user_id,
+                "education_stage_id": teacher_doc.education_stage_id,
+                "campus_id": teacher_doc.campus_id
             },
-            "message": "Teacher updated successfully"
-        }
+            message="Teacher updated successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error updating teacher {teacher_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating teacher: {str(e)}"
-        }
+        return error_response(
+            message="Error updating teacher",
+            code="UPDATE_TEACHER_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -520,11 +519,10 @@ def delete_teacher(teacher_id=None):
                 frappe.logger().info(f"Could not parse JSON data: {str(e)}, data: {frappe.request.data}")
 
         if not teacher_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Teacher ID is required"
-            }
+            return error_response(
+                message="Teacher ID is required",
+                code="MISSING_TEACHER_ID"
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -552,29 +550,25 @@ def delete_teacher(teacher_id=None):
                     }
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Teacher not found"
-            }
+            return not_found_response(
+                message="Teacher not found",
+                code="TEACHER_NOT_FOUND"
+            )
         
         # Delete the document
         frappe.delete_doc("SIS Teacher", teacher_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Teacher deleted successfully"
-        }
+        return success_response(
+            message="Teacher deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting teacher {teacher_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting teacher: {str(e)}"
-        }
+        return error_response(
+            message="Error deleting teacher",
+            code="DELETE_TEACHER_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -598,19 +592,17 @@ def get_users_for_selection():
             order_by="full_name asc"
         )
         
-        return {
-            "success": True,
-            "data": users,
-            "message": "Users fetched successfully"
-        }
+        return success_response(
+            data=users,
+            message="Users fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching users for selection: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching users: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching users",
+            code="FETCH_USERS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -636,16 +628,14 @@ def get_education_stages_for_teacher():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": education_stages,
-            "message": "Education stages fetched successfully"
-        }
+        return success_response(
+            data=education_stages,
+            message="Education stages fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching education stages for selection: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching education stages: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching education stages",
+            code="FETCH_EDUCATION_STAGES_ERROR"
+        )

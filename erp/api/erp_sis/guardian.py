@@ -3,6 +3,11 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response, error_response, list_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response, paginated_response
+)
 import unicodedata
 from typing import Optional
 
@@ -154,28 +159,20 @@ def get_all_guardians(page=1, limit=20):
         
         frappe.logger().info(f"Total count: {total_count}, Total pages: {total_pages}")
         
-        return {
-            "success": True,
-            "data": guardians,
-            "total_count": total_count,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "total_count": total_count,
-                "limit": limit,
-                "offset": offset
-            },
-            "message": "Guardians fetched successfully"
-        }
+        return paginated_response(
+            data=guardians,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Guardians fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching guardians: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching guardians: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching guardians",
+            code="FETCH_GUARDIANS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)  
@@ -211,11 +208,10 @@ def get_guardian_data():
                     pass
 
         if not guardian_id and not guardian_code and not guardian_slug:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Guardian ID, code, or slug is required"
-            }
+            return error_response(
+                message="Guardian ID, code, or slug is required",
+                code="MISSING_GUARDIAN_ID"
+            )
         
         # Build filters based on what parameter we have
         if guardian_id:
@@ -228,24 +224,28 @@ def get_guardian_data():
             # Search by guardian_id (which acts as code)
             docname = _resolve_guardian_docname(guardian_code=guardian_code)
             if not docname:
-                return {"success": False, "data": {}, "message": "Guardian not found"}
+                return not_found_response(
+                    message="Guardian not found",
+                    code="GUARDIAN_NOT_FOUND"
+                )
             guardian = frappe.get_doc("CRM Guardian", docname)
         elif guardian_slug:
             docname = _resolve_guardian_docname(guardian_slug=guardian_slug)
             if not docname:
-                return {"success": False, "data": {}, "message": "Guardian not found"}
+                return not_found_response(
+                    message="Guardian not found",
+                    code="GUARDIAN_NOT_FOUND"
+                )
             guardian = frappe.get_doc("CRM Guardian", docname)
         
         if not guardian:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Guardian not found"
-            }
+            return not_found_response(
+                message="Guardian not found",
+                code="GUARDIAN_NOT_FOUND"
+            )
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": guardian.name,
                 "guardian_id": guardian.guardian_id,
                 "guardian_name": guardian.guardian_name,
@@ -254,16 +254,15 @@ def get_guardian_data():
                 "creation": guardian.creation.isoformat() if guardian.creation else None,
                 "modified": guardian.modified.isoformat() if guardian.modified else None
             },
-            "message": "Guardian fetched successfully"
-        }
+            message="Guardian fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching guardian data: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching guardian data: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching guardian data",
+            code="FETCH_GUARDIAN_DATA_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -338,17 +337,23 @@ def create_guardian():
             frappe.logger().error(f"Form dict: {frappe.local.form_dict}")
             frappe.logger().error(f"Parsed data: {data}")
             frappe.logger().error(f"Guardian name extracted: '{guardian_name}'")
-            
+
             # Also try to get data directly from form_dict with different keys
             alt_name = frappe.local.form_dict.get('guardian_name') or frappe.local.form_dict.get('guardianName')
             frappe.logger().error(f"Alternative name from form_dict: '{alt_name}'")
-            
-            frappe.throw(_("Guardian name is required"))
+
+            return validation_error_response(
+                message="Guardian name is required",
+                errors={"guardian_name": ["Required"]}
+            )
                 
         # Check if guardian name already exists
         existing_name = frappe.db.exists("CRM Guardian", {"guardian_name": guardian_name})
         if existing_name:
-            frappe.throw(_(f"Guardian with name '{guardian_name}' already exists"))
+            return error_response(
+                message=f"Guardian with name '{guardian_name}' already exists",
+                code="GUARDIAN_NAME_EXISTS"
+            )
         
         frappe.logger().info(f"Creating guardian with Name: {guardian_name}")
         
@@ -383,26 +388,24 @@ def create_guardian():
         frappe.db.commit()
         
         # Return consistent API response format
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": guardian_doc.name,
                 "guardian_id": guardian_doc.guardian_id,
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
                 "email": guardian_doc.email if guardian_doc.email is not None else (email or "")
             },
-            "message": "Guardian created successfully"
-        }
+            message="Guardian created successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error creating guardian: {str(e)}", "Guardian Creation Error")
         frappe.logger().error(f"Full error details: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error creating guardian: {str(e)}"
-        }
+        return error_response(
+            message="Error creating guardian",
+            code="CREATE_GUARDIAN_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
@@ -432,21 +435,26 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
                 pass
         
         if not guardian_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Guardian ID is required"
-            }
+            return error_response(
+                message="Guardian ID is required",
+                code="MISSING_GUARDIAN_ID"
+            )
         
         # Resolve real docname from name/code/slug, then get existing document
         resolved_docname = _resolve_guardian_docname(identifier=guardian_id)
         if not resolved_docname:
-            return {"success": False, "data": {}, "message": "Guardian not found"}
+            return not_found_response(
+                message="Guardian not found",
+                code="GUARDIAN_NOT_FOUND"
+            )
 
         try:
             guardian_doc = frappe.get_doc("CRM Guardian", resolved_docname)
         except frappe.DoesNotExistError:
-            return {"success": False, "data": {}, "message": "Guardian not found"}
+            return not_found_response(
+                message="Guardian not found",
+                code="GUARDIAN_NOT_FOUND"
+            )
         
         # Track if any changes were made
         changes_made = False
@@ -482,33 +490,30 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
             })
             frappe.db.commit()
         except Exception as save_error:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Failed to save guardian: {str(save_error)}"
-            }
+            return error_response(
+                message="Failed to save guardian",
+                code="SAVE_GUARDIAN_ERROR"
+            )
         
         # Reload to get the final saved data from database
         guardian_doc.reload()
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": guardian_doc.name,
                 "guardian_id": guardian_doc.guardian_id,
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
                 "email": guardian_doc.email if guardian_doc.email is not None else (email or "")
             },
-            "message": "Guardian updated successfully"
-        }
+            message="Guardian updated successfully"
+        )
         
     except Exception as e:
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating guardian: {str(e)}"
-        }
+        return error_response(
+            message="Error updating guardian",
+            code="UPDATE_GUARDIAN_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -540,16 +545,18 @@ def delete_guardian():
         frappe.logger().info(f"delete_guardian called - guardian_id: {guardian_id}")
         
         if not guardian_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Guardian ID is required"
-            }
+            return error_response(
+                message="Guardian ID is required",
+                code="MISSING_GUARDIAN_ID"
+            )
         
         # Resolve real docname from name/code/slug
         docname = _resolve_guardian_docname(identifier=guardian_id)
         if not docname:
-            return {"success": False, "data": {}, "message": "Guardian not found"}
+            return not_found_response(
+                message="Guardian not found",
+                code="GUARDIAN_NOT_FOUND"
+            )
         
         # Cleanup relationships before delete
         try:
@@ -568,19 +575,16 @@ def delete_guardian():
                 raise e
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Guardian deleted successfully"
-        }
+        return success_response(
+            message="Guardian deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting guardian: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting guardian: {str(e)}"
-        }
+        return error_response(
+            message="Error deleting guardian",
+            code="DELETE_GUARDIAN_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -593,11 +597,10 @@ def bulk_delete_guardians():
         frappe.logger().info(f"bulk_delete_guardians called - guardian_ids: {guardian_ids}")
         
         if not guardian_ids:
-            return {
-                "success": False,
-                "data": None,
-                "message": "Guardian IDs are required"
-            }
+            return error_response(
+                message="Guardian IDs are required",
+                code="MISSING_GUARDIAN_IDS"
+            )
         
         if not isinstance(guardian_ids, list):
             guardian_ids = [guardian_ids]
@@ -619,23 +622,21 @@ def bulk_delete_guardians():
         frappe.db.commit()
         frappe.logger().info(f"Bulk delete completed. Deleted: {deleted_count}, Errors: {len(errors)}")
         
-        return {
-            "success": True,
-            "data": {
+        return success_response(
+            data={
                 "deleted_count": deleted_count,
                 "error_count": len(errors),
                 "errors": errors
             },
-            "message": f"Successfully deleted {deleted_count} guardians"
-        }
+            message=f"Successfully deleted {deleted_count} guardians"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error in bulk delete guardians: {str(e)}")
-        return {
-            "success": False,
-            "data": None,
-            "message": f"Error in bulk delete guardians: {str(e)}"
-        }
+        return error_response(
+            message="Error in bulk delete guardians",
+            code="BULK_DELETE_GUARDIANS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -735,34 +736,20 @@ def search_guardians(search_term=None, page=1, limit=20):
         
         total_pages = (total_count + limit - 1) // limit
         
-        return {
-            "success": True,
-            "data": guardians,
-            "total_count": total_count,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "total_count": total_count,
-                "limit": limit,
-                "offset": offset
-            },
-            "message": "Guardian search completed successfully"
-        }
+        return paginated_response(
+            data=guardians,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Guardian search completed successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error searching guardians: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "pagination": {
-                "current_page": page,
-                "total_pages": 0,
-                "total_count": 0,
-                "limit": limit,
-                "offset": 0
-            },
-            "message": f"Error searching guardians: {str(e)}"
-        }
+        return error_response(
+            message="Error searching guardians",
+            code="SEARCH_GUARDIANS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -781,16 +768,14 @@ def get_guardians_for_selection():
             order_by="guardian_name asc"
         )
         
-        return {
-            "success": True,
-            "data": guardians,
-            "message": "Guardians fetched successfully"
-        }
+        return success_response(
+            data=guardians,
+            message="Guardians fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching guardians for selection: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching guardians: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching guardians",
+            code="FETCH_GUARDIANS_SELECTION_ERROR"
+        )

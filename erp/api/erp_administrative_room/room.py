@@ -6,6 +6,15 @@ from frappe import _
 from frappe.utils import getdate, nowdate
 import json
 from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.api_response import (
+    success_response,
+    error_response,
+    list_response,
+    single_item_response,
+    validation_error_response,
+    not_found_response,
+    forbidden_response
+)
 
 
 @frappe.whitelist()
@@ -37,21 +46,11 @@ def get_all_rooms():
             order_by="title_vn asc"
         )
 
-        return {
-            "success": True,
-            "data": {
-                "rooms": rooms
-            },
-            "message": "Rooms fetched successfully"
-        }
+        return list_response(rooms, "Rooms fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching rooms: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error fetching rooms",
-            "error": str(e)
-        }
+        return error_response(f"Error fetching rooms: {str(e)}")
 
 
 @frappe.whitelist()
@@ -78,11 +77,7 @@ def get_room_by_id(room_id=None):
                 room_id = frappe.local.form_dict.get('room_id')
 
         if not room_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room ID is required"
-            }
+            return validation_error_response({"room_id": ["Room ID is required"]})
 
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -105,45 +100,29 @@ def get_room_by_id(room_id=None):
         )
 
         if not rooms:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room not found"
-            }
+            return not_found_response("Room not found")
 
         room = rooms[0]
         
-        return {
-            "success": True,
-            "data": {
-                "room": {
-                    "name": room.name,
-                    "title_vn": room.title_vn,
-                    "title_en": room.title_en,
-                    "short_title": room.short_title,
-                    "room_type": room.room_type,
-                    "capacity": room.capacity,
-                    "building_id": room.building_id,
-                    "description": room.description,
-                    "creation": room.creation,
-                    "modified": room.modified
-                }
-            },
-            "message": "Room details fetched successfully"
+        room_data = {
+            "name": room.name,
+            "title_vn": room.title_vn,
+            "title_en": room.title_en,
+            "short_title": room.short_title,
+            "room_type": room.room_type,
+            "capacity": room.capacity,
+            "building_id": room.building_id,
+            "description": room.description,
+            "creation": room.creation,
+            "modified": room.modified
         }
+        return single_item_response(room_data, "Room details fetched successfully")
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Room not found"
-        }
+        return not_found_response("Room not found")
     except Exception as e:
         frappe.log_error(f"Error fetching room {room_id}: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error fetching room details",
-            "error": str(e)
-        }
+        return error_response(f"Error fetching room details: {str(e)}")
 
 
 @frappe.whitelist()
@@ -152,10 +131,10 @@ def add_room(room_name, room_type, capacity=None, is_homeroom=0, description=Non
     try:
         # Validate required fields
         if not room_name or not room_type:
-            return {
-                "success": False,
-                "message": "Room name and room type are required"
-            }
+            return validation_error_response({
+                "room_name": ["Room name is required"] if not room_name else [],
+                "room_type": ["Room type is required"] if not room_type else []
+            })
         
         # Create new room document
         room_doc = frappe.get_doc({
@@ -170,27 +149,17 @@ def add_room(room_name, room_type, capacity=None, is_homeroom=0, description=Non
 
         room_doc.insert()
 
-        return {
-            "success": True,
-            "data": {
-                "room_id": room_doc.name,
-                "title_vn": room_doc.title_vn
-            },
-            "message": "Room added successfully"
+        room_data = {
+            "room_id": room_doc.name,
+            "title_vn": room_doc.title_vn
         }
+        return single_item_response(room_data, "Room added successfully")
         
     except frappe.DuplicateEntryError:
-        return {
-            "success": False,
-            "message": f"Room with name '{room_name}' already exists"
-        }
+        return validation_error_response({"room_name": [f"Room with name '{room_name}' already exists"]})
     except Exception as e:
         frappe.log_error(f"Error adding room: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error adding room",
-            "error": str(e)
-        }
+        return error_response(f"Error adding room: {str(e)}")
 
 
 @frappe.whitelist()
@@ -198,10 +167,7 @@ def update_room(room_id, room_name=None, room_type=None, capacity=None, is_homer
     """Update room information"""
     try:
         if not room_id:
-            return {
-                "success": False,
-                "message": "Room ID is required"
-            }
+            return validation_error_response({"room_id": ["Room ID is required"]})
         
         room_doc = frappe.get_doc("ERP Administrative Room", room_id)
         
@@ -223,27 +189,17 @@ def update_room(room_id, room_name=None, room_type=None, capacity=None, is_homer
         
         room_doc.save()
         
-        return {
-            "success": True,
-            "data": {
-                "room_id": room_doc.name,
-                "title_vn": room_doc.title_vn
-            },
-            "message": "Room updated successfully"
+        room_data = {
+            "room_id": room_doc.name,
+            "title_vn": room_doc.title_vn
         }
+        return single_item_response(room_data, "Room updated successfully")
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Room not found"
-        }
+        return not_found_response("Room not found")
     except Exception as e:
         frappe.log_error(f"Error updating room {room_id}: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error updating room",
-            "error": str(e)
-        }
+        return error_response(f"Error updating room: {str(e)}")
 
 
 @frappe.whitelist()
@@ -251,10 +207,7 @@ def delete_room(room_id):
     """Delete room"""
     try:
         if not room_id:
-            return {
-                "success": False,
-                "message": "Room ID is required"
-            }
+            return validation_error_response({"room_id": ["Room ID is required"]})
         
         room_doc = frappe.get_doc("ERP Administrative Room", room_id)
         room_name = room_doc.title_vn
@@ -264,23 +217,13 @@ def delete_room(room_id):
         
         room_doc.delete()
         
-        return {
-            "success": True,
-            "message": f"Room '{room_name}' deleted successfully"
-        }
+        return success_response(message=f"Room '{room_name}' deleted successfully")
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Room not found"
-        }
+        return not_found_response("Room not found")
     except Exception as e:
         frappe.log_error(f"Error deleting room {room_id}: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error deleting room",
-            "error": str(e)
-        }
+        return error_response(f"Error deleting room: {str(e)}")
 
 
 @frappe.whitelist()
@@ -288,10 +231,7 @@ def get_devices_by_room(room_id):
     """Get all devices assigned to a room"""
     try:
         if not room_id:
-            return {
-                "success": False,
-                "message": "Room ID is required"
-            }
+            return validation_error_response({"room_id": ["Room ID is required"]})
         
         # Check if room exists
         room = frappe.get_doc("ERP Administrative Room", room_id)
@@ -311,35 +251,25 @@ def get_devices_by_room(room_id):
         
         has_devices = any(len(device_list) > 0 for device_list in devices.values())
         
-        return {
-            "success": True,
-            "data": {
-                "room": {
-                    "name": room.name,
-                    "title_vn": room.title_vn,
-                    "title_en": room.title_en,
-                    "room_type": room.room_type,
-                    "capacity": room.capacity,
-                    "building_id": room.building_id
-                },
-                "devices": devices,
-                "has_devices": has_devices
+        room_devices_data = {
+            "room": {
+                "name": room.name,
+                "title_vn": room.title_vn,
+                "title_en": room.title_en,
+                "room_type": room.room_type,
+                "capacity": room.capacity,
+                "building_id": room.building_id
             },
-            "message": "Devices fetched successfully" if has_devices else "No devices found for this room"
+            "devices": devices,
+            "has_devices": has_devices
         }
+        return single_item_response(room_devices_data, "Devices fetched successfully" if has_devices else "No devices found for this room")
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Room not found"
-        }
+        return not_found_response("Room not found")
     except Exception as e:
         frappe.log_error(f"Error fetching devices for room {room_id}: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error fetching devices",
-            "error": str(e)
-        }
+        return error_response(f"Error fetching devices: {str(e)}")
 
 
 @frappe.whitelist()
@@ -347,10 +277,7 @@ def get_room_utilization(room_id):
     """Get room utilization statistics"""
     try:
         if not room_id:
-            return {
-                "success": False,
-                "message": "Room ID is required"
-            }
+            return validation_error_response({"room_id": ["Room ID is required"]})
         
         room = frappe.get_doc("ERP Administrative Room", room_id)
         
@@ -364,24 +291,13 @@ def get_room_utilization(room_id):
             "available_periods": 10
         }
         
-        return {
-            "success": True,
-            "data": utilization_data,
-            "message": "Room utilization data fetched successfully"
-        }
+        return single_item_response(utilization_data, "Room utilization data fetched successfully")
 
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Room not found"
-        }
+        return not_found_response("Room not found")
     except Exception as e:
         frappe.log_error(f"Error fetching room utilization {room_id}: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error fetching room utilization",
-            "error": str(e)
-        }
+        return error_response(f"Error fetching room utilization: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -425,7 +341,10 @@ def create_room():
 
         # Input validation
         if not title_vn or not room_type:
-            frappe.throw(_("Title VN and room type are required"))
+            return validation_error_response({
+                "title_vn": ["Title VN is required"] if not title_vn else [],
+                "room_type": ["Room type is required"] if not room_type else []
+            })
 
         # Create new room document directly
         room_doc = frappe.get_doc({
@@ -450,22 +369,17 @@ def create_room():
         }
 
         if result.get("success"):
-            return {
-                "success": True,
-                "data": {
-                    "room": {
-                        "name": result.get("room_id"),
-                        "title_vn": title_vn,
-                        "title_en": title_en,
-                        "short_title": short_title,
-                        "capacity": capacity,
-                        "room_type": room_type,
-                        "building_id": building_id,
-                        "campus_id": campus_id
-                    }
-                },
-                "message": "Room created successfully"
+            room_data = {
+                "name": result.get("room_id"),
+                "title_vn": title_vn,
+                "title_en": title_en,
+                "short_title": short_title,
+                "capacity": capacity,
+                "room_type": room_type,
+                "building_id": building_id,
+                "campus_id": campus_id
             }
+            return single_item_response(room_data, "Room created successfully")
         else:
             return result
 
@@ -645,11 +559,7 @@ def delete_room():
                 pass
 
         if not room_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room ID is required"
-            }
+            return validation_error_response({"room_id": ["Room ID is required"]})
 
         # Get campus from user context
         campus_id = get_current_campus_from_context()

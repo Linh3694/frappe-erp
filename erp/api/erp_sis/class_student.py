@@ -4,6 +4,11 @@
 import frappe
 from frappe import _
 from frappe.utils import get_datetime, now_datetime
+from erp.utils.api_response import (
+    success_response, error_response, paginated_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -48,27 +53,20 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         # Calculate pagination
         total_pages = (total_count + limit - 1) // limit
         
-        return {
-            "success": True,
-            "data": class_students,
-            "total_count": total_count,
-            "pagination": {
-                "current_page": page,
-                "total_pages": total_pages,
-                "total_count": total_count,
-                "limit": limit,
-                "offset": offset
-            },
-            "message": "Class students fetched successfully"
-        }
+        return paginated_response(
+            data=class_students,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Class students fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error getting class students: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching class students: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching class students",
+            code="FETCH_CLASS_STUDENTS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
@@ -102,10 +100,14 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
         
         # Validate required parameters
         if not class_id or not student_id or not school_year_id:
-            return {
-                "success": False,
-                "message": "Missing required parameters: class_id, student_id, school_year_id"
-            }
+            return validation_error_response(
+                message="Missing required parameters",
+                errors={
+                    "class_id": ["Required"] if not class_id else [],
+                    "student_id": ["Required"] if not student_id else [],
+                    "school_year_id": ["Required"] if not school_year_id else []
+                }
+            )
         
         # Get campus from context
         from erp.utils.campus_utils import get_current_campus_from_context
@@ -121,10 +123,10 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
         })
         
         if existing:
-            return {
-                "success": False,
-                "message": "Student is already assigned to this class"
-            }
+            return error_response(
+                message="Student is already assigned to this class",
+                code="STUDENT_ALREADY_ASSIGNED"
+            )
         
         # Create new class student assignment
         class_student = frappe.get_doc({
@@ -141,9 +143,8 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
         
         frappe.logger().info(f"Successfully assigned student {student_id} to class {class_id}")
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": class_student.name,
                 "class_id": class_student.class_id,
                 "student_id": class_student.student_id,
@@ -151,16 +152,16 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                 "class_type": class_student.class_type,
                 "campus_id": class_student.campus_id
             },
-            "message": "Student assigned to class successfully"
-        }
+            message="Student assigned to class successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error assigning student to class: {str(e)}")
         frappe.db.rollback()
-        return {
-            "success": False,
-            "message": f"Error assigning student to class: {str(e)}"
-        }
+        return error_response(
+            message="Error assigning student to class",
+            code="ASSIGN_STUDENT_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -175,17 +176,17 @@ def unassign_student(name=None):
         frappe.logger().info(f"unassign_student called with: name={name}")
         
         if not name:
-            return {
-                "success": False,
-                "message": "Missing required parameter: name"
-            }
+            return error_response(
+                message="Missing required parameter: name",
+                code="MISSING_NAME"
+            )
         
         # Check if class student exists
         if not frappe.db.exists("SIS Class Student", name):
-            return {
-                "success": False,
-                "message": "Class student assignment not found"
-            }
+            return not_found_response(
+                message="Class student assignment not found",
+                code="CLASS_STUDENT_NOT_FOUND"
+            )
         
         # Delete the assignment
         frappe.delete_doc("SIS Class Student", name)
@@ -193,15 +194,14 @@ def unassign_student(name=None):
         
         frappe.logger().info(f"Successfully unassigned class student: {name}")
         
-        return {
-            "success": True,
-            "message": "Student unassigned from class successfully"
-        }
+        return success_response(
+            message="Student unassigned from class successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error unassigning student from class: {str(e)}")
         frappe.db.rollback()
-        return {
-            "success": False,
-            "message": f"Error unassigning student from class: {str(e)}"
-        }
+        return error_response(
+            message="Error unassigning student from class",
+            code="UNASSIGN_STUDENT_ERROR"
+        )

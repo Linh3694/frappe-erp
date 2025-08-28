@@ -6,6 +6,11 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response, error_response, list_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -36,20 +41,16 @@ def get_all_education_stages():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": education_stages,
-            "total_count": len(education_stages),
-            "message": "Education stages fetched successfully"
-        }
+        return list_response(
+            data=education_stages,
+            message="Education stages fetched successfully"
+        )
         
     except Exception as e:
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching education stages: {str(e)}",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error fetching education stages",
+            code="FETCH_EDUCATION_STAGES_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -109,20 +110,10 @@ def get_education_stage_by_id():
 
         # Always return debug info for troubleshooting
         if not stage_id:
-            return {
-                "success": False,
-                "message": "Stage ID is required",
-                "debug": {
-                    "request_method": frappe.request.method,
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
-                    "request_data_type": type(frappe.request.data).__name__,
-                    "has_json_attr": hasattr(frappe.request, 'json'),
-                    "json_content": frappe.request.json if hasattr(frappe.request, 'json') and frappe.request.json else None,
-                    "stage_id_value": repr(stage_id),
-                    "stage_id_type": type(stage_id).__name__
-                }
-            }
+            return error_response(
+                message="Stage ID is required",
+                code="MISSING_STAGE_ID"
+            )
 
         # If stage_id is found, also include debug info
         print(f"=== SUCCESS DEBUG ===")
@@ -132,32 +123,28 @@ def get_education_stage_by_id():
         stage = frappe.get_doc("SIS Education Stage", stage_id)
 
         if not stage:
-            return {
-                "success": False,
-                "message": "Education stage not found"
-            }
+            return not_found_response(
+                message="Education stage not found",
+                code="EDUCATION_STAGE_NOT_FOUND"
+            )
 
         stage_data = stage.as_dict()
 
-        return {
-            "success": True,
-            "data": {
-                "education_stage": stage_data
-            },
-            "message": "Education stage fetched successfully"
-        }
+        return single_item_response(
+            data=stage_data,
+            message="Education stage fetched successfully"
+        )
 
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Education stage not found"
-        }
+        return not_found_response(
+            message="Education stage not found",
+            code="EDUCATION_STAGE_NOT_FOUND"
+        )
     except Exception as e:
-        return {
-            "success": False,
-            "message": "Error fetching education stage",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error fetching education stage",
+            code="FETCH_EDUCATION_STAGE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -171,7 +158,10 @@ def create_education_stage():
         required_fields = ["title_vn", "title_en", "short_title"]
         for field in required_fields:
             if not data.get(field):
-                frappe.throw(_(f"Field '{field}' is required"))
+                return validation_error_response(
+                    message=f"Field '{field}' is required",
+                    errors={field: ["Required"]}
+                )
         
         # Get campus from user roles or form data
         campus_id = data.get("campus_id")
@@ -188,7 +178,10 @@ def create_education_stage():
         })
         
         if existing_stage:
-            frappe.throw(_("Ký hiệu đã tồn tại cho trường học này"))
+            return error_response(
+                message="Ký hiệu đã tồn tại cho trường học này",
+                code="SHORT_TITLE_EXISTS"
+            )
         
         # Create new education stage
         stage_doc = frappe.get_doc({
@@ -201,18 +194,16 @@ def create_education_stage():
         
         stage_doc.insert(ignore_permissions=True)
 
-        return {
-            "success": True,
-            "data": stage_doc.as_dict(),
-            "message": "Education stage created successfully"
-        }
+        return single_item_response(
+            data=stage_doc.as_dict(),
+            message="Education stage created successfully"
+        )
 
     except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error creating education stage: {str(e)}",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error creating education stage",
+            code="CREATE_EDUCATION_STAGE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -248,18 +239,10 @@ def update_education_stage():
         print(f"Final extracted stage_id: {stage_id}")
 
         if not stage_id:
-            return {
-                "success": False,
-                "message": "Stage ID is required",
-                "debug": {
-                    "request_method": frappe.request.method,
-                    "content_type": frappe.request.headers.get('Content-Type'),
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
-                    "stage_id_value": repr(stage_id),
-                    "stage_id_type": type(stage_id).__name__
-                }
-            }
+            return error_response(
+                message="Stage ID is required",
+                code="MISSING_STAGE_ID"
+            )
 
         # Get data from request (support both form data and JSON)
         data = {}
@@ -284,10 +267,10 @@ def update_education_stage():
         stage_doc = frappe.get_doc("SIS Education Stage", stage_id)
         
         if not stage_doc:
-            return {
-                "success": False,
-                "message": "Education stage not found"
-            }
+            return not_found_response(
+                message="Education stage not found",
+                code="EDUCATION_STAGE_NOT_FOUND"
+            )
         
         # Check if short_title already exists for this campus (excluding current stage)
         if data.get("short_title") and data.get("short_title") != stage_doc.short_title:
@@ -298,10 +281,10 @@ def update_education_stage():
             })
             
             if existing_stage:
-                return {
-                    "success": False,
-                    "message": "Ký hiệu đã tồn tại cho trường học này"
-                }
+                return error_response(
+                    message="Ký hiệu đã tồn tại cho trường học này",
+                    code="SHORT_TITLE_EXISTS"
+                )
         
         # Update fields
         updatable_fields = ["title_vn", "title_en", "short_title"]
@@ -311,25 +294,21 @@ def update_education_stage():
         
         stage_doc.save(ignore_permissions=True)
         
-        return {
-            "success": True,
-            "data": {
-                "education_stage": stage_doc.as_dict()
-            },
-            "message": "Education stage updated successfully"
-        }
+        return single_item_response(
+            data=stage_doc.as_dict(),
+            message="Education stage updated successfully"
+        )
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Education stage not found"
-        }
+        return not_found_response(
+            message="Education stage not found",
+            code="EDUCATION_STAGE_NOT_FOUND"
+        )
     except Exception as e:
-        return {
-            "success": False,
-            "message": "Error updating education stage",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error updating education stage",
+            code="UPDATE_EDUCATION_STAGE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -377,10 +356,10 @@ def delete_education_stage():
         stage_doc = frappe.get_doc("SIS Education Stage", stage_id)
         
         if not stage_doc:
-            return {
-                "success": False,
-                "message": "Education stage not found"
-            }
+            return not_found_response(
+                message="Education stage not found",
+                code="EDUCATION_STAGE_NOT_FOUND"
+            )
         
         # TODO: Add validation to check if stage is being used by other documents
         # before deleting
@@ -388,22 +367,20 @@ def delete_education_stage():
         # Delete the stage
         frappe.delete_doc("SIS Education Stage", stage_id, ignore_permissions=True)
         
-        return {
-            "success": True,
-            "message": "Education stage deleted successfully"
-        }
+        return success_response(
+            message="Education stage deleted successfully"
+        )
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "Education stage not found"
-        }
+        return not_found_response(
+            message="Education stage not found",
+            code="EDUCATION_STAGE_NOT_FOUND"
+        )
     except Exception as e:
-        return {
-            "success": False,
-            "message": "Error deleting education stage",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error deleting education stage",
+            code="DELETE_EDUCATION_STAGE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -415,19 +392,19 @@ def check_short_title_availability():
         stage_id = frappe.form_dict.get('stage_id')
 
         if not short_title:
-            return {
-                "success": False,
-                "message": "Short title is required"
-            }
+            return error_response(
+                message="Short title is required",
+                code="MISSING_SHORT_TITLE"
+            )
         
         # Get current user's campus from roles
         campus_id = get_current_campus_from_context()
         
         if not campus_id:
-            return {
-                "success": False,
-                "message": "User campus not found in roles"
-            }
+            return error_response(
+                message="User campus not found in roles",
+                code="CAMPUS_NOT_FOUND"
+            )
         
         filters = {
             "short_title": short_title,
@@ -440,18 +417,16 @@ def check_short_title_availability():
         
         existing_stage = frappe.db.exists("SIS Education Stage", filters)
         
-        return {
-            "success": True,
-            "data": {
+        return success_response(
+            data={
                 "is_available": not bool(existing_stage),
                 "short_title": short_title
             },
-            "message": "Short title availability checked"
-        }
+            message="Short title availability checked"
+        )
         
     except Exception as e:
-        return {
-            "success": False,
-            "message": "Error checking short title availability",
-            "error": str(e)
-        }
+        return error_response(
+            message="Error checking short title availability",
+            code="CHECK_AVAILABILITY_ERROR"
+        )

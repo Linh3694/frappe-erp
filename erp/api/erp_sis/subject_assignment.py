@@ -6,6 +6,15 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response,
+    error_response,
+    list_response,
+    single_item_response,
+    validation_error_response,
+    not_found_response,
+    forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
@@ -41,21 +50,11 @@ def get_all_subject_assignments():
             ORDER BY sa.teacher_id asc
         """, (campus_id,), as_dict=True)
         
-        return {
-            "success": True,
-            "data": subject_assignments_data,
-            "total_count": len(subject_assignments_data),
-            "message": "Subject assignments fetched successfully"
-        }
+        return list_response(subject_assignments_data, "Subject assignments fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching subject assignments: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching subject assignments: {str(e)}"
-        }
+        return error_response(f"Error fetching subject assignments: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
@@ -85,11 +84,7 @@ def get_subject_assignment_by_id(assignment_id=None):
                 pass
 
         if not assignment_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Subject Assignment ID is required"
-            }
+            return validation_error_response({"assignment_id": ["Subject Assignment ID is required"]})
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -120,36 +115,23 @@ def get_subject_assignment_by_id(assignment_id=None):
 
         if not assignment_data or len(assignment_data) == 0:
             frappe.logger().error(f"Subject assignment not found - ID: {assignment_id}, Campus: {campus_id}")
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Subject assignment not found or access denied - ID: {assignment_id}, Campus: {campus_id}"
-            }
+            return not_found_response(f"Subject assignment not found or access denied - ID: {assignment_id}, Campus: {campus_id}")
 
         assignment = assignment_data[0]
 
-        return {
-            "success": True,
-            "data": {
-                "subject_assignment": {
-                    "name": assignment.name,
-                    "teacher_id": assignment.teacher_id,
-                    "subject_id": assignment.subject_id,
-                    "campus_id": assignment.campus_id,
-                    "teacher_name": assignment.teacher_name,
-                    "subject_title": assignment.subject_title
-                }
-            },
-            "message": "Subject assignment fetched successfully"
+        assignment_data = {
+            "name": assignment.name,
+            "teacher_id": assignment.teacher_id,
+            "subject_id": assignment.subject_id,
+            "campus_id": assignment.campus_id,
+            "teacher_name": assignment.teacher_name,
+            "subject_title": assignment.subject_title
         }
+        return single_item_response(assignment_data, "Subject assignment fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching subject assignment {assignment_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching subject assignment: {str(e)}"
-        }
+        return error_response(f"Error fetching subject assignment: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
@@ -216,11 +198,7 @@ def create_subject_assignment():
         )
         
         if not teacher_exists:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Selected teacher does not exist or access denied"
-            }
+            return not_found_response("Selected teacher does not exist or access denied")
         
         # Verify subject exists and belongs to same campus
         subject_exists = frappe.db.exists(
@@ -232,11 +210,7 @@ def create_subject_assignment():
         )
         
         if not subject_exists:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Selected subject does not exist or access denied"
-            }
+            return not_found_response("Selected subject does not exist or access denied")
         
         # Create new subject assignment
         assignment_doc = frappe.get_doc({
@@ -270,33 +244,23 @@ def create_subject_assignment():
 
         if created_data:
             result = created_data[0]
-            return {
-                "success": True,
-                "data": {
-                    "subject_assignment": {
-                        "name": result.name,
-                        "teacher_id": result.teacher_id,
-                        "subject_id": result.subject_id,
-                        "campus_id": result.campus_id,
-                        "teacher_name": result.teacher_name,
-                        "subject_title": result.subject_title
-                    }
-                },
-                "message": "Subject assignment created successfully"
+            assignment_data = {
+                "name": result.name,
+                "teacher_id": result.teacher_id,
+                "subject_id": result.subject_id,
+                "campus_id": result.campus_id,
+                "teacher_name": result.teacher_name,
+                "subject_title": result.subject_title
             }
+            return single_item_response(assignment_data, "Subject assignment created successfully")
         else:
-            return {
-                "success": True,
-                "data": {
-                    "subject_assignment": {
-                        "name": assignment_doc.name,
-                        "teacher_id": assignment_doc.teacher_id,
-                        "subject_id": assignment_doc.subject_id,
-                        "campus_id": assignment_doc.campus_id
-                    }
-                },
-                "message": "Subject assignment created successfully"
+            assignment_data = {
+                "name": assignment_doc.name,
+                "teacher_id": assignment_doc.teacher_id,
+                "subject_id": assignment_doc.subject_id,
+                "campus_id": assignment_doc.campus_id
             }
+            return single_item_response(assignment_data, "Subject assignment created successfully")
         
     except Exception as e:
         frappe.log_error(f"Error creating subject assignment: {str(e)}")
@@ -352,11 +316,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
             frappe.logger().info(f"frappe.request.data: {frappe.request.data}")
 
         if not assignment_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Subject Assignment ID is required"
-            }
+            return validation_error_response({"assignment_id": ["Subject Assignment ID is required"]})
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -370,18 +330,10 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
             
             # Check campus permission
             if assignment_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to modify this subject assignment"
-                }
+                return forbidden_response("Access denied: You don't have permission to modify this subject assignment")
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Subject assignment not found"
-            }
+            return not_found_response("Subject assignment not found")
         
         # Update fields if provided
         frappe.logger().info(f"Before update - Current teacher_id: {assignment_doc.teacher_id}, subject_id: {assignment_doc.subject_id}")
@@ -404,11 +356,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
 
             if not teacher_exists:
                 frappe.logger().error(f"Teacher {teacher_id} does not exist in campus {campus_id}")
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Selected teacher does not exist or access denied"
-                }
+                return not_found_response("Selected teacher does not exist or access denied")
 
             assignment_doc.teacher_id = teacher_id
             frappe.logger().info(f"Teacher ID updated successfully to: {assignment_doc.teacher_id}")
@@ -430,11 +378,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
 
             if not subject_exists:
                 frappe.logger().error(f"Subject {subject_id} does not exist in campus {campus_id}")
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Selected subject does not exist or access denied"
-                }
+                return not_found_response("Selected subject does not exist or access denied")
 
             assignment_doc.subject_id = subject_id
             frappe.logger().info(f"Subject ID updated successfully to: {assignment_doc.subject_id}")
@@ -457,11 +401,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
             )
             
             if existing:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"This teacher is already assigned to this subject"
-                }
+                return validation_error_response({"assignment": [f"This teacher is already assigned to this subject"]})
         
         frappe.logger().info(f"Before save - assignment_doc.teacher_id: {assignment_doc.teacher_id}, assignment_doc.subject_id: {assignment_doc.subject_id}")
 
@@ -492,41 +432,27 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
         if updated_data:
             result = updated_data[0]
             frappe.logger().info(f"Final result - teacher_id: {result.teacher_id}, subject_id: {result.subject_id}")
-            return {
-                "success": True,
-                "data": {
-                    "subject_assignment": {
-                        "name": result.name,
-                        "teacher_id": result.teacher_id,
-                        "subject_id": result.subject_id,
-                        "campus_id": result.campus_id,
-                        "teacher_name": result.teacher_name,
-                        "subject_title": result.subject_title
-                    }
-                },
-                "message": "Subject assignment updated successfully"
+            assignment_data = {
+                "name": result.name,
+                "teacher_id": result.teacher_id,
+                "subject_id": result.subject_id,
+                "campus_id": result.campus_id,
+                "teacher_name": result.teacher_name,
+                "subject_title": result.subject_title
             }
+            return single_item_response(assignment_data, "Subject assignment updated successfully")
         else:
-            return {
-                "success": True,
-                "data": {
-                    "subject_assignment": {
-                        "name": assignment_doc.name,
-                        "teacher_id": assignment_doc.teacher_id,
-                        "subject_id": assignment_doc.subject_id,
-                        "campus_id": assignment_doc.campus_id
-                    }
-                },
-                "message": "Subject assignment updated successfully"
+            assignment_data = {
+                "name": assignment_doc.name,
+                "teacher_id": assignment_doc.teacher_id,
+                "subject_id": assignment_doc.subject_id,
+                "campus_id": assignment_doc.campus_id
             }
+            return single_item_response(assignment_data, "Subject assignment updated successfully")
         
     except Exception as e:
         frappe.log_error(f"Error updating subject assignment {assignment_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating subject assignment: {str(e)}"
-        }
+        return error_response(f"Error updating subject assignment: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"]) 
@@ -534,11 +460,7 @@ def delete_subject_assignment(assignment_id):
     """Delete a subject assignment"""
     try:
         if not assignment_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Subject Assignment ID is required"
-            }
+            return validation_error_response({"assignment_id": ["Subject Assignment ID is required"]})
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -552,36 +474,20 @@ def delete_subject_assignment(assignment_id):
             
             # Check campus permission
             if assignment_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this subject assignment"
-                }
+                return forbidden_response("Access denied: You don't have permission to delete this subject assignment")
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Subject assignment not found"
-            }
+            return not_found_response("Subject assignment not found")
         
         # Delete the document
         frappe.delete_doc("SIS Subject Assignment", assignment_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Subject assignment deleted successfully"
-        }
+        return success_response(message="Subject assignment deleted successfully")
         
     except Exception as e:
         frappe.log_error(f"Error deleting subject assignment {assignment_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting subject assignment: {str(e)}"
-        }
+        return error_response(f"Error deleting subject assignment: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
@@ -606,19 +512,11 @@ def get_teachers_for_assignment():
             order_by="user_id asc"
         )
         
-        return {
-            "success": True,
-            "data": teachers,
-            "message": "Teachers fetched successfully"
-        }
+        return list_response(teachers, "Teachers fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching teachers for assignment: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching teachers: {str(e)}"
-        }
+        return error_response(f"Error fetching teachers: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
@@ -643,16 +541,8 @@ def get_subjects_for_assignment():
             order_by="title asc"
         )
         
-        return {
-            "success": True,
-            "data": subjects,
-            "message": "Subjects fetched successfully"
-        }
+        return list_response(subjects, "Subjects fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching subjects for assignment: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching subjects: {str(e)}"
-        }
+        return error_response(f"Error fetching subjects: {str(e)}")

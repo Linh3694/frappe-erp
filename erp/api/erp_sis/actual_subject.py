@@ -6,6 +6,11 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response, error_response, list_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -37,34 +42,24 @@ def get_all_actual_subjects():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": actual_subjects,
-            "total_count": len(actual_subjects),
-            "message": "Actual subjects fetched successfully"
-        }
+        return list_response(
+            data=actual_subjects,
+            message="Actual subjects fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching actual subjects: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching actual subjects: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching actual subjects",
+            code="FETCH_ACTUAL_SUBJECTS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
 def get_actual_subject_by_id():
     """Get a specific actual subject by ID"""
     try:
-        # Debug: Print all request data
-        print("=== DEBUG get_actual_subject_by_id ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
-
+        
         # Get subject_id from multiple sources (form data or JSON payload)
         subject_id = None
 
@@ -84,14 +79,10 @@ def get_actual_subject_by_id():
         print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
-            return {
-                "success": False,
-                "message": "Subject ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return error_response(
+                message="Subject ID is required",
+                code="MISSING_SUBJECT_ID"
+            )
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -107,31 +98,28 @@ def get_actual_subject_by_id():
         actual_subject = frappe.get_doc("SIS Actual Subject", filters)
         
         if not actual_subject:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Actual subject not found or access denied"
-            }
+            return not_found_response(
+                message="Actual subject not found or access denied",
+                code="ACTUAL_SUBJECT_NOT_FOUND"
+            )
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": actual_subject.name,
                 "title_vn": actual_subject.title_vn,
                 "title_en": actual_subject.title_en,
                 "curriculum_id": actual_subject.curriculum_id,
                 "campus_id": actual_subject.campus_id
             },
-            "message": "Actual subject fetched successfully"
-        }
+            message="Actual subject fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching actual subject {subject_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching actual subject: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching actual subject",
+            code="FETCH_ACTUAL_SUBJECT_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -160,7 +148,13 @@ def create_actual_subject():
         
         # Input validation
         if not title_vn or not curriculum_id:
-            frappe.throw(_("Title VN and Curriculum are required"))
+            return validation_error_response(
+                message="Title VN and Curriculum are required",
+                errors={
+                    "title_vn": ["Required"] if not title_vn else [],
+                    "curriculum_id": ["Required"] if not curriculum_id else []
+                }
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -179,7 +173,10 @@ def create_actual_subject():
         )
         
         if existing:
-            frappe.throw(_(f"Actual subject with title '{title_vn}' already exists"))
+            return error_response(
+                message=f"Actual subject with title '{title_vn}' already exists",
+                code="ACTUAL_SUBJECT_EXISTS"
+            )
         
         # Verify curriculum exists and belongs to same campus
         curriculum_exists = frappe.db.exists(
@@ -191,11 +188,10 @@ def create_actual_subject():
         )
         
         if not curriculum_exists:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Selected curriculum does not exist or access denied"
-            }
+            return error_response(
+                message="Selected curriculum does not exist or access denied",
+                code="CURRICULUM_ACCESS_DENIED"
+            )
         
         # Create new actual subject
         actual_subject_doc = frappe.get_doc({
@@ -211,17 +207,23 @@ def create_actual_subject():
         
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Actual subject created successfully"))
-        return {
-            "name": actual_subject_doc.name,
-            "title_vn": actual_subject_doc.title_vn,
-            "title_en": actual_subject_doc.title_en,
-            "curriculum_id": actual_subject_doc.curriculum_id,
-            "campus_id": actual_subject_doc.campus_id
-        }
+        return single_item_response(
+            data={
+                "name": actual_subject_doc.name,
+                "title_vn": actual_subject_doc.title_vn,
+                "title_en": actual_subject_doc.title_en,
+                "curriculum_id": actual_subject_doc.curriculum_id,
+                "campus_id": actual_subject_doc.campus_id
+            },
+            message="Actual subject created successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error creating actual subject: {str(e)}")
-        frappe.throw(_(f"Error creating actual subject: {str(e)}"))
+        return error_response(
+            message="Error creating actual subject",
+            code="CREATE_ACTUAL_SUBJECT_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -255,15 +257,10 @@ def update_actual_subject():
         print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
-            return {
-                "success": False,
-                "message": "Subject ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
-                    "final_data": data
-                }
-            }
+            return error_response(
+                message="Subject ID is required",
+                code="MISSING_SUBJECT_ID"
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -277,18 +274,16 @@ def update_actual_subject():
             
             # Check campus permission
             if actual_subject_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to modify this actual subject"
-                }
+                return forbidden_response(
+                    message="Access denied: You don't have permission to modify this actual subject",
+                    code="ACCESS_DENIED"
+                )
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Actual subject not found"
-            }
+            return not_found_response(
+                message="Actual subject not found",
+                code="ACTUAL_SUBJECT_NOT_FOUND"
+            )
         
         # Update fields if provided
         title_vn = data.get('title_vn')
@@ -308,11 +303,10 @@ def update_actual_subject():
                 }
             )
             if existing:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Actual subject with title '{title_vn}' already exists"
-                }
+                return error_response(
+                    message=f"Actual subject with title '{title_vn}' already exists",
+                    code="ACTUAL_SUBJECT_EXISTS"
+                )
             actual_subject_doc.title_vn = title_vn
         
         if title_en and title_en != actual_subject_doc.title_en:
@@ -329,35 +323,32 @@ def update_actual_subject():
             )
             
             if not curriculum_exists:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Selected curriculum does not exist or access denied"
-                }
+                return error_response(
+                    message="Selected curriculum does not exist or access denied",
+                    code="CURRICULUM_ACCESS_DENIED"
+                )
             actual_subject_doc.curriculum_id = curriculum_id
         
         actual_subject_doc.save()
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": actual_subject_doc.name,
                 "title_vn": actual_subject_doc.title_vn,
                 "title_en": actual_subject_doc.title_en,
                 "curriculum_id": actual_subject_doc.curriculum_id,
                 "campus_id": actual_subject_doc.campus_id
             },
-            "message": "Actual subject updated successfully"
-        }
+            message="Actual subject updated successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error updating actual subject {subject_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating actual subject: {str(e)}"
-        }
+        return error_response(
+            message="Error updating actual subject",
+            code="UPDATE_ACTUAL_SUBJECT_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -390,57 +381,48 @@ def delete_actual_subject():
         print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
-            return {
-                "success": False,
-                "message": "Subject ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
-        
+            return error_response(
+                message="Subject ID is required",
+                code="MISSING_SUBJECT_ID"
+            )
+
         # Get campus from user context
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
             campus_id = "campus-1"
-        
+
         # Get existing document
         try:
             actual_subject_doc = frappe.get_doc("SIS Actual Subject", subject_id)
-            
+
             # Check campus permission
             if actual_subject_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this actual subject"
-                }
+                return forbidden_response(
+                    message="Access denied: You don't have permission to delete this actual subject",
+                    code="ACCESS_DENIED"
+                )
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Actual subject not found"
-            }
+            return not_found_response(
+                message="Actual subject not found",
+                code="ACTUAL_SUBJECT_NOT_FOUND"
+            )
         
         # Delete the document
         frappe.delete_doc("SIS Actual Subject", subject_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Actual subject deleted successfully"
-        }
+        return success_response(
+            message="Actual subject deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting actual subject {subject_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting actual subject: {str(e)}"
-        }
+        return error_response(
+            message="Error deleting actual subject",
+            code="DELETE_ACTUAL_SUBJECT_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -466,16 +448,14 @@ def get_curriculums_for_selection():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": curriculums,
-            "message": "Curriculums fetched successfully"
-        }
+        return success_response(
+            data=curriculums,
+            message="Curriculums fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching curriculums for selection: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "message": f"Error fetching curriculums: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching curriculums",
+            code="FETCH_CURRICULUMS_ERROR"
+        )

@@ -6,6 +6,11 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import (
+    success_response, error_response, list_response,
+    single_item_response, validation_error_response,
+    not_found_response, forbidden_response
+)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -37,21 +42,17 @@ def get_all_academic_programs():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": academic_programs,
-            "total_count": len(academic_programs),
-            "message": "Academic programs fetched successfully"
-        }
+        return list_response(
+            data=academic_programs,
+            message="Academic programs fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching academic programs: {str(e)}")
-        return {
-            "success": False,
-            "data": [],
-            "total_count": 0,
-            "message": f"Error fetching academic programs: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching academic programs",
+            code="FETCH_ACADEMIC_PROGRAMS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -84,15 +85,11 @@ def get_academic_program_by_id():
         print(f"Final program_id: {repr(program_id)}")
 
         if not program_id:
-            return {
-                "success": False,
-                "message": "Program ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
-        
+            return error_response(
+                message="Program ID is required",
+                code="MISSING_PROGRAM_ID"
+            )
+
         # Get current user's campus
         campus_id = get_current_campus_from_context()
         
@@ -107,31 +104,28 @@ def get_academic_program_by_id():
         academic_program = frappe.get_doc("SIS Academic Program", filters)
         
         if not academic_program:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Academic program not found or access denied"
-            }
+            return not_found_response(
+                message="Academic program not found or access denied",
+                code="ACADEMIC_PROGRAM_NOT_FOUND"
+            )
         
-        return {
-            "success": True,
-                "data": {
-                    "name": academic_program.name,
-                    "title_vn": academic_program.title_vn,
-                    "title_en": academic_program.title_en,
-                    "short_title": academic_program.short_title,
-                    "campus_id": academic_program.campus_id
-                },
-                "message": "Academic program fetched successfully"
-            }
+        return single_item_response(
+            data={
+                "name": academic_program.name,
+                "title_vn": academic_program.title_vn,
+                "title_en": academic_program.title_en,
+                "short_title": academic_program.short_title,
+                "campus_id": academic_program.campus_id
+            },
+            message="Academic program fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching academic program {program_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching academic program: {str(e)}"
-        }
+        return error_response(
+            message="Error fetching academic program",
+            code="FETCH_ACADEMIC_PROGRAM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -167,7 +161,13 @@ def create_academic_program():
         
         # Input validation
         if not title_vn or not short_title:
-            frappe.throw(_("Title VN and short title are required"))
+            return validation_error_response(
+                message="Title VN and short title are required",
+                errors={
+                    "title_vn": ["Required"] if not title_vn else [],
+                    "short_title": ["Required"] if not short_title else []
+                }
+            )
         
         # Get campus from user context - simplified
         try:
@@ -204,8 +204,11 @@ def create_academic_program():
         )
         
         if existing:
-            frappe.throw(_(f"Academic program with title '{title_vn}' already exists"))
-            
+            return error_response(
+                message=f"Academic program with title '{title_vn}' already exists",
+                code="ACADEMIC_PROGRAM_EXISTS"
+            )
+
         # Check if short title already exists for this campus
         existing_code = frappe.db.exists(
             "SIS Academic Program",
@@ -214,9 +217,12 @@ def create_academic_program():
                 "campus_id": campus_id
             }
         )
-        
+
         if existing_code:
-            frappe.throw(_(f"Academic program with short title '{short_title}' already exists"))
+            return error_response(
+                message=f"Academic program with short title '{short_title}' already exists",
+                code="SHORT_TITLE_EXISTS"
+            )
         
         # Create new academic program - with detailed debugging
         frappe.logger().info(f"Creating SIS Academic Program with data: title_vn={title_vn}, title_en={title_en}, short_title={short_title}, campus_id={campus_id}")
@@ -244,17 +250,23 @@ def create_academic_program():
         
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Academic program created successfully"))
-        return {
-            "name": academic_program_doc.name,
-            "title_vn": academic_program_doc.title_vn,
-            "title_en": academic_program_doc.title_en,
-            "short_title": academic_program_doc.short_title,
-            "campus_id": academic_program_doc.campus_id
-        }
+        return single_item_response(
+            data={
+                "name": academic_program_doc.name,
+                "title_vn": academic_program_doc.title_vn,
+                "title_en": academic_program_doc.title_en,
+                "short_title": academic_program_doc.short_title,
+                "campus_id": academic_program_doc.campus_id
+            },
+            message="Academic program created successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error creating academic program: {str(e)}")
-        frappe.throw(_(f"Error creating academic program: {str(e)}"))
+        return error_response(
+            message="Error creating academic program",
+            code="CREATE_ACADEMIC_PROGRAM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -288,15 +300,10 @@ def update_academic_program():
         print(f"Final program_id: {repr(program_id)}")
 
         if not program_id:
-            return {
-                "success": False,
-                "message": "Program ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
-                    "final_data": data
-                }
-            }
+            return error_response(
+                message="Program ID is required",
+                code="MISSING_PROGRAM_ID"
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -310,18 +317,16 @@ def update_academic_program():
             
             # Check campus permission
             if academic_program_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to modify this academic program"
-                }
+                return forbidden_response(
+                    message="Access denied: You don't have permission to modify this academic program",
+                    code="ACCESS_DENIED"
+                )
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Academic program not found"
-            }
+            return not_found_response(
+                message="Academic program not found",
+                code="ACADEMIC_PROGRAM_NOT_FOUND"
+            )
         
         # Update fields if provided
         title_vn = data.get('title_vn')
@@ -341,11 +346,10 @@ def update_academic_program():
                 }
             )
             if existing:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Academic program with title '{title_vn}' already exists"
-                }
+                return error_response(
+                    message=f"Academic program with title '{title_vn}' already exists",
+                    code="ACADEMIC_PROGRAM_EXISTS"
+                )
             academic_program_doc.title_vn = title_vn
 
         if title_en and title_en != academic_program_doc.title_en:
@@ -362,35 +366,32 @@ def update_academic_program():
                 }
             )
             if existing_code:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Academic program with short title '{short_title}' already exists"
-                }
+                return error_response(
+                    message=f"Academic program with short title '{short_title}' already exists",
+                    code="SHORT_TITLE_EXISTS"
+                )
             academic_program_doc.short_title = short_title
         
         academic_program_doc.save()
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {
+        return single_item_response(
+            data={
                 "name": academic_program_doc.name,
                 "title_vn": academic_program_doc.title_vn,
                 "title_en": academic_program_doc.title_en,
                 "short_title": academic_program_doc.short_title,
                 "campus_id": academic_program_doc.campus_id
             },
-            "message": "Academic program updated successfully"
-        }
+            message="Academic program updated successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error updating academic program {program_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating academic program: {str(e)}"
-        }
+        return error_response(
+            message="Error updating academic program",
+            code="UPDATE_ACADEMIC_PROGRAM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -423,14 +424,10 @@ def delete_academic_program():
         print(f"Final program_id: {repr(program_id)}")
 
         if not program_id:
-            return {
-                "success": False,
-                "message": "Program ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return error_response(
+                message="Program ID is required",
+                code="MISSING_PROGRAM_ID"
+            )
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -444,36 +441,31 @@ def delete_academic_program():
             
             # Check campus permission
             if academic_program_doc.campus_id != campus_id:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this academic program"
-                }
+                return forbidden_response(
+                    message="Access denied: You don't have permission to delete this academic program",
+                    code="ACCESS_DENIED"
+                )
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Academic program not found"
-            }
+            return not_found_response(
+                message="Academic program not found",
+                code="ACADEMIC_PROGRAM_NOT_FOUND"
+            )
         
         # Delete the document
         frappe.delete_doc("SIS Academic Program", program_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Academic program deleted successfully"
-        }
+        return success_response(
+            message="Academic program deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting academic program {program_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting academic program: {str(e)}"
-        }
+        return error_response(
+            message="Error deleting academic program",
+            code="DELETE_ACADEMIC_PROGRAM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -507,16 +499,10 @@ def check_short_title_availability():
                 print(f"JSON parsing failed: {e}")
 
         if not short_title:
-            return {
-                "success": False,
-                "is_available": False,
-                "short_title": short_title,
-                "message": "Short title is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None
-                }
-            }
+            return error_response(
+                message="Short title is required",
+                code="MISSING_SHORT_TITLE"
+            )
         
         # Get campus from user context  
         campus_id = get_current_campus_from_context()
@@ -537,18 +523,17 @@ def check_short_title_availability():
         
         is_available = not bool(existing)
         
-        return {
-            "success": True,
-            "is_available": is_available,
-            "short_title": short_title,
-            "message": "Available" if is_available else "Short title already exists"
-        }
+        return success_response(
+            data={
+                "is_available": is_available,
+                "short_title": short_title
+            },
+            message="Available" if is_available else "Short title already exists"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error checking short title availability: {str(e)}")
-        return {
-            "success": False,
-            "is_available": False,
-            "short_title": short_title,
-            "message": f"Error checking availability: {str(e)}"
-        }
+        return error_response(
+            message="Error checking short title availability",
+            code="CHECK_AVAILABILITY_ERROR"
+        )
