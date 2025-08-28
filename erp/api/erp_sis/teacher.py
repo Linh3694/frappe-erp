@@ -302,11 +302,27 @@ def create_teacher():
         frappe.throw(_(f"Error creating teacher: {str(e)}"))
 
 
-@frappe.whitelist(allow_guest=False)
-def update_teacher(teacher_id, user_id=None, education_stage_id=None):
+@frappe.whitelist(allow_guest=True)
+def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
     """Update an existing teacher"""
     try:
+        # Debug: Log form_dict to see what's being sent
+        frappe.logger().info(f"update_teacher called with teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
+        frappe.logger().info(f"form_dict: {frappe.form_dict}")
+
+        # Get teacher_id from form_dict if not provided as parameter
         if not teacher_id:
+            teacher_id = frappe.form_dict.get('teacher_id')
+            frappe.logger().info(f"Got teacher_id from form_dict: {teacher_id}")
+
+        # Get other parameters from form_dict if not provided
+        if user_id is None:
+            user_id = frappe.form_dict.get('user_id')
+        if education_stage_id is None:
+            education_stage_id = frappe.form_dict.get('education_stage_id')
+
+        if not teacher_id:
+            frappe.logger().info("No teacher_id found for update")
             return {
                 "success": False,
                 "data": {},
@@ -393,10 +409,12 @@ def update_teacher(teacher_id, user_id=None, education_stage_id=None):
         return {
             "success": True,
             "data": {
-                "name": teacher_doc.name,
-                "user_id": teacher_doc.user_id,
-                "education_stage_id": teacher_doc.education_stage_id,
-                "campus_id": teacher_doc.campus_id
+                "teacher": {
+                    "name": teacher_doc.name,
+                    "user_id": teacher_doc.user_id,
+                    "education_stage_id": teacher_doc.education_stage_id,
+                    "campus_id": teacher_doc.campus_id
+                }
             },
             "message": "Teacher updated successfully"
         }
