@@ -15,22 +15,22 @@ class ERPAdministrativeRoom(Document):
         
     def validate_room_name(self):
         """Validate that room name is unique"""
-        if self.room_name:
+        if self.title_vn:
             existing = frappe.db.exists("ERP Administrative Room", {
-                "room_name": self.room_name,
+                "title_vn": self.title_vn,
                 "name": ("!=", self.name)
             })
             if existing:
-                frappe.throw(_("Room Name {0} already exists").format(self.room_name))
-        
+                frappe.throw(_("Room Name {0} already exists").format(self.title_vn))
+
         # Also validate English name if provided
-        if self.room_name_en:
+        if self.title_en:
             existing_en = frappe.db.exists("ERP Administrative Room", {
-                "room_name_en": self.room_name_en,
+                "title_en": self.title_en,
                 "name": ("!=", self.name)
             })
             if existing_en:
-                frappe.throw(_("English Room Name {0} already exists").format(self.room_name_en))
+                frappe.throw(_("English Room Name {0} already exists").format(self.title_en))
     
     def validate_capacity(self):
         """Validate capacity is positive number"""
@@ -53,7 +53,7 @@ class ERPAdministrativeRoom(Document):
     def on_update(self):
         """Operations after update"""
         # Log the update activity
-        self.create_activity_log("update", f"Room {self.room_name} information updated")
+        self.create_activity_log("update", f"Room {self.title_vn} information updated")
     
     def create_activity_log(self, activity_type, description, details=None):
         """Create activity log for this room"""
@@ -61,8 +61,8 @@ class ERPAdministrativeRoom(Document):
             # This will be implemented when we have activity logging system 
             # For now, just log to system
             frappe.log_error(
-                title=f"Room Activity: {activity_type}", 
-                message=f"{description} - Room: {self.room_name}",
+                title=f"Room Activity: {activity_type}",
+                message=f"{description} - Room: {self.title_vn}",
                 reference_doctype=self.doctype,
                 reference_name=self.name
             )
@@ -87,8 +87,8 @@ class ERPAdministrativeRoom(Document):
         
         return {
             "room_id": self.name,
-            "room_name": self.room_name,
-            "room_name_en": self.room_name_en,
+            "title_vn": self.title_vn,
+            "title_en": self.title_en,
             "building_id": self.building_id,
             "devices": devices
         }
@@ -99,7 +99,7 @@ class ERPAdministrativeRoom(Document):
         # This will calculate room usage, schedules, etc.
         return {
             "room_id": self.name,
-            "room_name": self.room_name,
+            "title_vn": self.title_vn,
             "capacity": self.capacity,
             "periods_per_day": self.periods_per_day,
             "is_homeroom": self.is_homeroom,
