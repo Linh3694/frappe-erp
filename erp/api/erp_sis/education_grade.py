@@ -65,7 +65,6 @@ def get_education_grade_by_id():
 
         # Try from form_dict first (for FormData/URLSearchParams)
         grade_id = frappe.form_dict.get('grade_id')
-        print(f"Grade ID from form_dict: {grade_id}")
 
         # If not found, try from JSON payload
         if not grade_id and frappe.request.data:
@@ -73,14 +72,11 @@ def get_education_grade_by_id():
                 import json
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 grade_id = json_data.get('grade_id')
-                print(f"Grade ID from JSON payload: {grade_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
         # Also try from request.args if available (for GET requests)
         if not grade_id and hasattr(frappe.request, 'args'):
             grade_id = frappe.request.args.get('grade_id')
-            print(f"Grade ID from request.args: {grade_id}")
 
         # Parse query string manually for GET requests
         if not grade_id and frappe.request.query_string:
@@ -88,11 +84,8 @@ def get_education_grade_by_id():
                 from urllib.parse import parse_qs
                 query_params = parse_qs(frappe.request.query_string.decode('utf-8'))
                 grade_id = query_params.get('grade_id', [None])[0]
-                print(f"Grade ID from query string: {grade_id}")
             except Exception as e:
-                print(f"Query string parsing error: {e}")
 
-        print(f"Final grade_id: {repr(grade_id)}")
 
         if not grade_id:
             return error_response(
@@ -285,18 +278,14 @@ def update_education_grade():
 
         # Try from form_dict first (for FormData/URLSearchParams)
         grade_id = frappe.form_dict.get('grade_id')
-        print(f"Grade ID from form_dict: {grade_id}")
 
         # Try from JSON payload if not found
         if not grade_id and frappe.request.data:
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 grade_id = json_data.get('grade_id')
-                print(f"Grade ID from JSON payload: {grade_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
-        print(f"Final extracted grade_id: {grade_id}")
 
         if not grade_id:
             return {
@@ -324,11 +313,8 @@ def update_education_grade():
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 data.update(json_data)
-                print(f"Merged JSON data: {json_data}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON data merge failed: {e}")
 
-        print(f"Final data to update: {data}")
         
         # Get existing grade
         grade_doc = frappe.get_doc("SIS Education Grade", grade_id)
@@ -398,18 +384,14 @@ def delete_education_grade():
 
         # Try from form_dict first (for FormData/URLSearchParams)
         grade_id = frappe.form_dict.get('grade_id')
-        print(f"Grade ID from form_dict: {grade_id}")
 
         # If not found, try from JSON payload
         if not grade_id and frappe.request.data:
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 grade_id = json_data.get('grade_id')
-                print(f"Grade ID from JSON payload: {grade_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
-        print(f"Final extracted grade_id: {grade_id}")
 
         if not grade_id:
             return {
@@ -476,7 +458,6 @@ def check_grade_code_availability():
                 grade_code = json_data.get('grade_code')
                 grade_id = json_data.get('grade_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
         if not grade_code:
             return error_response(

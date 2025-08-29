@@ -238,11 +238,6 @@ def create_subject():
         actual_subject_id = data.get("actual_subject_id")
         room_id = data.get("room_id")  # Can be None if not provided
 
-        print(f"title: {title}")
-        print(f"education_stage: {education_stage}")
-        print(f"timetable_subject_id: {timetable_subject_id}")
-        print(f"actual_subject_id: {actual_subject_id}")
-        print(f"room_id: {room_id}")
         
         # Input validation
         if not title or not education_stage:
@@ -295,7 +290,7 @@ def create_subject():
         if room_id:
             subject_data["room_id"] = room_id
 
-        print(subject_data)
+
 
         subject_doc = frappe.get_doc(subject_data)
         
@@ -361,10 +356,6 @@ def update_subject():
     """Update an existing subject"""
     try:
         # Debug: Print all request data
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
 
         # Get data from multiple sources (form data or JSON payload)
         data = {}
@@ -378,12 +369,10 @@ def update_subject():
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 data.update(json_data)
-                print(f"Merged JSON data: {json_data}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON data merge failed: {e}")
+                pass
 
         subject_id = data.get('subject_id')
-        print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
             return {
@@ -428,8 +417,6 @@ def update_subject():
         actual_subject_id = data.get('actual_subject_id')
         room_id = data.get('room_id')
 
-        print(f"Updating with: title={title}, education_stage={education_stage}, timetable_subject_id={timetable_subject_id}, actual_subject_id={actual_subject_id}, room_id={room_id}")
-        print(f"Request data keys: {list(data.keys())}")
 
         if title and title != subject_doc.title:
             # Check for duplicate subject title
@@ -470,15 +457,12 @@ def update_subject():
         # Update optional fields only if they are explicitly provided in the request
         # This handles the case where user selects "none" - field will be in request as None
         if 'timetable_subject_id' in data and timetable_subject_id != subject_doc.timetable_subject_id:
-            print(f"Updating timetable_subject_id: {subject_doc.timetable_subject_id} -> {timetable_subject_id}")
             subject_doc.timetable_subject_id = timetable_subject_id
 
         if 'actual_subject_id' in data and actual_subject_id != subject_doc.actual_subject_id:
-            print(f"Updating actual_subject_id: {subject_doc.actual_subject_id} -> {actual_subject_id}")
             subject_doc.actual_subject_id = actual_subject_id
 
         if 'room_id' in data and room_id != subject_doc.room_id:
-            print(f"Updating room_id: {subject_doc.room_id} -> {room_id}")
             subject_doc.room_id = room_id
         
         subject_doc.save()
@@ -548,28 +532,20 @@ def delete_subject():
     """Delete a subject"""
     try:
         # Debug: Print request data
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
 
         # Get subject_id from multiple sources (form data or JSON payload)
         subject_id = None
 
         # Try from form_dict first (for FormData/URLSearchParams)
         subject_id = frappe.form_dict.get('subject_id')
-        print(f"Subject ID from form_dict: {subject_id}")
 
         # If not found, try from JSON payload
         if not subject_id and frappe.request.data:
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 subject_id = json_data.get('subject_id')
-                print(f"Subject ID from JSON payload: {subject_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
-
-        print(f"Final subject_id: {repr(subject_id)}")
+                pass
 
         if not subject_id:
             return validation_error_response({"subject_id": ["Subject ID is required"]})
@@ -730,22 +706,17 @@ def get_education_stages_for_selection():
 
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        print(f"Campus ID from context: {campus_id}")
 
         if not campus_id:
             campus_id = "campus-1"
-            print(f"Using default campus: {campus_id}")
 
         filters = {"campus_id": campus_id}
-        print(f"Filters: {filters}")
 
         # First, check total count of education stages
         total_count = frappe.db.count("SIS Education Stage")
-        print(f"Total education stages in database: {total_count}")
 
         # Check education stages with current campus
         campus_count = frappe.db.count("SIS Education Stage", filters)
-        print(f"Education stages with campus {campus_id}: {campus_count}")
 
         education_stages = frappe.get_all(
             "SIS Education Stage",
@@ -759,9 +730,8 @@ def get_education_stages_for_selection():
             order_by="title_vn asc"
         )
 
-        print(f"Query result count: {len(education_stages)}")
         if education_stages:
-            print(f"First education stage: {education_stages[0]}")
+            pass
         else:
             print("No education stages found with current campus filter")
             # Try without campus filter to see if there are any education stages
@@ -770,7 +740,6 @@ def get_education_stages_for_selection():
                 fields=["name", "title_vn", "title_en", "campus_id"],
                 limit=5
             )
-            print(f"All education stages (first 5): {all_stages}")
 
             # If no stages at all, return all stages regardless of campus
             if not all_stages:
@@ -784,7 +753,6 @@ def get_education_stages_for_selection():
                     fields=["name", "title_vn", "title_en", "campus_id"],
                     order_by="title_vn asc"
                 )
-                print(f"Returning all stages for testing: {len(education_stages)}")
         
         return success_response(
             data=education_stages,
@@ -808,21 +776,16 @@ def get_timetable_subjects_for_selection():
 
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        print(f"Campus ID from context: {campus_id}")
 
         if not campus_id:
             campus_id = "campus-1"
-            print(f"Using default campus: {campus_id}")
 
         filters = {"campus_id": campus_id}
-        print(f"Filters: {filters}")
 
         # First, check total count
         total_count = frappe.db.count("SIS Timetable Subject")
-        print(f"Total timetable subjects in database: {total_count}")
 
         campus_count = frappe.db.count("SIS Timetable Subject", filters)
-        print(f"Timetable subjects with campus {campus_id}: {campus_count}")
 
         timetable_subjects = frappe.get_all(
             "SIS Timetable Subject",
@@ -836,9 +799,8 @@ def get_timetable_subjects_for_selection():
             order_by="title_vn asc"
         )
 
-        print(f"Query result count: {len(timetable_subjects)}")
         if timetable_subjects:
-            print(f"First timetable subject: {timetable_subjects[0]}")
+            pass
         else:
             print("No timetable subjects found with current campus filter")
             # Try without campus filter
@@ -847,7 +809,6 @@ def get_timetable_subjects_for_selection():
                 fields=["name", "title_vn", "title_en", "campus_id"],
                 limit=5
             )
-            print(f"All timetable subjects (first 5): {all_subjects}")
 
             # If no subjects at all, return empty
             if not all_subjects:
@@ -861,7 +822,6 @@ def get_timetable_subjects_for_selection():
                     fields=["name", "title_vn", "title_en", "campus_id"],
                     order_by="title_vn asc"
                 )
-                print(f"Returning all timetable subjects for testing: {len(timetable_subjects)}")
         
         return success_response(
             data=timetable_subjects,
@@ -885,25 +845,20 @@ def get_actual_subjects_for_selection():
 
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        print(f"Campus ID from context: {campus_id}")
 
         if not campus_id:
             campus_id = "campus-1"
-            print(f"Using default campus: {campus_id}")
 
         # Get actual subjects for this campus
         filters = {
             "campus_id": campus_id,
             "curriculum_id": ["!=", ""]  # Ensure it has a curriculum
         }
-        print(f"Filters: {filters}")
 
         # First, check total count
         total_count = frappe.db.count("SIS Actual Subject")
-        print(f"Total actual subjects in database: {total_count}")
 
         campus_count = frappe.db.count("SIS Actual Subject", {"campus_id": campus_id})
-        print(f"Actual subjects with campus {campus_id}: {campus_count}")
 
         actual_subjects = frappe.get_all(
             "SIS Actual Subject",
@@ -918,9 +873,8 @@ def get_actual_subjects_for_selection():
             order_by="title_vn asc"
         )
 
-        print(f"Query result count: {len(actual_subjects)}")
         if actual_subjects:
-            print(f"First actual subject: {actual_subjects[0]}")
+            pass
         else:
             print("No actual subjects found with current filters")
             # Try without curriculum filter
@@ -930,7 +884,6 @@ def get_actual_subjects_for_selection():
                 filters={"campus_id": campus_id},
                 limit=5
             )
-            print(f"Actual subjects with campus only (first 5): {all_subjects}")
 
             # If no subjects at all, return empty
             if not all_subjects:
@@ -945,7 +898,6 @@ def get_actual_subjects_for_selection():
                     filters={"campus_id": campus_id},
                     order_by="title_vn asc"
                 )
-                print(f"Returning all actual subjects for testing: {len(actual_subjects)}")
         
         return success_response(
             data=actual_subjects,

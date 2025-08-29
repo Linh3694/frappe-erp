@@ -57,28 +57,20 @@ def get_timetable_subject_by_id():
     """Get a specific timetable subject by ID"""
     try:
         # Debug: Print all request data
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
 
         # Get subject_id from multiple sources (form data or JSON payload)
         subject_id = None
 
         # Try from form_dict first (for FormData/URLSearchParams)
         subject_id = frappe.form_dict.get('subject_id')
-        print(f"Subject ID from form_dict: {subject_id}")
 
         # If not found, try from JSON payload
         if not subject_id and frappe.request.data:
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 subject_id = json_data.get('subject_id')
-                print(f"Subject ID from JSON payload: {subject_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
-        print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
             return validation_error_response({"subject_id": ["Subject ID is required"]})
@@ -199,10 +191,6 @@ def update_timetable_subject():
     """Update an existing timetable subject"""
     try:
         # Debug: Print all request data
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
 
         # Get data from multiple sources (form data or JSON payload)
         data = {}
@@ -216,12 +204,9 @@ def update_timetable_subject():
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 data.update(json_data)
-                print(f"Merged JSON data: {json_data}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON data merge failed: {e}")
 
         subject_id = data.get('subject_id')
-        print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
             return {
@@ -255,7 +240,6 @@ def update_timetable_subject():
         title_vn = data.get('title_vn')
         title_en = data.get('title_en')
 
-        print(f"Updating with: title_vn={title_vn}, title_en={title_en}")
 
         if title_vn and title_vn != timetable_subject_doc.title_vn:
             # Check for duplicate timetable subject title
@@ -295,28 +279,20 @@ def delete_timetable_subject():
     """Delete a timetable subject"""
     try:
         # Debug: Print request data
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
 
         # Get subject_id from multiple sources (form data or JSON payload)
         subject_id = None
 
         # Try from form_dict first (for FormData/URLSearchParams)
         subject_id = frappe.form_dict.get('subject_id')
-        print(f"Subject ID from form_dict: {subject_id}")
 
         # If not found, try from JSON payload
         if not subject_id and frappe.request.data:
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 subject_id = json_data.get('subject_id')
-                print(f"Subject ID from JSON payload: {subject_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
-        print(f"Final subject_id: {repr(subject_id)}")
 
         if not subject_id:
             return validation_error_response({"subject_id": ["Subject ID is required"]})

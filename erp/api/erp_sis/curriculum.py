@@ -118,18 +118,14 @@ def get_curriculum_by_id():
 
         # Try from form_dict first (for FormData/URLSearchParams)
         curriculum_id = frappe.form_dict.get('curriculum_id')
-        print(f"Curriculum ID from form_dict: {curriculum_id}")
 
         # If not found, try from JSON payload
         if not curriculum_id and frappe.request.data:
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 curriculum_id = json_data.get('curriculum_id')
-                print(f"Curriculum ID from JSON payload: {curriculum_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
-        print(f"Final curriculum_id: {repr(curriculum_id)}")
 
         if not curriculum_id:
             return error_response(
@@ -370,12 +366,9 @@ def update_curriculum():
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 data.update(json_data)
-                print(f"Merged JSON data: {json_data}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON data merge failed: {e}")
 
         curriculum_id = data.get('curriculum_id')
-        print(f"Final curriculum_id: {repr(curriculum_id)}")
 
         if not curriculum_id:
             return {
@@ -417,7 +410,6 @@ def update_curriculum():
         title_en = data.get('title_en')
         short_title = data.get('short_title')
 
-        print(f"Updating with: title_vn={title_vn}, title_en={title_en}, short_title={short_title}")
 
         if title_vn and title_vn != curriculum_doc.title_vn:
             # Check for duplicate curriculum title
@@ -489,18 +481,14 @@ def delete_curriculum():
 
         # Try from form_dict first (for FormData/URLSearchParams)
         curriculum_id = frappe.form_dict.get('curriculum_id')
-        print(f"Curriculum ID from form_dict: {curriculum_id}")
 
         # If not found, try from JSON payload
         if not curriculum_id and frappe.request.data:
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 curriculum_id = json_data.get('curriculum_id')
-                print(f"Curriculum ID from JSON payload: {curriculum_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
-        print(f"Final curriculum_id: {repr(curriculum_id)}")
 
         if not curriculum_id:
             return error_response(
@@ -591,7 +579,6 @@ def check_short_title_availability():
         # Try from form_dict first (for FormData/URLSearchParams)
         short_title = frappe.form_dict.get('short_title')
         curriculum_id = frappe.form_dict.get('curriculum_id')
-        print(f"Parameters from form_dict: short_title={short_title}, curriculum_id={curriculum_id}")
 
         # If not found, try from JSON payload
         if not short_title and frappe.request.data:
@@ -599,9 +586,7 @@ def check_short_title_availability():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 short_title = json_data.get('short_title')
                 curriculum_id = json_data.get('curriculum_id')
-                print(f"Parameters from JSON payload: short_title={short_title}, curriculum_id={curriculum_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
 
         if not short_title:
             return error_response(
