@@ -12,6 +12,7 @@ import jwt
 from datetime import datetime, timedelta
 import requests
 import json
+from erp.utils.api_response import success_response, error_response
 
 
 def find_user_by_identifier(identifier):
@@ -298,32 +299,38 @@ def get_current_user():
                     if jwt_user_email and frappe.db.exists("User", jwt_user_email):
                         user_doc = frappe.get_doc("User", jwt_user_email)
                         user_data = build_user_data_response(user_doc)
-                        return {
-                            "status": "success",
-                            "user": user_data,
-                            "authenticated": True,
-                        }
+                        return success_response(
+                            data={
+                                "user": user_data,
+                                "authenticated": True,
+                            },
+                            message="JWT authentication successful"
+                        )
             except Exception as jwt_error:
                 # JWT validation failed, continue to session-based auth
                 frappe.logger().debug(f"JWT validation failed: {jwt_error}")
         
-        # Check session-based authentication  
+        # Check session-based authentication
         if frappe.session.user == "Guest":
-            return {
-                "status": "success",
-                "user": None,
-                "authenticated": False
-            }
-        
+            return success_response(
+                data={
+                    "user": None,
+                    "authenticated": False
+                },
+                message="Guest user - not authenticated"
+            )
+
         # Get current user data
         user_doc = frappe.get_doc("User", frappe.session.user)
         user_data = build_user_data_response(user_doc)
-        
-        return {
-            "status": "success",
-            "user": user_data,
-            "authenticated": True
-        }
+
+        return success_response(
+            data={
+                "user": user_data,
+                "authenticated": True
+            },
+            message="Session authentication successful"
+        )
         
     except Exception as e:
         frappe.log_error(f"Get current user error: {str(e)}", "Authentication")
@@ -533,14 +540,16 @@ def debug_jwt_token():
             token_candidate = auth_header.split(" ", 1)[1].strip()
         
         if not token_candidate:
-            return {
-                "success": False,
-                "message": "No Bearer token found",
-                "debug": {
-                    "auth_header": auth_header[:50] + "..." if len(auth_header) > 50 else auth_header,
-                    "headers": dict(frappe.request.headers) if frappe.request else {}
+            return error_response(
+                message="No Bearer token found",
+                code="NO_BEARER_TOKEN",
+                errors={
+                    "debug": {
+                        "auth_header": auth_header[:50] + "..." if len(auth_header) > 50 else auth_header,
+                        "headers": dict(frappe.request.headers) if frappe.request else {}
+                    }
                 }
-            }
+            )
         
         # Test JWT decoding
         try:
@@ -555,38 +564,45 @@ def debug_jwt_token():
             
             # Check if user exists
             user_exists = frappe.db.exists("User", user_email) if user_email else False
-            
-            return {
-                "success": True,
-                "message": "JWT token valid",
-                "debug": {
-                    "token_preview": token_candidate[:30] + "...",
-                    "secret_preview": secret[:10] + "..." if secret else None,
-                    "payload": payload,
-                    "user_email": user_email,
-                    "user_exists": user_exists
+
+            return success_response(
+                message="JWT token valid",
+                data={
+                    "debug": {
+                        "token_preview": token_candidate[:30] + "...",
+                        "secret_preview": secret[:10] + "..." if secret else None,
+                        "payload": payload,
+                        "user_email": user_email,
+                        "user_exists": user_exists
+                    }
                 }
-            }
+            )
             
         except jwt.ExpiredSignatureError:
-            return {
-                "success": False,
-                "message": "Token expired",
-                "debug": {"token_preview": token_candidate[:30] + "..."}
-            }
+            return error_response(
+                message="Token expired",
+                code="TOKEN_EXPIRED",
+                errors={
+                    "debug": {"token_preview": token_candidate[:30] + "..."}
+                }
+            )
         except jwt.InvalidTokenError as e:
-            return {
-                "success": False,
-                "message": f"Invalid token: {str(e)}",
-                "debug": {"token_preview": token_candidate[:30] + "..."}
-            }
+            return error_response(
+                message=f"Invalid token: {str(e)}",
+                code="INVALID_TOKEN",
+                errors={
+                    "debug": {"token_preview": token_candidate[:30] + "..."}
+                }
+            )
             
     except Exception as e:
-        return {
-            "success": False,
-            "message": f"Debug error: {str(e)}",
-            "debug": {"error": str(e)}
-        }
+        return error_response(
+            message=f"Debug error: {str(e)}",
+            code="DEBUG_ERROR",
+            errors={
+                "debug": {"error": str(e)}
+            }
+        )
 
 
 @frappe.whitelist()

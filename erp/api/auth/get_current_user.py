@@ -3,6 +3,7 @@
 
 import frappe
 from frappe import _
+from erp.utils.api_response import success_response, error_response
 
 
 @frappe.whitelist(allow_guest=False)
@@ -14,10 +15,10 @@ def get_current_user_full():
         user_email = frappe.session.user
         
         if not user_email or user_email == 'Guest':
-            return {
-                "success": False,
-                "message": "User not authenticated"
-            }
+            return error_response(
+                message="User not authenticated",
+                code="USER_NOT_AUTHENTICATED"
+            )
         
         # Get full user document
         user_doc = frappe.get_doc('User', user_email)
@@ -97,24 +98,23 @@ def get_current_user_full():
         user_data["has_campus_access"] = len(campus_roles) > 0
         
         frappe.logger().info(f"Full user data retrieved for {user_email}")
-        
-        return {
-            "success": True,
-            "data": user_data,
-            "message": "User data retrieved successfully"
-        }
+
+        return success_response(
+            data=user_data,
+            message="User data retrieved successfully"
+        )
         
     except frappe.DoesNotExistError:
-        return {
-            "success": False,
-            "message": "User not found"
-        }
+        return error_response(
+            message="User not found",
+            code="USER_NOT_FOUND"
+        )
     except Exception as e:
         frappe.logger().error(f"Error getting full user data: {str(e)}")
         import traceback
         frappe.logger().error(traceback.format_exc())
-        
-        return {
-            "success": False,
-            "message": f"Error retrieving user data: {str(e)}"
-        }
+
+        return error_response(
+            message=f"Error retrieving user data: {str(e)}",
+            code="USER_DATA_RETRIEVAL_ERROR"
+        )
