@@ -486,11 +486,41 @@ def get_curriculums_for_selection():
 def delete_actual_subject():
     """Delete an actual subject"""
     try:
-        # Get subject_id from request
+        # Get subject_id from request - try multiple ways
         data = frappe.local.form_dict
         subject_id = data.get('subject_id')
 
+        frappe.logger().info(f"Delete request data: {data}")
+        frappe.logger().info(f"Subject ID from request: {subject_id}")
+        frappe.logger().info(f"Raw form_dict: {dict(data)}")
+
+        # If not found in form_dict, try request body
         if not subject_id:
+            try:
+                import json
+                request_body = frappe.local.request.get_data()
+                if request_body:
+                    body_data = json.loads(request_body.decode('utf-8'))
+                    subject_id = body_data.get('subject_id')
+                    frappe.logger().info(f"Subject ID from request body: {subject_id}")
+            except Exception as json_error:
+                frappe.logger().error(f"Error parsing request body: {json_error}")
+
+        # Also try frappe.request.args
+        if not subject_id:
+            subject_id = frappe.request.args.get('subject_id')
+            frappe.logger().info(f"Subject ID from args: {subject_id}")
+
+        # Try frappe.local.request.args as well
+        if not subject_id:
+            try:
+                subject_id = frappe.local.request.args.get('subject_id')
+                frappe.logger().info(f"Subject ID from local request args: {subject_id}")
+            except Exception as args_error:
+                frappe.logger().error(f"Error getting from local request args: {args_error}")
+
+        if not subject_id:
+            frappe.logger().error("Subject ID is missing from request")
             return error_response(
                 message="Subject ID is required",
                 code="MISSING_SUBJECT_ID"
