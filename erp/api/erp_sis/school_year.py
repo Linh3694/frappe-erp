@@ -151,12 +151,22 @@ def create_school_year():
             data = frappe.local.form_dict
         
         # Extract values from data with proper validation
-        title_vn = data.get("title_vn", "").strip() if data.get("title_vn") else ""
-        title_en = data.get("title_en", "").strip() if data.get("title_en") else ""
-        start_date = data.get("start_date", "").strip() if data.get("start_date") else ""
-        end_date = data.get("end_date", "").strip() if data.get("end_date") else ""
+        title_vn_raw = data.get("title_vn")
+        title_en_raw = data.get("title_en")
+        start_date_raw = data.get("start_date")
+        end_date_raw = data.get("end_date")
+
+        # Convert to strings and strip whitespace
+        title_vn = str(title_vn_raw).strip() if title_vn_raw is not None else ""
+        title_en = str(title_en_raw).strip() if title_en_raw is not None else ""
+        start_date = str(start_date_raw).strip() if start_date_raw is not None else ""
+        end_date = str(end_date_raw).strip() if end_date_raw is not None else ""
         is_enable = data.get("is_enable", True)
         
+        # Debug logging
+        frappe.logger().info(f"School Year Create - Raw data received: {data}")
+        frappe.logger().info(f"School Year Create - Processed values: title_vn='{title_vn}', title_en='{title_en}', start_date='{start_date}', end_date='{end_date}', is_enable={is_enable}")
+
         # Input validation with detailed logging
         if not title_vn:
             frappe.throw(_("Title VN is required"))
