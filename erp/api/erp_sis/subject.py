@@ -91,12 +91,17 @@ def get_all_subjects():
             """
             subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
 
+            # Debug: Log raw query results before processing
+            frappe.logger().info(f"Raw query returned {len(subjects)} subjects")
+            if subjects:
+                frappe.logger().info(f"First subject raw data: {subjects[0]}")
+
             # Add missing fields as null
             for subject in subjects:
                 subject['academic_program_id'] = None
                 subject['curriculum_id'] = None
 
-        frappe.logger().info(f"Found {len(subjects)} subjects")
+        frappe.logger().info(f"Found {len(subjects)} subjects after processing")
 
         # Debug: Print first few subjects to check data
         frappe.logger().info("=== DEBUG get_all_subjects ===")
