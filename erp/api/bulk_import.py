@@ -200,34 +200,11 @@ def download_template():
                 errors={"doctype": ["Invalid DocType"]}
             )
 
-        # Generate template
-        template_data = _generate_excel_template(doctype)
-
-        if not template_data:
-            return error_response(
-                message="Failed to generate template for this DocType",
-                code="TEMPLATE_GENERATION_ERROR"
-            )
-
-        # Try to generate Excel file if pandas is available
-        excel_file_url = _generate_excel_file_from_template(template_data)
-
-        if excel_file_url:
-            # Return Excel file URL if generation successful
-            return single_item_response(
-                data={
-                    "template_data": template_data,
-                    "excel_file_url": excel_file_url,
-                    "download_url": excel_file_url
-                },
-                message=f"Excel template generated successfully for {doctype}"
-            )
-        else:
-            # Fallback to CSV data only
-            return single_item_response(
-                data=template_data,
-                message=f"Template generated successfully for {doctype}"
-            )
+        # Template is handled by frontend directly - just return success
+        return single_item_response(
+            data={"message": "Template download handled by frontend"},
+            message=f"Template ready for {doctype}"
+        )
 
     except Exception as e:
         frappe.log_error(f"Error downloading template: {str(e)}")
@@ -250,272 +227,7 @@ def _get_request_data():
     return frappe.local.form_dict or {}
 
 
-def _generate_excel_file_from_template(template_data):
-    """
-    Generate Excel file from template data and upload to Frappe
-    Returns file URL if successful, None otherwise
-    """
-    try:
-        import pandas as pd
-        from frappe.utils.file_manager import save_file
-        import uuid
 
-        # Create DataFrame for template with proper formatting
-        headers = [field['fieldname'] for field in template_data['fields']]  # Use fieldname for data import
-        display_headers = [field['label'] + (' *' if field.get('reqd') else '') for field in template_data['fields']]
-
-        # Create sample data row
-        sample_data = [template_data['sample_data'].get(field['fieldname'], '') for field in template_data['fields']]
-
-        # Create instruction row
-        instruction_data = ['← Fill your data starting from this row (delete this instruction row)' if i == 0 else '' for i in range(len(headers))]
-
-        # Create multiple empty rows for data entry
-        empty_data = [[''] * len(headers) for _ in range(5)]  # 5 empty rows for data entry
-
-        # Combine all rows
-        all_data = [
-            ['TEMPLATE HEADER - DO NOT MODIFY'],
-            headers,  # Actual field names for import
-            ['DISPLAY HEADER (for reference)'],
-            display_headers,  # Display headers with * for required
-            ['SAMPLE DATA - DELETE AFTER COPYING'],
-            sample_data,
-            ['INSTRUCTION - DELETE THIS ROW'],
-            instruction_data,
-            ['YOUR DATA STARTS HERE'],
-        ] + empty_data
-
-        # Create DataFrame
-        df = pd.DataFrame(all_data, columns=headers)
-
-        # Create Excel file in memory with formatting
-        from io import BytesIO
-        output = BytesIO()
-
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Get workbook and worksheet for formatting
-            df.to_excel(writer, sheet_name='Import Data', index=False, header=False)
-            workbook = writer.book
-            worksheet = writer.sheets['Import Data']
-
-            # Add formatting
-            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-
-            # Define styles
-            header_font = Font(bold=True, color='FFFFFF')
-            header_fill = PatternFill(start_color='4F81BD', end_color='4F81BD', fill_type='solid')
-            instruction_fill = PatternFill(start_color='FFFF99', end_color='FFFF99', fill_type='solid')
-            required_font = Font(color='FF0000')
-            border = Border(
-                left=Side(style='thin'),
-                right=Side(style='thin'),
-                top=Side(style='thin'),
-                bottom=Side(style='thin')
-            )
-
-            # Format header rows
-            for row_idx in range(1, 9):  # Format first 8 rows
-                for col_idx in range(1, len(headers) + 1):
-                    cell = worksheet.cell(row=row_idx, column=col_idx)
-
-                    if row_idx == 1:  # Template header
-                        cell.font = Font(bold=True, color='FF0000', size=12)
-                        cell.fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')
-                    elif row_idx == 2:  # Field names (technical)
-                        cell.font = Font(bold=True, color='006600')
-                        cell.fill = PatternFill(start_color='CCFFCC', end_color='CCFFCC', fill_type='solid')
-                    elif row_idx == 4:  # Display headers
-                        cell.font = Font(bold=True)
-                        cell.fill = header_fill
-                        cell.font = header_font
-                    elif row_idx in [6, 8]:  # Sample data and instructions
-                        cell.fill = instruction_fill
-                        cell.font = Font(italic=True)
-
-                    # Add border to all cells
-                    cell.border = border
-                    # Center align
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
-
-            # Set column widths
-            for col_num, column_title in enumerate(headers, 1):
-                column_letter = chr(64 + col_num)  # A, B, C, ...
-                if len(column_title) < 15:
-                    worksheet.column_dimensions[column_letter].width = max(15, len(column_title) + 2)
-                else:
-                    worksheet.column_dimensions[column_letter].width = 20
-
-            # Add data validation for select fields
-            from openpyxl.worksheet.datavalidation import DataValidation
-
-            for field_idx, field in enumerate(template_data['fields']):
-                if field.get('fieldtype') == 'Select' and field.get('options'):
-                    options = field['options'].split('\n')
-                    if options:
-                        dv = DataValidation(
-                            type="list",
-                            formula1=f'"{",".join(options)}"',
-                            allow_blank=True
-                        )
-                        dv.error = 'Please select from the dropdown list'
-                        dv.errorTitle = 'Invalid Selection'
-
-                        # Apply to data entry rows (starting from row 10)
-                        start_cell = worksheet.cell(row=10, column=field_idx + 1)
-                        end_cell = worksheet.cell(row=15, column=field_idx + 1)  # 5 data rows
-                        dv.add(f'{start_cell.coordinate}:{end_cell.coordinate}')
-                        worksheet.add_data_validation(dv)
-
-            # Create Instructions sheet
-            instructions_data = []
-            for field in template_data['fields']:
-                instructions_data.append({
-                    'Field Name': field['fieldname'],
-                    'Display Label': field['label'],
-                    'Required': 'Yes' if field.get('reqd') else 'No',
-                    'Field Type': field.get('fieldtype', 'Data'),
-                    'Options': field.get('options', ''),
-                    'Description': f"{'Required field' if field.get('reqd') else 'Optional field'}"
-                })
-
-            instructions_df = pd.DataFrame(instructions_data)
-            instructions_df.to_excel(writer, sheet_name='Field Instructions', index=False)
-
-            # Format instructions sheet
-            instructions_sheet = writer.sheets['Field Instructions']
-            for col_num, column_title in enumerate(instructions_df.columns, 1):
-                column_letter = chr(64 + col_num)
-                instructions_sheet.column_dimensions[column_letter].width = max(15, len(column_title) + 2)
-
-            # Create Notes sheet with comprehensive instructions
-            notes_data = [
-                ['BULK IMPORT TEMPLATE'],
-                [f'DocType: {template_data["doctype"]}'],
-                [f'Generated: {frappe.utils.now()}'],
-                [''],
-                ['=== HOW TO USE THIS TEMPLATE ==='],
-                ['1. DO NOT modify the first 8 rows (headers and instructions)'],
-                ['2. Start entering your data from row 10 onwards'],
-                ['3. Delete the instruction rows (rows 5, 7, 9) after reading'],
-                ['4. For dropdown fields, use the validation dropdowns'],
-                ['5. Date format: YYYY-MM-DD (e.g., 2024-12-25)'],
-                ['6. Leave Campus ID empty to use current campus'],
-                ['7. Required fields are marked with * in display headers'],
-                ['8. Save the file after filling data'],
-                ['9. Upload this file back to the system for import'],
-                [''],
-                ['=== REQUIRED FIELDS ==='],
-            ] + [[f"- {field['label']}"] for field in template_data['fields'] if field.get('reqd')] + [
-                [''],
-                ['=== OPTIONAL FIELDS ==='],
-            ] + [[f"- {field['label']}"] for field in template_data['fields'] if not field.get('reqd')] + [
-                [''],
-                ['=== FIELD TYPES ==='],
-            ] + [[f"- {field['label']}: {field.get('fieldtype', 'Data')}"] for field in template_data['fields']] + [
-                [''],
-                ['=== SAMPLE DATA ==='],
-            ] + [[f"- {field['fieldname']}: {template_data['sample_data'].get(field['fieldname'], '')}"] for field in template_data['fields']]
-
-            notes_df = pd.DataFrame(notes_data, columns=['Instructions'])
-            notes_df.to_excel(writer, sheet_name='How to Use', index=False, header=False)
-
-            # Format notes sheet
-            notes_sheet = writer.sheets['How to Use']
-            notes_sheet.column_dimensions['A'].width = 60
-
-            # Add color coding
-            from openpyxl.styles import PatternFill
-            for row_idx in range(1, len(notes_data) + 1):
-                cell = notes_sheet.cell(row=row_idx, column=1)
-                if 'REQUIRED' in str(cell.value):
-                    cell.fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')
-                    cell.font = Font(bold=True, color='FF0000')
-                elif 'HOW TO USE' in str(cell.value):
-                    cell.fill = PatternFill(start_color='CCFFCC', end_color='CCFFCC', fill_type='solid')
-                    cell.font = Font(bold=True, color='006600')
-                elif str(cell.value).startswith('==='):
-                    cell.font = Font(bold=True)
-
-        # Upload file to Frappe
-        file_content = output.getvalue()
-        filename = f"bulk_import_template_{template_data['doctype'].lower().replace(' ', '_')}_{uuid.uuid4().hex[:8]}.xlsx"
-
-        file_doc = save_file(
-            filename,
-            file_content,
-            "SIS Bulk Import Job",
-            "",  # No parent doc
-            is_private=0
-        )
-
-        return file_doc.file_url if file_doc else None
-
-    except ImportError:
-        frappe.logger().info("pandas/openpyxl not available for Excel generation")
-        return None
-    except Exception as e:
-        frappe.logger().error(f"Error generating Excel file: {str(e)}")
-        return None
-
-
-def _generate_excel_template(doctype):
-    """
-    Generate Excel template based on DocType metadata
-
-    Returns template structure with headers and sample data
-    """
-    try:
-        # Get DocType metadata
-        meta = frappe.get_meta(doctype)
-
-        # Get fields for template (exclude system fields)
-        template_fields = []
-        sample_data = {}
-
-        for field in meta.fields:
-            # Skip system and non-user fields
-            if field.fieldtype in ["Column Break", "Section Break", "Tab Break", "HTML", "Button"]:
-                continue
-
-            if field.hidden or field.read_only or field.fieldname in ["name", "owner", "creation", "modified", "modified_by", "docstatus"]:
-                continue
-
-            # Add field to template
-            field_info = {
-                "fieldname": field.fieldname,
-                "label": field.label or field.fieldname,
-                "fieldtype": field.fieldtype,
-                "reqd": field.reqd or False,
-                "options": field.options if field.fieldtype in ["Select", "Link"] else None
-            }
-
-            template_fields.append(field_info)
-
-            # Add sample data
-            if field.fieldtype == "Data":
-                sample_data[field.fieldname] = f"Sample {field.label}"
-            elif field.fieldtype == "Select" and field.options:
-                options = field.options.split("\n")
-                sample_data[field.fieldname] = options[0] if options else ""
-            elif field.fieldtype == "Link":
-                sample_data[field.fieldname] = f"Sample {field.options}"
-
-        return {
-            "doctype": doctype,
-            "fields": template_fields,
-            "sample_data": sample_data,
-            "notes": [
-                f"Template for {doctype} bulk import",
-                "Required fields are marked with *",
-                "Date format: YYYY-MM-DD",
-                "Leave campus_id empty to use current user's campus"
-            ]
-        }
-
-    except Exception as e:
-        frappe.logger().error(f"Error generating template for {doctype}: {str(e)}")
-        return None
 
 
 @frappe.whitelist(allow_guest=False)
@@ -593,26 +305,14 @@ def _process_excel_file(job):
                 "message": f"Failed to read Excel file: {str(e)}"
             }
 
-        # Validate that this is a template-generated file
-        if len(df) < 10:
+        # Skip first row (header) for Excel template files
+        if len(df) > 1:
+            df = df.iloc[1:]  # Skip first row (header), keep data from row 2 onwards
+        else:
             return {
                 "success": False,
-                "message": "Excel file appears to be too short. Please use the downloaded template and fill data starting from row 10."
+                "message": "File appears to be too short. Please use the downloaded template and fill data starting from row 2."
             }
-
-        # Check if this looks like our template format
-        first_row = df.iloc[0].fillna('').astype(str).tolist()
-        expected_header = "TEMPLATE HEADER - DO NOT MODIFY"
-
-        if len(first_row) == 0 or not any(expected_header in str(cell) for cell in first_row):
-            frappe.logger().warning(f"Template validation failed. First row: {first_row[:3]}")
-            return {
-                "success": False,
-                "message": "This doesn't appear to be a template-generated file. Please download the template first, then fill your data."
-            }
-
-        # Skip template header rows (first 9 rows contain template info, data starts from row 10)
-        df = df.iloc[9:]  # Skip first 9 rows, keep from row 10 onwards
 
         # Remove completely empty rows
         df = df.dropna(how='all')
@@ -621,7 +321,7 @@ def _process_excel_file(job):
         if total_rows == 0:
             return {
                 "success": False,
-                "message": "No data found in Excel file. Please fill data starting from row 10 in the template."
+                "message": "No data found in file. Please fill data starting from row 2 in the template."
             }
 
         job.total_rows = total_rows
@@ -643,8 +343,7 @@ def _process_excel_file(job):
         # Process data in batches, accounting for skipped rows
         for i in range(0, total_rows, batch_size):
             batch_df = df.iloc[i:i+batch_size]
-            # Adjust row numbers for original Excel file (add back the 9 skipped rows + 1 for 1-indexing)
-            original_start_index = i + 9 + 1  # +9 for skipped rows, +1 for Excel 1-indexing
+            original_start_index = i + 1 + 1  # +1 for skipped header row, +1 for Excel 1-indexing
             batch_result = _process_batch(job, batch_df, original_start_index, update_if_exists, dry_run)
 
             success_count += batch_result["success_count"]
@@ -690,7 +389,7 @@ def _process_batch(job, batch_df, start_index, update_if_exists, dry_run):
     errors = []
 
     for idx, row in batch_df.iterrows():
-        row_num = start_index + idx + 2  # +2 because Excel is 1-indexed and has header
+        row_num = start_index + idx  # start_index already accounts for skipped header and Excel 1-indexing
 
         try:
             # Convert row to dict and clean data
