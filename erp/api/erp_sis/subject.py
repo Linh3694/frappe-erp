@@ -31,58 +31,92 @@ def get_all_subjects():
         
         filters = {"campus_id": campus_id}
             
-        # Use SQL query to join with related tables for proper display names
-        subjects_query = """
-            SELECT
-                s.name,
-                s.title as title_vn,
-                '' as title_en,
-                '' as short_title,
-                s.education_stage,
-                s.academic_program_id,
-                s.curriculum_id,
-                s.timetable_subject_id,
-                s.actual_subject_id,
-                s.room_id,
-                s.campus_id,
-                s.creation,
-                s.modified,
-                COALESCE(es.title_vn, '') as education_stage_name,
-                COALESCE(ts.title_vn, '') as timetable_subject_name,
-                COALESCE(act.title_vn, '') as actual_subject_name,
-                COALESCE(r.title_vn, '') as room_name
-            FROM `tabSIS Subject` s
-            LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
-            LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
-            LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
-            LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
-            WHERE s.campus_id = %s
-            ORDER BY s.title ASC
-        """
-        
-        # Try to get subjects with error handling
+
         try:
+            subjects_query = """
+                SELECT
+                    s.name,
+                    s.title as title_vn,
+                    '' as title_en,
+                    '' as short_title,
+                    s.education_stage,
+                    s.academic_program_id,
+                    s.curriculum_id,
+                    s.timetable_subject_id,
+                    s.actual_subject_id,
+                    s.room_id,
+                    s.campus_id,
+                    s.creation,
+                    s.modified,
+                    COALESCE(es.title_vn, '') as education_stage_name,
+                    COALESCE(ts.title_vn, '') as timetable_subject_name,
+                    COALESCE(act.title_vn, '') as actual_subject_name,
+                    COALESCE(r.title_vn, '') as room_name
+                FROM `tabSIS Subject` s
+                LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
+                LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
+                WHERE s.campus_id = %s
+                ORDER BY s.title ASC
+            """
             subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
-            frappe.logger().info(f"Found {len(subjects)} subjects")
+        except Exception as column_error:
+            frappe.logger().warning(f"Query with all fields failed: {str(column_error)}, trying with basic fields only")
+            # Fallback query without potentially missing columns
+            subjects_query = """
+                SELECT
+                    s.name,
+                    s.title as title_vn,
+                    '' as title_en,
+                    '' as short_title,
+                    s.education_stage,
+                    s.timetable_subject_id,
+                    s.actual_subject_id,
+                    s.room_id,
+                    s.campus_id,
+                    s.creation,
+                    s.modified,
+                    COALESCE(es.title_vn, '') as education_stage_name,
+                    COALESCE(ts.title_vn, '') as timetable_subject_name,
+                    COALESCE(act.title_vn, '') as actual_subject_name,
+                    COALESCE(r.title_vn, '') as room_name
+                FROM `tabSIS Subject` s
+                LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
+                LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
+                WHERE s.campus_id = %s
+                ORDER BY s.title ASC
+            """
+            subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
 
-            # Debug: Print first few subjects to check data
-            frappe.logger().info("=== DEBUG get_all_subjects ===")
-            frappe.logger().info(f"Campus ID: {campus_id}")
-            frappe.logger().info(f"Number of subjects: {len(subjects)}")
-            if subjects:
-                frappe.logger().info(f"First subject: {subjects[0]}")
-                frappe.logger().info(f"Subject fields: {list(subjects[0].keys())}")
-        except Exception as db_error:
-            frappe.logger().error(f"Database error: {str(db_error)}")
-            import traceback
-            frappe.logger().error(f"Database error traceback: {traceback.format_exc()}")
-            return error_response(
-                message=f"Database error: {str(db_error)}",
-                code="DATABASE_ERROR"
-            )
+            # Add missing fields as null
+            for subject in subjects:
+                subject['academic_program_id'] = None
+                subject['curriculum_id'] = None
 
-        return list_response(subjects, "Subjects fetched successfully")
-        
+        frappe.logger().info(f"Found {len(subjects)} subjects")
+
+        # Debug: Print first few subjects to check data
+        frappe.logger().info("=== DEBUG get_all_subjects ===")
+        frappe.logger().info(f"Campus ID: {campus_id}")
+        frappe.logger().info(f"Number of subjects: {len(subjects)}")
+        if subjects:
+            frappe.logger().info(f"First subject: {subjects[0]}")
+            frappe.logger().info(f"Subject fields: {list(subjects[0].keys())}")
+
+    except Exception as db_error:
+        frappe.logger().error(f"Database error: {str(db_error)}")
+        import traceback
+        frappe.logger().error(f"Database error traceback: {traceback.format_exc()}")
+        return error_response(
+            message=f"Database error: {str(db_error)}",
+            code="DATABASE_ERROR"
+        )
+
+    return list_response(subjects, "Subjects fetched successfully")
+
     except Exception as e:
         frappe.log_error(f"Error fetching subjects: {str(e)}")
         return error_response(f"Error fetching subjects: {str(e)}")
