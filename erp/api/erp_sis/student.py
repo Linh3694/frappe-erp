@@ -79,12 +79,6 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
 
         frappe.logger().info(f"get_all_students called with page: {page}, limit: {limit}, include_all_campuses: {include_all_campuses}")
 
-        # Temporarily disable campus filtering for debugging
-        frappe.logger().info("DEBUG: Campus filtering temporarily disabled")
-        filters = {}  # No campus filtering
-
-        # Original campus logic (commented out for debugging)
-        """
         if include_all_campuses:
             # Get filter for all user's campuses
             from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
@@ -103,14 +97,15 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
 
             # Apply campus filtering for data isolation
             filters = {"campus_id": campus_id}
-        """
 
         frappe.logger().info(f"Final filters applied: {filters}")
         frappe.logger().info(f"Current user: {frappe.session.user}")
         frappe.logger().info(f"User roles: {frappe.get_roles(frappe.session.user)}")
-        
+
         # Calculate offset for pagination
         offset = (page - 1) * limit
+
+        frappe.logger().info(f"DEBUG: About to execute query with filters: {filters}")
             
         frappe.logger().info(f"Query filters: {filters}")
         frappe.logger().info(f"Query pagination: offset={offset}, limit={limit}")
