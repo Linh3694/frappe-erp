@@ -175,11 +175,6 @@ def get_timetable_column_by_id():
 def update_timetable_column():
     """Update an existing timetable column"""
     try:
-        # Debug: Log which function is being called
-        frappe.logger().info("=== UPDATE_TIMETABLE_COLUMN FUNCTION CALLED ===")
-        frappe.logger().info(f"Update timetable column column - Request method: {frappe.request.method}")
-        frappe.logger().info(f"Update timetable column column - Request URL: {frappe.request.url}")
-
         # Get data from request - follow Education Stage pattern
         data = {}
 
@@ -194,13 +189,6 @@ def update_timetable_column():
                 data = frappe.local.form_dict
         else:
             data = frappe.local.form_dict
-
-        # Debug logging
-        frappe.logger().info(f"Update timetable column column - Raw data: {data}")
-        frappe.logger().info(f"Update timetable column column - Form dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"Update timetable column column - Request data: {frappe.request.data}")
-        frappe.logger().info(f"Update timetable column column - Request URL: {frappe.request.url}")
-        frappe.logger().info(f"Update timetable column column - Request method: {frappe.request.method}")
 
         # Try multiple ways to get timetable_column_id
         timetable_column_id = data.get("timetable_column_id")
@@ -576,17 +564,12 @@ def create_timetable_column():
 
         frappe.logger().info(f"Create timetable column - Raw extracted values: education_stage_id={repr(education_stage_id)}, period_priority={repr(period_priority)}, period_type={repr(period_type)}, period_name={repr(period_name)}, start_time={repr(start_time)}, end_time={repr(end_time)}")
 
-        # Convert period_priority to string if it's a number (frontend might send it as number)
-        if period_priority is not None and not isinstance(period_priority, str):
-            period_priority = str(period_priority)
-            frappe.logger().info(f"Create timetable column - Converted period_priority to string: {period_priority}")
-
         # Debug logging for extracted values
         frappe.logger().info(f"Create timetable column - Extracted values: education_stage_id={education_stage_id}, period_priority={period_priority}, period_type={period_type}, period_name={period_name}, start_time={start_time}, end_time={end_time}")
 
-        # Input validation - handle both None and empty strings
-        if (not education_stage_id or str(education_stage_id).strip() == "") or \
-           (not period_priority or str(period_priority).strip() == "") or \
+        # Input validation - handle both None and empty values
+        if (not education_stage_id or (isinstance(education_stage_id, str) and education_stage_id.strip() == "")) or \
+           (period_priority is None) or \
            (not period_type or str(period_type).strip() == "") or \
            (not period_name or str(period_name).strip() == "") or \
            (not start_time or str(start_time).strip() == "") or \
