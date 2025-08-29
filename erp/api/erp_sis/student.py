@@ -128,12 +128,20 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
             limit_start=offset,
             limit_page_length=limit
         )
-        
+
         frappe.logger().info(f"Found {len(students)} students from database")
 
-        # Log sample data to verify structure
+        # Ensure all students have name field and log sample data
         if students:
-            frappe.logger().info(f"Sample student data: {students[0]}")
+            sample = students[0]
+            frappe.logger().info(f"Sample student data: name={sample.get('name')}, student_name={sample.get('student_name')}, student_code={sample.get('student_code')}")
+
+            # Verify all students have name
+            students_without_name = [s for s in students if not s.get('name')]
+            if students_without_name:
+                frappe.logger().warning(f"Found {len(students_without_name)} students without name field")
+                for s in students_without_name[:3]:  # Log first 3
+                    frappe.logger().warning(f"Student without name: {s}")
 
         try:
             student_ids = [s.get("name") for s in students if s.get("name")]
