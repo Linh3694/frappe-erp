@@ -139,40 +139,72 @@ def get_curriculum_by_id():
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
-        
+        frappe.logger().info(f"Current campus_id: {campus_id}")
+
         if not campus_id:
             campus_id = "campus-1"
-            
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+
         filters = {
             "name": curriculum_id,
             "campus_id": campus_id
         }
-        
-        curriculum = frappe.get_doc("SIS Curriculum", filters)
-        
+        frappe.logger().info(f"Using filters: {filters}")
+
+        # Try to get curriculum with error handling
+        try:
+            curriculum = frappe.get_doc("SIS Curriculum", filters)
+            frappe.logger().info(f"Successfully retrieved curriculum: {curriculum.name if curriculum else 'None'}")
+        except Exception as doc_error:
+            frappe.logger().error(f"Error getting curriculum document: {str(doc_error)}")
+            return error_response(
+                message=f"Database error while fetching curriculum: {str(doc_error)}",
+                code="DATABASE_ERROR"
+            )
+
         if not curriculum:
             return not_found_response(
                 message="Curriculum not found or access denied",
                 code="CURRICULUM_NOT_FOUND"
             )
-        
+
+        # Build response data safely, handling missing attributes
+        response_data = {
+            "name": curriculum.name,
+            "title_vn": curriculum.title_vn,
+            "title_en": curriculum.title_en,
+            "short_title": curriculum.short_title,
+            "campus_id": curriculum.campus_id,
+            "creation": curriculum.creation,
+            "modified": curriculum.modified
+        }
+
+        # Add optional fields if they exist
+        try:
+            if hasattr(curriculum, 'academic_program_id') and curriculum.academic_program_id:
+                response_data["academic_program_id"] = curriculum.academic_program_id
+            else:
+                response_data["academic_program_id"] = None
+        except AttributeError:
+            response_data["academic_program_id"] = None
+
+        try:
+            if hasattr(curriculum, 'education_stage_id') and curriculum.education_stage_id:
+                response_data["education_stage_id"] = curriculum.education_stage_id
+            else:
+                response_data["education_stage_id"] = None
+        except AttributeError:
+            response_data["education_stage_id"] = None
+
         return single_item_response(
-            data={
-                "name": curriculum.name,
-                "title_vn": curriculum.title_vn,
-                "title_en": curriculum.title_en,
-                "short_title": curriculum.short_title,
-                "academic_program_id": curriculum.academic_program_id,
-                "education_stage_id": curriculum.education_stage_id,
-                "campus_id": curriculum.campus_id,
-                "creation": curriculum.creation,
-                "modified": curriculum.modified
-            },
+            data=response_data,
             message="Curriculum fetched successfully"
         )
         
     except Exception as e:
         frappe.log_error(f"Error fetching curriculum {curriculum_id}: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
         return error_response(
             message="Error fetching curriculum",
             code="FETCH_CURRICULUM_ERROR"
