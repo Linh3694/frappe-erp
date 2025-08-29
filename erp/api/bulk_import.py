@@ -464,6 +464,19 @@ def _process_excel_file(job):
 
         frappe.logger().info(f"Excel file has {total_rows} rows")
 
+        # Build label->fieldname mapping for column headers
+        meta = frappe.get_meta(job.doctype_target)
+        def _normalize_key(text):
+            key = cstr(text)
+            return "".join(ch.lower() for ch in key if ch.isalnum())
+
+        label_map = {}
+        for f in meta.fields:
+            if getattr(f, 'fieldname', None):
+                label_map[_normalize_key(f.fieldname)] = f.fieldname
+            if getattr(f, 'label', None):
+                label_map[_normalize_key(f.label)] = f.fieldname
+
         # Process data in batches
         batch_size = 100
         success_count = 0
@@ -478,7 +491,7 @@ def _process_excel_file(job):
         for i in range(0, total_rows, batch_size):
             batch_df = df.iloc[i:i+batch_size]
             original_start_index = i + 1 + 1  # +1 for skipped header row, +1 for Excel 1-indexing
-            batch_result = _process_batch(job, batch_df, original_start_index, update_if_exists, dry_run)
+            batch_result = _process_batch(job, batch_df, original_start_index, update_if_exists, dry_run, label_map)
 
             success_count += batch_result["success_count"]
             error_count += batch_result["error_count"]
@@ -516,7 +529,7 @@ def _process_excel_file(job):
         }
 
 
-def _process_batch(job, batch_df, start_index, update_if_exists, dry_run):
+def _process_batch(job, batch_df, start_index, update_if_exists, dry_run, label_map):
     """Process a batch of records"""
     success_count = 0
     error_count = 0
@@ -533,7 +546,16 @@ def _process_batch(job, batch_df, start_index, update_if_exists, dry_run):
                 value = row[col]
                 if pd.isna(value):
                     value = None
-                row_data[col] = value
+                # Convert pandas Timestamp to ISO date string
+                if isinstance(value, pd.Timestamp):
+                    try:
+                        value = value.date().isoformat()
+                    except Exception:
+                        value = value.to_pydatetime().date().isoformat()
+                # Map header label to fieldname if possible (case/space-insensitive)
+                normalized = "".join(ch.lower() for ch in cstr(col) if ch.isalnum())
+                target_key = label_map.get(normalized, col)
+                row_data[target_key] = value
 
             # Process single record
             result = _process_single_record(job, row_data, row_num, update_if_exists, dry_run)
