@@ -326,23 +326,25 @@ def create_teacher():
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
-def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
+def update_teacher():
     """Update an existing teacher"""
     try:
         # Debug: Log all received data
-        frappe.logger().info(f"update_teacher called with teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
+        frappe.logger().info(f"update_teacher called")
         frappe.logger().info(f"form_dict: {frappe.form_dict}")
         frappe.logger().info(f"request.data exists: {bool(frappe.request.data)}")
         if frappe.request.data:
             frappe.logger().info(f"request.data: {frappe.request.data}")
             frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
 
-        # Get teacher_id from form_dict if not provided as parameter
-        if not teacher_id:
-            teacher_id = frappe.form_dict.get('teacher_id')
-            frappe.logger().info(f"Got teacher_id from form_dict: {teacher_id}")
+        # Get parameters from form_dict (form data)
+        teacher_id = frappe.form_dict.get('teacher_id')
+        user_id = frappe.form_dict.get('user_id')
+        education_stage_id = frappe.form_dict.get('education_stage_id')
 
-        # If still no teacher_id, try to parse from request body
+        frappe.logger().info(f"Parameters from form_dict - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
+
+        # If no form data, try to parse from JSON request body
         if not teacher_id and frappe.request.data:
             try:
                 import json
@@ -354,39 +356,15 @@ def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
                 if json_str.strip():
                     json_data = json.loads(json_str)
                     teacher_id = json_data.get('teacher_id')
-                    frappe.logger().info(f"Got teacher_id from JSON request body: {teacher_id}")
+                    user_id = json_data.get('user_id')
+                    education_stage_id = json_data.get('education_stage_id')
+                    frappe.logger().info(f"Got parameters from JSON request body - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
             except Exception as e:
-                frappe.logger().info(f"Could not parse JSON data for teacher_id: {str(e)}")
-
-        # Get other parameters from form_dict if not provided
-        if user_id is None:
-            user_id = frappe.form_dict.get('user_id')
-        if education_stage_id is None:
-            education_stage_id = frappe.form_dict.get('education_stage_id')
+                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
 
         frappe.logger().info(f"Final parameters - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
 
-        # If parameters not found in form_dict, try to parse JSON from request body
-        if (not teacher_id or user_id is None or education_stage_id is None) and frappe.request.data:
-            try:
-                import json
-                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                frappe.logger().info(f"Parsed JSON data: {json_data}")
 
-                if not teacher_id:
-                    teacher_id = json_data.get('teacher_id')
-                    frappe.logger().info(f"Got teacher_id from JSON body: {teacher_id}")
-
-                if user_id is None:
-                    user_id = json_data.get('user_id')
-                    frappe.logger().info(f"Got user_id from JSON body: {user_id}")
-
-                if education_stage_id is None:
-                    education_stage_id = json_data.get('education_stage_id')
-                    frappe.logger().info(f"Got education_stage_id from JSON body: {education_stage_id}")
-
-            except Exception as e:
-                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
 
         if not teacher_id:
             frappe.logger().info("No teacher_id found for update")
