@@ -35,8 +35,12 @@ def get_all_subjects():
         subjects_query = """
             SELECT
                 s.name,
-                s.title,
+                s.title_vn,
+                s.title_en,
+                s.short_title,
                 s.education_stage,
+                s.academic_program_id,
+                s.curriculum_id,
                 s.timetable_subject_id,
                 s.actual_subject_id,
                 s.room_id,
@@ -53,19 +57,29 @@ def get_all_subjects():
             LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
             LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
             WHERE s.campus_id = %s
-            ORDER BY s.title ASC
+            ORDER BY s.title_vn ASC
         """
         
-        subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
+        # Try to get subjects with error handling
+        try:
+            subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
+            frappe.logger().info(f"Found {len(subjects)} subjects")
 
-        # Debug: Print first few subjects to check data
-        print("=== DEBUG get_all_subjects ===")
-        print(f"Campus ID: {campus_id}")
-        print(f"Query: {subjects_query}")
-        print(f"Number of subjects: {len(subjects)}")
-        if subjects:
-            print(f"First subject: {subjects[0]}")
-            print(f"Subject fields: {list(subjects[0].keys())}")
+            # Debug: Print first few subjects to check data
+            frappe.logger().info("=== DEBUG get_all_subjects ===")
+            frappe.logger().info(f"Campus ID: {campus_id}")
+            frappe.logger().info(f"Number of subjects: {len(subjects)}")
+            if subjects:
+                frappe.logger().info(f"First subject: {subjects[0]}")
+                frappe.logger().info(f"Subject fields: {list(subjects[0].keys())}")
+        except Exception as db_error:
+            frappe.logger().error(f"Database error: {str(db_error)}")
+            import traceback
+            frappe.logger().error(f"Database error traceback: {traceback.format_exc()}")
+            return error_response(
+                message=f"Database error: {str(db_error)}",
+                code="DATABASE_ERROR"
+            )
 
         return list_response(subjects, "Subjects fetched successfully")
         

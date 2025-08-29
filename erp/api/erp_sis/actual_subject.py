@@ -26,13 +26,17 @@ def get_all_actual_subjects():
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         filters = {"campus_id": campus_id}
-            
-        actual_subjects = frappe.get_all(
+        frappe.logger().info(f"Using filters: {filters}")
+
+        # Try to get actual subjects with error handling
+        try:
+            actual_subjects = frappe.get_all(
             "SIS Actual Subject",
             fields=[
                 "name",
                 "title_vn",
                 "title_en",
+                "short_title",
                 "curriculum_id",
                 "campus_id",
                 "creation",
@@ -41,7 +45,23 @@ def get_all_actual_subjects():
             filters=filters,
             order_by="title_vn asc"
         )
-        
+            frappe.logger().info(f"Found {len(actual_subjects)} actual subjects")
+
+            # Add creation and modified fields if missing
+            for subject in actual_subjects:
+                if 'creation' not in subject:
+                    subject['creation'] = None
+                if 'modified' not in subject:
+                    subject['modified'] = None
+        except Exception as db_error:
+            frappe.logger().error(f"Database error: {str(db_error)}")
+            import traceback
+            frappe.logger().error(f"Database error traceback: {traceback.format_exc()}")
+            return error_response(
+                message=f"Database error: {str(db_error)}",
+                code="DATABASE_ERROR"
+            )
+
         return list_response(
             data=actual_subjects,
             message="Actual subjects fetched successfully"
@@ -109,7 +129,9 @@ def get_actual_subject_by_id():
                 "title_vn": actual_subject.title_vn,
                 "title_en": actual_subject.title_en,
                 "curriculum_id": actual_subject.curriculum_id,
-                "campus_id": actual_subject.campus_id
+                "campus_id": actual_subject.campus_id,
+                "creation": actual_subject.creation,
+                "modified": actual_subject.modified
             },
             message="Actual subject fetched successfully"
         )
