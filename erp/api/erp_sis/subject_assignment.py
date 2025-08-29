@@ -61,7 +61,23 @@ def get_all_subject_assignments():
 def get_subject_assignment_by_id(assignment_id=None):
     """Get a specific subject assignment by ID"""
     try:
-        # Get assignment_id from multiple sources (form_dict, JSON payload, or direct parameter)
+        # Get assignment_id from multiple sources (URL path, form_dict, JSON payload, or direct parameter)
+        if not assignment_id:
+            # Try to get from URL path first (e.g., /api/method/.../SIS-SUBJECT_ASSIGNMENT-00001)
+            try:
+                request_path = frappe.local.request.path if hasattr(frappe.local, 'request') else frappe.request.path
+                if request_path:
+                    # Extract the last part of the URL path
+                    path_parts = request_path.strip('/').split('/')
+                    if len(path_parts) > 0:
+                        last_part = path_parts[-1]
+                        # Check if it looks like an assignment ID (contains assignment identifier)
+                        if 'SUBJECT_ASSIGNMENT' in last_part or last_part.startswith('SIS-'):
+                            assignment_id = last_part
+            except Exception:
+                pass
+
+        # Try to get from form_dict
         if not assignment_id:
             assignment_id = frappe.form_dict.get('assignment_id')
 
@@ -270,7 +286,23 @@ def create_subject_assignment():
 def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=None):
     """Update an existing subject assignment"""
     try:
-        # Get assignment_id from multiple sources (form_dict, JSON payload, or direct parameter)
+        # Get assignment_id from multiple sources (URL path, form_dict, JSON payload, or direct parameter)
+        if not assignment_id:
+            # Try to get from URL path first (e.g., /api/method/.../SIS-SUBJECT_ASSIGNMENT-00001)
+            try:
+                request_path = frappe.local.request.path if hasattr(frappe.local, 'request') else frappe.request.path
+                if request_path:
+                    # Extract the last part of the URL path
+                    path_parts = request_path.strip('/').split('/')
+                    if len(path_parts) > 0:
+                        last_part = path_parts[-1]
+                        # Check if it looks like an assignment ID (contains assignment identifier)
+                        if 'SUBJECT_ASSIGNMENT' in last_part or last_part.startswith('SIS-'):
+                            assignment_id = last_part
+            except Exception:
+                pass
+
+        # Try to get from form_dict
         if not assignment_id:
             assignment_id = frappe.form_dict.get('assignment_id')
 
