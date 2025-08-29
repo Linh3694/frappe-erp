@@ -452,13 +452,49 @@ def delete_academic_program():
                 code="ACADEMIC_PROGRAM_NOT_FOUND"
             )
         
-        # Delete the document
-        frappe.delete_doc("SIS Academic Program", program_id)
-        frappe.db.commit()
-        
-        return success_response(
-            message="Academic program deleted successfully"
-        )
+        # Check for linked documents before deletion
+        linked_docs = []
+        try:
+            # Check Curriculum links
+            curriculum_count = frappe.db.count("SIS Curriculum", {"academic_program_id": program_id})
+            if curriculum_count > 0:
+                linked_docs.append(f"{curriculum_count} chương trình học")
+
+            # Check Actual Subject links
+            actual_subject_count = frappe.db.count("SIS Actual Subject", {"academic_program_id": program_id})
+            if actual_subject_count > 0:
+                linked_docs.append(f"{actual_subject_count} môn học thực tế")
+
+            # Check Subject links
+            subject_count = frappe.db.count("SIS Subject", {"academic_program_id": program_id})
+            if subject_count > 0:
+                linked_docs.append(f"{subject_count} môn học")
+
+            if linked_docs:
+                return error_response(
+                    message=f"Không thể xóa hệ học vì đang được liên kết với {', '.join(linked_docs)}. Vui lòng xóa hoặc chuyển các mục liên kết sang hệ học khác trước.",
+                    code="ACADEMIC_PROGRAM_LINKED"
+                )
+
+            # Delete the document
+            frappe.delete_doc("SIS Academic Program", program_id)
+            frappe.db.commit()
+
+            return success_response(
+                message="Academic program deleted successfully"
+            )
+
+        except frappe.LinkExistsError as e:
+            return error_response(
+                message=f"Không thể xóa hệ học vì đang được sử dụng bởi các module khác. Chi tiết: {str(e)}",
+                code="ACADEMIC_PROGRAM_LINKED"
+            )
+        except Exception as e:
+            frappe.log_error(f"Unexpected error during deletion: {str(e)}")
+            return error_response(
+                message="Lỗi không mong muốn khi xóa hệ học",
+                code="DELETE_ACADEMIC_PROGRAM_ERROR"
+            )
         
     except Exception as e:
         frappe.log_error(f"Error deleting academic program {program_id}: {str(e)}")

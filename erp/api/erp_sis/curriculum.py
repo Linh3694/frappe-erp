@@ -32,8 +32,10 @@ def get_all_curriculums():
             fields=[
                 "name",
                 "title_vn",
-                "title_en", 
+                "title_en",
                 "short_title",
+                "academic_program_id",
+                "education_stage_id",
                 "campus_id",
                 "creation",
                 "modified"
@@ -110,7 +112,11 @@ def get_curriculum_by_id():
                 "title_vn": curriculum.title_vn,
                 "title_en": curriculum.title_en,
                 "short_title": curriculum.short_title,
-                "campus_id": curriculum.campus_id
+                "academic_program_id": curriculum.academic_program_id,
+                "education_stage_id": curriculum.education_stage_id,
+                "campus_id": curriculum.campus_id,
+                "creation": curriculum.creation,
+                "modified": curriculum.modified
             },
             message="Curriculum fetched successfully"
         )
