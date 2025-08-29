@@ -201,7 +201,7 @@ def update_timetable():
         start_time = data.get("start_time")
         end_time = data.get("end_time")
 
-        # Update fields if provided
+                # Update fields if provided
         if education_stage_id and education_stage_id != timetable_doc.education_stage_id:
             # Verify education stage exists and belongs to same campus
             education_stage_exists = frappe.db.exists(
@@ -248,23 +248,38 @@ def update_timetable():
         if period_name and period_name != timetable_doc.period_name:
             timetable_doc.period_name = period_name
 
-        if start_time and start_time != format_time_for_html(timetable_doc.start_time):
-            try:
-                start_time_obj = get_time(start_time)
-                timetable_doc.start_time = start_time
-            except Exception:
-                return validation_error_response("Validation failed", {"start_time": ["Invalid start time format"]})
+        # Handle time updates with better validation
+        current_start_time = format_time_for_html(timetable_doc.start_time)
+        current_end_time = format_time_for_html(timetable_doc.end_time)
 
-        if end_time and end_time != format_time_for_html(timetable_doc.end_time):
-            try:
-                end_time_obj = get_time(end_time)
-                timetable_doc.end_time = end_time
-            except Exception:
-                return validation_error_response("Validation failed", {"end_time": ["Invalid end time format"]})
-        
+        if start_time and start_time.strip():
+            if start_time != current_start_time:
+                try:
+                    start_time_obj = get_time(start_time)
+                    timetable_doc.start_time = start_time
+                except Exception as e:
+                    frappe.log_error(f"Error parsing start_time '{start_time}': {str(e)}")
+                    return validation_error_response("Validation failed", {"start_time": ["Invalid start time format"]})
+
+        if end_time and end_time.strip():
+            if end_time != current_end_time:
+                try:
+                    end_time_obj = get_time(end_time)
+                    timetable_doc.end_time = end_time
+                except Exception as e:
+                    frappe.log_error(f"Error parsing end_time '{end_time}': {str(e)}")
+                    return validation_error_response("Validation failed", {"end_time": ["Invalid end time format"]})
+
         # Validate time range after updates
-        if timetable_doc.start_time >= timetable_doc.end_time:
-            return validation_error_response("Validation failed", {"start_time": ["Start time must be before end time"]})
+        if hasattr(timetable_doc, 'start_time') and hasattr(timetable_doc, 'end_time') and timetable_doc.start_time and timetable_doc.end_time:
+            try:
+                start_time_obj = get_time(str(timetable_doc.start_time))
+                end_time_obj = get_time(str(timetable_doc.end_time))
+                if start_time_obj >= end_time_obj:
+                    return validation_error_response("Validation failed", {"start_time": ["Start time must be before end time"]})
+            except Exception as e:
+                frappe.log_error(f"Error validating time range: {str(e)}")
+                return validation_error_response("Validation failed", {"start_time": ["Invalid time values"]})
         
         timetable_doc.save()
         frappe.db.commit()
