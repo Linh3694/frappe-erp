@@ -733,7 +733,7 @@ def get_education_stages_for_selection():
         if education_stages:
             pass
         else:
-            print("No education stages found with current campus filter")
+
             # Try without campus filter to see if there are any education stages
             all_stages = frappe.get_all(
                 "SIS Education Stage",
@@ -802,7 +802,7 @@ def get_timetable_subjects_for_selection():
         if timetable_subjects:
             pass
         else:
-            print("No timetable subjects found with current campus filter")
+
             # Try without campus filter
             all_subjects = frappe.get_all(
                 "SIS Timetable Subject",
@@ -876,7 +876,7 @@ def get_actual_subjects_for_selection():
         if actual_subjects:
             pass
         else:
-            print("No actual subjects found with current filters")
+
             # Try without curriculum filter
             all_subjects = frappe.get_all(
                 "SIS Actual Subject",

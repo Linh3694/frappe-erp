@@ -30,7 +30,7 @@ def get_all_school_years():
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         filters = {"campus_id": campus_id}
-        frappe.logger().info(f"Using filters: {filters}")
+
 
         # Try to get school years with error handling
         try:
@@ -137,25 +137,21 @@ def create_school_year():
                 json_data = json.loads(frappe.request.data)
                 if json_data:
                     data = json_data
-                    frappe.logger().info(f"Received JSON data for create_school_year: {data}")
                 else:
                     data = frappe.local.form_dict
-                    frappe.logger().info(f"Received form data for create_school_year: {data}")
             except (json.JSONDecodeError, TypeError):
                 # If JSON parsing fails, use form_dict
                 data = frappe.local.form_dict
-                frappe.logger().info(f"JSON parsing failed, using form data for create_school_year: {data}")
         else:
             # Fallback to form_dict
             data = frappe.local.form_dict
-            frappe.logger().info(f"No request data, using form_dict for create_school_year: {data}")
         
         # Extract values from data
         title_vn = data.get("title_vn")
         title_en = data.get("title_en")
         start_date = data.get("start_date")
         end_date = data.get("end_date")
-        is_enable = data.get("is_enable", 1)
+        is_enable = data.get("is_enable", True)
         
         # Input validation
         if not title_vn or not start_date or not end_date:
@@ -340,7 +336,7 @@ def update_school_year():
 
         is_enable = data.get('is_enable')
         if is_enable is not None:
-            school_year_doc.is_enable = int(is_enable)
+            school_year_doc.is_enable = bool(is_enable)
 
         school_year_doc.save()
         frappe.db.commit()
