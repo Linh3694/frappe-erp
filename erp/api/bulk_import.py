@@ -75,13 +75,12 @@ def start_bulk_import():
         job.insert(ignore_permissions=True)
         frappe.db.commit()
 
-        # Enqueue the bulk import worker on default queue so it runs without long worker
+        # Execute immediately (synchronous) so it runs without any worker
         frappe.enqueue(
             "erp.api.bulk_import.process_bulk_import",
             job_id=job.name,
-            queue="default",
             timeout=3600,
-            now=False
+            now=True
         )
 
         frappe.logger().info(f"Bulk import job {job.name} created and queued for {doctype}")
