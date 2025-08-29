@@ -172,8 +172,29 @@ def update_timetable():
         else:
             data = frappe.local.form_dict
 
+        # Debug logging
+        frappe.logger().info(f"Update timetable - Raw data: {data}")
+        frappe.logger().info(f"Update timetable - Form dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"Update timetable - Request data: {frappe.request.data}")
+
+        # Try multiple ways to get timetable_id
         timetable_id = data.get("timetable_id")
+
+        # If not found in data, try form_dict directly
+        if not timetable_id and frappe.local.form_dict:
+            timetable_id = frappe.local.form_dict.get("timetable_id")
+
+        # If still not found, try URL path (similar to get_timetable_by_id)
         if not timetable_id:
+            # Check if timetable_id is in URL path
+            import re
+            url_pattern = r'/api/method/erp\.api\.erp_sis\.timetable\.update_timetable/([^/?]+)'
+            match = re.search(url_pattern, frappe.request.url or '')
+            if match:
+                timetable_id = match.group(1)
+
+        if not timetable_id:
+            frappe.logger().error(f"Update timetable - Missing timetable_id. Data keys: {list(data.keys()) if data else 'None'}, Form dict keys: {list(frappe.local.form_dict.keys()) if frappe.local.form_dict else 'None'}")
             return validation_error_response("Validation failed", {"timetable_id": ["Timetable ID is required"]})
 
         # Get campus from user context
