@@ -134,8 +134,31 @@ def get_education_stage_by_id():
 def create_education_stage():
     """Create a new education stage - SIMPLE VERSION"""
     try:
+        # Debug: Print request data
+        print("=== DEBUG create_education_stage ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+        print(f"Request data type: {type(frappe.request.data)}")
+
         # Get data from form_dict (FormData will be available here)
         data = frappe.local.form_dict
+        print(f"Initial data from form_dict: {data}")
+
+        # If no data in form_dict, try to parse JSON payload
+        if not data or not any(data.values()):
+            if frappe.request.data:
+                try:
+                    import json
+                    json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                    data = frappe._dict(json_data)
+                    print(f"Parsed JSON data: {json_data}")
+                    print(f"Converted to frappe._dict: {data}")
+                except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                    print(f"JSON parsing failed: {e}")
+
+        print(f"Final data to process: {data}")
         
         # Validate required fields
         required_fields = ["title_vn", "title_en", "short_title"]
