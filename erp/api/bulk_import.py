@@ -76,12 +76,7 @@ def start_bulk_import():
         frappe.db.commit()
 
         # Execute immediately (synchronous) so it runs without any worker
-        frappe.enqueue(
-            "erp.api.bulk_import.process_bulk_import",
-            job_id=job.name,
-            timeout=3600,
-            now=True
-        )
+        process_bulk_import(job.name)
 
         frappe.logger().info(f"Bulk import job {job.name} created and queued for {doctype}")
 
