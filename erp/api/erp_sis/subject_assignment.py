@@ -79,7 +79,7 @@ def get_subject_assignment_by_id(assignment_id=None):
 
         # Try to get from URL query parameters (for GET requests)
         if not assignment_id:
-            assignment_id = frappe.local.request.args.get('assignment_id') if hasattr(frappe.local, 'request') and hasattr(frappe.local.request, 'args') else None
+            assignment_id = frappe.request.args.get('assignment_id')
 
         # Try to get from form_dict
         if not assignment_id:
@@ -308,7 +308,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
 
         # Try to get from URL query parameters (for GET requests)
         if not assignment_id:
-            assignment_id = frappe.local.request.args.get('assignment_id') if hasattr(frappe.local, 'request') and hasattr(frappe.local.request, 'args') else None
+            assignment_id = frappe.request.args.get('assignment_id')
 
         # Try to get from form_dict
         if not assignment_id:
@@ -482,7 +482,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
 def delete_subject_assignment(assignment_id=None):
     """Delete a subject assignment"""
     try:
-        # Get assignment_id from multiple sources (URL path, form_dict, JSON payload, or direct parameter)
+        # Get assignment_id from multiple sources (URL path, query params, form_dict, JSON payload, or direct parameter)
         if not assignment_id:
             # Try to get from URL path first (e.g., /api/method/.../SIS-SUBJECT_ASSIGNMENT-00001)
             try:
@@ -497,6 +497,10 @@ def delete_subject_assignment(assignment_id=None):
                             assignment_id = last_part
             except Exception:
                 pass
+
+        # Try to get from URL query parameters (for GET requests)
+        if not assignment_id:
+            assignment_id = frappe.request.args.get('assignment_id')
 
         # Try to get from form_dict
         if not assignment_id:
