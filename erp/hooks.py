@@ -208,6 +208,16 @@ has_permission = {
 # Overriding Methods
 # ------------------------------
 #
+# Whitelisted methods
+# -------------------
+whitelisted_methods = [
+	"erp.api.bulk_import.upload_bulk_import_file",
+	"erp.api.bulk_import.start_bulk_import",
+	"erp.api.bulk_import.get_bulk_import_status",
+	"erp.api.bulk_import.download_template",
+	"erp.api.bulk_import.reload_whitelist"
+]
+
 # override_whitelisted_methods = {
 # 	"frappe.desk.doctype.event.event.get_events": "erp.event.get_events"
 # }

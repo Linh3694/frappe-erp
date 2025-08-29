@@ -1,4 +1,5 @@
 import frappe
+from frappe.utils import cstr
 from frappe import _
 from frappe.utils import now_datetime, get_datetime
 import json
@@ -161,6 +162,32 @@ def get_bulk_import_status():
         return error_response(
             message="Failed to get bulk import status",
             code="GET_STATUS_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def reload_whitelist():
+    """
+    Reload whitelisted methods cache
+    Call this after adding new whitelisted methods
+    """
+    try:
+        # Clear method cache
+        frappe.cache().delete_key("whitelisted_methods")
+        frappe.cache().delete_key("method_map")
+
+        # Reload hooks
+        frappe.get_hooks()
+
+        return single_item_response(
+            data={"message": "Whitelist cache reloaded successfully"},
+            message="Cache reloaded"
+        )
+    except Exception as e:
+        frappe.log_error(f"Error reloading whitelist: {str(e)}")
+        return error_response(
+            message="Failed to reload whitelist",
+            code="RELOAD_ERROR"
         )
 
 
