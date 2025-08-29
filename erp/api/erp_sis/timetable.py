@@ -115,11 +115,29 @@ def get_timetable_by_id():
         else:
             data = frappe.local.form_dict
 
+        # Try to get timetable_id from multiple sources
         timetable_id = data.get("timetable_id")
+
+        # If not found, try URL path
+        if not timetable_id:
+            import re
+            url_patterns = [
+                r'/api/method/erp\.api\.erp_sis\.timetable\.get_timetable_by_id/([^/?]+)',
+                r'/erp\.api\.erp_sis\.timetable\.get_timetable_by_id/([^/?]+)',
+                r'get_timetable_by_id/([^/?]+)',
+            ]
+
+            for pattern in url_patterns:
+                match = re.search(pattern, frappe.request.url or '')
+                if match:
+                    timetable_id = match.group(1)
+                    frappe.logger().info(f"Get timetable - Found timetable_id '{timetable_id}' using pattern '{pattern}' from URL: {frappe.request.url}")
+                    break
+
         if not timetable_id:
             return validation_error_response("Validation failed", {"timetable_id": ["Timetable ID is required"]})
 
-        # Get current user's campus
+        # Get campus from user context
         campus_id = get_current_campus_from_context()
 
         if not campus_id:
@@ -176,6 +194,8 @@ def update_timetable():
         frappe.logger().info(f"Update timetable - Raw data: {data}")
         frappe.logger().info(f"Update timetable - Form dict: {frappe.local.form_dict}")
         frappe.logger().info(f"Update timetable - Request data: {frappe.request.data}")
+        frappe.logger().info(f"Update timetable - Request URL: {frappe.request.url}")
+        frappe.logger().info(f"Update timetable - Request method: {frappe.request.method}")
 
         # Try multiple ways to get timetable_id
         timetable_id = data.get("timetable_id")
@@ -188,10 +208,34 @@ def update_timetable():
         if not timetable_id:
             # Check if timetable_id is in URL path
             import re
-            url_pattern = r'/api/method/erp\.api\.erp_sis\.timetable\.update_timetable/([^/?]+)'
-            match = re.search(url_pattern, frappe.request.url or '')
-            if match:
-                timetable_id = match.group(1)
+            # Try different URL patterns
+            url_patterns = [
+                r'/api/method/erp\.api\.erp_sis\.timetable\.update_timetable/([^/?]+)',
+                r'/api/method/erp\.api\.erp_sis\.timetable\.update_timetable\?(.+)',
+                r'update_timetable/([^/?]+)',
+                r'/erp\.api\.erp_sis\.timetable\.update_timetable/([^/?]+)',
+                r'update_timetable/?([^/?]+)',
+            ]
+
+            for pattern in url_patterns:
+                match = re.search(pattern, frappe.request.url or '')
+                if match:
+                    timetable_id = match.group(1)
+                    frappe.logger().info(f"Update timetable - Found timetable_id '{timetable_id}' using pattern '{pattern}' from URL: {frappe.request.url}")
+                    break
+
+            # Also try to extract from query parameters
+            if not timetable_id and frappe.local.form_dict:
+                timetable_id = frappe.local.form_dict.get("timetable_id")
+
+        # Final fallback - try to get from any source
+        if not timetable_id:
+            # Check if it's in the request args
+            import urllib.parse
+            if hasattr(frappe.request, 'args') and frappe.request.args:
+                parsed_args = urllib.parse.parse_qs(frappe.request.args)
+                if 'timetable_id' in parsed_args:
+                    timetable_id = parsed_args['timetable_id'][0]
 
         if not timetable_id:
             frappe.logger().error(f"Update timetable - Missing timetable_id. Data keys: {list(data.keys()) if data else 'None'}, Form dict keys: {list(frappe.local.form_dict.keys()) if frappe.local.form_dict else 'None'}")
@@ -345,7 +389,24 @@ def delete_timetable():
         else:
             data = frappe.local.form_dict
 
+        # Try to get timetable_id from multiple sources
         timetable_id = data.get("timetable_id")
+
+        # If not found, try URL path
+        if not timetable_id:
+            import re
+            url_patterns = [
+                r'/api/method/erp\.api\.erp_sis\.timetable\.delete_timetable/([^/?]+)',
+                r'/erp\.api\.erp_sis\.timetable\.delete_timetable/([^/?]+)',
+                r'delete_timetable/([^/?]+)',
+            ]
+
+            for pattern in url_patterns:
+                match = re.search(pattern, frappe.request.url or '')
+                if match:
+                    timetable_id = match.group(1)
+                    break
+
         if not timetable_id:
             return validation_error_response("Validation failed", {"timetable_id": ["Timetable ID is required"]})
 
