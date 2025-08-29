@@ -163,9 +163,7 @@ def create_school_year():
         end_date = str(end_date_raw).strip() if end_date_raw is not None else ""
         is_enable = data.get("is_enable", True)
         
-        # Debug logging
-        frappe.logger().info(f"School Year Create - Raw data received: {data}")
-        frappe.logger().info(f"School Year Create - Processed values: title_vn='{title_vn}', title_en='{title_en}', start_date='{start_date}', end_date='{end_date}', is_enable={is_enable}")
+
 
         # Input validation with detailed logging
         if not title_vn:
@@ -314,8 +312,6 @@ def update_school_year():
         except frappe.DoesNotExistError:
             return not_found_response("School year not found")
 
-        # Debug logging for update
-        frappe.logger().info(f"School Year Update - Raw data received: {data}")
 
         # Update fields if provided
         title_vn = data.get('title_vn')
