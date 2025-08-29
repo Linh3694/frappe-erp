@@ -3,6 +3,7 @@
 
 import frappe
 from frappe import _
+from erp.utils.api_response import success_response
 
 
 @frappe.whitelist(allow_guest=False)
@@ -43,7 +44,10 @@ def debug_education_stages():
         """, as_dict=True)[0]["count"]
         result["debug_info"]["stages_with_empty_campus_id"] = empty_campus_count
         
-        return result
+        return success_response(
+            data=result["debug_info"],
+            message="Education stage debug completed successfully"
+        )
         
     except Exception as e:
         frappe.logger().error(f"Error in debug_education_stages: {str(e)}")

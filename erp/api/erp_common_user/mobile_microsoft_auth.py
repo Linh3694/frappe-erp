@@ -8,6 +8,7 @@ import json
 import urllib.parse
 import base64
 from frappe import _
+from erp.utils.api_response import success_response
 from frappe.utils import cstr
 from erp.api.erp_common_user.microsoft_auth import (
     get_microsoft_access_token, 
@@ -197,13 +198,14 @@ def mobile_microsoft_callback(code, state=None):
         }
         
         # Return success response
-        return {
-            "success": True,
-            "message": "Microsoft authentication successful",
-            "token": jwt_token,
-            "expires_in": 24 * 60 * 60,  # 24 hours in seconds
-            "user": user_data
-        }
+        return success_response(
+            data={
+                "token": jwt_token,
+                "expires_in": 24 * 60 * 60,  # 24 hours in seconds
+                "user": user_data
+            },
+            message="Microsoft authentication successful"
+        )
         
     except Exception as e:
         frappe.logger().error(f"Unexpected error in mobile Microsoft callback: {str(e)}")
@@ -230,12 +232,14 @@ def mobile_auth_status():
         client_id = site_config.get("microsoft_client_id") or frappe.conf.get("microsoft_client_id")
         tenant_id = site_config.get("microsoft_tenant_id") or frappe.conf.get("microsoft_tenant_id")
         
-        return {
-            "success": True,
-            "microsoft_auth_available": bool(client_id and tenant_id),
-            "tenant_id": tenant_id if tenant_id else None,
-            "client_id": client_id[:8] + "..." if client_id else None  # Partial client ID for verification
-        }
+        return success_response(
+            data={
+                "microsoft_auth_available": bool(client_id and tenant_id),
+                "tenant_id": tenant_id if tenant_id else None,
+                "client_id": client_id[:8] + "..." if client_id else None  # Partial client ID for verification
+            },
+            message="Microsoft auth configuration check completed"
+        )
     except Exception as e:
         return {
             "success": False,
@@ -308,13 +312,14 @@ def mobile_direct_token_auth(microsoft_token):
             "username": user_email
         }
         
-        return {
-            "success": True,
-            "message": "Direct token authentication successful",
-            "token": jwt_token,
-            "expires_in": 24 * 60 * 60,
-            "user": user_data
-        }
+        return success_response(
+            data={
+                "token": jwt_token,
+                "expires_in": 24 * 60 * 60,
+                "user": user_data
+            },
+            message="Direct token authentication successful"
+        )
         
     except Exception as e:
         frappe.log_error(f"Direct token auth error: {str(e)}", "Mobile Microsoft Auth")

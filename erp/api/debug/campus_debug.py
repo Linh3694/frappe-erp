@@ -3,6 +3,7 @@
 
 import frappe
 from frappe import _
+from erp.utils.api_response import success_response
 from erp.utils.campus_utils import get_campus_id_from_user_roles, find_campus_id_by_title, get_current_campus_from_context
 
 
@@ -63,7 +64,13 @@ def debug_campus_logic():
             
         result["debug_info"]["education_stage_counts_by_campus"] = stage_counts
         
-        return result
+        return success_response(
+            data={
+                "user_email": result["user_email"],
+                "debug_info": result["debug_info"]
+            },
+            message="Campus debug completed successfully"
+        )
         
     except Exception as e:
         frappe.logger().error(f"Error in debug_campus_logic: {str(e)}")

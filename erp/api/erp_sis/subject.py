@@ -495,9 +495,8 @@ def update_subject():
             except:
                 pass
 
-        return {
-            "success": True,
-            "data": {
+        return success_response(
+            data={
                 "name": subject_doc.name,
                 "title": subject_doc.title,
                 "education_stage": subject_doc.education_stage,
@@ -505,14 +504,13 @@ def update_subject():
                 "actual_subject_id": subject_doc.actual_subject_id,
                 "room_id": subject_doc.room_id,
                 "campus_id": subject_doc.campus_id,
-                # Display names for UI
                 "education_stage_name": education_stage_name,
                 "timetable_subject_name": timetable_subject_name,
                 "actual_subject_name": actual_subject_name,
                 "room_name": room_name
             },
-            "message": "Subject updated successfully"
-        }
+            message="Subject updated successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error updating subject {subject_id}: {str(e)}")
@@ -584,11 +582,10 @@ def delete_subject():
         frappe.delete_doc("SIS Subject", subject_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Subject deleted successfully"
-        }
+        return success_response(
+            data={},
+            message="Subject deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting subject {subject_id}: {str(e)}")
@@ -620,11 +617,10 @@ def get_actual_subjects_for_selection():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": actual_subjects,
-            "message": "Actual subjects for selection fetched successfully"
-        }
+        return success_response(
+            data=actual_subjects,
+            message="Actual subjects for selection fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching actual subjects for selection: {str(e)}")
@@ -656,11 +652,10 @@ def get_timetable_subjects_for_selection():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": timetable_subjects,
-            "message": "Timetable subjects for selection fetched successfully"
-        }
+        return success_response(
+            data=timetable_subjects,
+            message="Timetable subjects for selection fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching timetable subjects for selection: {str(e)}")
@@ -692,11 +687,10 @@ def get_rooms_for_selection():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": rooms,
-            "message": "Rooms for selection fetched successfully"
-        }
+        return success_response(
+            data=rooms,
+            message="Rooms for selection fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching rooms for selection: {str(e)}")
@@ -772,11 +766,10 @@ def get_education_stages_for_selection():
                 )
                 print(f"Returning all stages for testing: {len(education_stages)}")
         
-        return {
-            "success": True,
-            "data": education_stages,
-            "message": "Education stages fetched successfully"
-        }
+        return success_response(
+            data=education_stages,
+            message="Education stages fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching education stages for selection: {str(e)}")
@@ -851,11 +844,10 @@ def get_timetable_subjects_for_selection():
                 )
                 print(f"Returning all timetable subjects for testing: {len(timetable_subjects)}")
         
-        return {
-            "success": True,
-            "data": timetable_subjects,
-            "message": "Timetable subjects fetched successfully"
-        }
+        return success_response(
+            data=timetable_subjects,
+            message="Timetable subjects fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching timetable subjects for selection: {str(e)}")
@@ -937,11 +929,10 @@ def get_actual_subjects_for_selection():
                 )
                 print(f"Returning all actual subjects for testing: {len(actual_subjects)}")
         
-        return {
-            "success": True,
-            "data": actual_subjects,
-            "message": "Actual subjects fetched successfully"
-        }
+        return success_response(
+            data=actual_subjects,
+            message="Actual subjects fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching actual subjects for selection: {str(e)}")
@@ -973,11 +964,10 @@ def get_rooms_for_selection():
         building_ids = [b.name for b in buildings]
         
         if not building_ids:
-            return {
-                "success": True,
-                "data": [],
-                "message": "No buildings found for this campus"
-            }
+            return success_response(
+            data=[],
+            message="No buildings found for this campus"
+        )
         
         rooms = frappe.get_all(
             "ERP Administrative Room",
@@ -991,11 +981,10 @@ def get_rooms_for_selection():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": rooms,
-            "message": "Rooms fetched successfully"
-        }
+        return success_response(
+            data=rooms,
+            message="Rooms fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching rooms for selection: {str(e)}")

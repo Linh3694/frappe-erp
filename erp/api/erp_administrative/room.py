@@ -6,6 +6,7 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.api_response import success_response, error_response
 
 
 @frappe.whitelist(allow_guest=False)
@@ -31,12 +32,11 @@ def get_all_rooms():
         building_ids = [b.name for b in buildings]
         
         if not building_ids:
-            return {
-                "success": True,
-                "data": [],
-                "total_count": 0,
-                "message": "No buildings found for this campus"
-            }
+            return success_response(
+                data=[],
+                message="No buildings found for this campus",
+                meta={"total_count": 0}
+            )
         
         # Get rooms that belong to buildings in this campus
         rooms = frappe.get_all(
@@ -56,12 +56,11 @@ def get_all_rooms():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": rooms,
-            "total_count": len(rooms),
-            "message": "Rooms fetched successfully"
-        }
+        return success_response(
+            data=rooms,
+            message="Rooms fetched successfully",
+            meta={"total_count": len(rooms)}
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching rooms: {str(e)}")
@@ -116,9 +115,8 @@ def get_room_by_id(room_id):
                 "message": "Room not found or access denied"
             }
         
-        return {
-            "success": True,
-            "data": {
+        return success_response(
+            data={
                 "name": room.name,
                 "title_vn": room.title_vn,
                 "title_en": room.title_en,
@@ -127,8 +125,8 @@ def get_room_by_id(room_id):
                 "room_type": room.room_type,
                 "building_id": room.building_id
             },
-            "message": "Room fetched successfully"
-        }
+            message="Room fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching room {room_id}: {str(e)}")
@@ -336,9 +334,8 @@ def update_room(room_id, title_vn=None, title_en=None, short_title=None, capacit
         room_doc.save()
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {
+        return success_response(
+            data={
                 "name": room_doc.name,
                 "title_vn": room_doc.title_vn,
                 "title_en": room_doc.title_en,
@@ -347,8 +344,8 @@ def update_room(room_id, title_vn=None, title_en=None, short_title=None, capacit
                 "room_type": room_doc.room_type,
                 "building_id": room_doc.building_id
             },
-            "message": "Room updated successfully"
-        }
+            message="Room updated successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error updating room {room_id}: {str(e)}")
@@ -407,11 +404,10 @@ def delete_room(room_id):
         frappe.delete_doc("ERP Administrative Room", room_id)
         frappe.db.commit()
         
-        return {
-            "success": True,
-            "data": {},
-            "message": "Room deleted successfully"
-        }
+        return success_response(
+            data={},
+            message="Room deleted successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error deleting room {room_id}: {str(e)}")
@@ -446,11 +442,10 @@ def get_buildings_for_selection():
             order_by="title_vn asc"
         )
         
-        return {
-            "success": True,
-            "data": buildings,
-            "message": "Buildings fetched successfully"
-        }
+        return success_response(
+            data=buildings,
+            message="Buildings fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching buildings for selection: {str(e)}")

@@ -6,6 +6,7 @@ from frappe import _
 import jwt
 from frappe.auth import LoginManager
 import json
+from erp.utils.api_response import success_response
 
 
 @frappe.whitelist(allow_guest=True)
@@ -83,10 +84,8 @@ def jwt_to_session():
         # Get user info
         user = frappe.get_doc('User', user_email)
         
-        return {
-            "success": True,
-            "message": "Session created successfully",
-            "data": {
+        return success_response(
+            data={
                 "user": {
                     "email": user.email,
                     "full_name": user.full_name,
@@ -96,8 +95,9 @@ def jwt_to_session():
                     "roles": frappe.get_roles(user_email)
                 },
                 "session_id": frappe.session.sid
-            }
-        }
+            },
+            message="Session created successfully"
+        )
         
     except Exception as e:
         frappe.logger().error(f"Error in jwt_to_session: {str(e)}")

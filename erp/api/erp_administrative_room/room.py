@@ -362,15 +362,16 @@ def create_room():
         room_doc.insert()
         frappe.db.commit()
 
-        result = {
-            "success": True,
-            "room_id": room_doc.name,
-            "message": "Room created successfully"
-        }
+        result = success_response(
+            data={
+                "room_id": room_doc.name
+            },
+            message="Room created successfully"
+        )
 
-        if result.get("success"):
+        if result.success:
             room_data = {
-                "name": result.get("room_id"),
+                "name": result.data.room_id,
                 "title_vn": title_vn,
                 "title_en": title_en,
                 "short_title": short_title,
@@ -500,40 +501,38 @@ def update_room():
         room_doc.save()
         frappe.db.commit()
 
-        result = {
-            "success": True,
-            "message": "Room updated successfully"
-        }
+        result = success_response(
+            message="Room updated successfully"
+        )
 
-        if result.get("success"):
-            return {
-                "success": True,
-                "data": {
-                                    "room": {
-                    "name": room_id,
-                    "title_vn": title_vn,
-                    "title_en": title_en,
-                    "short_title": short_title,
-                    "capacity": capacity,
-                    "room_type": room_type,
-                    "building_id": building_id,
-                    "campus_id": campus_id
-                }
+        if result.success:
+            return success_response(
+                data={
+                    "room": {
+                        "name": room_id,
+                        "title_vn": title_vn,
+                        "title_en": title_en,
+                        "short_title": short_title,
+                        "capacity": capacity,
+                        "room_type": room_type,
+                        "building_id": building_id,
+                        "campus_id": campus_id
+                    }
                 },
-                "message": "Room updated successfully"
-            }
+                message="Room updated successfully"
+            )
         else:
             return result
 
     except Exception as e:
         frappe.log_error(f"Error updating room: {str(e)}")
-        return {
-            "success": False,
-            "data": {
+        return error_response(
+            message=f"Error updating room: {str(e)}",
+            code="ROOM_UPDATE_ERROR",
+            errors={
                 "room": {}
-            },
-            "message": f"Error updating room: {str(e)}"
-        }
+            }
+        )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -590,24 +589,17 @@ def delete_room():
         frappe.delete_doc("ERP Administrative Room", room_id)
         frappe.db.commit()
 
-        result = {
-            "success": True,
-            "message": "Room deleted successfully"
-        }
-
-        if result.get("success"):
-            return {
-                "success": True,
-                "data": {},
-                "message": "Room deleted successfully"
-            }
-        else:
-            return result
+        return success_response(
+            data={},
+            message="Room deleted successfully"
+        )
 
     except Exception as e:
         frappe.log_error(f"Error deleting room: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting room: {str(e)}"
-        }
+        return error_response(
+            message=f"Error deleting room: {str(e)}",
+            code="ROOM_DELETE_ERROR",
+            errors={
+                "data": {}
+            }
+        )

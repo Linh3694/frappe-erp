@@ -496,18 +496,16 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
             student_doc.save(ignore_permissions=True)
             frappe.db.commit()
         except Exception as save_error:
-            return {
-                "success": False,
-                "data": {},
-                "message": f"Failed to save student: {str(save_error)}"
-            }
+                    return error_response(
+            message=f"Failed to save student: {str(save_error)}",
+            code="STUDENT_UPDATE_ERROR"
+        )
         
         # Reload to get the final saved data from database
         student_doc.reload()
         
-        return {
-            "success": True,
-            "data": {
+        return success_response(
+            data={
                 "name": student_doc.name,
                 "student_name": student_doc.student_name,
                 "student_code": student_doc.student_code,
@@ -515,8 +513,8 @@ def update_student(student_id=None, student_name=None, student_code=None, dob=No
                 "gender": student_doc.gender,
                 "campus_id": student_doc.campus_id
             },
-            "message": "Student updated successfully"
-        }
+            message="Student updated successfully"
+        )
         
     except Exception as e:
         return {

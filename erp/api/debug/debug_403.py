@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 import json
+from erp.utils.api_response import success_response
 
 
 @frappe.whitelist(allow_guest=False)
@@ -98,7 +99,14 @@ def debug_403_error():
         if result["errors"]:
             result["success"] = False
             
-        return result
+        return success_response(
+            data=result["debug_info"],
+            message="Debug 403 completed successfully",
+            meta={
+                "errors": result.get("errors", []),
+                "has_errors": len(result.get("errors", [])) > 0
+            }
+        )
         
     except Exception as e:
         return {
@@ -118,13 +126,15 @@ def quick_perm_check():
         doctype = "SIS Education Stage"
         has_perm = frappe.has_permission(doctype, "create")
         
-        return {
-            "success": True,
-            "user": user,
-            "doctype": doctype,
-            "has_create_permission": has_perm,
-            "user_roles": frappe.get_roles(user)
-        }
+        return success_response(
+            data={
+                "user": user,
+                "doctype": doctype,
+                "has_create_permission": has_perm,
+                "user_roles": frappe.get_roles(user)
+            },
+            message="Permission check completed successfully"
+        )
         
     except Exception as e:
         return {
