@@ -177,10 +177,21 @@ def upload_bulk_import_file():
         # Use Frappe's built-in file upload mechanism
         from frappe.utils.file_manager import save_file
 
-        # Check if file exists in form_dict
+        # Debug: Log all available request data
+        frappe.logger().info("=== DEBUG: Bulk Import File Upload ===")
+        frappe.logger().info(f"Available form_dict keys: {list(frappe.form_dict.keys())}")
+        frappe.logger().info(f"Available local.form_dict keys: {list(frappe.local.form_dict.keys()) if hasattr(frappe.local, 'form_dict') else 'No local.form_dict'}")
+
+        # Check for file in different locations
         if "file" not in frappe.form_dict and "file" not in frappe.local.form_dict:
-            frappe.logger().info(f"Available form_dict keys: {list(frappe.form_dict.keys())}")
-            frappe.logger().info(f"Available local.form_dict keys: {list(frappe.local.form_dict.keys()) if hasattr(frappe.local, 'form_dict') else 'No local.form_dict'}")
+            frappe.logger().info("File not found in form_dict or local.form_dict")
+
+            # Try to check if file is in request.files
+            if hasattr(frappe.request, 'files') and frappe.request.files:
+                frappe.logger().info(f"Request files available: {list(frappe.request.files.keys())}")
+            else:
+                frappe.logger().info("No request.files available")
+
             return validation_error_response(
                 message="File is required",
                 errors={"file": ["Required field"]}
