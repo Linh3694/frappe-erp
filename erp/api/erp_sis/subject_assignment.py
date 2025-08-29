@@ -84,8 +84,11 @@ def get_subject_assignment_by_id(assignment_id=None):
                 pass
 
         if not assignment_id:
-            return validation_error_response({"assignment_id": ["Subject Assignment ID is required"]})
-        
+            return validation_error_response(
+                message="Subject Assignment ID is required",
+                errors={"assignment_id": ["Subject Assignment ID is required"]}
+            )
+
         # Get current user's campus
         campus_id = get_current_campus_from_context()
         
@@ -290,7 +293,10 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 pass
 
         if not assignment_id:
-            return validation_error_response({"assignment_id": ["Subject Assignment ID is required"]})
+            return validation_error_response(
+    message="Subject Assignment ID is required",
+    errors={"assignment_id": ["Subject Assignment ID is required"]}
+)
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -375,7 +381,10 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
             )
             
             if existing:
-                return validation_error_response({"assignment": [f"This teacher is already assigned to this subject"]})
+                return validation_error_response(
+                    message="Teacher already assigned to this subject",
+                    errors={"assignment": [f"This teacher is already assigned to this subject"]}
+                )
         
         frappe.logger().info(f"Before save - assignment_doc.teacher_id: {assignment_doc.teacher_id}, assignment_doc.subject_id: {assignment_doc.subject_id}")
 
@@ -434,8 +443,11 @@ def delete_subject_assignment(assignment_id):
     """Delete a subject assignment"""
     try:
         if not assignment_id:
-            return validation_error_response({"assignment_id": ["Subject Assignment ID is required"]})
-        
+            return validation_error_response(
+                message="Subject Assignment ID is required",
+                errors={"assignment_id": ["Subject Assignment ID is required"]}
+            )
+
         # Get campus from user context
         campus_id = get_current_campus_from_context()
         
