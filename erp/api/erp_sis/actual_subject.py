@@ -36,7 +36,6 @@ def get_all_actual_subjects():
                 "name",
                 "title_vn",
                 "title_en",
-                "short_title",
                 "curriculum_id",
                 "campus_id",
                 "creation",

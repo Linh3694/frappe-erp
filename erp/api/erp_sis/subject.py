@@ -35,9 +35,9 @@ def get_all_subjects():
         subjects_query = """
             SELECT
                 s.name,
-                s.title_vn,
-                s.title_en,
-                s.short_title,
+                s.title as title_vn,
+                '' as title_en,
+                '' as short_title,
                 s.education_stage,
                 s.academic_program_id,
                 s.curriculum_id,
@@ -57,7 +57,7 @@ def get_all_subjects():
             LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
             LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
             WHERE s.campus_id = %s
-            ORDER BY s.title_vn ASC
+            ORDER BY s.title ASC
         """
         
         # Try to get subjects with error handling
