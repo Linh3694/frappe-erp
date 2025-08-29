@@ -533,30 +533,39 @@ def create_timetable_column():
         frappe.logger().info(f"Create timetable column - Request method: {frappe.request.method}")
         frappe.logger().info(f"Create timetable column - Request URL: {frappe.request.url}")
 
-        # Get data from request - handle both JSON and form data
-        data = frappe.local.form_dict or {}
+        # Get data from request - prioritize form_dict over JSON
+        data = {}
 
         # Debug logging
         frappe.logger().info(f"Create timetable column - Raw request data: {frappe.request.data}")
         frappe.logger().info(f"Create timetable column - Form dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"Create timetable column - Initial data: {data}")
 
-        # If request has JSON data, try to parse it
+        # First try to get data from form_dict (for FormData/Form submissions)
+        if frappe.local.form_dict:
+            data.update(dict(frappe.local.form_dict))
+            frappe.logger().info(f"Create timetable column - Using form_dict data: {data}")
+
+        # If request has JSON data, try to parse and merge it (JSON takes precedence for overlapping keys)
         if frappe.request.data and frappe.request.data.strip():
             try:
                 json_data = json.loads(frappe.request.data)
                 if json_data and isinstance(json_data, dict):
-                    data = json_data
-                    frappe.logger().info(f"Create timetable column - Using JSON data: {data}")
+                    data.update(json_data)
+                    frappe.logger().info(f"Create timetable column - Merged JSON data: {data}")
                 else:
-                    frappe.logger().info(f"Create timetable column - JSON data is empty or not dict, using form_dict")
+                    frappe.logger().info(f"Create timetable column - JSON data is empty or not dict, keeping form_dict")
             except (json.JSONDecodeError, TypeError) as e:
-                # If JSON parsing fails, use form_dict which contains URL-encoded data
-                frappe.logger().info(f"Create timetable column - JSON parsing failed ({e}), using form_dict")
+                # If JSON parsing fails, keep form_dict data
+                frappe.logger().info(f"Create timetable column - JSON parsing failed ({e}), keeping form_dict data")
                 pass
 
         frappe.logger().info(f"Create timetable column - Final data: {data}")
         frappe.logger().info(f"Create timetable column - Data keys: {list(data.keys()) if data else 'None'}")
+
+        # Check if we have any data at all
+        if not data:
+            frappe.logger().error("Create timetable column - No data received from request")
+            frappe.throw(_("No data received"))
 
         # Extract values from data
         education_stage_id = data.get("education_stage_id")
@@ -567,6 +576,11 @@ def create_timetable_column():
         end_time = data.get("end_time")
 
         frappe.logger().info(f"Create timetable column - Raw extracted values: education_stage_id={repr(education_stage_id)}, period_priority={repr(period_priority)}, period_type={repr(period_type)}, period_name={repr(period_name)}, start_time={repr(start_time)}, end_time={repr(end_time)}")
+
+        # Convert period_priority to string if it's a number (frontend might send it as number)
+        if period_priority is not None and not isinstance(period_priority, str):
+            period_priority = str(period_priority)
+            frappe.logger().info(f"Create timetable column - Converted period_priority to string: {period_priority}")
 
         # Debug logging for extracted values
         frappe.logger().info(f"Create timetable column - Extracted values: education_stage_id={education_stage_id}, period_priority={period_priority}, period_type={period_type}, period_name={period_name}, start_time={start_time}, end_time={end_time}")
