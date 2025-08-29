@@ -175,6 +175,11 @@ def get_timetable_by_id():
 def update_timetable():
     """Update an existing timetable column"""
     try:
+        # Debug: Log which function is being called
+        frappe.logger().info("=== UPDATE_TIMETABLE FUNCTION CALLED ===")
+        frappe.logger().info(f"Update timetable - Request method: {frappe.request.method}")
+        frappe.logger().info(f"Update timetable - Request URL: {frappe.request.url}")
+
         # Get data from request - follow Education Stage pattern
         data = {}
 
@@ -523,6 +528,11 @@ def get_education_stages_for_timetable():
 def create_timetable():
     """Create a new timetable column - SIMPLE VERSION"""
     try:
+        # Debug: Log which function is being called
+        frappe.logger().info("=== CREATE_TIMETABLE FUNCTION CALLED ===")
+        frappe.logger().info(f"Create timetable - Request method: {frappe.request.method}")
+        frappe.logger().info(f"Create timetable - Request URL: {frappe.request.url}")
+
         # Get data from request - handle both JSON and form data
         data = frappe.local.form_dict or {}
 
@@ -611,24 +621,27 @@ def create_timetable():
         
         timetable_doc.insert()
         frappe.db.commit()
-        
+
+        # Debug: Log time values before and after formatting
+        frappe.logger().info(f"Create timetable - Raw times from doc: start_time={timetable_doc.start_time}, end_time={timetable_doc.end_time}")
+        frappe.logger().info(f"Create timetable - Raw times types: start_time={type(timetable_doc.start_time)}, end_time={type(timetable_doc.end_time)}")
+
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Timetable column created successfully"))
 
-        # Format time fields for HTML time input (HH:MM format)
-        start_time_formatted = format_time_for_html(timetable_doc.start_time)
-        end_time_formatted = format_time_for_html(timetable_doc.end_time)
-
+        # For now, let's try returning the original string values to see if formatting is the issue
         timetable_data = {
             "name": timetable_doc.name,
             "education_stage_id": timetable_doc.education_stage_id,
             "period_priority": timetable_doc.period_priority,
             "period_type": timetable_doc.period_type,
             "period_name": timetable_doc.period_name,
-            "start_time": start_time_formatted,
-            "end_time": end_time_formatted,
+            "start_time": start_time,  # Use original string value
+            "end_time": end_time,      # Use original string value
             "campus_id": timetable_doc.campus_id
         }
+
+        frappe.logger().info(f"Create timetable - Returning original times: start_time={start_time}, end_time={end_time}")
         return single_item_response(timetable_data, "Timetable created successfully")
         
     except Exception as e:
