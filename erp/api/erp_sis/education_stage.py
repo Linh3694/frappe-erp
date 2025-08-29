@@ -206,9 +206,19 @@ def create_education_stage():
         )
 
     except Exception as e:
+        # Debug: Log the actual exception
+        print(f"CREATE EXCEPTION: {str(e)}")
+        print(f"Exception type: {type(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+
         return error_response(
-            message="Error creating education stage",
-            code="CREATE_EDUCATION_STAGE_ERROR"
+            message=f"Error creating education stage: {str(e)}",
+            code="CREATE_EDUCATION_STAGE_ERROR",
+            errors={
+                "exception": str(e),
+                "data": data
+            }
         )
 
 
@@ -295,9 +305,20 @@ def update_education_stage():
             code="EDUCATION_STAGE_NOT_FOUND"
         )
     except Exception as e:
+        # Debug: Log the actual exception
+        print(f"UPDATE EXCEPTION: {str(e)}")
+        print(f"Exception type: {type(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+
         return error_response(
-            message="Error updating education stage",
-            code="UPDATE_EDUCATION_STAGE_ERROR"
+            message=f"Error updating education stage: {str(e)}",
+            code="UPDATE_EDUCATION_STAGE_ERROR",
+            errors={
+                "exception": str(e),
+                "stage_id": stage_id,
+                "data": data
+            }
         )
 
 
@@ -372,9 +393,19 @@ def delete_education_stage():
             code="EDUCATION_STAGE_NOT_FOUND"
         )
     except Exception as e:
+        # Debug: Log the actual exception
+        print(f"DELETE EXCEPTION: {str(e)}")
+        print(f"Exception type: {type(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+
         return error_response(
-            message="Error deleting education stage",
-            code="DELETE_EDUCATION_STAGE_ERROR"
+            message=f"Error deleting education stage: {str(e)}",
+            code="DELETE_EDUCATION_STAGE_ERROR",
+            errors={
+                "exception": str(e),
+                "stage_id": stage_id
+            }
         )
 
 
