@@ -150,16 +150,22 @@ def create_school_year():
             # Fallback to form_dict
             data = frappe.local.form_dict
         
-        # Extract values from data
-        title_vn = data.get("title_vn")
-        title_en = data.get("title_en")
-        start_date = data.get("start_date")
-        end_date = data.get("end_date")
+        # Extract values from data with proper validation
+        title_vn = data.get("title_vn", "").strip() if data.get("title_vn") else ""
+        title_en = data.get("title_en", "").strip() if data.get("title_en") else ""
+        start_date = data.get("start_date", "").strip() if data.get("start_date") else ""
+        end_date = data.get("end_date", "").strip() if data.get("end_date") else ""
         is_enable = data.get("is_enable", True)
         
-        # Input validation
-        if not title_vn or not start_date or not end_date:
-            frappe.throw(_("Title VN, start date and end date are required"))
+        # Input validation with detailed logging
+        if not title_vn:
+            frappe.throw(_("Title VN is required"))
+        if not title_en:
+            frappe.throw(_("Title EN is required"))
+        if not start_date:
+            frappe.throw(_("Start date is required"))
+        if not end_date:
+            frappe.throw(_("End date is required"))
         
         # Validate dates
         try:
