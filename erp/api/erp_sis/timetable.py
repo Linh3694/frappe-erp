@@ -523,21 +523,30 @@ def get_education_stages_for_timetable():
 def create_timetable():
     """Create a new timetable column - SIMPLE VERSION"""
     try:
-        # Get data from request - follow Education Stage pattern
-        data = {}
-        
-        if frappe.request.data:
+        # Get data from request - handle both JSON and form data
+        data = frappe.local.form_dict or {}
+
+        # Debug logging
+        frappe.logger().info(f"Create timetable - Raw request data: {frappe.request.data}")
+        frappe.logger().info(f"Create timetable - Form dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"Create timetable - Initial data: {data}")
+
+        # If request has JSON data, try to parse it
+        if frappe.request.data and frappe.request.data.strip():
             try:
                 json_data = json.loads(frappe.request.data)
-                if json_data:
+                if json_data and isinstance(json_data, dict):
                     data = json_data
+                    frappe.logger().info(f"Create timetable - Using JSON data: {data}")
                 else:
-                    data = frappe.local.form_dict
-            except (json.JSONDecodeError, TypeError):
-                data = frappe.local.form_dict
-        else:
-            data = frappe.local.form_dict
-        
+                    frappe.logger().info(f"Create timetable - JSON data is empty or not dict, using form_dict")
+            except (json.JSONDecodeError, TypeError) as e:
+                # If JSON parsing fails, use form_dict which contains URL-encoded data
+                frappe.logger().info(f"Create timetable - JSON parsing failed ({e}), using form_dict")
+                pass
+
+        frappe.logger().info(f"Create timetable - Final data: {data}")
+
         # Extract values from data
         education_stage_id = data.get("education_stage_id")
         period_priority = data.get("period_priority")
@@ -545,9 +554,13 @@ def create_timetable():
         period_name = data.get("period_name")
         start_time = data.get("start_time")
         end_time = data.get("end_time")
-        
+
+        # Debug logging for extracted values
+        frappe.logger().info(f"Create timetable - Extracted values: education_stage_id={education_stage_id}, period_priority={period_priority}, period_type={period_type}, period_name={period_name}, start_time={start_time}, end_time={end_time}")
+
         # Input validation
         if not education_stage_id or not period_priority or not period_type or not period_name or not start_time or not end_time:
+            frappe.logger().error(f"Create timetable - Validation failed. Missing fields: education_stage_id={bool(education_stage_id)}, period_priority={bool(period_priority)}, period_type={bool(period_type)}, period_name={bool(period_name)}, start_time={bool(start_time)}, end_time={bool(end_time)}")
             frappe.throw(_("All fields are required"))
         
         # Get campus from user context
