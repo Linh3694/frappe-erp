@@ -17,11 +17,9 @@ from erp.utils.api_response import (
 def get_all_education_grades():
     """Get all education grades with basic information - SIMPLE VERSION"""
     try:
-        # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
         
         if not campus_id:
-            # Fallback to default if no campus found
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
@@ -148,9 +146,11 @@ def get_education_grade_by_id():
 def create_education_grade():
     """Create a new education grade - SIMPLE VERSION"""
     try:
+        frappe.logger().info("=== START create_education_grade ===")
+
         # Get data from request - support both JSON and form data
         data = {}
-        
+
         # First try to get JSON data from request body
         if frappe.request.data:
             try:
@@ -169,49 +169,63 @@ def create_education_grade():
             # Fallback to form_dict
             data = frappe.local.form_dict
             frappe.logger().info(f"No request data, using form_dict for create_education_grade: {data}")
+
+        frappe.logger().info(f"Final data for processing: {data}")
         
         # Validate required fields - map from frontend to backend fields
+        frappe.logger().info("=== VALIDATION STEP ===")
         required_fields = {
-            "grade_name": "title_vn", 
+            "grade_name": "title_vn",
             "grade_code": "grade_code",
             "education_stage": "education_stage_id",
             "sort_order": "sort_order"
         }
-        
+
         backend_data = {}
         for frontend_field, backend_field in required_fields.items():
             if not data.get(frontend_field):
+                frappe.logger().error(f"Missing required field: {frontend_field}")
                 return validation_error_response(
                     message=f"Field '{frontend_field}' is required",
                     errors={frontend_field: ["Required"]}
                 )
             backend_data[backend_field] = data.get(frontend_field)
+
+        frappe.logger().info(f"Backend data mapping successful: {backend_data}")
         
         # Get campus from user roles or form data
+        frappe.logger().info("=== CAMPUS LOOKUP STEP ===")
         campus_id = data.get("campus_id")
+        frappe.logger().info(f"Campus from data: {campus_id}")
+
         if not campus_id:
             campus_id = get_current_campus_from_context()
+            frappe.logger().info(f"Campus from context: {campus_id}")
             if not campus_id:
                 # Fallback to default if no campus found
                 campus_id = "campus-1"
                 frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
-        frappe.logger().info(f"Using campus_id: {campus_id}")
+
+        frappe.logger().info(f"Final campus_id: {campus_id}")
         
         # Check if grade_code already exists for this campus
+        frappe.logger().info("=== DUPLICATE CHECK STEP ===")
         existing_grade = frappe.db.exists("SIS Education Grade", {
             "grade_code": data.get("grade_code"),
             "campus_id": campus_id
         })
-        
+        frappe.logger().info(f"Checking for existing grade_code '{data.get('grade_code')}' in campus '{campus_id}': {existing_grade}")
+
         if existing_grade:
+            frappe.logger().warning(f"Grade code already exists: {existing_grade}")
             return error_response(
                 message="Mã khối học đã tồn tại cho trường học này",
                 code="GRADE_CODE_EXISTS"
             )
         
         # Create new education grade
-        grade_doc = frappe.get_doc({
+        frappe.logger().info("=== INSERT STEP ===")
+        grade_data = {
             "doctype": "SIS Education Grade",
             "title_vn": backend_data["title_vn"],
             "title_en": backend_data["title_vn"],  # Default to VN if EN not provided
@@ -219,10 +233,15 @@ def create_education_grade():
             "education_stage_id": backend_data["education_stage_id"],
             "sort_order": int(backend_data["sort_order"]),
             "campus_id": campus_id
-        })
-        
+        }
+        frappe.logger().info(f"Grade data to insert: {grade_data}")
+
+        grade_doc = frappe.get_doc(grade_data)
+        frappe.logger().info("Created frappe doc object successfully")
+
         grade_doc.insert(ignore_permissions=True)
-        
+        frappe.logger().info(f"Insert operation completed: {grade_doc.name}")
+
         frappe.logger().info(f"Created education grade: {grade_doc.name}")
         
         return single_item_response(
@@ -232,8 +251,26 @@ def create_education_grade():
         
     except Exception as e:
         frappe.logger().error(f"Error creating education grade: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+
+        # Check if grade was actually created despite the exception
+        if data.get("grade_code"):
+            created_grade = frappe.db.exists("SIS Education Grade", {
+                "grade_code": data.get("grade_code"),
+                "campus_id": campus_id if 'campus_id' in locals() else None
+            })
+            if created_grade:
+                frappe.logger().info(f"Grade was actually created despite exception: {created_grade}")
+                # Return success response if grade exists
+                grade_doc = frappe.get_doc("SIS Education Grade", created_grade)
+                return single_item_response(
+                    data=grade_doc.as_dict(),
+                    message="Education grade created successfully"
+                )
+
         return error_response(
-            message="Error creating education grade",
+            message=f"Error creating education grade: {str(e)}",
             code="CREATE_EDUCATION_GRADE_ERROR"
         )
 
