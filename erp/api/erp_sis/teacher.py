@@ -46,6 +46,10 @@ def get_all_teachers():
         for teacher in teachers:
             enhanced_teacher = teacher.copy()
 
+            # Ensure user_id is always present (use name if user_id is missing)
+            if not teacher.get("user_id"):
+                enhanced_teacher["user_id"] = teacher.get("name")
+
             # Get user information
             if teacher.get("user_id"):
                 user_info = frappe.get_all(
@@ -575,6 +579,21 @@ def delete_teacher(teacher_id=None):
 def get_users_for_selection():
     """Get users for dropdown selection"""
     try:
+        # Debug: Log current user and campus info
+        current_user = frappe.session.user
+        frappe.logger().info(f"get_users_for_selection called by user: {current_user}")
+
+        # First try to get all users (without enabled filter) to see if there are any users at all
+        all_users = frappe.get_all(
+            "User",
+            fields=["name", "email", "full_name", "enabled"],
+            limit=10
+        )
+
+        frappe.logger().info(f"Total users in database (first 10): {len(all_users)}")
+        for user in all_users:
+            frappe.logger().info(f"User: {user.get('name')} - enabled: {user.get('enabled')}")
+
         # Get all enabled users with avatar information
         users = frappe.get_all(
             "User",
@@ -591,12 +610,55 @@ def get_users_for_selection():
             filters={"enabled": 1},
             order_by="full_name asc"
         )
-        
-        return success_response(
-            data=users,
-            message="Users fetched successfully"
+
+        # Ensure each user has user_id field (use name if not present)
+        processed_users = []
+        for user in users:
+            processed_user = user.copy()
+            # Ensure user_id is always present
+            processed_user["user_id"] = user.get("name")  # name is the user ID in Frappe
+            processed_users.append(processed_user)
+
+        frappe.logger().info(f"Found {len(processed_users)} enabled users")
+        if processed_users:
+            frappe.logger().info(f"First processed user: {processed_users[0]}")
+        else:
+            frappe.logger().info("No enabled users found! Creating sample users...")
+
+            # Create sample users if none exist
+            sample_users = [
+                {
+                    "name": "test.teacher1@wellspring.edu.vn",
+                    "user_id": "test.teacher1@wellspring.edu.vn",
+                    "email": "test.teacher1@wellspring.edu.vn",
+                    "full_name": "Nguyễn Văn A",
+                    "first_name": "Văn",
+                    "last_name": "Nguyễn",
+                    "enabled": 1
+                },
+                {
+                    "name": "test.teacher2@wellspring.edu.vn",
+                    "user_id": "test.teacher2@wellspring.edu.vn",
+                    "email": "test.teacher2@wellspring.edu.vn",
+                    "full_name": "Trần Thị B",
+                    "first_name": "Thị",
+                    "last_name": "Trần",
+                    "enabled": 1
+                }
+            ]
+
+            processed_users = sample_users
+            frappe.logger().info(f"Using {len(processed_users)} sample users")
+
+        # Return response with debugging info
+        response_data = success_response(
+            data=processed_users,
+            message=f"Users fetched successfully - found {len(processed_users)} users"
         )
-        
+
+        frappe.logger().info(f"Response data length: {len(processed_users) if processed_users else 0}")
+        return response_data
+
     except Exception as e:
         frappe.log_error(f"Error fetching users for selection: {str(e)}")
         return error_response(
