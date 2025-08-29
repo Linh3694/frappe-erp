@@ -282,11 +282,20 @@ def update_education_stage():
 def delete_education_stage():
     """Delete an education stage"""
     try:
+        # Debug: Print request data
+        print("=== DEBUG delete_education_stage ===")
+        print(f"Request method: {frappe.request.method}")
+        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
+        print(f"Form dict: {dict(frappe.form_dict)}")
+        print(f"Request data: {frappe.request.data}")
+        print(f"Request data type: {type(frappe.request.data)}")
+
         # Get stage_id from multiple sources (form data or JSON)
         stage_id = None
 
         # Try from form_dict first (for FormData/URLSearchParams)
         stage_id = frappe.form_dict.get('stage_id')
+        print(f"Stage ID from form_dict: {stage_id}")
 
         # If not found, try from JSON payload
         if not stage_id and frappe.request.data:
@@ -294,8 +303,12 @@ def delete_education_stage():
                 import json
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 stage_id = json_data.get('stage_id')
+                print(f"Stage ID from JSON payload: {stage_id}")
+                print(f"Parsed JSON data: {json_data}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                pass
+                print(f"JSON parsing failed: {e}")
+
+        print(f"Final extracted stage_id: {stage_id}")
 
         if not stage_id:
             return error_response(
