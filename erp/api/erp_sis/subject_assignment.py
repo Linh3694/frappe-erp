@@ -147,18 +147,14 @@ def create_subject_assignment():
                 json_data = json.loads(frappe.request.data)
                 if json_data:
                     data = json_data
-                    frappe.logger().info(f"Received JSON data for create_subject_assignment: {data}")
                 else:
                     data = frappe.local.form_dict
-                    frappe.logger().info(f"Received form data for create_subject_assignment: {data}")
             except (json.JSONDecodeError, TypeError):
                 # If JSON parsing fails, use form_dict
                 data = frappe.local.form_dict
-                frappe.logger().info(f"JSON parsing failed, using form data for create_subject_assignment: {data}")
         else:
             # Fallback to form_dict
             data = frappe.local.form_dict
-            frappe.logger().info(f"No request data, using form_dict for create_subject_assignment: {data}")
         
         # Extract values from data
         teacher_id = data.get("teacher_id")
@@ -272,13 +268,8 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
     """Update an existing subject assignment"""
     try:
         # Get assignment_id from multiple sources (form_dict, JSON payload, or direct parameter)
-        frappe.logger().info(f"update_subject_assignment called with assignment_id: {assignment_id}")
-        frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys())}")
-        frappe.logger().info(f"form_dict data: {dict(frappe.form_dict)}")
-
         if not assignment_id:
             assignment_id = frappe.form_dict.get('assignment_id')
-            frappe.logger().info(f"Got assignment_id from form_dict: {assignment_id}")
 
         # Try to get from JSON payload if not in form_dict
         if not assignment_id and frappe.request.data:
@@ -290,30 +281,13 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 else:
                     json_str = str(frappe.request.data)
 
-                frappe.logger().info(f"Raw request data: {json_str}")
-
                 # Skip if data is empty or just whitespace
                 if json_str.strip():
                     json_data = json.loads(json_str)
-                    frappe.logger().info(f"Parsed JSON data: {json_data}")
                     assignment_id = json_data.get('assignment_id')
-                    frappe.logger().info(f"Got assignment_id from JSON payload: {assignment_id}")
             except Exception as e:
                 # Silently handle JSON parse errors
-                frappe.logger().error(f"Error parsing JSON payload: {str(e)}")
                 pass
-
-        frappe.logger().info(f"Final assignment_id: {assignment_id}")
-
-        # Additional fallback: check if assignment_id is passed as keyword argument
-        if not assignment_id:
-            # This shouldn't happen but let's log all arguments
-            import inspect
-            frame = inspect.currentframe()
-            args, _, _, values = inspect.getargvalues(frame)
-            frappe.logger().info(f"All function arguments: {values}")
-            frappe.logger().info(f"frappe.form_dict content: {dict(frappe.form_dict)}")
-            frappe.logger().info(f"frappe.request.data: {frappe.request.data}")
 
         if not assignment_id:
             return validation_error_response({"assignment_id": ["Subject Assignment ID is required"]})
