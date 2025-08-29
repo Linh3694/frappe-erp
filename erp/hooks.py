@@ -218,6 +218,11 @@ whitelisted_methods = [
 	"erp.api.bulk_import.reload_whitelist"
 ]
 
+# Allow guest access for testing
+guest_method_whitelist = [
+	"erp.api.bulk_import.reload_whitelist"
+]
+
 # override_whitelisted_methods = {
 # 	"frappe.desk.doctype.event.event.get_events": "erp.event.get_events"
 # }

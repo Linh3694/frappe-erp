@@ -165,7 +165,7 @@ def get_bulk_import_status():
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def reload_whitelist():
     """
     Reload whitelisted methods cache
