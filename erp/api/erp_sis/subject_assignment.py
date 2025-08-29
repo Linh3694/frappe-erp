@@ -290,7 +290,27 @@ def create_subject_assignment():
 def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=None):
     """Update an existing subject assignment"""
     try:
-        # Get assignment_id from multiple sources (URL path, query params, form_dict, JSON payload, or direct parameter)
+        # Get data from POST body first (JSON payload)
+        if frappe.request.data:
+            try:
+                import json
+                # Handle both bytes and string data
+                if isinstance(frappe.request.data, bytes):
+                    json_str = frappe.request.data.decode('utf-8')
+                else:
+                    json_str = str(frappe.request.data)
+
+                # Skip if data is empty or just whitespace
+                if json_str.strip():
+                    json_data = json.loads(json_str)
+                    assignment_id = json_data.get('assignment_id') or assignment_id
+                    teacher_id = json_data.get('teacher_id') or teacher_id
+                    subject_id = json_data.get('subject_id') or subject_id
+            except Exception as e:
+                # Silently handle JSON parse errors
+                pass
+
+        # Get assignment_id from multiple sources if not found in JSON
         if not assignment_id:
             # Try to get from URL path first (e.g., /api/method/.../SIS-SUBJECT_ASSIGNMENT-00001)
             try:
@@ -313,24 +333,10 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
         # Try to get from form_dict
         if not assignment_id:
             assignment_id = frappe.form_dict.get('assignment_id')
-
-        # Try to get from JSON payload if not in form_dict
-        if not assignment_id and frappe.request.data:
-            try:
-                import json
-                # Handle both bytes and string data
-                if isinstance(frappe.request.data, bytes):
-                    json_str = frappe.request.data.decode('utf-8')
-                else:
-                    json_str = str(frappe.request.data)
-
-                # Skip if data is empty or just whitespace
-                if json_str.strip():
-                    json_data = json.loads(json_str)
-                    assignment_id = json_data.get('assignment_id')
-            except Exception as e:
-                # Silently handle JSON parse errors
-                pass
+        if not teacher_id:
+            teacher_id = frappe.form_dict.get('teacher_id')
+        if not subject_id:
+            subject_id = frappe.form_dict.get('subject_id')
 
         if not assignment_id:
             return validation_error_response(
