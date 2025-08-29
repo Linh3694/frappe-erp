@@ -134,31 +134,42 @@ def get_education_stage_by_id():
 def create_education_stage():
     """Create a new education stage - SIMPLE VERSION"""
     try:
-        # Debug: Print request data
-        print("=== DEBUG create_education_stage ===")
+        # Debug: Log incoming request
+        print("=== CREATE DEBUG ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
         print(f"Request data: {frappe.request.data}")
-        print(f"Request data type: {type(frappe.request.data)}")
 
-        # Get data from form_dict (FormData will be available here)
+        # Get data from form_dict first (works for both FormData and URL params)
         data = frappe.local.form_dict
         print(f"Initial data from form_dict: {data}")
 
-        # If no data in form_dict, try to parse JSON payload
-        if not data or not any(data.values()):
+        # If required fields not in form_dict, try to parse request data
+        required_fields = ["title_vn", "title_en", "short_title"]
+        missing_fields = [field for field in required_fields if not data.get(field)]
+
+        if missing_fields:
+            print(f"Missing fields in form_dict: {missing_fields}")
             if frappe.request.data:
                 try:
+                    # Try parsing as JSON first
                     import json
-                    json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                    data = frappe._dict(json_data)
+                    request_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                    json_data = json.loads(request_str)
                     print(f"Parsed JSON data: {json_data}")
-                    print(f"Converted to frappe._dict: {data}")
+
+                    # Check if JSON has the required fields
+                    json_missing = [field for field in required_fields if not json_data.get(field)]
+                    if not json_missing:
+                        data = frappe._dict(json_data)
+                        print(f"Using JSON data: {data}")
+                    else:
+                        print(f"JSON also missing fields: {json_missing}")
                 except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
                     print(f"JSON parsing failed: {e}")
 
-        print(f"Final data to process: {data}")
+        print(f"Final data to validate: {data}")
         
         # Validate required fields
         required_fields = ["title_vn", "title_en", "short_title"]
@@ -206,19 +217,10 @@ def create_education_stage():
         )
 
     except Exception as e:
-        # Debug: Log the actual exception
-        print(f"CREATE EXCEPTION: {str(e)}")
-        print(f"Exception type: {type(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-
+        frappe.log_error(f"Error creating education stage: {str(e)}", "Education Stage API")
         return error_response(
             message=f"Error creating education stage: {str(e)}",
-            code="CREATE_EDUCATION_STAGE_ERROR",
-            errors={
-                "exception": str(e),
-                "data": data
-            }
+            code="CREATE_EDUCATION_STAGE_ERROR"
         )
 
 
@@ -305,20 +307,10 @@ def update_education_stage():
             code="EDUCATION_STAGE_NOT_FOUND"
         )
     except Exception as e:
-        # Debug: Log the actual exception
-        print(f"UPDATE EXCEPTION: {str(e)}")
-        print(f"Exception type: {type(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-
+        frappe.log_error(f"Error updating education stage: {str(e)}", "Education Stage API")
         return error_response(
             message=f"Error updating education stage: {str(e)}",
-            code="UPDATE_EDUCATION_STAGE_ERROR",
-            errors={
-                "exception": str(e),
-                "stage_id": stage_id,
-                "data": data
-            }
+            code="UPDATE_EDUCATION_STAGE_ERROR"
         )
 
 
@@ -326,20 +318,11 @@ def update_education_stage():
 def delete_education_stage():
     """Delete an education stage"""
     try:
-        # Debug: Print request data
-        print("=== DEBUG delete_education_stage ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
-        print(f"Request data type: {type(frappe.request.data)}")
-
         # Get stage_id from multiple sources (form data or JSON)
         stage_id = None
 
         # Try from form_dict first (for FormData/URLSearchParams)
         stage_id = frappe.form_dict.get('stage_id')
-        print(f"Stage ID from form_dict: {stage_id}")
 
         # If not found, try from JSON payload
         if not stage_id and frappe.request.data:
@@ -347,12 +330,9 @@ def delete_education_stage():
                 import json
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 stage_id = json_data.get('stage_id')
-                print(f"Stage ID from JSON payload: {stage_id}")
-                print(f"Parsed JSON data: {json_data}")
-            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
-
-        print(f"Final extracted stage_id: {stage_id}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
+                # If JSON fails, request data might be FormData - ignore
+                pass
 
         if not stage_id:
             return error_response(
@@ -393,19 +373,10 @@ def delete_education_stage():
             code="EDUCATION_STAGE_NOT_FOUND"
         )
     except Exception as e:
-        # Debug: Log the actual exception
-        print(f"DELETE EXCEPTION: {str(e)}")
-        print(f"Exception type: {type(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-
+        frappe.log_error(f"Error deleting education stage: {str(e)}", "Education Stage API")
         return error_response(
             message=f"Error deleting education stage: {str(e)}",
-            code="DELETE_EDUCATION_STAGE_ERROR",
-            errors={
-                "exception": str(e),
-                "stage_id": stage_id
-            }
+            code="DELETE_EDUCATION_STAGE_ERROR"
         )
 
 
