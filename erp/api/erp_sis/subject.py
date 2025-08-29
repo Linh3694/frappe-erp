@@ -91,21 +91,7 @@ def get_all_subjects():
             """
             subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
 
-            # Debug: Log raw query results before processing
-            frappe.logger().info(f"Raw query returned {len(subjects)} subjects")
-            if subjects:
-                frappe.logger().info(f"First subject raw data: {subjects[0]}")
-
-
-        frappe.logger().info(f"Found {len(subjects)} subjects after processing")
-
-        # Debug: Print first few subjects to check data
-        frappe.logger().info("=== DEBUG get_all_subjects ===")
-        frappe.logger().info(f"Campus ID: {campus_id}")
-        frappe.logger().info(f"Number of subjects: {len(subjects)}")
-        if subjects:
-            frappe.logger().info(f"First subject: {subjects[0]}")
-            frappe.logger().info(f"Subject fields: {list(subjects[0].keys())}")
+        frappe.logger().info(f"Found {len(subjects)} subjects")
 
     except Exception as db_error:
         frappe.logger().error(f"Database error: {str(db_error)}")
@@ -123,37 +109,23 @@ def get_all_subjects():
 def get_subject_by_id():
     """Get a specific subject by ID"""
     try:
-        # Debug: Print all request data
-        print("=== DEBUG get_subject_by_id ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
-
         # Get subject_id from multiple sources (form data or JSON payload)
         subject_id = None
 
         # Try from form_dict first (for FormData/URLSearchParams)
         subject_id = frappe.form_dict.get('subject_id')
-        print(f"Subject ID from form_dict: {subject_id}")
 
         # Try from URL args (for query parameters)
         if not subject_id:
             subject_id = frappe.request.args.get('subject_id')
-            print(f"Subject ID from URL args: {subject_id}")
 
         # If not found, try from JSON payload
         if not subject_id and frappe.request.data:
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 subject_id = json_data.get('subject_id')
-                print(f"Subject ID from JSON payload: {subject_id}")
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                print(f"JSON parsing failed: {e}")
-
-        print(f"Final subject_id: {repr(subject_id)}")
-        print(f"Subject ID type: {type(subject_id)}")
-        print(f"Subject ID length: {len(subject_id) if subject_id else 0}")
+                pass
 
         if not subject_id:
             return validation_error_response({"subject_id": ["Subject ID is required"]})
@@ -221,6 +193,7 @@ def get_subject_by_id():
             "actual_subject_name": actual_subject_name,
             "room_name": room_name
         }
+
         return single_item_response(subject_data, "Subject fetched successfully")
         
     except Exception as e:
@@ -265,7 +238,6 @@ def create_subject():
         actual_subject_id = data.get("actual_subject_id")
         room_id = data.get("room_id")  # Can be None if not provided
 
-        print("=== DEBUG create_subject extracted data ===")
         print(f"title: {title}")
         print(f"education_stage: {education_stage}")
         print(f"timetable_subject_id: {timetable_subject_id}")
@@ -323,7 +295,6 @@ def create_subject():
         if room_id:
             subject_data["room_id"] = room_id
 
-        print("=== DEBUG subject_data to create ===")
         print(subject_data)
 
         subject_doc = frappe.get_doc(subject_data)
@@ -390,7 +361,6 @@ def update_subject():
     """Update an existing subject"""
     try:
         # Debug: Print all request data
-        print("=== DEBUG update_subject ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
@@ -578,7 +548,6 @@ def delete_subject():
     """Delete a subject"""
     try:
         # Debug: Print request data
-        print("=== DEBUG delete_subject ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
@@ -758,7 +727,6 @@ def get_education_stages_for_selection():
     """Get education stages for dropdown selection"""
     try:
         # Debug: Log campus information
-        print("=== DEBUG get_education_stages_for_selection ===")
 
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -837,7 +805,6 @@ def get_timetable_subjects_for_selection():
     """Get timetable subjects for dropdown selection"""
     try:
         # Debug: Log campus information
-        print("=== DEBUG get_timetable_subjects_for_selection ===")
 
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -915,7 +882,6 @@ def get_actual_subjects_for_selection():
     """Get actual subjects for dropdown selection"""
     try:
         # Debug: Log campus information
-        print("=== DEBUG get_actual_subjects_for_selection ===")
 
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()

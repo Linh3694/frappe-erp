@@ -60,7 +60,6 @@ def get_academic_program_by_id():
     """Get a specific academic program by ID"""
     try:
         # Debug: Print all request data
-        print("=== DEBUG get_academic_program_by_id ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
@@ -274,7 +273,6 @@ def update_academic_program():
     """Update an existing academic program"""
     try:
         # Debug: Print all request data
-        print("=== DEBUG update_academic_program ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
@@ -399,7 +397,6 @@ def delete_academic_program():
     """Delete an academic program"""
     try:
         # Debug: Print request data
-        print("=== DEBUG delete_academic_program ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
@@ -509,7 +506,6 @@ def check_short_title_availability():
     """Check if short title is available"""
     try:
         # Debug: Print request data
-        print("=== DEBUG check_short_title_availability ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")

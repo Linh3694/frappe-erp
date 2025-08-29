@@ -57,7 +57,6 @@ def get_timetable_subject_by_id():
     """Get a specific timetable subject by ID"""
     try:
         # Debug: Print all request data
-        print("=== DEBUG get_timetable_subject_by_id ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
@@ -200,7 +199,6 @@ def update_timetable_subject():
     """Update an existing timetable subject"""
     try:
         # Debug: Print all request data
-        print("=== DEBUG update_timetable_subject ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
@@ -297,7 +295,6 @@ def delete_timetable_subject():
     """Delete a timetable subject"""
     try:
         # Debug: Print request data
-        print("=== DEBUG delete_timetable_subject ===")
         print(f"Request method: {frappe.request.method}")
         print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
         print(f"Form dict: {dict(frappe.form_dict)}")
