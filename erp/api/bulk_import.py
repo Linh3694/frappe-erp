@@ -11,7 +11,6 @@ from erp.utils.api_response import (
 )
 from erp.utils.campus_utils import get_current_campus_from_context
 import traceback
-import pandas as pd
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -434,6 +433,7 @@ def _process_excel_file(job):
 
         # Read Excel file
         try:
+            import pandas as pd
             df = pd.read_excel(file_path)
         except Exception as e:
             return {
@@ -524,6 +524,7 @@ def _process_batch(job, batch_df, start_index, update_if_exists, dry_run):
     error_count = 0
     errors = []
 
+    import pandas as pd
     for idx, row in batch_df.iterrows():
         row_num = start_index + idx  # start_index already accounts for skipped header and Excel 1-indexing
 
