@@ -93,7 +93,7 @@ def start_bulk_import():
     except Exception as e:
         frappe.log_error(f"Error starting bulk import: {str(e)}")
         return error_response(
-            message="Failed to start bulk import job",
+            message=f"Failed to start bulk import job: {str(e)}",
             code="START_BULK_IMPORT_ERROR"
         )
 
