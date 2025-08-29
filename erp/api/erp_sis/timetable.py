@@ -266,7 +266,19 @@ def update_timetable():
         start_time = data.get("start_time")
         end_time = data.get("end_time")
 
-                # Update fields if provided
+        # Debug logging - current values
+        frappe.logger().info(f"Update timetable - Current values: education_stage_id={timetable_doc.education_stage_id}, period_priority={timetable_doc.period_priority}, period_type={timetable_doc.period_type}, period_name={timetable_doc.period_name}")
+        current_start_time_raw = timetable_doc.start_time
+        current_end_time_raw = timetable_doc.end_time
+        frappe.logger().info(f"Update timetable - Current times raw: start_time={current_start_time_raw}, end_time={current_end_time_raw}")
+
+        # Debug logging - new values
+        frappe.logger().info(f"Update timetable - New values: education_stage_id={education_stage_id}, period_priority={period_priority}, period_type={period_type}, period_name={period_name}, start_time={start_time}, end_time={end_time}")
+
+        # Track if any updates were made
+        updates_made = []
+
+        # Update fields if provided
         if education_stage_id and education_stage_id != timetable_doc.education_stage_id:
             # Verify education stage exists and belongs to same campus
             education_stage_exists = frappe.db.exists(
@@ -280,7 +292,9 @@ def update_timetable():
             if not education_stage_exists:
                 return not_found_response("Selected education stage does not exist or access denied")
 
+            frappe.logger().info(f"Update timetable - Updating education_stage_id: {timetable_doc.education_stage_id} -> {education_stage_id}")
             timetable_doc.education_stage_id = education_stage_id
+            updates_made.append(f"education_stage_id: {education_stage_id}")
 
         if period_priority is not None and int(period_priority) != timetable_doc.period_priority:
             # Validate period_priority is integer
@@ -303,37 +317,53 @@ def update_timetable():
             if existing:
                 return validation_error_response("Validation failed", {"period_priority": [f"Timetable with priority '{period_priority}' already exists for this education stage"]})
 
+            frappe.logger().info(f"Update timetable - Updating period_priority: {timetable_doc.period_priority} -> {period_priority}")
             timetable_doc.period_priority = period_priority
+            updates_made.append(f"period_priority: {period_priority}")
 
         if period_type and period_type != timetable_doc.period_type:
             if period_type not in ['study', 'non-study']:
                 return validation_error_response("Validation failed", {"period_type": ["Period type must be 'study' or 'non-study'"]})
+            frappe.logger().info(f"Update timetable - Updating period_type: {timetable_doc.period_type} -> {period_type}")
             timetable_doc.period_type = period_type
+            updates_made.append(f"period_type: {period_type}")
 
         if period_name and period_name != timetable_doc.period_name:
+            frappe.logger().info(f"Update timetable - Updating period_name: {timetable_doc.period_name} -> {period_name}")
             timetable_doc.period_name = period_name
+            updates_made.append(f"period_name: {period_name}")
 
         # Handle time updates with better validation
         current_start_time = format_time_for_html(timetable_doc.start_time)
         current_end_time = format_time_for_html(timetable_doc.end_time)
 
+        frappe.logger().info(f"Update timetable - Time comparison: start_time '{start_time}' vs current '{current_start_time}', end_time '{end_time}' vs current '{current_end_time}'")
+
         if start_time and start_time.strip():
             if start_time != current_start_time:
+                frappe.logger().info(f"Update timetable - Updating start_time: {current_start_time} -> {start_time}")
                 try:
                     start_time_obj = get_time(start_time)
                     timetable_doc.start_time = start_time
+                    updates_made.append(f"start_time: {start_time}")
                 except Exception as e:
                     frappe.log_error(f"Error parsing start_time '{start_time}': {str(e)}")
                     return validation_error_response("Validation failed", {"start_time": ["Invalid start time format"]})
+            else:
+                frappe.logger().info(f"Update timetable - start_time unchanged: {start_time}")
 
         if end_time and end_time.strip():
             if end_time != current_end_time:
+                frappe.logger().info(f"Update timetable - Updating end_time: {current_end_time} -> {end_time}")
                 try:
                     end_time_obj = get_time(end_time)
                     timetable_doc.end_time = end_time
+                    updates_made.append(f"end_time: {end_time}")
                 except Exception as e:
                     frappe.log_error(f"Error parsing end_time '{end_time}': {str(e)}")
                     return validation_error_response("Validation failed", {"end_time": ["Invalid end time format"]})
+            else:
+                frappe.logger().info(f"Update timetable - end_time unchanged: {end_time}")
 
         # Validate time range after updates
         if hasattr(timetable_doc, 'start_time') and hasattr(timetable_doc, 'end_time') and timetable_doc.start_time and timetable_doc.end_time:
@@ -345,9 +375,30 @@ def update_timetable():
             except Exception as e:
                 frappe.log_error(f"Error validating time range: {str(e)}")
                 return validation_error_response("Validation failed", {"start_time": ["Invalid time values"]})
-        
+
+        # Check if any updates were made
+        frappe.logger().info(f"Update timetable - Updates made: {updates_made}")
+
+        if not updates_made:
+            frappe.logger().warning(f"Update timetable - No updates detected, returning current data")
+            # Return current data without changes
+            timetable_data = {
+                "name": timetable_doc.name,
+                "education_stage_id": timetable_doc.education_stage_id,
+                "period_priority": timetable_doc.period_priority,
+                "period_type": timetable_doc.period_type,
+                "period_name": timetable_doc.period_name,
+                "start_time": format_time_for_html(timetable_doc.start_time),
+                "end_time": format_time_for_html(timetable_doc.end_time),
+                "campus_id": timetable_doc.campus_id
+            }
+            return single_item_response(timetable_data, "No changes detected")
+
+        # Save and commit changes
+        frappe.logger().info(f"Update timetable - Saving document with updates: {updates_made}")
         timetable_doc.save()
         frappe.db.commit()
+        frappe.logger().info(f"Update timetable - Document saved and committed successfully")
         
         # Format time fields for HTML time input (HH:MM format)
         start_time_formatted = format_time_for_html(timetable_doc.start_time)
