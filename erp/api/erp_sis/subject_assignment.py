@@ -470,10 +470,48 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
         return error_response(f"Error updating subject assignment: {str(e)}")
 
 
-@frappe.whitelist(allow_guest=False, methods=["GET", "POST"]) 
-def delete_subject_assignment(assignment_id):
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def delete_subject_assignment(assignment_id=None):
     """Delete a subject assignment"""
     try:
+        # Get assignment_id from multiple sources (URL path, form_dict, JSON payload, or direct parameter)
+        if not assignment_id:
+            # Try to get from URL path first (e.g., /api/method/.../SIS-SUBJECT_ASSIGNMENT-00001)
+            try:
+                request_path = frappe.local.request.path if hasattr(frappe.local, 'request') else frappe.request.path
+                if request_path:
+                    # Extract the last part of the URL path
+                    path_parts = request_path.strip('/').split('/')
+                    if len(path_parts) > 0:
+                        last_part = path_parts[-1]
+                        # Check if it looks like an assignment ID (contains assignment identifier)
+                        if 'SUBJECT_ASSIGNMENT' in last_part or last_part.startswith('SIS-'):
+                            assignment_id = last_part
+            except Exception:
+                pass
+
+        # Try to get from form_dict
+        if not assignment_id:
+            assignment_id = frappe.form_dict.get('assignment_id')
+
+        # Try to get from JSON payload if not in form_dict
+        if not assignment_id and frappe.request.data:
+            try:
+                import json
+                # Handle both bytes and string data
+                if isinstance(frappe.request.data, bytes):
+                    json_str = frappe.request.data.decode('utf-8')
+                else:
+                    json_str = str(frappe.request.data)
+
+                # Skip if data is empty or just whitespace
+                if json_str.strip():
+                    json_data = json.loads(json_str)
+                    assignment_id = json_data.get('assignment_id')
+            except Exception as e:
+                # Silently handle JSON parse errors
+                pass
+
         if not assignment_id:
             return validation_error_response(
                 message="Subject Assignment ID is required",
