@@ -150,6 +150,42 @@ def get_bulk_import_status():
             "error_file_url": job.error_file_url
         }
 
+        # Attach a small preview of errors so FE can show without opening file
+        try:
+            if job.error_file_url and job.error_count:
+                file_url = job.error_file_url
+                if file_url.startswith("/private/files/"):
+                    filename = file_url.split("/private/files/")[-1]
+                    file_path = frappe.get_site_path("private", "files", filename)
+                elif file_url.startswith("/files/"):
+                    filename = file_url.split("/files/")[-1]
+                    file_path = frappe.get_site_path("public", "files", filename)
+                else:
+                    file_path = file_url if file_url.startswith("/") else frappe.get_site_path("public", file_url)
+
+                import pandas as pd
+                df_prev = pd.read_excel(file_path, nrows=5)
+                preview = []
+                for _, r in df_prev.iterrows():
+                    item = {
+                        "row": int(r.get("__row_number", 0)) if not pd.isna(r.get("__row_number", 0)) else 0,
+                        "error": str(r.get("__error", "")).strip(),
+                    }
+                    sample = {}
+                    for key in ["student_code", "student_name", "title", "name", "gender", "date_of_birth"]:
+                        if key in df_prev.columns:
+                            val = r.get(key)
+                            if not (isinstance(val, float) and pd.isna(val)):
+                                sample[key] = str(val)
+                    if sample:
+                        item["data"] = sample
+                    preview.append(item)
+                if preview:
+                    response_data["errors_preview"] = preview
+        except Exception:
+            # Do not fail status API if preview extraction fails
+            pass
+
         return single_item_response(
             data=response_data,
             message="Bulk import status retrieved successfully"
