@@ -556,6 +556,7 @@ def create_timetable_column():
                 pass
 
         frappe.logger().info(f"Create timetable column - Final data: {data}")
+        frappe.logger().info(f"Create timetable column - Data keys: {list(data.keys()) if data else 'None'}")
 
         # Extract values from data
         education_stage_id = data.get("education_stage_id")
@@ -565,12 +566,19 @@ def create_timetable_column():
         start_time = data.get("start_time")
         end_time = data.get("end_time")
 
+        frappe.logger().info(f"Create timetable column - Raw extracted values: education_stage_id={repr(education_stage_id)}, period_priority={repr(period_priority)}, period_type={repr(period_type)}, period_name={repr(period_name)}, start_time={repr(start_time)}, end_time={repr(end_time)}")
+
         # Debug logging for extracted values
         frappe.logger().info(f"Create timetable column - Extracted values: education_stage_id={education_stage_id}, period_priority={period_priority}, period_type={period_type}, period_name={period_name}, start_time={start_time}, end_time={end_time}")
 
-        # Input validation
-        if not education_stage_id or not period_priority or not period_type or not period_name or not start_time or not end_time:
-            frappe.logger().error(f"Create timetable column - Validation failed. Missing fields: education_stage_id={bool(education_stage_id)}, period_priority={bool(period_priority)}, period_type={bool(period_type)}, period_name={bool(period_name)}, start_time={bool(start_time)}, end_time={bool(end_time)}")
+        # Input validation - handle both None and empty strings
+        if (not education_stage_id or str(education_stage_id).strip() == "") or \
+           (not period_priority or str(period_priority).strip() == "") or \
+           (not period_type or str(period_type).strip() == "") or \
+           (not period_name or str(period_name).strip() == "") or \
+           (not start_time or str(start_time).strip() == "") or \
+           (not end_time or str(end_time).strip() == ""):
+            frappe.logger().error(f"Create timetable column - Validation failed. Field values: education_stage_id='{education_stage_id}', period_priority='{period_priority}', period_type='{period_type}', period_name='{period_name}', start_time='{start_time}', end_time='{end_time}'")
             frappe.throw(_("All fields are required"))
         
         # Get campus from user context
