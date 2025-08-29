@@ -337,14 +337,44 @@ def update_teacher():
             frappe.logger().info(f"request.data: {frappe.request.data}")
             frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
 
-        # Get parameters from form_dict (form data)
-        teacher_id = frappe.form_dict.get('teacher_id')
-        user_id = frappe.form_dict.get('user_id')
-        education_stage_id = frappe.form_dict.get('education_stage_id')
+        # Try multiple ways to get the parameters
+        teacher_id = None
+        user_id = None
+        education_stage_id = None
 
-        frappe.logger().info(f"Parameters from form_dict - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
+        # Method 1: Try frappe.form_dict (for form data)
+        if frappe.form_dict:
+            teacher_id = frappe.form_dict.get('teacher_id')
+            user_id = frappe.form_dict.get('user_id')
+            education_stage_id = frappe.form_dict.get('education_stage_id')
+            frappe.logger().info(f"Method 1 - form_dict: teacher_id={teacher_id}, user_id={user_id}, education_stage_id={education_stage_id}")
 
-        # If no form data, try to parse from JSON request body
+        # Method 2: Try frappe.local.form_dict
+        if not teacher_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
+            teacher_id = frappe.local.form_dict.get('teacher_id')
+            user_id = frappe.local.form_dict.get('user_id')
+            education_stage_id = frappe.local.form_dict.get('education_stage_id')
+            frappe.logger().info(f"Method 2 - local.form_dict: teacher_id={teacher_id}, user_id={user_id}, education_stage_id={education_stage_id}")
+
+        # Method 3: Parse raw request data (for application/x-www-form-urlencoded)
+        if not teacher_id and frappe.request.data:
+            try:
+                from urllib.parse import parse_qs
+                if isinstance(frappe.request.data, bytes):
+                    data_str = frappe.request.data.decode('utf-8')
+                else:
+                    data_str = str(frappe.request.data)
+
+                if data_str.strip():
+                    parsed_data = parse_qs(data_str)
+                    teacher_id = parsed_data.get('teacher_id', [None])[0]
+                    user_id = parsed_data.get('user_id', [None])[0]
+                    education_stage_id = parsed_data.get('education_stage_id', [None])[0]
+                    frappe.logger().info(f"Method 3 - parse_qs: teacher_id={teacher_id}, user_id={user_id}, education_stage_id={education_stage_id}")
+            except Exception as e:
+                frappe.logger().info(f"Could not parse form data with parse_qs: {str(e)}")
+
+        # Method 4: Try JSON parsing as last resort
         if not teacher_id and frappe.request.data:
             try:
                 import json
@@ -358,11 +388,13 @@ def update_teacher():
                     teacher_id = json_data.get('teacher_id')
                     user_id = json_data.get('user_id')
                     education_stage_id = json_data.get('education_stage_id')
-                    frappe.logger().info(f"Got parameters from JSON request body - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
+                    frappe.logger().info(f"Method 4 - JSON: teacher_id={teacher_id}, user_id={user_id}, education_stage_id={education_stage_id}")
             except Exception as e:
                 frappe.logger().info(f"Could not parse JSON data: {str(e)}")
 
-        frappe.logger().info(f"Final parameters - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
+        frappe.logger().info(f"FINAL parameters - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
+        frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys()) if frappe.form_dict else 'None'}")
+        frappe.logger().info(f"local.form_dict keys: {list(frappe.local.form_dict.keys()) if hasattr(frappe.local, 'form_dict') and frappe.local.form_dict else 'None'}")
 
 
 
