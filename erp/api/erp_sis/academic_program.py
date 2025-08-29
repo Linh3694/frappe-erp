@@ -73,6 +73,7 @@ def get_academic_program_by_id():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 program_id = json_data.get('program_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                pass
 
 
         if not program_id:
@@ -279,6 +280,7 @@ def update_academic_program():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 data.update(json_data)
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                pass
 
         program_id = data.get('program_id')
 
@@ -394,6 +396,7 @@ def delete_academic_program():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 program_id = json_data.get('program_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                pass
 
 
         if not program_id:
@@ -498,6 +501,7 @@ def check_short_title_availability():
                 short_title = json_data.get('short_title')
                 program_id = json_data.get('program_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                pass
 
         if not short_title:
             return error_response(
