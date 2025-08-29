@@ -30,24 +30,37 @@ def get_all_school_years():
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         filters = {"campus_id": campus_id}
-            
-        school_years = frappe.get_all(
-            "SIS School Year",
-            fields=[
-                "name",
-                "title_vn",
-                "title_en", 
-                "start_date",
-                "end_date",
-                "is_enable",
-                "campus_id",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="start_date desc"
-        )
-        
+        frappe.logger().info(f"Using filters: {filters}")
+
+        # Try to get school years with error handling
+        try:
+            school_years = frappe.get_all(
+                "SIS School Year",
+                fields=[
+                    "name",
+                    "title_vn",
+                    "title_en",
+                    "start_date",
+                    "end_date",
+                    "is_current",
+                    "is_enable",
+                    "campus_id",
+                    "creation",
+                    "modified"
+                ],
+                filters=filters,
+                order_by="start_date desc"
+            )
+            frappe.logger().info(f"Found {len(school_years)} school years")
+        except Exception as db_error:
+            frappe.logger().error(f"Database error: {str(db_error)}")
+            import traceback
+            frappe.logger().error(f"Database error traceback: {traceback.format_exc()}")
+            return error_response(
+                message=f"Database error: {str(db_error)}",
+                code="DATABASE_ERROR"
+            )
+
         return list_response(school_years, "School years fetched successfully")
         
     except Exception as e:
