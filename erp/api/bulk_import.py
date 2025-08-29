@@ -11,6 +11,7 @@ from erp.utils.api_response import (
 )
 from erp.utils.campus_utils import get_current_campus_from_context
 import traceback
+import pandas as pd
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -411,10 +412,25 @@ def _process_excel_file(job):
 
         frappe.logger().info(f"Processing Excel file for job {job.name}")
 
-        # Download file from URL
-        file_path = job.file_url
-        if not file_path.startswith("/"):
-            file_path = frappe.get_site_path("public", file_path)
+        # Resolve file_url to absolute file system path
+        file_url = job.file_url or ""
+        if not file_url:
+            return {
+                "success": False,
+                "message": "Job has no file_url"
+            }
+
+        # Map /files/* and /private/files/* to site paths
+        # Support both public and private file locations
+        if file_url.startswith("/private/files/"):
+            filename = file_url.split("/private/files/")[-1]
+            file_path = frappe.get_site_path("private", "files", filename)
+        elif file_url.startswith("/files/"):
+            filename = file_url.split("/files/")[-1]
+            file_path = frappe.get_site_path("public", "files", filename)
+        else:
+            # Fallback: if it's a relative path treat as public, else assume absolute
+            file_path = file_url if file_url.startswith("/") else frappe.get_site_path("public", file_url)
 
         # Read Excel file
         try:
@@ -607,10 +623,12 @@ def _find_existing_record(doctype, doc_data):
     # unique key detection based on DocType configuration
 
     if doctype == "CRM Student" and doc_data.get("student_code"):
-        return frappe.db.exists(doctype, {"student_code": doc_data["student_code"]})
+        name = frappe.db.exists(doctype, {"student_code": doc_data["student_code"]})
+        return frappe.get_doc(doctype, name) if name else None
 
     if doctype == "SIS Subject" and doc_data.get("title"):
-        return frappe.db.exists(doctype, {"title": doc_data["title"]})
+        name = frappe.db.exists(doctype, {"title": doc_data["title"]})
+        return frappe.get_doc(doctype, name) if name else None
 
     return None
 

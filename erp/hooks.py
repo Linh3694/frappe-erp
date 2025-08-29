@@ -211,7 +211,7 @@ has_permission = {
 # Whitelisted methods
 # -------------------
 whitelisted_methods = [
-	"erp.api.bulk_import.upload_bulk_import_file",
+	"erp.api.bulk_import.upload_bulk_import_file_v2",
 	"erp.api.bulk_import.start_bulk_import",
 	"erp.api.bulk_import.get_bulk_import_status",
 	"erp.api.bulk_import.download_template",
