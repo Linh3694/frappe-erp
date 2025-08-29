@@ -39,25 +39,54 @@ def get_all_curriculums():
 
         # Try to get curriculums with error handling
         try:
-            curriculums = frappe.get_all(
-                "SIS Curriculum",
-                fields=[
-                    "name",
-                    "title_vn",
-                    "title_en",
-                    "short_title",
-                    "academic_program_id",
-                    "education_stage_id",
-                    "campus_id",
-                    "creation",
-                    "modified"
-                ],
-                filters=filters,
-                order_by="title_vn asc"
-            )
-            frappe.logger().info(f"Found {len(curriculums)} curriculums")
+            # First try with all fields, if fails, try with basic fields only
+            try:
+                curriculums = frappe.get_all(
+                    "SIS Curriculum",
+                    fields=[
+                        "name",
+                        "title_vn",
+                        "title_en",
+                        "short_title",
+                        "academic_program_id",
+                        "education_stage_id",
+                        "campus_id",
+                        "creation",
+                        "modified"
+                    ],
+                    filters=filters,
+                    order_by="title_vn asc"
+                )
+                frappe.logger().info(f"Found {len(curriculums)} curriculums with all fields")
+            except Exception as column_error:
+                # If columns don't exist, try with basic fields only
+                frappe.logger().warning(f"Some columns missing, trying with basic fields: {str(column_error)}")
+                curriculums = frappe.get_all(
+                    "SIS Curriculum",
+                    fields=[
+                        "name",
+                        "title_vn",
+                        "title_en",
+                        "short_title",
+                        "campus_id",
+                        "creation",
+                        "modified"
+                    ],
+                    filters=filters,
+                    order_by="title_vn asc"
+                )
+                frappe.logger().info(f"Found {len(curriculums)} curriculums with basic fields")
+
+                # Add missing fields as null
+                for curriculum in curriculums:
+                    curriculum["academic_program_id"] = None
+                    curriculum["education_stage_id"] = None
+
+            frappe.logger().info(f"Successfully retrieved {len(curriculums)} curriculums")
         except Exception as db_error:
             frappe.logger().error(f"Database error: {str(db_error)}")
+            import traceback
+            frappe.logger().error(f"Database error traceback: {traceback.format_exc()}")
             return error_response(
                 message=f"Database error: {str(db_error)}",
                 code="DATABASE_ERROR"
