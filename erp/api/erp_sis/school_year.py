@@ -314,6 +314,9 @@ def update_school_year():
         except frappe.DoesNotExistError:
             return not_found_response("School year not found")
 
+        # Debug logging for update
+        frappe.logger().info(f"School Year Update - Raw data received: {data}")
+
         # Update fields if provided
         title_vn = data.get('title_vn')
         if title_vn and title_vn != school_year_doc.title_vn:
