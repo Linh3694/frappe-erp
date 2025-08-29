@@ -131,14 +131,9 @@ def get_all_teachers():
 def get_teacher_by_id(teacher_id=None):
     """Get a specific teacher by ID"""
     try:
-        # Debug: Log form_dict to see what's being sent
-        frappe.logger().info(f"get_teacher_by_id called with teacher_id: {teacher_id}")
-        frappe.logger().info(f"form_dict: {frappe.form_dict}")
-
         # Get teacher_id from form_dict if not provided as parameter
         if not teacher_id:
             teacher_id = frappe.form_dict.get('teacher_id')
-            frappe.logger().info(f"Got teacher_id from form_dict: {teacher_id}")
 
         # If still no teacher_id, try to parse JSON from request body
         if not teacher_id and frappe.request.data:
@@ -146,12 +141,10 @@ def get_teacher_by_id(teacher_id=None):
                 import json
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 teacher_id = json_data.get('teacher_id')
-                frappe.logger().info(f"Got teacher_id from JSON body: {teacher_id}")
-            except Exception as e:
-                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
+            except Exception:
+                pass
 
         if not teacher_id:
-            frappe.logger().info("No teacher_id found")
             return error_response(
                 message="Teacher ID is required",
                 code="MISSING_TEACHER_ID"
@@ -159,7 +152,6 @@ def get_teacher_by_id(teacher_id=None):
 
         # Get current user's campus
         campus_id = get_current_campus_from_context()
-        frappe.logger().info(f"Current user campus_id: {campus_id}")
 
         if not campus_id:
             campus_id = "campus-1"
@@ -167,9 +159,7 @@ def get_teacher_by_id(teacher_id=None):
         # Try to find teacher by name first (without campus filter)
         try:
             teacher = frappe.get_doc("SIS Teacher", teacher_id)
-            frappe.logger().info(f"Teacher found: {teacher.name}, campus: {teacher.campus_id}")
         except frappe.DoesNotExistError:
-            frappe.logger().info(f"Teacher {teacher_id} not found at all")
             return not_found_response(
                 message="Teacher not found",
                 code="TEACHER_NOT_FOUND"
@@ -177,7 +167,6 @@ def get_teacher_by_id(teacher_id=None):
 
         # Check if teacher belongs to user's campus (if campus filtering is needed)
         if teacher.campus_id != campus_id:
-            frappe.logger().info(f"Teacher campus {teacher.campus_id} != user campus {campus_id}")
             # For now, allow access but log the mismatch
             frappe.logger().warning(f"Teacher {teacher_id} campus mismatch: {teacher.campus_id} != {campus_id}")
 
@@ -211,15 +200,6 @@ def get_teacher_by_id(teacher_id=None):
 def create_teacher():
     """Create a new teacher"""
     try:
-        # Debug: Log all received data
-        frappe.logger().info(f"create_teacher called")
-        frappe.logger().info(f"form_dict: {frappe.form_dict}")
-        frappe.logger().info(f"local.form_dict: {frappe.local.form_dict if hasattr(frappe.local, 'form_dict') else 'No local.form_dict'}")
-        frappe.logger().info(f"request.data exists: {bool(frappe.request.data)}")
-        if frappe.request.data:
-            frappe.logger().info(f"request.data: {frappe.request.data}")
-            frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
-
         # Try multiple ways to get the parameters
         user_id = None
         education_stage_id = None
@@ -228,13 +208,11 @@ def create_teacher():
         if frappe.form_dict:
             user_id = frappe.form_dict.get('user_id')
             education_stage_id = frappe.form_dict.get('education_stage_id')
-            frappe.logger().info(f"Method 1 - form_dict: user_id={user_id}, education_stage_id={education_stage_id}")
 
         # Method 2: Try frappe.local.form_dict
         if not user_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
             user_id = frappe.local.form_dict.get('user_id')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
-            frappe.logger().info(f"Method 2 - local.form_dict: user_id={user_id}, education_stage_id={education_stage_id}")
 
         # Method 3: Parse raw request data (for application/x-www-form-urlencoded)
         if not user_id and frappe.request.data:
@@ -249,9 +227,8 @@ def create_teacher():
                     parsed_data = parse_qs(data_str)
                     user_id = parsed_data.get('user_id', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
-                    frappe.logger().info(f"Method 3 - parse_qs: user_id={user_id}, education_stage_id={education_stage_id}")
-            except Exception as e:
-                frappe.logger().info(f"Could not parse form data with parse_qs: {str(e)}")
+            except Exception:
+                pass
 
         # Method 4: Try JSON parsing as last resort
         if not user_id and frappe.request.data:
@@ -265,13 +242,8 @@ def create_teacher():
                     json_data = json.loads(json_str)
                     user_id = json_data.get('user_id')
                     education_stage_id = json_data.get('education_stage_id')
-                    frappe.logger().info(f"Method 4 - JSON: user_id={user_id}, education_stage_id={education_stage_id}")
-            except Exception as e:
-                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
-
-        frappe.logger().info(f"FINAL parameters - user_id: {user_id}, education_stage_id: {education_stage_id}")
-        frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys()) if frappe.form_dict else 'None'}")
-        frappe.logger().info(f"local.form_dict keys: {list(frappe.local.form_dict.keys()) if hasattr(frappe.local, 'form_dict') and frappe.local.form_dict else 'None'}")
+            except Exception:
+                pass
 
         # Input validation
         if not user_id:
@@ -362,14 +334,6 @@ def create_teacher():
 def update_teacher():
     """Update an existing teacher"""
     try:
-        # Debug: Log all received data
-        frappe.logger().info(f"update_teacher called")
-        frappe.logger().info(f"form_dict: {frappe.form_dict}")
-        frappe.logger().info(f"request.data exists: {bool(frappe.request.data)}")
-        if frappe.request.data:
-            frappe.logger().info(f"request.data: {frappe.request.data}")
-            frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
-
         # Try multiple ways to get the parameters
         teacher_id = None
         user_id = None
@@ -380,14 +344,12 @@ def update_teacher():
             teacher_id = frappe.form_dict.get('teacher_id')
             user_id = frappe.form_dict.get('user_id')
             education_stage_id = frappe.form_dict.get('education_stage_id')
-            frappe.logger().info(f"Method 1 - form_dict: teacher_id={teacher_id}, user_id={user_id}, education_stage_id={education_stage_id}")
 
         # Method 2: Try frappe.local.form_dict
         if not teacher_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
             teacher_id = frappe.local.form_dict.get('teacher_id')
             user_id = frappe.local.form_dict.get('user_id')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
-            frappe.logger().info(f"Method 2 - local.form_dict: teacher_id={teacher_id}, user_id={user_id}, education_stage_id={education_stage_id}")
 
         # Method 3: Parse raw request data (for application/x-www-form-urlencoded)
         if not teacher_id and frappe.request.data:
@@ -403,9 +365,8 @@ def update_teacher():
                     teacher_id = parsed_data.get('teacher_id', [None])[0]
                     user_id = parsed_data.get('user_id', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
-                    frappe.logger().info(f"Method 3 - parse_qs: teacher_id={teacher_id}, user_id={user_id}, education_stage_id={education_stage_id}")
-            except Exception as e:
-                frappe.logger().info(f"Could not parse form data with parse_qs: {str(e)}")
+            except Exception:
+                pass
 
         # Method 4: Try JSON parsing as last resort
         if not teacher_id and frappe.request.data:
@@ -421,18 +382,12 @@ def update_teacher():
                     teacher_id = json_data.get('teacher_id')
                     user_id = json_data.get('user_id')
                     education_stage_id = json_data.get('education_stage_id')
-                    frappe.logger().info(f"Method 4 - JSON: teacher_id={teacher_id}, user_id={user_id}, education_stage_id={education_stage_id}")
-            except Exception as e:
-                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
-
-        frappe.logger().info(f"FINAL parameters - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
-        frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys()) if frappe.form_dict else 'None'}")
-        frappe.logger().info(f"local.form_dict keys: {list(frappe.local.form_dict.keys()) if hasattr(frappe.local, 'form_dict') and frappe.local.form_dict else 'None'}")
+            except Exception:
+                pass
 
 
 
         if not teacher_id:
-            frappe.logger().info("No teacher_id found for update")
             return error_response(
                 message="Teacher ID is required",
                 code="MISSING_TEACHER_ID"
@@ -447,7 +402,7 @@ def update_teacher():
         # Get existing document
         try:
             teacher_doc = frappe.get_doc("SIS Teacher", teacher_id)
-            frappe.logger().info(f"Update teacher - Teacher campus: {teacher_doc.campus_id}, User campus: {campus_id}")
+
 
             # Check campus permission
             if teacher_doc.campus_id != campus_id:
@@ -500,13 +455,10 @@ def update_teacher():
             teacher_doc.user_id = user_id
         
         if education_stage_id is not None and education_stage_id != teacher_doc.education_stage_id:
-            frappe.logger().info(f"Update teacher - Checking education_stage_id: {education_stage_id}, campus_id: {campus_id}")
-
             # Verify education stage exists and belongs to same campus (if provided)
             if education_stage_id:
                 # First try without campus restriction
                 education_stage_exists = frappe.db.exists("SIS Education Stage", education_stage_id)
-                frappe.logger().info(f"Education stage exists (without campus check): {education_stage_exists}")
 
                 if not education_stage_exists:
                     return {
@@ -523,7 +475,6 @@ def update_teacher():
                         "campus_id": campus_id
                     }
                 )
-                frappe.logger().info(f"Education stage exists (with campus check): {education_stage_with_campus}")
 
                 if not education_stage_with_campus:
                     frappe.logger().warning(f"Education stage {education_stage_id} exists but campus mismatch: expected {campus_id}")
@@ -647,21 +598,6 @@ def delete_teacher(teacher_id=None):
 def get_users_for_selection():
     """Get users for dropdown selection"""
     try:
-        # Debug: Log current user and campus info
-        current_user = frappe.session.user
-        frappe.logger().info(f"get_users_for_selection called by user: {current_user}")
-
-        # First try to get all users (without enabled filter) to see if there are any users at all
-        all_users = frappe.get_all(
-            "User",
-            fields=["name", "email", "full_name", "enabled"],
-            limit=10
-        )
-
-        frappe.logger().info(f"Total users in database (first 10): {len(all_users)}")
-        for user in all_users:
-            frappe.logger().info(f"User: {user.get('name')} - enabled: {user.get('enabled')}")
-
         # Get all enabled users with avatar information
         users = frappe.get_all(
             "User",
@@ -687,12 +623,7 @@ def get_users_for_selection():
             processed_user["user_id"] = user.get("name")  # name is the user ID in Frappe
             processed_users.append(processed_user)
 
-        frappe.logger().info(f"Found {len(processed_users)} enabled users")
-        if processed_users:
-            frappe.logger().info(f"First processed user: {processed_users[0]}")
-        else:
-            frappe.logger().info("No enabled users found! Creating sample users...")
-
+        if not processed_users:
             # Create sample users if none exist
             sample_users = [
                 {
@@ -716,16 +647,11 @@ def get_users_for_selection():
             ]
 
             processed_users = sample_users
-            frappe.logger().info(f"Using {len(processed_users)} sample users")
 
-        # Return response with debugging info
-        response_data = success_response(
+        return success_response(
             data=processed_users,
-            message=f"Users fetched successfully - found {len(processed_users)} users"
+            message="Users fetched successfully"
         )
-
-        frappe.logger().info(f"Response data length: {len(processed_users) if processed_users else 0}")
-        return response_data
 
     except Exception as e:
         frappe.log_error(f"Error fetching users for selection: {str(e)}")
