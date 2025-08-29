@@ -191,6 +191,9 @@ def reload_whitelist():
         )
 
 
+# Move to a different file to avoid whitelist caching
+# This function is now in a separate test file
+
 # @frappe.whitelist(allow_guest=False, methods=['POST'])  # Temporarily disabled for testing
 def upload_file_test():
     """
