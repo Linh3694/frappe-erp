@@ -174,8 +174,24 @@ def upload_bulk_import_file():
     - file_name: Name of the file
     """
     try:
-        # Get file from request
-        filedata = frappe.form_dict.get("file")
+        # Get file from request - try multiple ways
+        filedata = None
+
+        # Try from form_dict first
+        if "file" in frappe.form_dict:
+            filedata = frappe.form_dict.file
+        # Try from local.form_dict
+        elif hasattr(frappe.local, 'form_dict') and "file" in frappe.local.form_dict:
+            filedata = frappe.local.form_dict.file
+        # Try from request.files (Flask style)
+        elif hasattr(frappe.request, 'files') and frappe.request.files and "file" in frappe.request.files:
+            filedata = frappe.request.files["file"].read()
+
+        # Log for debugging
+        frappe.logger().info(f"File data check - form_dict has file: {'file' in frappe.form_dict}")
+        frappe.logger().info(f"File data check - local.form_dict has file: {hasattr(frappe.local, 'form_dict') and 'file' in frappe.local.form_dict if hasattr(frappe.local, 'form_dict') else False}")
+        frappe.logger().info(f"File data check - request.files exists: {hasattr(frappe.request, 'files') and frappe.request.files is not None}")
+        frappe.logger().info(f"File data found: {filedata is not None}")
 
         if not filedata:
             return validation_error_response(
@@ -183,25 +199,35 @@ def upload_bulk_import_file():
                 errors={"file": ["Required field"]}
             )
 
-        # Create file document
-        file_doc = frappe.get_doc({
-            "doctype": "File",
-            "file_name": frappe.form_dict.get("file_name") or "bulk_import_file.xlsx",
+        # Use Frappe's standard file upload method
+        from frappe.handler import upload_file
+
+        # Temporarily modify form_dict to match upload_file expectations
+        original_form_dict = frappe.form_dict.copy()
+        frappe.form_dict.clear()
+        frappe.form_dict.update({
+            "file": filedata,
+            "file_name": frappe.local.form_dict.get("file_name") or "bulk_import_file.xlsx",
             "is_private": 1,
-            "folder": "Home/Bulk Import",
-            "content": filedata
+            "folder": "Home/Bulk Import"
         })
 
-        file_doc.save(ignore_permissions=True)
-        frappe.db.commit()
+        try:
+            # Use Frappe's upload_file method
+            file_doc = upload_file()
+            frappe.db.commit()
 
-        return single_item_response(
-            data={
-                "file_url": file_doc.file_url,
-                "file_name": file_doc.file_name
-            },
-            message="File uploaded successfully"
-        )
+            return single_item_response(
+                data={
+                    "file_url": file_doc.file_url if hasattr(file_doc, 'file_url') else file_doc.get('file_url'),
+                    "file_name": file_doc.file_name if hasattr(file_doc, 'file_name') else file_doc.get('file_name')
+                },
+                message="File uploaded successfully"
+            )
+        finally:
+            # Restore original form_dict
+            frappe.form_dict.clear()
+            frappe.form_dict.update(original_form_dict)
 
     except Exception as e:
         frappe.log_error(f"Error uploading bulk import file: {str(e)}")
