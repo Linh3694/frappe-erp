@@ -96,10 +96,6 @@ def get_all_subjects():
             if subjects:
                 frappe.logger().info(f"First subject raw data: {subjects[0]}")
 
-            # Add missing fields as null
-            for subject in subjects:
-                subject['academic_program_id'] = None
-                subject['curriculum_id'] = None
 
         frappe.logger().info(f"Found {len(subjects)} subjects after processing")
 
@@ -141,6 +137,11 @@ def get_subject_by_id():
         subject_id = frappe.form_dict.get('subject_id')
         print(f"Subject ID from form_dict: {subject_id}")
 
+        # Try from URL args (for query parameters)
+        if not subject_id:
+            subject_id = frappe.request.args.get('subject_id')
+            print(f"Subject ID from URL args: {subject_id}")
+
         # If not found, try from JSON payload
         if not subject_id and frappe.request.data:
             try:
@@ -151,6 +152,8 @@ def get_subject_by_id():
                 print(f"JSON parsing failed: {e}")
 
         print(f"Final subject_id: {repr(subject_id)}")
+        print(f"Subject ID type: {type(subject_id)}")
+        print(f"Subject ID length: {len(subject_id) if subject_id else 0}")
 
         if not subject_id:
             return validation_error_response({"subject_id": ["Subject ID is required"]})
