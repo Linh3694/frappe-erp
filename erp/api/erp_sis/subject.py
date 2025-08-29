@@ -117,10 +117,6 @@ def get_all_subjects():
 
     return list_response(subjects, "Subjects fetched successfully")
 
-    except Exception as e:
-        frappe.log_error(f"Error fetching subjects: {str(e)}")
-        return error_response(f"Error fetching subjects: {str(e)}")
-
 
 @frappe.whitelist(allow_guest=False)
 def get_subject_by_id():
