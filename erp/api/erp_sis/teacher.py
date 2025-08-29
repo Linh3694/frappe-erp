@@ -236,7 +236,10 @@ def create_teacher():
         # Extract values from data
         user_id = data.get("user_id")
         education_stage_id = data.get("education_stage_id")
-        
+
+        frappe.logger().info(f"Extracted user_id: {user_id}, education_stage_id: {education_stage_id}")
+        frappe.logger().info(f"Data keys: {list(data.keys()) if hasattr(data, 'keys') else 'No keys'}")
+
         # Input validation
         if not user_id:
             return validation_error_response(
@@ -326,20 +329,42 @@ def create_teacher():
 def update_teacher(teacher_id=None, user_id=None, education_stage_id=None):
     """Update an existing teacher"""
     try:
-        # Debug: Log form_dict to see what's being sent
+        # Debug: Log all received data
         frappe.logger().info(f"update_teacher called with teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
         frappe.logger().info(f"form_dict: {frappe.form_dict}")
+        frappe.logger().info(f"request.data exists: {bool(frappe.request.data)}")
+        if frappe.request.data:
+            frappe.logger().info(f"request.data: {frappe.request.data}")
+            frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
 
         # Get teacher_id from form_dict if not provided as parameter
         if not teacher_id:
             teacher_id = frappe.form_dict.get('teacher_id')
             frappe.logger().info(f"Got teacher_id from form_dict: {teacher_id}")
 
+        # If still no teacher_id, try to parse from request body
+        if not teacher_id and frappe.request.data:
+            try:
+                import json
+                if isinstance(frappe.request.data, bytes):
+                    json_str = frappe.request.data.decode('utf-8')
+                else:
+                    json_str = str(frappe.request.data)
+
+                if json_str.strip():
+                    json_data = json.loads(json_str)
+                    teacher_id = json_data.get('teacher_id')
+                    frappe.logger().info(f"Got teacher_id from JSON request body: {teacher_id}")
+            except Exception as e:
+                frappe.logger().info(f"Could not parse JSON data for teacher_id: {str(e)}")
+
         # Get other parameters from form_dict if not provided
         if user_id is None:
             user_id = frappe.form_dict.get('user_id')
         if education_stage_id is None:
             education_stage_id = frappe.form_dict.get('education_stage_id')
+
+        frappe.logger().info(f"Final parameters - teacher_id: {teacher_id}, user_id: {user_id}, education_stage_id: {education_stage_id}")
 
         # If parameters not found in form_dict, try to parse JSON from request body
         if (not teacher_id or user_id is None or education_stage_id is None) and frappe.request.data:
