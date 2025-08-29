@@ -174,60 +174,44 @@ def upload_bulk_import_file():
     - file_name: Name of the file
     """
     try:
-        # Get file from request - try multiple ways
-        filedata = None
+        # Use Frappe's built-in file upload mechanism
+        from frappe.utils.file_manager import save_file
 
-        # Try from form_dict first
-        if "file" in frappe.form_dict:
-            filedata = frappe.form_dict.file
-        # Try from local.form_dict
-        elif hasattr(frappe.local, 'form_dict') and "file" in frappe.local.form_dict:
-            filedata = frappe.local.form_dict.file
-        # Try from request.files (Flask style)
-        elif hasattr(frappe.request, 'files') and frappe.request.files and "file" in frappe.request.files:
-            filedata = frappe.request.files["file"].read()
-
-        # Log for debugging
-        frappe.logger().info(f"File data check - form_dict has file: {'file' in frappe.form_dict}")
-        frappe.logger().info(f"File data check - local.form_dict has file: {hasattr(frappe.local, 'form_dict') and 'file' in frappe.local.form_dict if hasattr(frappe.local, 'form_dict') else False}")
-        frappe.logger().info(f"File data check - request.files exists: {hasattr(frappe.request, 'files') and frappe.request.files is not None}")
-        frappe.logger().info(f"File data found: {filedata is not None}")
-
-        if not filedata:
+        # Check if file exists in form_dict
+        if "file" not in frappe.form_dict and "file" not in frappe.local.form_dict:
+            frappe.logger().info(f"Available form_dict keys: {list(frappe.form_dict.keys())}")
+            frappe.logger().info(f"Available local.form_dict keys: {list(frappe.local.form_dict.keys()) if hasattr(frappe.local, 'form_dict') else 'No local.form_dict'}")
             return validation_error_response(
                 message="File is required",
                 errors={"file": ["Required field"]}
             )
 
-        # Use Frappe's standard file upload method
-        from frappe.handler import upload_file
+        # Get file data
+        file_obj = frappe.form_dict.get("file") or frappe.local.form_dict.get("file")
+        file_name = frappe.form_dict.get("file_name") or frappe.local.form_dict.get("file_name") or "bulk_import_file.xlsx"
 
-        # Temporarily modify form_dict to match upload_file expectations
-        original_form_dict = frappe.form_dict.copy()
-        frappe.form_dict.clear()
-        frappe.form_dict.update({
-            "file": filedata,
-            "file_name": frappe.local.form_dict.get("file_name") or "bulk_import_file.xlsx",
-            "is_private": 1,
-            "folder": "Home/Bulk Import"
-        })
+        frappe.logger().info(f"File object type: {type(file_obj)}")
+        frappe.logger().info(f"File name: {file_name}")
 
-        try:
-            # Use Frappe's upload_file method
-            file_doc = upload_file()
-            frappe.db.commit()
+        # Save file using Frappe's file manager
+        file_doc = save_file(
+            fname=file_name,
+            content=file_obj,
+            dt="File",
+            dn="",
+            folder="Home/Bulk Import",
+            is_private=1
+        )
 
-            return single_item_response(
-                data={
-                    "file_url": file_doc.file_url if hasattr(file_doc, 'file_url') else file_doc.get('file_url'),
-                    "file_name": file_doc.file_name if hasattr(file_doc, 'file_name') else file_doc.get('file_name')
-                },
-                message="File uploaded successfully"
-            )
-        finally:
-            # Restore original form_dict
-            frappe.form_dict.clear()
-            frappe.form_dict.update(original_form_dict)
+        frappe.logger().info(f"File saved successfully: {file_doc.file_url}")
+
+        return single_item_response(
+            data={
+                "file_url": file_doc.file_url,
+                "file_name": file_doc.file_name
+            },
+            message="File uploaded successfully"
+        )
 
     except Exception as e:
         frappe.log_error(f"Error uploading bulk import file: {str(e)}")
