@@ -73,6 +73,7 @@ def get_education_grade_by_id():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 grade_id = json_data.get('grade_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                pass
 
         # Also try from request.args if available (for GET requests)
         if not grade_id and hasattr(frappe.request, 'args'):
@@ -85,7 +86,7 @@ def get_education_grade_by_id():
                 query_params = parse_qs(frappe.request.query_string.decode('utf-8'))
                 grade_id = query_params.get('grade_id', [None])[0]
             except Exception as e:
-
+                pass
 
         if not grade_id:
             return error_response(
@@ -285,7 +286,7 @@ def update_education_grade():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 grade_id = json_data.get('grade_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-
+                pass
 
         if not grade_id:
             return {
@@ -314,8 +315,8 @@ def update_education_grade():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 data.update(json_data)
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                pass
 
-        
         # Get existing grade
         grade_doc = frappe.get_doc("SIS Education Grade", grade_id)
         
@@ -391,7 +392,7 @@ def delete_education_grade():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 grade_id = json_data.get('grade_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-
+                pass
 
         if not grade_id:
             return {
@@ -458,6 +459,7 @@ def check_grade_code_availability():
                 grade_code = json_data.get('grade_code')
                 grade_id = json_data.get('grade_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                pass
 
         if not grade_code:
             return error_response(
