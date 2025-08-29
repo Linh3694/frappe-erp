@@ -533,31 +533,30 @@ def create_timetable_column():
         frappe.logger().info(f"Create timetable column - Request method: {frappe.request.method}")
         frappe.logger().info(f"Create timetable column - Request URL: {frappe.request.url}")
 
-        # Get data from request - prioritize form_dict over JSON
+        # Get data from request - prioritize JSON over form_dict for API calls
         data = {}
 
         # Debug logging
         frappe.logger().info(f"Create timetable column - Raw request data: {frappe.request.data}")
         frappe.logger().info(f"Create timetable column - Form dict: {frappe.local.form_dict}")
 
-        # First try to get data from form_dict (for FormData/Form submissions)
-        if frappe.local.form_dict:
-            data.update(dict(frappe.local.form_dict))
-            frappe.logger().info(f"Create timetable column - Using form_dict data: {data}")
-
-        # If request has JSON data, try to parse and merge it (JSON takes precedence for overlapping keys)
+        # First try to parse JSON data from request body (preferred for API calls)
         if frappe.request.data and frappe.request.data.strip():
             try:
                 json_data = json.loads(frappe.request.data)
                 if json_data and isinstance(json_data, dict):
                     data.update(json_data)
-                    frappe.logger().info(f"Create timetable column - Merged JSON data: {data}")
+                    frappe.logger().info(f"Create timetable column - Using JSON data: {data}")
                 else:
-                    frappe.logger().info(f"Create timetable column - JSON data is empty or not dict, keeping form_dict")
+                    frappe.logger().info(f"Create timetable column - JSON data is empty or not dict")
             except (json.JSONDecodeError, TypeError) as e:
-                # If JSON parsing fails, keep form_dict data
-                frappe.logger().info(f"Create timetable column - JSON parsing failed ({e}), keeping form_dict data")
+                frappe.logger().info(f"Create timetable column - JSON parsing failed ({e}), trying form_dict")
                 pass
+
+        # Fallback to form_dict if JSON parsing failed or no JSON data
+        if not data and frappe.local.form_dict:
+            data.update(dict(frappe.local.form_dict))
+            frappe.logger().info(f"Create timetable column - Using form_dict data as fallback: {data}")
 
         frappe.logger().info(f"Create timetable column - Final data: {data}")
         frappe.logger().info(f"Create timetable column - Data keys: {list(data.keys()) if data else 'None'}")
@@ -641,30 +640,30 @@ def create_timetable_column():
             "campus_id": campus_id
         })
         
-        timetable_column_doc.insert()
-        frappe.db.commit()
+        try:
+            timetable_column_doc.insert()
+            frappe.db.commit()
 
-        # Debug: Log time values before and after formatting
-        frappe.logger().info(f"Create timetable column - Raw times from doc: start_time={timetable_column_doc.start_time}, end_time={timetable_column_doc.end_time}")
-        frappe.logger().info(f"Create timetable column - Raw times types: start_time={type(timetable_column_doc.start_time)}, end_time={type(timetable_column_doc.end_time)}")
+            frappe.logger().info(f"Create timetable column - Record created successfully: {timetable_column_doc.name}")
 
-        # Return the created data - follow Education Stage pattern
-        frappe.msgprint(_("Timetable column created successfully"))
+            # Return the created data - follow Education Stage pattern
+            timetable_data = {
+                "name": timetable_column_doc.name,
+                "education_stage_id": timetable_column_doc.education_stage_id,
+                "period_priority": timetable_column_doc.period_priority,
+                "period_type": timetable_column_doc.period_type,
+                "period_name": timetable_column_doc.period_name,
+                "start_time": start_time,  # Use original string value
+                "end_time": end_time,      # Use original string value
+                "campus_id": timetable_column_doc.campus_id
+            }
 
-        # For now, let's try returning the original string values to see if formatting is the issue
-        timetable_data = {
-            "name": timetable_column_doc.name,
-            "education_stage_id": timetable_column_doc.education_stage_id,
-            "period_priority": timetable_column_doc.period_priority,
-            "period_type": timetable_column_doc.period_type,
-            "period_name": timetable_column_doc.period_name,
-            "start_time": start_time,  # Use original string value
-            "end_time": end_time,      # Use original string value
-            "campus_id": timetable_column_doc.campus_id
-        }
+            frappe.logger().info(f"Create timetable column - Returning data: {timetable_data}")
+            return single_item_response(timetable_data, "Timetable column created successfully")
 
-        frappe.logger().info(f"Create timetable column - Returning original times: start_time={start_time}, end_time={end_time}")
-        return single_item_response(timetable_data, "Timetable column created successfully")
+        except Exception as insert_error:
+            frappe.logger().error(f"Create timetable column - Insert failed: {str(insert_error)}")
+            frappe.throw(_(f"Failed to save timetable column: {str(insert_error)}"))
         
     except Exception as e:
         frappe.log_error(f"Error creating timetable column: {str(e)}")
