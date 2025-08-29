@@ -12,6 +12,7 @@ from datetime import timedelta
 import secrets
 import base64
 import urllib.parse
+from erp.utils.api_response import success_response, error_response
 
 
 @frappe.whitelist(allow_guest=True)
@@ -38,23 +39,21 @@ def microsoft_login_redirect():
         }
         
         redirect_url = f"{auth_url}?{urllib.parse.urlencode(params)}"
-        
-        return {
-            "success": True,
-            "data": {
+
+        return success_response(
+            data={
                 "redirect_url": redirect_url,
                 "state": state
             },
-            "message": "Microsoft login URL generated successfully"
-        }
+            message="Microsoft login URL generated successfully"
+        )
         
     except Exception as e:
         frappe.log_error("Microsoft Auth", f"Microsoft login redirect error: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Error generating Microsoft login URL: {str(e)}",
-            "error": str(e)
-        }
+        return error_response(
+            message=f"Error generating Microsoft login URL: {str(e)}",
+            code="MICROSOFT_LOGIN_REDIRECT_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=True)
@@ -207,7 +206,10 @@ Các hàm đồng bộ định kỳ đã được loại bỏ để tránh nhầ
 @frappe.whitelist()
 def sync_microsoft_users():
     """[Deprecated] Không còn dùng đồng bộ định kỳ vì đã có webhook."""
-    return {"status": "success", "message": "No-op; use webhook subscription instead"}
+    return success_response(
+        message="No-op; use webhook subscription instead",
+        data={"status": "success"}
+    )
 
 
 @frappe.whitelist()
@@ -228,17 +230,18 @@ def map_microsoft_user(microsoft_user_id, frappe_user_email=None, create_new=Fal
             success = ms_user.map_to_frappe_user(frappe_user_email)
         
         if success:
-            return {
-                "status": "success",
-                "message": _("Microsoft user mapped successfully"),
-                "mapped_user": ms_user.mapped_user_id
-            }
+            return success_response(
+                data={
+                    "mapped_user": ms_user.mapped_user_id,
+                    "status": "success"
+                },
+                message="Microsoft user mapped successfully"
+            )
         else:
-            return {
-                "status": "failed",
-                "message": _("Failed to map Microsoft user"),
-                "error": ms_user.sync_error
-            }
+            return error_response(
+                message="Failed to map Microsoft user",
+                code="MICROSOFT_USER_MAPPING_FAILED"
+            )
         
     except Exception as e:
         frappe.log_error("Microsoft Mapping", f"Microsoft user mapping error: {str(e)}")
@@ -612,7 +615,10 @@ def create_or_update_user_profile(*args, **kwargs):
 @frappe.whitelist()
 def sync_existing_users_to_profiles():
     """[Deprecated] Giữ endpoint để không gãy client cũ, nhưng không còn làm gì."""
-    return {"status": "success", "message": "No-op; profiles are deprecated"}
+    return success_response(
+        message="No-op; profiles are deprecated",
+        data={"status": "success"}
+    )
 
 
 @frappe.whitelist()
@@ -1117,10 +1123,23 @@ def sync_one_microsoft_user(identifier: str):
 
         local_user = find_or_create_frappe_user(ms_user, user_data)
         if not local_user:
-            return {"status": "success", "message": "User data saved in MS record, no local User found", "email": email}
+            return success_response(
+                message="User data saved in MS record, no local User found",
+                data={"status": "success", "email": email}
+            )
 
         update_frappe_user(local_user, ms_user, user_data)
-        return {"status": "success", "email": email, "updated_fields": {"department": user_data.get("department"), "job_title": user_data.get("jobTitle")}}
+        return success_response(
+            data={
+                "email": email,
+                "status": "success",
+                "updated_fields": {
+                    "department": user_data.get("department"),
+                    "job_title": user_data.get("jobTitle")
+                }
+            },
+            message="User synced successfully"
+        )
 
     except Exception as e:
         frappe.log_error("Microsoft Manual Sync", f"sync_one_microsoft_user error: {str(e)}")
