@@ -70,11 +70,11 @@ def get_timetable_subject_by_id():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 subject_id = json_data.get('subject_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-
+                frappe.logger().error(f"Error parsing JSON data: {str(e)}")
 
         if not subject_id:
             return validation_error_response({"subject_id": ["Subject ID is required"]})
-        
+
         # Get current user's campus
         campus_id = get_current_campus_from_context()
         
@@ -205,6 +205,7 @@ def update_timetable_subject():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 data.update(json_data)
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                frappe.logger().error(f"Error parsing JSON data: {str(e)}")
 
         subject_id = data.get('subject_id')
 
@@ -292,11 +293,11 @@ def delete_timetable_subject():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 subject_id = json_data.get('subject_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-
+                frappe.logger().error(f"Error parsing JSON data: {str(e)}")
 
         if not subject_id:
             return validation_error_response({"subject_id": ["Subject ID is required"]})
-        
+
         # Get campus from user context
         campus_id = get_current_campus_from_context()
         
