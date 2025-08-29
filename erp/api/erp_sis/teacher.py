@@ -209,36 +209,69 @@ def get_teacher_by_id(teacher_id=None):
 
 @frappe.whitelist(allow_guest=False)
 def create_teacher():
-    """Create a new teacher - SIMPLE VERSION"""
+    """Create a new teacher"""
     try:
-        # Get data from request - follow Education Stage pattern
-        data = {}
-        
-        # First try to get JSON data from request body
+        # Debug: Log all received data
+        frappe.logger().info(f"create_teacher called")
+        frappe.logger().info(f"form_dict: {frappe.form_dict}")
+        frappe.logger().info(f"local.form_dict: {frappe.local.form_dict if hasattr(frappe.local, 'form_dict') else 'No local.form_dict'}")
+        frappe.logger().info(f"request.data exists: {bool(frappe.request.data)}")
         if frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-                    frappe.logger().info(f"Received JSON data for create_teacher: {data}")
-                else:
-                    data = frappe.local.form_dict
-                    frappe.logger().info(f"Received form data for create_teacher: {data}")
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
-                data = frappe.local.form_dict
-                frappe.logger().info(f"JSON parsing failed, using form data for create_teacher: {data}")
-        else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
-            frappe.logger().info(f"No request data, using form_dict for create_teacher: {data}")
-        
-        # Extract values from data
-        user_id = data.get("user_id")
-        education_stage_id = data.get("education_stage_id")
+            frappe.logger().info(f"request.data: {frappe.request.data}")
+            frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
 
-        frappe.logger().info(f"Extracted user_id: {user_id}, education_stage_id: {education_stage_id}")
-        frappe.logger().info(f"Data keys: {list(data.keys()) if hasattr(data, 'keys') else 'No keys'}")
+        # Try multiple ways to get the parameters
+        user_id = None
+        education_stage_id = None
+
+        # Method 1: Try frappe.form_dict (for form data)
+        if frappe.form_dict:
+            user_id = frappe.form_dict.get('user_id')
+            education_stage_id = frappe.form_dict.get('education_stage_id')
+            frappe.logger().info(f"Method 1 - form_dict: user_id={user_id}, education_stage_id={education_stage_id}")
+
+        # Method 2: Try frappe.local.form_dict
+        if not user_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
+            user_id = frappe.local.form_dict.get('user_id')
+            education_stage_id = frappe.local.form_dict.get('education_stage_id')
+            frappe.logger().info(f"Method 2 - local.form_dict: user_id={user_id}, education_stage_id={education_stage_id}")
+
+        # Method 3: Parse raw request data (for application/x-www-form-urlencoded)
+        if not user_id and frappe.request.data:
+            try:
+                from urllib.parse import parse_qs
+                if isinstance(frappe.request.data, bytes):
+                    data_str = frappe.request.data.decode('utf-8')
+                else:
+                    data_str = str(frappe.request.data)
+
+                if data_str.strip():
+                    parsed_data = parse_qs(data_str)
+                    user_id = parsed_data.get('user_id', [None])[0]
+                    education_stage_id = parsed_data.get('education_stage_id', [None])[0]
+                    frappe.logger().info(f"Method 3 - parse_qs: user_id={user_id}, education_stage_id={education_stage_id}")
+            except Exception as e:
+                frappe.logger().info(f"Could not parse form data with parse_qs: {str(e)}")
+
+        # Method 4: Try JSON parsing as last resort
+        if not user_id and frappe.request.data:
+            try:
+                if isinstance(frappe.request.data, bytes):
+                    json_str = frappe.request.data.decode('utf-8')
+                else:
+                    json_str = str(frappe.request.data)
+
+                if json_str.strip():
+                    json_data = json.loads(json_str)
+                    user_id = json_data.get('user_id')
+                    education_stage_id = json_data.get('education_stage_id')
+                    frappe.logger().info(f"Method 4 - JSON: user_id={user_id}, education_stage_id={education_stage_id}")
+            except Exception as e:
+                frappe.logger().info(f"Could not parse JSON data: {str(e)}")
+
+        frappe.logger().info(f"FINAL parameters - user_id: {user_id}, education_stage_id: {education_stage_id}")
+        frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys()) if frappe.form_dict else 'None'}")
+        frappe.logger().info(f"local.form_dict keys: {list(frappe.local.form_dict.keys()) if hasattr(frappe.local, 'form_dict') and frappe.local.form_dict else 'None'}")
 
         # Input validation
         if not user_id:
