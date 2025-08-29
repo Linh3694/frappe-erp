@@ -192,6 +192,28 @@ def reload_whitelist():
 
 
 # @frappe.whitelist(allow_guest=False, methods=['POST'])  # Temporarily disabled for testing
+def upload_file_test():
+    """
+    Test upload function - no whitelist required
+    """
+    try:
+        # Simple response for testing
+        return single_item_response(
+            data={
+                "file_url": "/files/test.xlsx",
+                "file_name": "test.xlsx",
+                "message": "Test upload successful - whitelist bypassed"
+            },
+            message="Test upload completed"
+        )
+    except Exception as e:
+        return error_response(
+            message=f"Test upload failed: {str(e)}",
+            code="TEST_UPLOAD_ERROR"
+        )
+
+
+# @frappe.whitelist(allow_guest=False, methods=['POST'])  # Temporarily disabled for testing
 def upload_bulk_import_file_v2():
     """
     Upload file for bulk import processing
