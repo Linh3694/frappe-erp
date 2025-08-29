@@ -108,8 +108,12 @@ def get_bulk_import_status():
     - job_id: Job ID to check
     """
     try:
-        # Get job_id from request
-        job_id = frappe.form_dict.get("job_id") or frappe.local.form_dict.get("job_id")
+        # Get job_id from request (support multiple sources)
+        job_id = (
+            (frappe.form_dict.get("job_id") if hasattr(frappe, 'form_dict') else None)
+            or (frappe.local.form_dict.get("job_id") if hasattr(frappe.local, 'form_dict') else None)
+            or (frappe.request.args.get("job_id") if hasattr(frappe, 'request') and hasattr(frappe.request, 'args') and frappe.request.args else None)
+        )
 
         if not job_id:
             return validation_error_response(
