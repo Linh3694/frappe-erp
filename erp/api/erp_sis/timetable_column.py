@@ -289,30 +289,35 @@ def update_timetable_column():
             timetable_column_doc.education_stage_id = education_stage_id
             updates_made.append(f"education_stage_id: {education_stage_id}")
 
-        if period_priority is not None and int(period_priority) != timetable_column_doc.period_priority:
-            # Validate period_priority is integer
-            try:
-                period_priority = int(period_priority)
-            except (ValueError, TypeError):
+        if period_priority is not None:
+            # Convert period_priority to int if it's a string
+            if isinstance(period_priority, str):
+                try:
+                    period_priority = int(period_priority)
+                except (ValueError, TypeError):
+                    return validation_error_response("Validation failed", {"period_priority": ["Period priority must be a number"]})
+            elif not isinstance(period_priority, int):
                 return validation_error_response("Validation failed", {"period_priority": ["Period priority must be a number"]})
 
-            # Check for duplicate period_priority
-            final_education_stage_id = education_stage_id or timetable_column_doc.education_stage_id
-            existing = frappe.db.exists(
-                "SIS Timetable Column",
-                {
-                    "education_stage_id": final_education_stage_id,
-                    "period_priority": period_priority,
-                    "campus_id": campus_id,
-                    "name": ["!=", timetable_column_id]
-                }
-            )
-            if existing:
-                return validation_error_response("Validation failed", {"period_priority": [f"Timetable column with priority '{period_priority}' already exists for this education stage"]})
+            # Check if value has changed
+            if period_priority != timetable_column_doc.period_priority:
+                # Check for duplicate period_priority
+                final_education_stage_id = education_stage_id or timetable_column_doc.education_stage_id
+                existing = frappe.db.exists(
+                    "SIS Timetable Column",
+                    {
+                        "education_stage_id": final_education_stage_id,
+                        "period_priority": period_priority,
+                        "campus_id": campus_id,
+                        "name": ["!=", timetable_column_id]
+                    }
+                )
+                if existing:
+                    return validation_error_response("Validation failed", {"period_priority": [f"Timetable column with priority '{period_priority}' already exists for this education stage"]})
 
-            frappe.logger().info(f"Update timetable column - Updating period_priority: {timetable_column_doc.period_priority} -> {period_priority}")
-            timetable_column_doc.period_priority = period_priority
-            updates_made.append(f"period_priority: {period_priority}")
+                frappe.logger().info(f"Update timetable column - Updating period_priority: {timetable_column_doc.period_priority} -> {period_priority}")
+                timetable_column_doc.period_priority = period_priority
+                updates_made.append(f"period_priority: {period_priority}")
 
         if period_type and period_type != timetable_column_doc.period_type:
             if period_type not in ['study', 'non-study']:
