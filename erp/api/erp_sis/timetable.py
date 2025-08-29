@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime, get_time
+from datetime import datetime, time, timedelta
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.api_response import (
@@ -15,6 +16,40 @@ from erp.utils.api_response import (
     not_found_response,
     forbidden_response
 )
+
+
+def format_time_for_html(time_value):
+    """Format time value to HH:MM format for HTML time input"""
+    if not time_value:
+        return ""
+
+    try:
+        # Handle datetime.time object
+        if hasattr(time_value, 'strftime'):
+            return time_value.strftime("%H:%M")
+
+        # Handle datetime.timedelta object (convert to time)
+        if isinstance(time_value, timedelta):
+            # Convert timedelta to time (assuming it's from midnight)
+            total_seconds = int(time_value.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            return f"{hours:02d}:{minutes:02d}"
+
+        # Handle string format
+        if isinstance(time_value, str):
+            # Try to parse string as time
+            try:
+                parsed_time = get_time(time_value)
+                return parsed_time.strftime("%H:%M")
+            except:
+                return time_value
+
+        # Fallback
+        return str(time_value)
+
+    except Exception:
+        return ""
 
 
 @frappe.whitelist(allow_guest=False)
@@ -51,31 +86,8 @@ def get_all_timetables():
 
         # Format time fields for HTML time input (HH:MM format)
         for timetable in timetables:
-            if timetable.get("start_time"):
-                try:
-                    if hasattr(timetable["start_time"], "strftime"):
-                        timetable["start_time"] = timetable["start_time"].strftime("%H:%M")
-                    else:
-                        # If it's already a string, try to parse and format
-                        time_obj = get_time(str(timetable["start_time"]))
-                        timetable["start_time"] = time_obj.strftime("%H:%M")
-                except:
-                    timetable["start_time"] = ""
-            else:
-                timetable["start_time"] = ""
-
-            if timetable.get("end_time"):
-                try:
-                    if hasattr(timetable["end_time"], "strftime"):
-                        timetable["end_time"] = timetable["end_time"].strftime("%H:%M")
-                    else:
-                        # If it's already a string, try to parse and format
-                        time_obj = get_time(str(timetable["end_time"]))
-                        timetable["end_time"] = time_obj.strftime("%H:%M")
-                except:
-                    timetable["end_time"] = ""
-            else:
-                timetable["end_time"] = ""
+            timetable["start_time"] = format_time_for_html(timetable.get("start_time"))
+            timetable["end_time"] = format_time_for_html(timetable.get("end_time"))
 
         return list_response(timetables, "Timetables fetched successfully")
         
@@ -129,8 +141,8 @@ def get_timetable_by_id():
             "period_priority": timetable.period_priority,
             "period_type": timetable.period_type,
             "period_name": timetable.period_name,
-            "start_time": timetable.start_time.strftime("%H:%M") if timetable.start_time else "",
-            "end_time": timetable.end_time.strftime("%H:%M") if timetable.end_time else "",
+            "start_time": format_time_for_html(timetable.start_time),
+            "end_time": format_time_for_html(timetable.end_time),
             "campus_id": timetable.campus_id
         }
         return single_item_response(timetable_data, "Timetable fetched successfully")
@@ -236,14 +248,14 @@ def update_timetable():
         if period_name and period_name != timetable_doc.period_name:
             timetable_doc.period_name = period_name
 
-        if start_time and start_time != timetable_doc.start_time.strftime("%H:%M"):
+        if start_time and start_time != format_time_for_html(timetable_doc.start_time):
             try:
                 start_time_obj = get_time(start_time)
                 timetable_doc.start_time = start_time
             except Exception:
                 return validation_error_response("Validation failed", {"start_time": ["Invalid start time format"]})
 
-        if end_time and end_time != timetable_doc.end_time.strftime("%H:%M"):
+        if end_time and end_time != format_time_for_html(timetable_doc.end_time):
             try:
                 end_time_obj = get_time(end_time)
                 timetable_doc.end_time = end_time
@@ -258,20 +270,8 @@ def update_timetable():
         frappe.db.commit()
         
         # Format time fields for HTML time input (HH:MM format)
-        start_time_formatted = ""
-        end_time_formatted = ""
-
-        try:
-            if timetable_doc.start_time:
-                start_time_formatted = timetable_doc.start_time.strftime("%H:%M")
-        except:
-            start_time_formatted = ""
-
-        try:
-            if timetable_doc.end_time:
-                end_time_formatted = timetable_doc.end_time.strftime("%H:%M")
-        except:
-            end_time_formatted = ""
+        start_time_formatted = format_time_for_html(timetable_doc.start_time)
+        end_time_formatted = format_time_for_html(timetable_doc.end_time)
 
         timetable_data = {
             "name": timetable_doc.name,
@@ -455,20 +455,8 @@ def create_timetable():
         frappe.msgprint(_("Timetable column created successfully"))
 
         # Format time fields for HTML time input (HH:MM format)
-        start_time_formatted = ""
-        end_time_formatted = ""
-
-        try:
-            if timetable_doc.start_time:
-                start_time_formatted = timetable_doc.start_time.strftime("%H:%M")
-        except:
-            start_time_formatted = ""
-
-        try:
-            if timetable_doc.end_time:
-                end_time_formatted = timetable_doc.end_time.strftime("%H:%M")
-        except:
-            end_time_formatted = ""
+        start_time_formatted = format_time_for_html(timetable_doc.start_time)
+        end_time_formatted = format_time_for_html(timetable_doc.end_time)
 
         timetable_data = {
             "name": timetable_doc.name,
