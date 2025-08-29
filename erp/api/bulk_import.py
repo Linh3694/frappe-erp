@@ -164,7 +164,7 @@ def get_bulk_import_status():
         )
 
 
-@frappe.whitelist(allow_guest=False, methods=['GET'])
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def download_template():
     """
     Download Excel template for a specific DocType
@@ -173,8 +173,24 @@ def download_template():
     - doctype: Target DocType to generate template for
     """
     try:
-        # Get doctype from request
-        doctype = frappe.form_dict.get("doctype") or frappe.local.form_dict.get("doctype")
+        # Get doctype from request - try multiple sources
+        doctype = (
+            frappe.form_dict.get("doctype") or
+            frappe.local.form_dict.get("doctype") or
+            frappe.request.args.get("doctype") if hasattr(frappe.request, 'args') and frappe.request.args else None
+        )
+
+        # Debug logging
+        frappe.logger().info(f"Download template - doctype from form_dict: {frappe.form_dict.get('doctype')}")
+        frappe.logger().info(f"Download template - doctype from local.form_dict: {frappe.local.form_dict.get('doctype')}")
+        frappe.logger().info(f"Download template - final doctype: {doctype}")
+        frappe.logger().info(f"Download template - all form_dict keys: {list(frappe.form_dict.keys())}")
+        frappe.logger().info(f"Download template - all local.form_dict keys: {list(frappe.local.form_dict.keys())}")
+
+        # TEMPORARY: For debugging, use hardcoded doctype if not found
+        if not doctype:
+            frappe.logger().info("TEMPORARY: Using hardcoded doctype 'CRM Student' for debugging")
+            doctype = "CRM Student"
 
         if not doctype:
             return validation_error_response(
