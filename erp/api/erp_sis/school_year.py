@@ -36,18 +36,17 @@ def get_all_school_years():
         try:
             school_years = frappe.get_all(
                 "SIS School Year",
-                fields=[
-                    "name",
-                    "title_vn",
-                    "title_en",
-                    "start_date",
-                    "end_date",
-                    "is_current",
-                    "is_enable",
-                    "campus_id",
-                    "creation",
-                    "modified"
-                ],
+                            fields=[
+                "name",
+                "title_vn",
+                "title_en",
+                "start_date",
+                "end_date",
+                "is_enable",
+                "campus_id",
+                "creation",
+                "modified"
+            ],
                 filters=filters,
                 order_by="start_date desc"
             )

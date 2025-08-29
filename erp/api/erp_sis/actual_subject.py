@@ -480,3 +480,79 @@ def get_curriculums_for_selection():
             message="Error fetching curriculums",
             code="FETCH_CURRICULUMS_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_actual_subject():
+    """Delete an actual subject"""
+    try:
+        # Get subject_id from request
+        data = frappe.local.form_dict
+        subject_id = data.get('subject_id')
+
+        if not subject_id:
+            return error_response(
+                message="Subject ID is required",
+                code="MISSING_SUBJECT_ID"
+            )
+
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            return error_response(
+                message="Unable to determine user's campus",
+                code="NO_CAMPUS_FOUND"
+            )
+
+        # Check if subject exists and belongs to user's campus
+        subject = frappe.get_doc("SIS Actual Subject", subject_id)
+        if subject.campus_id != campus_id:
+            return error_response(
+                message="Unauthorized: Subject does not belong to your campus",
+                code="UNAUTHORIZED_ACCESS"
+            )
+
+        # Check for linked records that prevent deletion
+        linked_docs = []
+
+        # Check Subject links
+        subject_count = frappe.db.count("SIS Subject", {"actual_subject_id": subject_id})
+        if subject_count > 0:
+            linked_docs.append(f"{subject_count} môn học")
+
+        # Check Timetable Subject links
+        timetable_count = frappe.db.count("SIS Timetable Subject", {"actual_subject_id": subject_id})
+        if timetable_count > 0:
+            linked_docs.append(f"{timetable_count} môn học thời khóa biểu")
+
+        if linked_docs:
+            return error_response(
+                message=f"Không thể xóa môn học thực tế vì đang được liên kết với {', '.join(linked_docs)}. Vui lòng xóa hoặc chuyển các mục liên kết sang môn học thực tế khác trước.",
+                code="ACTUAL_SUBJECT_LINKED"
+            )
+
+        # Delete the subject
+        frappe.delete_doc("SIS Actual Subject", subject_id)
+        frappe.db.commit()
+
+        return success_response(
+            message="Môn học thực tế đã được xóa thành công"
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Môn học thực tế không tồn tại",
+            code="ACTUAL_SUBJECT_NOT_FOUND"
+        )
+    except frappe.LinkExistsError as e:
+        return error_response(
+            message=f"Không thể xóa môn học thực tế vì đang được sử dụng bởi các module khác. Chi tiết: {str(e)}",
+            code="ACTUAL_SUBJECT_LINKED"
+        )
+    except Exception as e:
+        frappe.log_error(f"Unexpected error during actual subject deletion: {str(e)}")
+        return error_response(
+            message="Lỗi không mong muốn khi xóa môn học thực tế",
+            code="DELETE_ACTUAL_SUBJECT_ERROR"
+        )
