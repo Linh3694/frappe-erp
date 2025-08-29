@@ -164,6 +164,53 @@ def get_bulk_import_status():
         )
 
 
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def upload_bulk_import_file():
+    """
+    Upload file for bulk import processing
+
+    Expected parameters:
+    - file: File to upload
+    - file_name: Name of the file
+    """
+    try:
+        # Get file from request
+        filedata = frappe.form_dict.get("file")
+
+        if not filedata:
+            return validation_error_response(
+                message="File is required",
+                errors={"file": ["Required field"]}
+            )
+
+        # Create file document
+        file_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": frappe.form_dict.get("file_name") or "bulk_import_file.xlsx",
+            "is_private": 1,
+            "folder": "Home/Bulk Import",
+            "content": filedata
+        })
+
+        file_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        return single_item_response(
+            data={
+                "file_url": file_doc.file_url,
+                "file_name": file_doc.file_name
+            },
+            message="File uploaded successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error uploading bulk import file: {str(e)}")
+        return error_response(
+            message="Failed to upload file",
+            code="FILE_UPLOAD_ERROR"
+        )
+
+
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def download_template():
     """
