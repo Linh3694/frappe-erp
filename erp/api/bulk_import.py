@@ -192,7 +192,7 @@ def reload_whitelist():
 
 
 # @frappe.whitelist(allow_guest=False, methods=['POST'])  # Temporarily disabled for testing
-def upload_bulk_import_file():
+def upload_bulk_import_file_v2():
     """
     Upload file for bulk import processing
 
