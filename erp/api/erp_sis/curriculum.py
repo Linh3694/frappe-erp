@@ -435,28 +435,58 @@ def delete_curriculum():
         # Get existing document
         try:
             curriculum_doc = frappe.get_doc("SIS Curriculum", curriculum_id)
-            
+
             # Check campus permission
             if curriculum_doc.campus_id != campus_id:
                 return forbidden_response(
                     message="Access denied: You don't have permission to delete this curriculum",
                     code="ACCESS_DENIED"
                 )
-                
+
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Curriculum not found"
-            }
-        
-        # Delete the document
-        frappe.delete_doc("SIS Curriculum", curriculum_id)
-        frappe.db.commit()
-        
-        return success_response(
-            message="Curriculum deleted successfully"
-        )
+            return not_found_response(
+                message="Curriculum not found",
+                code="CURRICULUM_NOT_FOUND"
+            )
+
+        # Check for linked documents before deletion
+        linked_docs = []
+        try:
+            # Check Actual Subject links
+            actual_subject_count = frappe.db.count("SIS Actual Subject", {"curriculum_id": curriculum_id})
+            if actual_subject_count > 0:
+                linked_docs.append(f"{actual_subject_count} môn học thực tế")
+
+            # Check Subject links
+            subject_count = frappe.db.count("SIS Subject", {"curriculum_id": curriculum_id})
+            if subject_count > 0:
+                linked_docs.append(f"{subject_count} môn học")
+
+            if linked_docs:
+                return error_response(
+                    message=f"Không thể xóa chương trình học vì đang được liên kết với {', '.join(linked_docs)}. Vui lòng xóa hoặc chuyển các mục liên kết sang chương trình học khác trước.",
+                    code="CURRICULUM_LINKED"
+                )
+
+            # Delete the document
+            frappe.delete_doc("SIS Curriculum", curriculum_id)
+            frappe.db.commit()
+
+            return success_response(
+                message="Curriculum deleted successfully"
+            )
+
+        except frappe.LinkExistsError as e:
+            return error_response(
+                message=f"Không thể xóa chương trình học vì đang được sử dụng bởi các module khác. Chi tiết: {str(e)}",
+                code="CURRICULUM_LINKED"
+            )
+        except Exception as e:
+            frappe.log_error(f"Unexpected error during deletion: {str(e)}")
+            return error_response(
+                message="Lỗi không mong muốn khi xóa chương trình học",
+                code="DELETE_CURRICULUM_ERROR"
+            )
         
     except Exception as e:
         frappe.log_error(f"Error deleting curriculum {curriculum_id}: {str(e)}")
