@@ -15,42 +15,63 @@ from erp.utils.api_response import (
 
 @frappe.whitelist(allow_guest=False)
 def get_all_curriculums():
-    """Get all curriculums with basic information - SIMPLE VERSION"""
+    """Get all curriculums with basic information"""
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+        frappe.logger().info(f"Current campus_id: {campus_id}")
+
         if not campus_id:
             # Fallback to default if no campus found
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
+
+        # Check if SIS Curriculum doctype exists
+        if not frappe.db.exists("DocType", "SIS Curriculum"):
+            frappe.logger().error("SIS Curriculum DocType does not exist")
+            return error_response(
+                message="SIS Curriculum DocType not found",
+                code="DOCTYPE_NOT_FOUND"
+            )
+
         filters = {"campus_id": campus_id}
-            
-        curriculums = frappe.get_all(
-            "SIS Curriculum",
-            fields=[
-                "name",
-                "title_vn",
-                "title_en",
-                "short_title",
-                "academic_program_id",
-                "education_stage_id",
-                "campus_id",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="title_vn asc"
-        )
-        
+        frappe.logger().info(f"Using filters: {filters}")
+
+        # Try to get curriculums with error handling
+        try:
+            curriculums = frappe.get_all(
+                "SIS Curriculum",
+                fields=[
+                    "name",
+                    "title_vn",
+                    "title_en",
+                    "short_title",
+                    "academic_program_id",
+                    "education_stage_id",
+                    "campus_id",
+                    "creation",
+                    "modified"
+                ],
+                filters=filters,
+                order_by="title_vn asc"
+            )
+            frappe.logger().info(f"Found {len(curriculums)} curriculums")
+        except Exception as db_error:
+            frappe.logger().error(f"Database error: {str(db_error)}")
+            return error_response(
+                message=f"Database error: {str(db_error)}",
+                code="DATABASE_ERROR"
+            )
+
         return list_response(
             data=curriculums,
             message="Curriculums fetched successfully"
         )
-        
+
     except Exception as e:
-        frappe.log_error(f"Error fetching curriculums: {str(e)}")
+        frappe.logger().error(f"Error fetching curriculums: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
         return error_response(
             message="Error fetching curriculums",
             code="FETCH_CURRICULUMS_ERROR"
