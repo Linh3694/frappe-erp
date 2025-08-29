@@ -637,7 +637,6 @@ def delete_actual_subject():
         frappe.log_error(f"Unexpected error during actual subject deletion: {str(e)}\n{error_details}")
 
         # Return detailed error for debugging (only in development)
-        import frappe
         debug_mode = frappe.conf.get('developer_mode', False)
 
         if debug_mode:
