@@ -50,11 +50,15 @@ def get_all_school_years():
                 filters=filters,
                 order_by="start_date desc"
             )
-            frappe.logger().info(f"Found {len(school_years)} school years")
+
+
+            # Convert integer is_enable values to booleans
+            for school_year in school_years:
+                if 'is_enable' in school_year:
+                    school_year['is_enable'] = bool(school_year['is_enable'])
+
         except Exception as db_error:
-            frappe.logger().error(f"Database error: {str(db_error)}")
-            import traceback
-            frappe.logger().error(f"Database error traceback: {traceback.format_exc()}")
+            frappe.log_error(f"Database error: {str(db_error)}")
             return error_response(
                 message=f"Database error: {str(db_error)}",
                 code="DATABASE_ERROR"
@@ -114,7 +118,7 @@ def get_school_year_by_id():
             "title_en": school_year.title_en,
             "start_date": str(school_year.start_date),
             "end_date": str(school_year.end_date),
-            "is_enable": school_year.is_enable,
+            "is_enable": bool(school_year.is_enable),
             "campus_id": school_year.campus_id
         }
         return single_item_response(school_year_data, "School year fetched successfully")
