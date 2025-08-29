@@ -189,17 +189,58 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
         )
 
 
-@frappe.whitelist(allow_guest=False)  
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])  
 def get_student_data():
-    """Get a specific student by ID or code"""
+    """Get a specific student by ID, code or slug"""
     try:
-        # Get parameters from form_dict
-        student_id = frappe.local.form_dict.get("student_id")
-        student_code = frappe.local.form_dict.get("student_code")
-        student_slug = frappe.local.form_dict.get("student_slug")
-        
-        frappe.logger().info(f"get_student_data called - student_id: {student_id}, student_code: {student_code}, student_slug: {student_slug}")
-        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"get_student_data: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
+        student_id = (
+            pick(form, ['student_id', 'id', 'name', 'studentId'])
+            or pick(local_form, ['student_id', 'id', 'name', 'studentId'])
+            or pick(request_args, ['student_id', 'id', 'name', 'studentId'])
+            or pick(payload, ['student_id', 'id', 'name', 'studentId'])
+        )
+
+        student_code = (
+            pick(form, ['student_code', 'code'])
+            or pick(local_form, ['student_code', 'code'])
+            or pick(request_args, ['student_code', 'code'])
+            or pick(payload, ['student_code', 'code'])
+        )
+
+        student_slug = (
+            pick(form, ['student_slug', 'slug'])
+            or pick(local_form, ['student_slug', 'slug'])
+            or pick(request_args, ['student_slug', 'slug'])
+            or pick(payload, ['student_slug', 'slug'])
+        )
+
+        frappe.logger().info(
+            f"get_student_data identifiers → student_id: {student_id}, student_code: {student_code}, student_slug: {student_slug}"
+        )
+        try:
+            frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
+        except Exception:
+            pass
         
         if not student_id and not student_code and not student_slug:
             return error_response(
@@ -228,7 +269,7 @@ def get_student_data():
             # Search by student_code without campus filtering (for debugging)
             students = frappe.get_all("CRM Student",
                 filters={
-                    "student_code": student_code,
+                    "student_code": str(student_code).strip(),
                     # "campus_id": campus_id
                 },
                 fields=["name"],
