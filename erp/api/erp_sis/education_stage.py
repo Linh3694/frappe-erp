@@ -298,15 +298,18 @@ def delete_education_stage():
                 pass
 
         if not stage_id:
-            return {
-                "success": False,
-                "message": "Stage ID is required",
-                "debug": {
-                    "form_dict": dict(frappe.form_dict),
-                    "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
-                    "stage_id_value": repr(stage_id)
+            return error_response(
+                message="Stage ID is required",
+                code="MISSING_STAGE_ID",
+                errors={
+                    "stage_id": ["Required"],
+                    "debug_info": {
+                        "form_dict": dict(frappe.form_dict),
+                        "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
+                        "stage_id_value": repr(stage_id)
+                    }
                 }
-            }
+            )
 
         # Check if stage exists
         stage_doc = frappe.get_doc("SIS Education Stage", stage_id)
