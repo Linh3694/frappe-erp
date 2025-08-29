@@ -15,7 +15,7 @@ from erp.utils.api_response import (
 
 @frappe.whitelist(allow_guest=False)
 def get_all_education_stages():
-    """Get all education stages with basic information - SIMPLE VERSION"""
+    """Get all education stages with basic information"""
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -132,44 +132,31 @@ def get_education_stage_by_id():
 
 @frappe.whitelist(allow_guest=False)
 def create_education_stage():
-    """Create a new education stage - SIMPLE VERSION"""
+    """Create a new education stage"""
     try:
-        # Debug: Log incoming request
-        print("=== CREATE DEBUG ===")
-        print(f"Request method: {frappe.request.method}")
-        print(f"Content-Type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-        print(f"Form dict: {dict(frappe.form_dict)}")
-        print(f"Request data: {frappe.request.data}")
 
         # Get data from form_dict first (works for both FormData and URL params)
         data = frappe.local.form_dict
-        print(f"Initial data from form_dict: {data}")
 
         # If required fields not in form_dict, try to parse request data
         required_fields = ["title_vn", "title_en", "short_title"]
         missing_fields = [field for field in required_fields if not data.get(field)]
 
         if missing_fields:
-            print(f"Missing fields in form_dict: {missing_fields}")
             if frappe.request.data:
                 try:
                     # Try parsing as JSON first
                     import json
                     request_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
                     json_data = json.loads(request_str)
-                    print(f"Parsed JSON data: {json_data}")
 
                     # Check if JSON has the required fields
                     json_missing = [field for field in required_fields if not json_data.get(field)]
                     if not json_missing:
                         data = frappe._dict(json_data)
-                        print(f"Using JSON data: {data}")
-                    else:
-                        print(f"JSON also missing fields: {json_missing}")
-                except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                    print(f"JSON parsing failed: {e}")
-
-        print(f"Final data to validate: {data}")
+                except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
+                    # If JSON fails, request data might be FormData - ignore
+                    pass
         
         # Validate required fields
         required_fields = ["title_vn", "title_en", "short_title"]
