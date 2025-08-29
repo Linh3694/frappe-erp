@@ -1,0 +1,212 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:BIMP-{#####}",
+ "beta": 0,
+ "creation": "2024-12-19 00:00:00.000000",
+ "custom": 0,
+ "description": "Track bulk import jobs for Excel file processing",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "job_information",
+  "doctype_target",
+  "file_url",
+  "options_json",
+  "job_status",
+  "status",
+  "progress_section",
+  "total_rows",
+  "processed_rows",
+  "success_count",
+  "error_count",
+  "error_file_url",
+  "timing_section",
+  "started_at",
+  "finished_at",
+  "created_by",
+  "campus_id",
+  "message"
+ ],
+ "fields": [
+  {
+   "fieldname": "job_information",
+   "fieldtype": "Section Break",
+   "label": "Job Information"
+  },
+  {
+   "fieldname": "doctype_target",
+   "fieldtype": "Data",
+   "label": "Target DocType",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "The DocType to import data into (e.g., CRM Student, SIS Subject)"
+  },
+  {
+   "fieldname": "file_url",
+   "fieldtype": "Data",
+   "label": "Excel File URL",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "URL of the uploaded Excel file to process"
+  },
+  {
+   "fieldname": "options_json",
+   "fieldtype": "Long Text",
+   "label": "Import Options",
+   "description": "JSON string containing import options (update_if_exists, dry_run, etc.)"
+  },
+  {
+   "fieldname": "job_status",
+   "fieldtype": "Section Break",
+   "label": "Job Status"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Queued\nRunning\nCompleted\nFailed",
+   "default": "Queued",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "progress_section",
+   "fieldtype": "Section Break",
+   "label": "Progress Information"
+  },
+  {
+   "fieldname": "total_rows",
+   "fieldtype": "Int",
+   "label": "Total Rows",
+   "description": "Total number of rows in the Excel file (excluding headers)"
+  },
+  {
+   "fieldname": "processed_rows",
+   "fieldtype": "Int",
+   "label": "Processed Rows",
+   "description": "Number of rows that have been processed"
+  },
+  {
+   "fieldname": "success_count",
+   "fieldtype": "Int",
+   "label": "Success Count",
+   "description": "Number of successfully imported records"
+  },
+  {
+   "fieldname": "error_count",
+   "fieldtype": "Int",
+   "label": "Error Count",
+   "description": "Number of records that failed to import"
+  },
+  {
+   "fieldname": "error_file_url",
+   "fieldtype": "Data",
+   "label": "Error Report URL",
+   "description": "URL of the Excel file containing error details"
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "Timing Information"
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At",
+   "description": "When the bulk import job started processing"
+  },
+  {
+   "fieldname": "finished_at",
+   "fieldtype": "Datetime",
+   "label": "Finished At",
+   "description": "When the bulk import job finished processing"
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "label": "Created By",
+   "options": "User",
+   "reqd": 1,
+   "default": "__user",
+   "read_only": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "description": "Campus associated with this bulk import job"
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Small Text",
+   "label": "Message",
+   "description": "Additional message or summary of the import result"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2024-12-19 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SIS",
+ "name": "SIS Bulk Import Job",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS User",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "quick_entry": 0,
+ "search_fields": "doctype_target,status,created_by",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "doctype_target",
+ "track_changes": 1,
+ "track_seen": 0,
+ "track_views": 0
+}
