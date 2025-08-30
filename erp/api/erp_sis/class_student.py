@@ -18,6 +18,17 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         page = int(page)
         limit = int(limit)
 
+        # Get parameters from request args if not provided as function parameters
+        if not school_year_id:
+            school_year_id = frappe.request.args.get("school_year_id")
+        if not class_id:
+            class_id = frappe.request.args.get("class_id")
+
+        # Debug: log all parameters
+        print(f"DEBUG: Final parameters - page: {page}, limit: {limit}, school_year_id: {school_year_id}, class_id: {class_id}")
+        print(f"DEBUG: frappe.request.args: {dict(frappe.request.args)}")
+        print(f"DEBUG: frappe.local.form_dict: {dict(frappe.local.form_dict) if frappe.local.form_dict else 'None'}")
+
         # Build filters
         filters = {}
         if school_year_id:
@@ -105,15 +116,25 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
 def assign_student(class_id=None, student_id=None, school_year_id=None, class_type="regular"):
     """Assign a student to a class"""
     try:
-        # Get parameters from form_dict if not provided (following Frappe pattern)
+        # Get parameters from both form_dict and request args (handle query string params)
         if not class_id:
-            class_id = frappe.local.form_dict.get("class_id")
+            class_id = frappe.local.form_dict.get("class_id") or frappe.form_dict.get("class_id")
         if not student_id:
-            student_id = frappe.local.form_dict.get("student_id")
+            student_id = frappe.local.form_dict.get("student_id") or frappe.form_dict.get("student_id")
         if not school_year_id:
-            school_year_id = frappe.local.form_dict.get("school_year_id")
+            school_year_id = frappe.local.form_dict.get("school_year_id") or frappe.form_dict.get("school_year_id")
         if not class_type:
-            class_type = frappe.local.form_dict.get("class_type", "regular")
+            class_type = frappe.local.form_dict.get("class_type", "regular") or frappe.form_dict.get("class_type", "regular")
+
+        # Also try to get from request args (query parameters)
+        if not class_id:
+            class_id = frappe.request.args.get("class_id")
+        if not student_id:
+            student_id = frappe.request.args.get("student_id")
+        if not school_year_id:
+            school_year_id = frappe.request.args.get("school_year_id")
+        if not class_type:
+            class_type = frappe.request.args.get("class_type", "regular")
 
         # Fallback to JSON data if form_dict is empty
         if not class_id and hasattr(frappe, 'request') and frappe.request.data:
