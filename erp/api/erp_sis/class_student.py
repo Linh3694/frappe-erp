@@ -11,7 +11,7 @@ from erp.utils.api_response import (
 )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist()
 def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None):
     """Get all class students with pagination and filters"""
     try:
