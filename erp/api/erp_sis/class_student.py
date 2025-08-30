@@ -27,14 +27,18 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             filters['school_year_id'] = school_year_id
         if class_id:
             filters['class_id'] = class_id
+            frappe.logger().info(f"Adding class_id filter: {class_id}")
 
-        frappe.logger().info(f"Applied filters: {filters}")
-            
+        frappe.logger().info(f"Filters before campus: {filters}")
+
         # Get campus filter from context
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
         if campus_id:
             filters['campus_id'] = campus_id
+            frappe.logger().info(f"Adding campus filter: {campus_id}")
+
+        frappe.logger().info(f"Final filters: {filters}")
         
         # Calculate offset
         offset = (page - 1) * limit
@@ -55,7 +59,18 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         frappe.logger().info(f"Query result count: {len(class_students)}")
         if class_students:
             frappe.logger().info(f"First record class_id: {class_students[0].get('class_id')}")
+            frappe.logger().info(f"All class_ids in result: {[r.get('class_id') for r in class_students]}")
             frappe.logger().info(f"Sample records: {class_students[:2]}")
+
+        # Test query without campus filter to see if that's the issue
+        if class_id:
+            test_filters = {'class_id': class_id}
+            test_count = frappe.db.count("SIS Class Student", filters=test_filters)
+            frappe.logger().info(f"Test query without campus filter - count for class {class_id}: {test_count}")
+
+            if test_count > 0:
+                test_records = frappe.get_all("SIS Class Student", filters=test_filters, limit=5)
+                frappe.logger().info(f"Test query records: {[r.get('class_id') for r in test_records]}")
         
         # Get total count
         total_count = frappe.db.count("SIS Class Student", filters=filters)
@@ -77,6 +92,49 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             message="Error fetching class students",
             code="FETCH_CLASS_STUDENTS_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def debug_class_students(class_id=None):
+    """Debug function to check class students data"""
+    try:
+        if not class_id:
+            return error_response("class_id is required")
+
+        # Check all records for this class_id
+        all_records = frappe.get_all(
+            "SIS Class Student",
+            filters={'class_id': class_id},
+            fields=["name", "class_id", "student_id"]
+        )
+
+        # Check total count
+        total_count = len(all_records)
+
+        # Check records with campus filter
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+
+        campus_records = []
+        if campus_id:
+            campus_records = frappe.get_all(
+                "SIS Class Student",
+                filters={'class_id': class_id, 'campus_id': campus_id},
+                fields=["name", "class_id", "student_id", "campus_id"]
+            )
+
+        return {
+            "class_id_requested": class_id,
+            "current_campus": campus_id,
+            "total_records_without_campus_filter": total_count,
+            "records_without_campus_filter": all_records,
+            "total_records_with_campus_filter": len(campus_records),
+            "records_with_campus_filter": campus_records
+        }
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Debug Class Students Error")
+        return error_response(f"Error: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
