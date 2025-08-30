@@ -50,7 +50,7 @@
    "fieldname": "type",
    "fieldtype": "Select",
    "label": "Type",
-   "options": "holiday\\nschool_event\\nexam",
+       "options": "holiday\nschool_event\nexam",
    "reqd": 1
   },
   {

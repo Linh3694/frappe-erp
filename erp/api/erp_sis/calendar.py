@@ -160,6 +160,14 @@ def create_event(
             "school_year_id": school_year_id or data.get("school_year_id"),
         }
 
+        # Validate type field
+        valid_types = ["holiday", "school_event", "exam"]
+        if payload.get("type") and payload["type"] not in valid_types:
+            return validation_error_response(
+                message="Invalid type value",
+                errors={"type": [f"Must be one of: {', '.join(valid_types)}"]}
+            )
+
         errors: Dict[str, List[str]] = {}
         for f in ["title", "type", "start_date", "end_date", "school_year_id"]:
             if not payload.get(f):
@@ -245,6 +253,14 @@ def update_event(name: Optional[str] = None, **kwargs):
                 pass
 
         data.update(kwargs)
+
+        # Validate type field if provided
+        valid_types = ["holiday", "school_event", "exam"]
+        if data.get("type") and data["type"] not in valid_types:
+            return validation_error_response(
+                message="Invalid type value",
+                errors={"type": [f"Must be one of: {', '.join(valid_types)}"]}
+            )
 
         allowed_fields = {
             "campus_id",
