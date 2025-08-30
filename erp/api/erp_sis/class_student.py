@@ -32,6 +32,8 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             filters['campus_id'] = campus_id
 
         # Debug logging
+        print(f"DEBUG: get_all_class_students filters: {filters}")
+        print(f"DEBUG: Parameters - page: {page}, limit: {limit}, school_year_id: {school_year_id}, class_id: {class_id}, campus_id: {campus_id}")
         frappe.logger().info(f"get_all_class_students filters: {filters}")
         frappe.logger().info(f"Parameters - page: {page}, limit: {limit}, school_year_id: {school_year_id}, class_id: {class_id}, campus_id: {campus_id}")
 
@@ -52,6 +54,9 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         )
 
         # Debug logging for results
+        print(f"DEBUG: get_all_class_students returned {len(class_students)} records")
+        if class_students:
+            print(f"DEBUG: Sample class_ids: {[cs.get('class_id') for cs in class_students[:3]]}")
         frappe.logger().info(f"get_all_class_students returned {len(class_students)} records")
         if class_students:
             frappe.logger().info(f"Sample class_ids: {[cs.get('class_id') for cs in class_students[:3]]}")
