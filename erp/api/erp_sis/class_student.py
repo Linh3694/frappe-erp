@@ -11,15 +11,12 @@ from erp.utils.api_response import (
 )
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None):
     """Get all class students with pagination and filters"""
     try:
         page = int(page)
         limit = int(limit)
-
-        # Debug logging
-        frappe.logger().info(f"get_all_class_students called with: page={page}, limit={limit}, school_year_id={school_year_id}, class_id={class_id}")
 
         # Build filters
         filters = {}
@@ -27,20 +24,12 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             filters['school_year_id'] = school_year_id
         if class_id:
             filters['class_id'] = class_id
-            frappe.logger().info(f"Adding class_id filter: {class_id}")
-
-        frappe.logger().info(f"Filters before campus: {filters}")
 
         # Get campus filter from context
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
         if campus_id:
             filters['campus_id'] = campus_id
-            frappe.logger().info(f"Adding campus filter: {campus_id}")
-        else:
-            frappe.logger().info("No campus context found - querying without campus filter")
-
-        frappe.logger().info(f"Final filters: {filters}")
         
         # Calculate offset
         offset = (page - 1) * limit
@@ -57,39 +46,6 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             limit_start=offset,
             limit_page_length=limit
         )
-
-        frappe.logger().info(f"Query result count: {len(class_students)}")
-        frappe.logger().info(f"Total count from db.count: {total_count}")
-        if class_students:
-            frappe.logger().info(f"First record class_id: {class_students[0].get('class_id')}")
-            frappe.logger().info(f"All class_ids in result: {[r.get('class_id') for r in class_students]}")
-            frappe.logger().info(f"All campus_ids in result: {[r.get('campus_id') for r in class_students]}")
-            frappe.logger().info(f"Sample records: {class_students[:2]}")
-        else:
-            frappe.logger().info("No records found in main query")
-
-        # Double-check the actual database state
-        actual_count = frappe.db.count("SIS Class Student", filters=filters)
-        frappe.logger().info(f"Double-check actual count: {actual_count}")
-
-        # Test query without campus filter to see if that's the issue
-        if class_id:
-            test_filters = {'class_id': class_id}
-            test_count = frappe.db.count("SIS Class Student", filters=test_filters)
-            frappe.logger().info(f"Test query without campus filter - count for class {class_id}: {test_count}")
-
-            if test_count > 0:
-                test_records = frappe.get_all("SIS Class Student", filters=test_filters, limit=5)
-                frappe.logger().info(f"Test query records: {[r.get('class_id') for r in test_records]}")
-
-        # If no records found, try query without any filters to check if table has data
-        if actual_count == 0:
-            total_count_all = frappe.db.count("SIS Class Student")
-            frappe.logger().info(f"Total records in SIS Class Student table: {total_count_all}")
-
-            if total_count_all > 0:
-                sample_records = frappe.get_all("SIS Class Student", limit=3)
-                frappe.logger().info(f"Sample records from table: {sample_records}")
         
         # Get total count
         total_count = frappe.db.count("SIS Class Student", filters=filters)
@@ -113,73 +69,6 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         )
 
 
-@frappe.whitelist()
-def debug_class_students():
-    """Simple debug function to check class students data"""
-    try:
-        # Get class_id from query parameters directly
-        import urllib.parse
-        query_string = frappe.local.request.query_string
-        frappe.logger().info(f"Debug: Raw query_string: {query_string}")
-
-        if query_string:
-            parsed_params = urllib.parse.parse_qs(query_string.decode('utf-8'))
-            class_id = parsed_params.get('class_id', [None])[0]
-            frappe.logger().info(f"Debug: Parsed class_id: {class_id}")
-        else:
-            class_id = None
-
-        if not class_id:
-            frappe.logger().info("Debug: No class_id found in query string")
-            return error_response("class_id is required")
-
-        # Check all records for this class_id
-        all_records = frappe.get_all(
-            "SIS Class Student",
-            filters={'class_id': class_id},
-            fields=["name", "class_id", "student_id", "campus_id", "creation"]
-        )
-
-        # Check records without campus filter
-        all_records_no_campus = frappe.get_all(
-            "SIS Class Student",
-            filters={'class_id': class_id},
-            fields=["name", "class_id", "student_id", "campus_id", "creation"]
-        )
-
-        return success_response(
-            data={
-                "class_id_requested": class_id,
-                "total_records_without_campus_filter": len(all_records_no_campus),
-                "total_records_with_campus_filter": len(all_records),
-                "records_without_campus_filter": all_records_no_campus[:5],  # First 5 records
-                "records_with_campus_filter": all_records[:5]
-            },
-            message="Debug data retrieved successfully"
-        )
-
-    except Exception as e:
-        frappe.log_error(f"Error in debug_class_students: {str(e)}")
-        return error_response(
-            message=f"Error in debug: {str(e)}",
-            code="DEBUG_ERROR"
-        )
-
-
-@frappe.whitelist()
-def simple_test():
-    """Simple test function to check if API is working"""
-    try:
-        # Just return success
-        return success_response(
-            data={"test": "ok"},
-            message="API is working"
-        )
-    except Exception as e:
-        return error_response(
-            message=f"Test failed: {str(e)}",
-            code="TEST_ERROR"
-        )
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
