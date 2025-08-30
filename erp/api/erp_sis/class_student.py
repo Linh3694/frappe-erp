@@ -72,7 +72,7 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             current_page=page,
             total_count=total_count,
             per_page=limit,
-            message="Class students fetched successfully"
+            message="Class students fetched successfullyyyyyyyy"
         )
         
     except Exception as e:
