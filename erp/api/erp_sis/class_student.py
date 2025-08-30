@@ -31,14 +31,14 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
 
         frappe.logger().info(f"Filters before campus: {filters}")
 
-        # TEMP: Disable campus filter for debugging
-        # from erp.utils.campus_utils import get_current_campus_from_context
-        # campus_id = get_current_campus_from_context()
-        # if campus_id:
-        #     filters['campus_id'] = campus_id
-        #     frappe.logger().info(f"Adding campus filter: {campus_id}")
-        # else:
-        frappe.logger().info("Campus filter temporarily disabled for debugging")
+        # Get campus filter from context
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+        if campus_id:
+            filters['campus_id'] = campus_id
+            frappe.logger().info(f"Adding campus filter: {campus_id}")
+        else:
+            frappe.logger().info("No campus context found")
 
         frappe.logger().info(f"Final filters: {filters}")
         
@@ -59,10 +59,18 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         )
 
         frappe.logger().info(f"Query result count: {len(class_students)}")
+        frappe.logger().info(f"Total count from db.count: {total_count}")
         if class_students:
             frappe.logger().info(f"First record class_id: {class_students[0].get('class_id')}")
             frappe.logger().info(f"All class_ids in result: {[r.get('class_id') for r in class_students]}")
+            frappe.logger().info(f"All campus_ids in result: {[r.get('campus_id') for r in class_students]}")
             frappe.logger().info(f"Sample records: {class_students[:2]}")
+        else:
+            frappe.logger().info("No records found in main query")
+
+        # Double-check the actual database state
+        actual_count = frappe.db.count("SIS Class Student", filters=filters)
+        frappe.logger().info(f"Double-check actual count: {actual_count}")
 
         # Test query without campus filter to see if that's the issue
         if class_id:
