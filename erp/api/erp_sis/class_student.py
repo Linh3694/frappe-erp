@@ -166,6 +166,22 @@ def debug_class_students():
         )
 
 
+@frappe.whitelist(allow_guest=False)
+def simple_test():
+    """Simple test function to check if API is working"""
+    try:
+        # Just return success
+        return success_response(
+            data={"test": "ok"},
+            message="API is working"
+        )
+    except Exception as e:
+        return error_response(
+            message=f"Test failed: {str(e)}",
+            code="TEST_ERROR"
+        )
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def assign_student(class_id=None, student_id=None, school_year_id=None, class_type="regular"):
     """Assign a student to a class"""
