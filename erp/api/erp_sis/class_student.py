@@ -31,12 +31,14 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
 
         frappe.logger().info(f"Filters before campus: {filters}")
 
-        # Get campus filter from context
-        from erp.utils.campus_utils import get_current_campus_from_context
-        campus_id = get_current_campus_from_context()
-        if campus_id:
-            filters['campus_id'] = campus_id
-            frappe.logger().info(f"Adding campus filter: {campus_id}")
+        # TEMP: Disable campus filter for debugging
+        # from erp.utils.campus_utils import get_current_campus_from_context
+        # campus_id = get_current_campus_from_context()
+        # if campus_id:
+        #     filters['campus_id'] = campus_id
+        #     frappe.logger().info(f"Adding campus filter: {campus_id}")
+        # else:
+        frappe.logger().info("Campus filter temporarily disabled for debugging")
 
         frappe.logger().info(f"Final filters: {filters}")
         
@@ -94,10 +96,30 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def debug_class_students(class_id=None):
     """Debug function to check class students data"""
     try:
+        # Try to get class_id from various sources
+        if not class_id:
+            class_id = frappe.local.form_dict.get("class_id")
+
+        if not class_id:
+            # Try from request JSON body
+            try:
+                if frappe.request.data:
+                    import json
+                    json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                    class_id = json_data.get('class_id')
+            except Exception:
+                pass
+
+        if not class_id:
+            frappe.logger().info(f"Debug: No class_id found. form_dict: {frappe.local.form_dict}, request_data: {frappe.request.data}")
+            # Try from URL parameters for GET requests
+            class_id = frappe.local.form_dict.get("class_id")
+            frappe.logger().info(f"Debug: Trying class_id from form_dict: {class_id}")
+
         if not class_id:
             return error_response("class_id is required")
 
