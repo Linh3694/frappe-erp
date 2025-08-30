@@ -42,11 +42,7 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         if campus_id:
             filters['campus_id'] = campus_id
 
-        # Debug logging
-        print(f"DEBUG: get_all_class_students filters: {filters}")
-        print(f"DEBUG: Parameters - page: {page}, limit: {limit}, school_year_id: {school_year_id}, class_id: {class_id}, campus_id: {campus_id}")
-        frappe.logger().info(f"get_all_class_students filters: {filters}")
-        frappe.logger().info(f"Parameters - page: {page}, limit: {limit}, school_year_id: {school_year_id}, class_id: {class_id}, campus_id: {campus_id}")
+
 
         # Calculate offset
         offset = (page - 1) * limit
@@ -64,13 +60,7 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             limit_page_length=limit
         )
 
-        # Debug logging for results
-        print(f"DEBUG: get_all_class_students returned {len(class_students)} records")
-        if class_students:
-            print(f"DEBUG: Sample class_ids: {[cs.get('class_id') for cs in class_students[:3]]}")
-        frappe.logger().info(f"get_all_class_students returned {len(class_students)} records")
-        if class_students:
-            frappe.logger().info(f"Sample class_ids: {[cs.get('class_id') for cs in class_students[:3]]}")
+
         
         # Get total count
         total_count = frappe.db.count("SIS Class Student", filters=filters)
@@ -78,29 +68,13 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         # Calculate pagination
         total_pages = (total_count + limit - 1) // limit
 
-        # Create response with debug info
-
-        response_data = {
-            "success": True,
-            "message": "Class students fetched successfully",
-            "data": class_students,
-            "pagination": {
-                "current_page": page,
-                "per_page": limit,
-                "total": total_count,
-                "total_pages": total_pages
-            },
-            "debug_info": {
-                "requested_class_id": class_id,
-                "requested_school_year_id": school_year_id,
-                "applied_filters": filters,
-                "campus_id": campus_id,
-                "returned_records": len(class_students),
-                "unique_class_ids": list(set([cs.get('class_id') for cs in class_students])) if class_students else []
-            }
-        }
-
-        return response_data
+        return paginated_response(
+            data=class_students,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Class students fetched successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error getting class students: {str(e)}")
@@ -148,8 +122,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
             except:
                 pass
 
-        # Debug logging
-        frappe.logger().info(f"Final parameters - class_id={class_id}, student_id={student_id}, school_year_id={school_year_id}, class_type={class_type}")
+
         
         # Validate required parameters
         if not class_id or not student_id or not school_year_id:
