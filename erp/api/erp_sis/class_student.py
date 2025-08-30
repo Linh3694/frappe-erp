@@ -96,67 +96,57 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         )
 
 
-@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
-def debug_class_students(class_id=None):
-    """Debug function to check class students data"""
+@frappe.whitelist(allow_guest=False)
+def debug_class_students():
+    """Simple debug function to check class students data"""
     try:
-        # Try to get class_id from various sources
-        if not class_id:
-            class_id = frappe.local.form_dict.get("class_id")
+        # Get class_id from query parameters directly
+        import urllib.parse
+        query_string = frappe.local.request.query_string
+        frappe.logger().info(f"Debug: Raw query_string: {query_string}")
+
+        if query_string:
+            parsed_params = urllib.parse.parse_qs(query_string.decode('utf-8'))
+            class_id = parsed_params.get('class_id', [None])[0]
+            frappe.logger().info(f"Debug: Parsed class_id: {class_id}")
+        else:
+            class_id = None
 
         if not class_id:
-            # Try from request JSON body
-            try:
-                if frappe.request.data:
-                    import json
-                    json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                    class_id = json_data.get('class_id')
-            except Exception:
-                pass
-
-        if not class_id:
-            frappe.logger().info(f"Debug: No class_id found. form_dict: {frappe.local.form_dict}, request_data: {frappe.request.data}")
-            # Try from URL parameters for GET requests
-            class_id = frappe.local.form_dict.get("class_id")
-            frappe.logger().info(f"Debug: Trying class_id from form_dict: {class_id}")
-
-        if not class_id:
+            frappe.logger().info("Debug: No class_id found in query string")
             return error_response("class_id is required")
 
         # Check all records for this class_id
         all_records = frappe.get_all(
             "SIS Class Student",
             filters={'class_id': class_id},
-            fields=["name", "class_id", "student_id"]
+            fields=["name", "class_id", "student_id", "campus_id", "creation"]
         )
 
-        # Check total count
-        total_count = len(all_records)
+        # Check records without campus filter
+        all_records_no_campus = frappe.get_all(
+            "SIS Class Student",
+            filters={'class_id': class_id},
+            fields=["name", "class_id", "student_id", "campus_id", "creation"]
+        )
 
-        # Check records with campus filter
-        from erp.utils.campus_utils import get_current_campus_from_context
-        campus_id = get_current_campus_from_context()
-
-        campus_records = []
-        if campus_id:
-            campus_records = frappe.get_all(
-                "SIS Class Student",
-                filters={'class_id': class_id, 'campus_id': campus_id},
-                fields=["name", "class_id", "student_id", "campus_id"]
-            )
-
-        return {
-            "class_id_requested": class_id,
-            "current_campus": campus_id,
-            "total_records_without_campus_filter": total_count,
-            "records_without_campus_filter": all_records,
-            "total_records_with_campus_filter": len(campus_records),
-            "records_with_campus_filter": campus_records
-        }
+        return success_response(
+            data={
+                "class_id_requested": class_id,
+                "total_records_without_campus_filter": len(all_records_no_campus),
+                "total_records_with_campus_filter": len(all_records),
+                "records_without_campus_filter": all_records_no_campus[:5],  # First 5 records
+                "records_with_campus_filter": all_records[:5]
+            },
+            message="Debug data retrieved successfully"
+        )
 
     except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Debug Class Students Error")
-        return error_response(f"Error: {str(e)}")
+        frappe.log_error(f"Error in debug_class_students: {str(e)}")
+        return error_response(
+            message=f"Error in debug: {str(e)}",
+            code="DEBUG_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
