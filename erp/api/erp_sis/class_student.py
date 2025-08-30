@@ -38,7 +38,7 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             filters['campus_id'] = campus_id
             frappe.logger().info(f"Adding campus filter: {campus_id}")
         else:
-            frappe.logger().info("No campus context found")
+            frappe.logger().info("No campus context found - querying without campus filter")
 
         frappe.logger().info(f"Final filters: {filters}")
         
@@ -81,6 +81,15 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             if test_count > 0:
                 test_records = frappe.get_all("SIS Class Student", filters=test_filters, limit=5)
                 frappe.logger().info(f"Test query records: {[r.get('class_id') for r in test_records]}")
+
+        # If no records found, try query without any filters to check if table has data
+        if actual_count == 0:
+            total_count_all = frappe.db.count("SIS Class Student")
+            frappe.logger().info(f"Total records in SIS Class Student table: {total_count_all}")
+
+            if total_count_all > 0:
+                sample_records = frappe.get_all("SIS Class Student", limit=3)
+                frappe.logger().info(f"Sample records from table: {sample_records}")
         
         # Get total count
         total_count = frappe.db.count("SIS Class Student", filters=filters)
