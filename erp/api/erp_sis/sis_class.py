@@ -444,6 +444,11 @@ def create_class():
         # Sanitize select-type fields to avoid validation edge-cases
         raw_academic_level = (data.get("academic_level") or "").strip()
         raw_class_type = (data.get("class_type") or "").strip()
+
+        print(f"Received academic_level from frontend: '{raw_academic_level}'")
+        print(f"Academic_level type: {type(raw_academic_level)}")
+        print(f"Academic_level length: {len(raw_academic_level) if raw_academic_level else 0}")
+        # Only set academic_level in payload if it's a valid single value
         payload = {
             "doctype": "SIS Class",
             "title": data.get("title"),
@@ -458,23 +463,19 @@ def create_class():
             "start_date": data.get("start_date"),
             "end_date": data.get("end_date"),
         }
+
+        # Set academic_level in payload only if it's a valid single value
+        if raw_academic_level and raw_academic_level in ["Level 1", "Level 2", "Level 3", "Level 4"]:
+            payload["academic_level"] = raw_academic_level
+            print(f"Including academic_level in payload: '{raw_academic_level}'")
+        else:
+            print(f"Not including academic_level in payload: '{raw_academic_level}'")
         doc = frappe.get_doc(payload)
         doc.flags.ignore_validate = True
         doc.insert(ignore_permissions=True)
-        # Set academic_level after insert to bypass strict Select validation differences
-        try:
-            if raw_academic_level:
-                allowed = ["Level 1", "Level 2", "Level 3", "Level 4"]
-                if raw_academic_level not in allowed:
-                    # attempt case-insensitive match
-                    for opt in allowed:
-                        if opt.lower() == raw_academic_level.lower():
-                            raw_academic_level = opt
-                            break
-                frappe.db.set_value("SIS Class", doc.name, "academic_level", raw_academic_level)
-        except Exception:
-            pass
-        # Normalize class_type as well
+
+        print(f"Document created with academic_level in payload: '{payload.get('academic_level')}'")
+        print(f"Document after insert has academic_level: '{doc.academic_level}'")
         try:
             if raw_class_type:
                 allowed_ct = ["regular", "mixed"]
@@ -601,6 +602,7 @@ def create_class():
                         except Exception:
                             pass
 
+        print(f"Final response academic_level: '{response_data.get('academic_level')}'")
         return single_item_response(response_data, "Class created successfully")
     except Exception as e:
         frappe.log_error(f"Error creating class: {str(e)}")
