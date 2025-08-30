@@ -30,10 +30,14 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         campus_id = get_current_campus_from_context()
         if campus_id:
             filters['campus_id'] = campus_id
-        
+
+        # Debug logging
+        frappe.logger().info(f"get_all_class_students filters: {filters}")
+        frappe.logger().info(f"Parameters - page: {page}, limit: {limit}, school_year_id: {school_year_id}, class_id: {class_id}, campus_id: {campus_id}")
+
         # Calculate offset
         offset = (page - 1) * limit
-        
+
         # Get class students
         class_students = frappe.get_all(
             "SIS Class Student",
@@ -46,6 +50,11 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             limit_start=offset,
             limit_page_length=limit
         )
+
+        # Debug logging for results
+        frappe.logger().info(f"get_all_class_students returned {len(class_students)} records")
+        if class_students:
+            frappe.logger().info(f"Sample class_ids: {[cs.get('class_id') for cs in class_students[:3]]}")
         
         # Get total count
         total_count = frappe.db.count("SIS Class Student", filters=filters)
