@@ -66,14 +66,30 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         
         # Calculate pagination
         total_pages = (total_count + limit - 1) // limit
-        
-        return paginated_response(
-            data=class_students,
-            current_page=page,
-            total_count=total_count,
-            per_page=limit,
-            message="Class students fetched successfullyyyyyyyy"
-        )
+
+        # Create response with debug info
+
+        response_data = {
+            "success": True,
+            "message": "Class students fetched successfully",
+            "data": class_students,
+            "pagination": {
+                "current_page": page,
+                "per_page": limit,
+                "total": total_count,
+                "total_pages": total_pages
+            },
+            "debug_info": {
+                "requested_class_id": class_id,
+                "requested_school_year_id": school_year_id,
+                "applied_filters": filters,
+                "campus_id": campus_id,
+                "returned_records": len(class_students),
+                "unique_class_ids": list(set([cs.get('class_id') for cs in class_students])) if class_students else []
+            }
+        }
+
+        return response_data
         
     except Exception as e:
         frappe.log_error(f"Error getting class students: {str(e)}")
