@@ -113,7 +113,7 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist()
 def debug_class_students():
     """Simple debug function to check class students data"""
     try:
@@ -166,7 +166,7 @@ def debug_class_students():
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist()
 def simple_test():
     """Simple test function to check if API is working"""
     try:
