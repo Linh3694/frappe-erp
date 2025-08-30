@@ -102,7 +102,7 @@
    "fieldname": "academic_level",
    "fieldtype": "Select",
    "label": "Academic Level",
-   "options": "Level 1\\nLevel 2\\nLevel 3\\nLevel 4"
+   "options": "Level 1\nLevel 2\nLevel 3\nLevel 4"
   }
   ,
   {
