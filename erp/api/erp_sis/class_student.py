@@ -17,13 +17,18 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
     try:
         page = int(page)
         limit = int(limit)
-        
+
+        # Debug logging
+        frappe.logger().info(f"get_all_class_students called with: page={page}, limit={limit}, school_year_id={school_year_id}, class_id={class_id}")
+
         # Build filters
         filters = {}
         if school_year_id:
             filters['school_year_id'] = school_year_id
         if class_id:
             filters['class_id'] = class_id
+
+        frappe.logger().info(f"Applied filters: {filters}")
             
         # Get campus filter from context
         from erp.utils.campus_utils import get_current_campus_from_context
@@ -39,13 +44,18 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
             "SIS Class Student",
             filters=filters,
             fields=[
-                "name", "class_id", "student_id", "school_year_id", 
+                "name", "class_id", "student_id", "school_year_id",
                 "class_type", "campus_id", "creation", "modified"
             ],
             order_by="creation desc",
             limit_start=offset,
             limit_page_length=limit
         )
+
+        frappe.logger().info(f"Query result count: {len(class_students)}")
+        if class_students:
+            frappe.logger().info(f"First record class_id: {class_students[0].get('class_id')}")
+            frappe.logger().info(f"Sample records: {class_students[:2]}")
         
         # Get total count
         total_count = frappe.db.count("SIS Class Student", filters=filters)
