@@ -172,3 +172,18 @@ def sis_class_student_query(user):
 def sis_photo_query(user):
     """Permission query for SIS Photo"""
     return get_campus_permission_query("SIS Photo", user)
+
+
+def sis_timetable_instance_row_query(user):
+    """Permission query for SIS Timetable Instance Row"""
+    return get_campus_permission_query("SIS Timetable Instance Row", user)
+
+
+def sis_teacher_timetable_query(user):
+    """Permission query for SIS Teacher Timetable"""
+    return get_campus_permission_query("SIS Teacher Timetable", user)
+
+
+def sis_timetable_override_query(user):
+    """Permission query for SIS Timetable Override"""
+    return get_campus_permission_query("SIS Timetable Override", user)

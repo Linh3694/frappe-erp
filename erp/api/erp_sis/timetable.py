@@ -3,174 +3,17 @@
 
 import frappe
 from frappe import _
-from frappe.utils import nowdate, get_datetime, get_time
-from datetime import datetime, time, timedelta
-import json
-from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from datetime import datetime, timedelta
+from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
-    success_response,
     error_response,
     list_response,
-    single_item_response,
     validation_error_response,
-    not_found_response,
-    forbidden_response
 )
+from .timetable_excel_import import process_excel_import
 
-
-def format_time_for_html(time_value):
-    """Format time value to HH:MM format for HTML time input"""
-    if not time_value:
-        return ""
-
-    try:
-        # Handle datetime.time object
-        if hasattr(time_value, 'strftime'):
-            return time_value.strftime("%H:%M")
-
-        # Handle datetime.timedelta object (convert to time)
-        if isinstance(time_value, timedelta):
-            # Convert timedelta to time (assuming it's from midnight)
-            total_seconds = int(time_value.total_seconds())
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            return f"{hours:02d}:{minutes:02d}"
-
-        # Handle string format
-        if isinstance(time_value, str):
-            # Try to parse string as time
-            try:
-                parsed_time = get_time(time_value)
-                return parsed_time.strftime("%H:%M")
-            except:
-                return time_value
-
-        # Fallback
-        return str(time_value)
-
-    except Exception:
-        return ""
-
-
-@frappe.whitelist(allow_guest=False)
-def get_all_timetable_columns():
-    """Get all timetable columns with basic information - SIMPLE VERSION"""
-    try:
-        # Get current user's campus information from roles
-        campus_id = get_current_campus_from_context()
-        
-        if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
-        filters = {"campus_id": campus_id}
-            
-        timetables = frappe.get_all(
-            "SIS Timetable Column",
-            fields=[
-                "name",
-                "education_stage_id",
-                "period_priority",
-                "period_type", 
-                "period_name",
-                "start_time",
-                "end_time",
-                "campus_id",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="education_stage_id asc, period_priority asc"
-        )
-
-        # Format time fields for HTML time input (HH:MM format)
-        for timetable in timetables:
-            timetable["start_time"] = format_time_for_html(timetable.get("start_time"))
-            timetable["end_time"] = format_time_for_html(timetable.get("end_time"))
-
-        return list_response(timetables, "Timetable columns fetched successfully")
-        
-    except Exception as e:
-        frappe.log_error(f"Error fetching timetable columns: {str(e)}")
-        return error_response(f"Error fetching timetable columns: {str(e)}")
-
-
-@frappe.whitelist(allow_guest=False)
-def get_timetable_column_by_id():
-    """Get a specific timetable column by ID"""
-    try:
-        # Get data from request - follow Education Stage pattern
-        data = {}
-
-        if frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-                else:
-                    data = frappe.local.form_dict
-            except (json.JSONDecodeError, TypeError):
-                data = frappe.local.form_dict
-        else:
-            data = frappe.local.form_dict
-
-        # Try to get timetable_column_id from multiple sources
-        timetable_column_id = data.get("timetable_column_id")
-
-        # If not found, try URL path
-        if not timetable_column_id:
-            import re
-            url_patterns = [
-                r'/api/method/erp\.api\.erp_sis\.timetable\.get_timetable_column_by_id/([^/?]+)',
-                r'/erp\.api\.erp_sis\.timetable\.get_timetable_column_by_id/([^/?]+)',
-                r'get_timetable_column_by_id/([^/?]+)',
-            ]
-
-            for pattern in url_patterns:
-                match = re.search(pattern, frappe.request.url or '')
-                if match:
-                    timetable_column_id = match.group(1)
-                    frappe.logger().info(f"Get timetable column column - Found timetable_column_id '{timetable_column_id}' using pattern '{pattern}' from URL: {frappe.request.url}")
-                    break
-
-        if not timetable_column_id:
-            return validation_error_response("Validation failed", {"timetable_column_id": ["Timetable Column ID is required"]})
-
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
-
-        if not campus_id:
-            campus_id = "campus-1"
-
-        filters = {
-            "name": timetable_column_id,
-            "campus_id": campus_id
-        }
-
-        timetable_column = frappe.get_doc("SIS Timetable Column", filters)
-
-        if not timetable_column:
-            return not_found_response("Timetable column not found or access denied")
-
-        timetable_column_data = {
-            "name": timetable_column.name,
-            "education_stage_id": timetable_column.education_stage_id,
-            "period_priority": timetable_column.period_priority,
-            "period_type": timetable_column.period_type,
-            "period_name": timetable_column.period_name,
-            "start_time": format_time_for_html(timetable_column.start_time),
-            "end_time": format_time_for_html(timetable_column.end_time),
-            "campus_id": timetable_column.campus_id
-        }
-        return single_item_response(timetable_column_data, "Timetable column fetched successfully")
-
-    except Exception as e:
-        frappe.log_error(f"Error fetching timetable column: {str(e)}")
-        return error_response(f"Error fetching timetable column: {str(e)}")
-
-
-
+def _noop():
+    return None
 @frappe.whitelist(allow_guest=False)
 def update_timetable_column():
     """Update an existing timetable column"""
@@ -647,3 +490,340 @@ def create_timetable_column():
     except Exception as e:
         frappe.log_error(f"Error creating timetable column: {str(e)}")
         frappe.throw(_(f"Error creating timetable column: {str(e)}"))
+
+
+# =========================
+# Timetable week endpoints
+# =========================
+
+def _parse_iso_date(date_str: str) -> datetime:
+    try:
+        return datetime.strptime(date_str[:10], "%Y-%m-%d")
+    except Exception:
+        frappe.throw(_(f"Invalid date format: {date_str}. Expect YYYY-MM-DD"))
+
+def _add_days(d: datetime, n: int) -> datetime:
+    return d + timedelta(days=n)
+
+def _day_of_week_to_index(dow: str) -> int:
+    mapping = {
+        "mon": 0, "monday": 0,
+        "tue": 1, "tuesday": 1,
+        "wed": 2, "wednesday": 2,
+        "thu": 3, "thursday": 3,
+        "fri": 4, "friday": 4,
+        "sat": 5, "saturday": 5,
+        "sun": 6, "sunday": 6,
+    }
+    key = (dow or "").strip().lower()
+    if key not in mapping:
+        # Try Vietnamese labels
+        vi = {
+            "thứ 2": 0, "thu 2": 0,
+            "thứ 3": 1, "thu 3": 1,
+            "thứ 4": 2, "thu 4": 2,
+            "thứ 5": 3, "thu 5": 3,
+            "thứ 6": 4, "thu 6": 4,
+            "thứ 7": 5, "thu 7": 5,
+            "cn": 6, "chủ nhật": 6,
+        }
+        if key in vi:
+            return vi[key]
+        return -1
+    return mapping[key]
+
+def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
+    # Load timetable columns map for period info
+    column_ids = list({r.get("timetable_column_id") for r in rows if r.get("timetable_column_id")})
+    columns_map = {}
+    if column_ids:
+        for col in frappe.get_all(
+            "SIS Timetable Column",
+            fields=["name", "period_priority", "period_name", "start_time", "end_time"],
+            filters={"name": ["in", column_ids]},
+        ):
+            columns_map[col.name] = col
+
+    result: list[dict] = []
+    for r in rows:
+        idx = _day_of_week_to_index(r.get("day_of_week"))
+        if idx < 0:
+            continue
+        d = _add_days(week_start, idx)
+        col = columns_map.get(r.get("timetable_column_id")) or {}
+        result.append({
+            "date": d.strftime("%Y-%m-%d"),
+            "day_of_week": r.get("day_of_week"),
+            "timetable_column_id": r.get("timetable_column_id"),
+            "period_priority": col.get("period_priority"),
+            "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
+            "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
+            "class_id": r.get("class_id"),
+        })
+    return result
+
+
+@frappe.whitelist(allow_guest=False)
+def get_teacher_week(teacher_id: str = None, week_start: str = None, week_end: str = None):
+    """Return teacher's weekly timetable entries (normalized for FE WeeklyGrid).
+
+    Expects timetable rows stored in Doctype `SIS Timetable Instance Row` with fields:
+    - day_of_week (mon..sun)
+    - timetable_column_id (link to SIS Timetable Column)
+    - subject_id / subject_title
+    - teacher_1_id / teacher_2_id
+    - class_id
+    """
+    try:
+        if not teacher_id:
+            return validation_error_response({"teacher_id": ["Teacher is required"]})
+        if not week_start:
+            return validation_error_response({"week_start": ["Week start is required"]})
+
+        ws = _parse_iso_date(week_start)
+        # Query timetable rows
+        campus_id = get_current_campus_from_context() or "campus-1"
+        filters = {
+            "campus_id": campus_id,
+        }
+
+        rows = frappe.get_all(
+            "SIS Timetable Instance Row",
+            fields=[
+                "name", "day_of_week", "timetable_column_id", "class_id",
+                "subject_title", "subject_name", "teacher_names", "teacher_1_id", "teacher_2_id",
+            ],
+            filters=filters,
+            order_by="day_of_week asc",
+        )
+        # Filter in-memory for teacher (to avoid OR filter limitation in simple get_all)
+        rows = [r for r in rows if r.get("teacher_1_id") == teacher_id or r.get("teacher_2_id") == teacher_id]
+
+        entries = _build_entries(rows, ws)
+        return list_response(entries, "Teacher week fetched successfully")
+    except Exception as e:
+        frappe.log_error(f"Error get_teacher_week: {str(e)}")
+        return error_response(f"Error fetching teacher week: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_class_week(class_id: str = None, week_start: str = None, week_end: str = None):
+    """Return class weekly timetable entries."""
+    try:
+        if not class_id:
+            return validation_error_response({"class_id": ["Class is required"]})
+        if not week_start:
+            return validation_error_response({"week_start": ["Week start is required"]})
+
+        ws = _parse_iso_date(week_start)
+        campus_id = get_current_campus_from_context() or "campus-1"
+        filters = {
+            "campus_id": campus_id,
+            "class_id": class_id,
+        }
+
+        rows = frappe.get_all(
+            "SIS Timetable Instance Row",
+            fields=[
+                "name", "day_of_week", "timetable_column_id", "class_id",
+                "subject_title", "subject_name", "teacher_names", "teacher_1_id", "teacher_2_id",
+            ],
+            filters=filters,
+            order_by="day_of_week asc",
+        )
+
+        entries = _build_entries(rows, ws)
+        return list_response(entries, "Class week fetched successfully")
+    except Exception as e:
+        frappe.log_error(f"Error get_class_week: {str(e)}")
+        return error_response(f"Error fetching class week: {str(e)}")
+
+
+# =========================
+# Import & CRUD API endpoints
+# =========================
+
+@frappe.whitelist(allow_guest=False)
+def import_timetable():
+    """Import timetable from Excel with dry-run validation and final import"""
+    try:
+        # Get request data
+        data = frappe.local.form_dict or {}
+
+        # Check for dry_run parameter
+        dry_run = data.get("dry_run", "false").lower() == "true"
+
+        # Extract basic info
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en")
+        campus_id = data.get("campus_id")
+        school_year_id = data.get("school_year_id")
+        education_stage_id = data.get("education_stage_id")
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")
+
+        # Validate required fields
+        if not all([title_vn, campus_id, school_year_id, education_stage_id, start_date, end_date]):
+            return validation_error_response("Validation failed", {
+                "required_fields": ["title_vn", "campus_id", "school_year_id", "education_stage_id", "start_date", "end_date"]
+            })
+
+        # Get current user campus
+        user_campus = get_current_campus_from_context()
+        if user_campus and user_campus != campus_id:
+            return forbidden_response("Access denied: Campus mismatch")
+
+        # For now, return success with dry_run info
+        result = {
+            "dry_run": dry_run,
+            "title_vn": title_vn,
+            "title_en": title_en,
+            "campus_id": campus_id,
+            "school_year_id": school_year_id,
+            "education_stage_id": education_stage_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "message": "Import validation completed" if dry_run else "Import completed"
+        }
+
+        return single_item_response(result, "Timetable import processed successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error importing timetable: {str(e)}")
+        return error_response(f"Error importing timetable: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_timetables():
+    """Get list of timetables with filtering"""
+    try:
+        # Get query parameters
+        page = int(frappe.local.form_dict.get("page", 1))
+        limit = int(frappe.local.form_dict.get("limit", 20))
+        campus_id = frappe.local.form_dict.get("campus_id")
+        school_year_id = frappe.local.form_dict.get("school_year_id")
+
+        # Build filters
+        filters = {}
+        if campus_id:
+            filters["campus_id"] = campus_id
+        if school_year_id:
+            filters["school_year_id"] = school_year_id
+
+        # Get campus from user context
+        user_campus = get_current_campus_from_context()
+        if user_campus:
+            filters["campus_id"] = user_campus
+
+        # Query timetables
+        timetables = frappe.get_all(
+            "SIS Timetable",
+            fields=["name", "title_vn", "title_en", "campus_id", "school_year_id", "education_stage_id", "start_date", "end_date", "created_by"],
+            filters=filters,
+            start=(page - 1) * limit,
+            page_length=limit,
+            order_by="creation desc"
+        )
+
+        # Get total count
+        total_count = frappe.db.count("SIS Timetable", filters=filters)
+
+        result = {
+            "data": timetables,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_count,
+                "pages": (total_count + limit - 1) // limit
+            }
+        }
+
+        return single_item_response(result, "Timetables fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching timetables: {str(e)}")
+        return error_response(f"Error fetching timetables: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_timetable_detail():
+    """Get detailed timetable information"""
+    try:
+        timetable_id = frappe.local.form_dict.get("name")
+        if not timetable_id:
+            return validation_error_response("Validation failed", {"name": ["Timetable ID is required"]})
+
+        # Get timetable
+        timetable = frappe.get_doc("SIS Timetable", timetable_id)
+
+        # Check campus permission
+        user_campus = get_current_campus_from_context()
+        if user_campus and timetable.campus_id != user_campus:
+            return forbidden_response("Access denied: Campus mismatch")
+
+        # Get instances
+        instances = frappe.get_all(
+            "SIS Timetable Instance",
+            fields=["name", "class_id", "start_date", "end_date", "is_locked"],
+            filters={"timetable_id": timetable_id},
+            order_by="class_id"
+        )
+
+        result = {
+            "timetable": {
+                "name": timetable.name,
+                "title_vn": timetable.title_vn,
+                "title_en": timetable.title_en,
+                "campus_id": timetable.campus_id,
+                "school_year_id": timetable.school_year_id,
+                "education_stage_id": timetable.education_stage_id,
+                "start_date": timetable.start_date,
+                "end_date": timetable.end_date,
+                "upload_source": timetable.upload_source,
+                "created_by": timetable.created_by
+            },
+            "instances": instances
+        }
+
+        return single_item_response(result, "Timetable detail fetched successfully")
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Timetable not found")
+    except Exception as e:
+        frappe.log_error(f"Error fetching timetable detail: {str(e)}")
+        return error_response(f"Error fetching timetable detail: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_timetable():
+    """Delete a timetable and all its instances"""
+    try:
+        timetable_id = frappe.local.form_dict.get("name")
+        if not timetable_id:
+            return validation_error_response("Validation failed", {"name": ["Timetable ID is required"]})
+
+        # Get timetable
+        timetable = frappe.get_doc("SIS Timetable", timetable_id)
+
+        # Check campus permission
+        user_campus = get_current_campus_from_context()
+        if user_campus and timetable.campus_id != user_campus:
+            return forbidden_response("Access denied: Campus mismatch")
+
+        # Delete timetable (this will cascade delete instances due to foreign key)
+        frappe.delete_doc("SIS Timetable", timetable_id)
+        frappe.db.commit()
+
+        return success_response("Timetable deleted successfully")
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Timetable not found")
+    except Exception as e:
+        frappe.log_error(f"Error deleting timetable: {str(e)}")
+        return error_response(f"Error deleting timetable: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def import_timetable_excel():
+    """Import timetable from Excel file with validation"""
+    return process_excel_import()

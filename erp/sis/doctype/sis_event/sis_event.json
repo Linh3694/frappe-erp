@@ -22,6 +22,15 @@
   "description",
   "start_time",
   "end_time",
+  "timetable_column_id",
+  "participants_section",
+  "participants",
+  "workflow_section",
+  "status",
+  "homeroom_teacher_id",
+  "approved_at",
+  "approved_by",
+  "rejection_reason",
   "create_at",
   "create_by",
   "update_at",
@@ -65,6 +74,66 @@
    "fieldtype": "Datetime",
    "label": "End Time",
    "reqd": 1
+  },
+  {
+   "fieldname": "timetable_column_id",
+   "fieldtype": "Link",
+   "label": "Timetable Column",
+   "options": "SIS Timetable Column",
+   "description": "Specific period for this event"
+  },
+  {
+   "fieldname": "participants_section",
+   "fieldtype": "Section Break",
+   "label": "Participants"
+  },
+  {
+   "fieldname": "participants",
+   "fieldtype": "Table",
+   "label": "Participants",
+   "options": "SIS Event Student",
+   "description": "Students and teachers participating in this event"
+  },
+  {
+   "fieldname": "workflow_section",
+   "fieldtype": "Section Break",
+   "label": "Approval Workflow"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "pending\\napproved\\nrejected",
+   "default": "pending",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "homeroom_teacher_id",
+   "fieldtype": "Link",
+   "label": "Homeroom Teacher",
+   "options": "SIS Teacher",
+   "description": "Teacher responsible for approving this event"
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Approved At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "SIS Teacher",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejection_reason",
+   "fieldtype": "Text",
+   "label": "Rejection Reason",
+   "read_only": 1,
+   "depends_on": "eval:doc.status == 'rejected'"
   },
   {
    "fieldname": "create_at",

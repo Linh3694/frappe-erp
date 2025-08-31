@@ -127,7 +127,8 @@ def create_user_campus_permissions(user, campus):
         "SIS Campus", "SIS School Year", "SIS Education Stage", "SIS Education Grade",
         "SIS Academic Program", "SIS Timetable Subject", "SIS Curriculum", "SIS Actual Subject",
         "SIS Subject", "SIS Timetable Column", "SIS Calendar", "SIS Class", "SIS Teacher",
-        "SIS Subject Assignment", "SIS Timetable", "SIS Timetable Instance", "SIS Event",
+        "SIS Subject Assignment", "SIS Timetable", "SIS Timetable Instance", "SIS Timetable Instance Row",
+        "SIS Teacher Timetable", "SIS Timetable Override", "SIS Event",
         "SIS Event Student", "SIS Event Teacher", "SIS Student Timetable", "SIS Class Student",
         "SIS Photo"
     ]

@@ -5,11 +5,11 @@
  "allow_guest_to_view": 0,
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:SIS-STUDENT-TIMETABLE-{#####}",
+ "autoname": "format:SIS-TIMETABLE-INSTANCE-ROW-{#####}",
  "beta": 0,
- "creation": "2024-08-20 09:00:00.000000",
+ "creation": "2024-12-20 10:00:00.000000",
  "custom": 0,
- "description": "SIS Student Timetable - Materialized view for student schedules",
+ "description": "SIS Timetable Instance Row - Weekly pattern rows for timetable instances",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -17,16 +17,15 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
-  "student_id",
-  "class_id",
-  "timetable_instance_id",
+  "parent_timetable_instance",
   "day_of_week",
   "timetable_column_id",
+  "period_priority",
+  "period_name",
   "subject_id",
   "teacher_1_id",
   "teacher_2_id",
-  "room_id",
-  "date"
+  "room_id"
  ],
  "fields": [
   {
@@ -35,40 +34,39 @@
    "label": "Basic Information"
   },
   {
-   "fieldname": "student_id",
+   "fieldname": "parent_timetable_instance",
    "fieldtype": "Link",
-   "label": "Student",
-   "options": "SIS Student",
+   "label": "Parent Timetable Instance",
+   "options": "SIS Timetable Instance",
    "reqd": 1,
    "in_list_view": 1
-  },
-  {
-   "fieldname": "class_id",
-   "fieldtype": "Link",
-   "label": "Class",
-   "options": "SIS Class",
-   "reqd": 1
-  },
-  {
-   "fieldname": "timetable_instance_id",
-   "fieldtype": "Link",
-   "label": "Timetable Instance",
-   "options": "SIS Timetable Instance",
-   "reqd": 1
   },
   {
    "fieldname": "day_of_week",
    "fieldtype": "Select",
    "label": "Day of Week",
    "options": "mon\\ntue\\nwed\\nthu\\nfri\\nsat\\nsun",
-   "reqd": 1
+   "reqd": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "timetable_column_id",
    "fieldtype": "Link",
    "label": "Timetable Column",
    "options": "SIS Timetable Column",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "period_priority",
+   "fieldtype": "Int",
+   "label": "Period Priority",
    "reqd": 1
+  },
+  {
+   "fieldname": "period_name",
+   "fieldtype": "Data",
+   "label": "Period Name"
   },
   {
    "fieldname": "subject_id",
@@ -95,21 +93,15 @@
    "fieldtype": "Link",
    "label": "Room",
    "options": "ERP Administrative Room"
-  },
-  {
-   "fieldname": "date",
-   "fieldtype": "Date",
-   "label": "Date",
-   "reqd": 1
   }
  ],
  "index_web_pages_for_search": 1,
- "istable": 0,
+ "istable": 1,
  "links": [],
- "modified": "2024-08-20 09:00:00.000000",
+ "modified": "2024-12-20 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
- "name": "SIS Student Timetable",
+ "name": "SIS Timetable Instance Row",
  "owner": "Administrator",
  "permissions": [
   {
@@ -125,9 +117,9 @@
    "write": 1
   }
  ],
- "sort_field": "date",
+ "sort_field": "day_of_week",
  "sort_order": "ASC",
  "states": [],
- "title_field": "student_id",
+ "title_field": "day_of_week",
  "track_changes": 1
 }

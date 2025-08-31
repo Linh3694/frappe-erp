@@ -9,7 +9,7 @@
  "beta": 0,
  "creation": "2024-08-20 09:00:00.000000",
  "custom": 0,
- "description": "SIS Timetable Management",
+ "description": "SIS Timetable Header - Contains metadata for timetable imports",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -17,21 +17,36 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
+  "title_vn",
+  "title_en",
   "campus_id",
-  "class_id",
-  "subject_assignment_id",
-  "timetable_column_id",
-  "subject_id",
-  "day_of_week",
+  "school_year_id",
+  "education_stage_id",
   "start_date",
   "end_date",
-  "calendar_id"
+  "upload_source",
+  "created_by",
+  "instances_section",
+  "instances"
  ],
  "fields": [
   {
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
    "label": "Basic Information"
+  },
+  {
+   "fieldname": "title_vn",
+   "fieldtype": "Data",
+   "label": "Title (Vietnamese)",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "label": "Title (English)",
+   "in_list_view": 1
   },
   {
    "fieldname": "campus_id",
@@ -42,39 +57,17 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "class_id",
+   "fieldname": "school_year_id",
    "fieldtype": "Link",
-   "label": "Class",
-   "options": "SIS Class",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "subject_assignment_id",
-   "fieldtype": "Link",
-   "label": "Subject Assignment",
-   "options": "SIS Subject Assignment",
+   "label": "School Year",
+   "options": "SIS School Year",
    "reqd": 1
   },
   {
-   "fieldname": "timetable_column_id",
+   "fieldname": "education_stage_id",
    "fieldtype": "Link",
-   "label": "Timetable Column",
-   "options": "SIS Timetable Column",
-   "reqd": 1
-  },
-  {
-   "fieldname": "subject_id",
-   "fieldtype": "Link",
-   "label": "Subject",
-   "options": "SIS Subject",
-   "reqd": 1
-  },
-  {
-   "fieldname": "day_of_week",
-   "fieldtype": "Select",
-   "label": "Day of Week",
-   "options": "Monday\\nTuesday\\nWednesday\\nThursday\\nFriday\\nSaturday\\nSunday",
+   "label": "Education Stage",
+   "options": "SIS Education Stage",
    "reqd": 1
   },
   {
@@ -90,10 +83,30 @@
    "reqd": 1
   },
   {
-   "fieldname": "calendar_id",
+   "fieldname": "upload_source",
+   "fieldtype": "Data",
+   "label": "Upload Source",
+   "description": "File path of uploaded Excel file"
+  },
+  {
+   "fieldname": "created_by",
    "fieldtype": "Link",
-   "label": "Calendar",
-   "options": "SIS Calendar"
+   "label": "Created By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "instances_section",
+   "fieldtype": "Section Break",
+   "label": "Timetable Instances"
+  },
+  {
+   "fieldname": "instances",
+   "fieldtype": "Table",
+   "label": "Instances",
+   "options": "SIS Timetable Instance",
+   "read_only": 1,
+   "description": "Auto-generated instances per class after import"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -121,6 +134,6 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "class_id",
+ "title_field": "title_vn",
  "track_changes": 1
 }
