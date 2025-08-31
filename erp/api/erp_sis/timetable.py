@@ -648,16 +648,27 @@ def import_timetable():
     """Import timetable from Excel with dry-run validation and final import"""
     try:
         # Get request data - handle both FormData and regular form data
-        data = frappe.local.form_dict or {}
+        data = {}
 
         # Try different sources for FormData
-        if not data:
-            # Try frappe.request.form (for multipart/form-data)
-            if hasattr(frappe.request, 'form') and frappe.request.form:
-                data = frappe.request.form
+        if hasattr(frappe.request, 'form_data') and frappe.request.form_data:
+            # For werkzeug form data
+            data = frappe.request.form_data
+        elif hasattr(frappe.request, 'form') and frappe.request.form:
+            # For flask-style form data
+            data = frappe.request.form
+        elif frappe.local.form_dict:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+        elif hasattr(frappe.request, 'args') and frappe.request.args:
             # Try request args
-            elif hasattr(frappe.request, 'args') and frappe.request.args:
-                data = frappe.request.args
+            data = frappe.request.args
+
+        # Convert to dict if it's not already
+        if hasattr(data, 'to_dict'):
+            data = data.to_dict()
+        elif not isinstance(data, dict):
+            data = dict(data) if data else {}
 
         # Check for dry_run parameter
         dry_run = data.get("dry_run", "false").lower() == "true"
