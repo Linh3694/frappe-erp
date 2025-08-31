@@ -644,6 +644,11 @@ def get_class_week(class_id: str = None, week_start: str = None, week_end: str =
 # =========================
 
 @frappe.whitelist(allow_guest=False)
+def test_timetable_api():
+    """Test function to check if API is accessible"""
+    return {"success": True, "message": "Timetable API is working", "timestamp": str(frappe.utils.now())}
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
 def import_timetable():
     """Import timetable from Excel with dry-run validation and final import"""
     try:
