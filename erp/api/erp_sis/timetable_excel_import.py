@@ -162,33 +162,55 @@ class TimetableExcelImporter:
         return subject_id
 
     def validate_and_map_teacher(self, teacher_identifier: str) -> Optional[str]:
-        """Map teacher identifier (employee_code or full_name) to SIS Teacher"""
+        """Map teacher identifier to SIS Teacher via supported strategies.
+
+        Supported formats (in order):
+        - User email (User.name)
+        - User.full_name
+        - Legacy: SIS Teacher.employee_code (if field exists in future)
+        - Legacy: SIS Teacher.full_name (if field exists in future)
+        """
         if not teacher_identifier:
             return None
 
-        # Try employee_code first
-        teacher_id = self.get_or_cache_mapping(
-            "SIS Teacher",
-            "employee_code",
-            teacher_identifier,
-            {"campus_id": self.campus_id}
-        )
+        ident = str(teacher_identifier).strip()
 
-        if teacher_id:
-            return teacher_id
+        # Strategy 1: identify by User email (User.name)
+        try:
+            # In Frappe, User.name is the email
+            user_name = None
+            if "@" in ident:
+                user_name = frappe.db.get_value("User", {"name": ident}, "name")
+            if not user_name:
+                # Strategy 2: match by full_name
+                user_name = frappe.db.get_value("User", {"full_name": ident}, "name")
 
-        # Fallback to full_name match
-        teacher_id = self.get_or_cache_mapping(
-            "SIS Teacher",
-            "full_name",
-            teacher_identifier,
-            {"campus_id": self.campus_id}
-        )
+            if user_name:
+                teacher_docname = frappe.db.get_value(
+                    "SIS Teacher",
+                    {"user_id": user_name, "campus_id": self.campus_id},
+                    "name"
+                )
+                if teacher_docname:
+                    return teacher_docname
+        except Exception:
+            pass
 
-        if not teacher_id:
-            self.errors.append(f"Teacher '{teacher_identifier}' not found")
+        # Strategy 3/4: legacy fallbacks (only work if fields are added later)
+        for field in ("employee_code", "full_name"):
+            try:
+                teacher_docname = frappe.db.get_value(
+                    "SIS Teacher",
+                    {field: ident, "campus_id": self.campus_id},
+                    "name"
+                )
+                if teacher_docname:
+                    return teacher_docname
+            except Exception:
+                continue
 
-        return teacher_id
+        self.errors.append(f"Teacher '{ident}' not found")
+        return None
 
     def validate_and_map_period(self, period_str: str, education_stage_id: str) -> Optional[str]:
         """Map period to SIS Timetable Column"""
