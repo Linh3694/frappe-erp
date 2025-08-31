@@ -749,7 +749,7 @@ def get_class_week():
             rows = frappe.get_all(
                 "SIS Timetable Instance Row",
                 fields=basic_fields,
-                filters={"campus_id": campus_id},
+                filters=filters,  # Use the filters we already tested
                 limit=5  # Limit to see if basic query works
             )
             frappe.logger().info(f"Basic query successful, found {len(rows)} rows")
@@ -764,7 +764,7 @@ def get_class_week():
                     test_rows = frappe.get_all(
                         "SIS Timetable Instance Row",
                         fields=available_fields + [field],
-                        filters={"campus_id": campus_id},
+                        filters=filters,  # Use the tested filters
                         limit=1
                     )
                     available_fields.append(field)
@@ -776,7 +776,7 @@ def get_class_week():
             rows = frappe.get_all(
                 "SIS Timetable Instance Row",
                 fields=available_fields,
-                filters={"campus_id": campus_id},
+                filters=filters,  # Use the tested filters
                 order_by="day_of_week asc",
             )
             frappe.logger().info(f"Final query successful with fields: {available_fields}")
