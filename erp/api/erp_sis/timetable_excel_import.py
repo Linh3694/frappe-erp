@@ -336,6 +336,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
         frappe.logger().info(message)
         logs.append(f"{frappe.utils.now()}: {message}")
 
+    # Log that function was called
+    frappe.logger().info("=== FUNCTION process_excel_import_with_metadata_v2 CALLED ===")
+    frappe.logger().info(f"Import data received: {import_data}")
+
     try:
         log_message("=== Starting Excel Import Processing ===")
         log_message(f"Received import_data: {import_data}")
@@ -355,10 +359,13 @@ def process_excel_import_with_metadata_v2(import_data: dict):
         # Basic validation
         if not title_vn or not campus_id:
             log_message(f"Validation failed - missing title_vn or campus_id")
-            return validation_error_response("Validation failed", {
+            log_message("=== EARLY RETURN: Validation Failed ===")
+            error_response = validation_error_response("Validation failed", {
                 "missing_fields": ["title_vn", "campus_id"],
                 "logs": logs
             })
+            log_message(f"Error response type: {type(error_response)}")
+            return error_response
 
         # Check file exists using standard Python
         import os
@@ -507,7 +514,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
             log_message(f"Final result: {result}")
             log_message("=== Excel Import Processing Completed ===")
-            return single_item_response(result, "Timetable import processed successfully")
+            final_response = single_item_response(result, "Timetable import processed successfully")
+            log_message(f"Final response type: {type(final_response)}")
+            log_message(f"Final response keys: {final_response.keys() if isinstance(final_response, dict) else 'Not dict'}")
+            return final_response
 
         except Exception as e:
             log_message(f"Error processing Excel file: {str(e)}")

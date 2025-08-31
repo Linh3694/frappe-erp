@@ -933,12 +933,20 @@ def import_timetable():
 
             # Process the Excel import
             log_timetable_message("Starting Excel import processing")
+            log_timetable_message(f"Calling process_excel_import_with_metadata_v2 with: {import_data}")
             result = process_excel_import_with_metadata_v2(import_data)
+            log_timetable_message(f"process_excel_import_with_metadata_v2 returned: {type(result)}")
+            log_timetable_message(f"Result keys: {result.keys() if isinstance(result, dict) else 'Not dict'}")
 
             # Add logs to result if it's a dict
             if isinstance(result, dict) and 'data' in result:
                 if isinstance(result['data'], dict):
                     result['data']['logs'] = logs
+                    log_timetable_message("Successfully merged logs into result")
+                else:
+                    log_timetable_message("Result data is not a dict, cannot merge logs")
+            else:
+                log_timetable_message("Result structure unexpected, cannot merge logs")
 
             # Clean up temp file
             import os
@@ -946,6 +954,7 @@ def import_timetable():
                 os.remove(file_path)
                 log_timetable_message("Cleaned up temporary file")
 
+            log_timetable_message(f"About to return result with keys: {result.keys() if isinstance(result, dict) else 'Not dict'}")
             return result
         else:
             # No file uploaded, just validate metadata
