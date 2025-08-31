@@ -558,6 +558,9 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
 
     try:
         log_data_message(f"Processing Excel data for timetable: {timetable_id}")
+        log_data_message(f"DataFrame shape: {df.shape}")
+        log_data_message(f"DataFrame columns: {list(df.columns)}")
+        log_data_message(f"First 3 rows: {df.head(3).to_dict() if len(df) > 0 else 'No data'}")
 
         # Group data by week (assuming there's a 'Week' column or we calculate from dates)
         # For now, we'll assume all data belongs to the first week of the timetable
@@ -566,8 +569,10 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
         timetable_doc = frappe.get_doc("SIS Timetable", timetable_id)
         start_date = timetable_doc.start_date
         end_date = timetable_doc.end_date
+        log_data_message(f"Timetable dates: {start_date} to {end_date}")
 
         # Create timetable instance for the first week
+        log_data_message("Creating timetable instance...")
         instance_doc = frappe.get_doc({
             "doctype": "SIS Timetable Instance",
             "timetable_id": timetable_id,
@@ -575,10 +580,15 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
             "week_end_date": end_date,
             "campus_id": campus_id
         })
-        instance_doc.insert()
-        instance_id = instance_doc.name
 
-        log_data_message(f"Created timetable instance: {instance_id}")
+        try:
+            instance_doc.insert()
+            instance_id = instance_doc.name
+            log_data_message(f"Created timetable instance: {instance_id}")
+        except Exception as instance_error:
+            log_data_message(f"Error creating timetable instance: {str(instance_error)}")
+            frappe.logger().error(f"Instance creation error: {str(instance_error)}")
+            return 0  # Return 0 to indicate no rows processed
 
         # Process each row in Excel
         for index, row in df.iterrows():
@@ -625,6 +635,7 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
                     continue
 
                 # Create timetable instance row
+                log_data_message(f"Creating row for {mapped_day} {period} {class_name}")
                 row_doc = frappe.get_doc({
                     "doctype": "SIS Timetable Instance Row",
                     "timetable_instance_id": instance_id,
@@ -636,10 +647,15 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
                     "teacher_1_id": teacher_1_id,
                     "campus_id": campus_id
                 })
-                row_doc.insert()
 
-                success_count += 1
-                log_data_message(f"Created timetable row {success_count}: {mapped_day} {period} {class_name}")
+                try:
+                    row_doc.insert()
+                    success_count += 1
+                    log_data_message(f"Created timetable row {success_count}: {mapped_day} {period} {class_name}")
+                except Exception as row_error:
+                    log_data_message(f"Error creating row {index + 1}: {str(row_error)}")
+                    frappe.logger().error(f"Row creation error: {str(row_error)}")
+                    continue  # Continue to next row instead of failing
 
             except Exception as e:
                 log_data_message(f"Error processing row {index + 1}: {str(e)}")
