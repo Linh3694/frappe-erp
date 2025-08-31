@@ -1,4 +1,5 @@
 
+
 # Copyright (c) 2024, Wellspring International School and contributors
 # For license information, please see license.txt
 
@@ -616,18 +617,44 @@ def get_teacher_week():
             frappe.logger().info(f"Teacher query - Table error: {str(table_error)}")
             return error_response(f"Table not found: {str(table_error)}")
 
-        # Now try with filters but handle missing class_id field
+        # Try with minimal fields first to see what exists
         try:
+            # Step 1: Try with only basic fields
+            basic_fields = ["name", "day_of_week"]
             rows = frappe.get_all(
                 "SIS Timetable Instance Row",
-                fields=[
-                    "name", "day_of_week", "timetable_column_id",
-                    "subject_title", "subject_name", "teacher_names", "teacher_1_id", "teacher_2_id",
-                ],
+                fields=basic_fields,
+                filters=filters,
+                limit=5
+            )
+            frappe.logger().info(f"Teacher basic query successful, found {len(rows)} rows")
+
+            # Step 2: Try adding more fields one by one
+            available_fields = basic_fields[:]
+            test_fields = ["timetable_column_id", "subject_name", "teacher_1_id", "teacher_2_id"]
+
+            for field in test_fields:
+                try:
+                    test_rows = frappe.get_all(
+                        "SIS Timetable Instance Row",
+                        fields=available_fields + [field],
+                        filters=filters,
+                        limit=1
+                    )
+                    available_fields.append(field)
+                    frappe.logger().info(f"Teacher field '{field}' is available")
+                except Exception as field_error:
+                    frappe.logger().info(f"Teacher field '{field}' not available: {str(field_error)}")
+
+            # Step 3: Use all available fields
+            rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=available_fields,
                 filters=filters,
                 order_by="day_of_week asc",
             )
-            frappe.logger().info(f"Teacher query successful, found {len(rows)} rows")
+            frappe.logger().info(f"Teacher final query successful with fields: {available_fields}")
+
         except Exception as query_error:
             frappe.logger().info(f"Teacher query error: {str(query_error)}")
             return error_response(f"Query failed: {str(query_error)}")
@@ -689,18 +716,45 @@ def get_class_week():
             frappe.logger().info(f"Table error: {str(table_error)}")
             return error_response(f"Table not found: {str(table_error)}")
 
-        # Now try with filters but handle missing class_id field
+        # Try with minimal fields first to see what exists
         try:
+            # Step 1: Try with only basic fields
+            basic_fields = ["name", "day_of_week"]
             rows = frappe.get_all(
                 "SIS Timetable Instance Row",
-                fields=[
-                    "name", "day_of_week", "timetable_column_id",
-                    "subject_title", "subject_name", "teacher_names", "teacher_1_id", "teacher_2_id",
-                ],
-                filters={"campus_id": campus_id},  # Remove class_id filter temporarily
+                fields=basic_fields,
+                filters={"campus_id": campus_id},
+                limit=5  # Limit to see if basic query works
+            )
+            frappe.logger().info(f"Basic query successful, found {len(rows)} rows")
+            frappe.logger().info(f"Sample row: {rows[0] if rows else 'No rows'}")
+
+            # Step 2: Try adding more fields one by one
+            available_fields = basic_fields[:]
+            test_fields = ["timetable_column_id", "subject_name", "teacher_1_id", "teacher_2_id"]
+
+            for field in test_fields:
+                try:
+                    test_rows = frappe.get_all(
+                        "SIS Timetable Instance Row",
+                        fields=available_fields + [field],
+                        filters={"campus_id": campus_id},
+                        limit=1
+                    )
+                    available_fields.append(field)
+                    frappe.logger().info(f"Field '{field}' is available")
+                except Exception as field_error:
+                    frappe.logger().info(f"Field '{field}' not available: {str(field_error)}")
+
+            # Step 3: Use all available fields
+            rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=available_fields,
+                filters={"campus_id": campus_id},
                 order_by="day_of_week asc",
             )
-            frappe.logger().info(f"Query successful, found {len(rows)} rows")
+            frappe.logger().info(f"Final query successful with fields: {available_fields}")
+
         except Exception as query_error:
             frappe.logger().info(f"Query error: {str(query_error)}")
             return error_response(f"Query failed: {str(query_error)}")
