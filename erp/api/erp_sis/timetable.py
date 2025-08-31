@@ -3,17 +3,24 @@
 # Copyright (c) 2024, Wellspring International School and contributors
 # For license information, please see license.txt
 
+import json
 import frappe
 from frappe import _
+from frappe.utils.data import get_time
 from datetime import datetime, timedelta
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
     error_response,
+    forbidden_response,
     list_response,
+    not_found_response,
     single_item_response,
+    success_response,
     validation_error_response,
 )
 from .timetable_excel_import import process_excel_import, process_excel_import_with_metadata_v2
+from .timetable_column import format_time_for_html
+from .calendar import _get_request_arg
 
 def _noop():
     return None
@@ -21,11 +28,6 @@ def _noop():
 def update_timetable_column():
     """Update an existing timetable column"""
     try:
-        # Debug: Log which function is being called
-        frappe.logger().info("=== UPDATE_TIMETABLE_COLUMN FUNCTION CALLED ===")
-        frappe.logger().info(f"Update timetable column column - Request method: {frappe.request.method}")
-        frappe.logger().info(f"Update timetable column column - Request URL: {frappe.request.url}")
-
         # Get data from request - follow Education Stage pattern
         data = {}
 
@@ -40,13 +42,6 @@ def update_timetable_column():
                 data = frappe.local.form_dict
         else:
             data = frappe.local.form_dict
-
-        # Debug logging
-        frappe.logger().info(f"Update timetable column column - Raw data: {data}")
-        frappe.logger().info(f"Update timetable column column - Form dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"Update timetable column column - Request data: {frappe.request.data}")
-        frappe.logger().info(f"Update timetable column column - Request URL: {frappe.request.url}")
-        frappe.logger().info(f"Update timetable column column - Request method: {frappe.request.method}")
 
         # Try multiple ways to get timetable_column_id
         timetable_column_id = data.get("timetable_column_id")
@@ -72,7 +67,6 @@ def update_timetable_column():
                 match = re.search(pattern, frappe.request.url or '')
                 if match:
                     timetable_column_id = match.group(1)
-                    frappe.logger().info(f"Update timetable column column - Found timetable_column_id '{timetable_column_id}' using pattern '{pattern}' from URL: {frappe.request.url}")
                     break
 
             # Also try to extract from query parameters
@@ -89,7 +83,6 @@ def update_timetable_column():
                     timetable_column_id = parsed_args['timetable_column_id'][0]
 
         if not timetable_column_id:
-            frappe.logger().error(f"Update timetable column column - Missing timetable_column_id. Data keys: {list(data.keys()) if data else 'None'}, Form dict keys: {list(frappe.local.form_dict.keys()) if frappe.local.form_dict else 'None'}")
             return validation_error_response("Validation failed", {"timetable_column_id": ["Timetable Column ID is required"]})
 
         # Get campus from user context
@@ -117,14 +110,9 @@ def update_timetable_column():
         start_time = data.get("start_time")
         end_time = data.get("end_time")
 
-        # Debug logging - current values
-        frappe.logger().info(f"Update timetable column column - Current values: education_stage_id={timetable_column_doc.education_stage_id}, period_priority={timetable_column_doc.period_priority}, period_type={timetable_column_doc.period_type}, period_name={timetable_column_doc.period_name}")
         current_start_time_raw = timetable_column_doc.start_time
         current_end_time_raw = timetable_column_doc.end_time
-        frappe.logger().info(f"Update timetable column column - Current times raw: start_time={current_start_time_raw}, end_time={current_end_time_raw}")
 
-        # Debug logging - new values
-        frappe.logger().info(f"Update timetable column column - New values: education_stage_id={education_stage_id}, period_priority={period_priority}, period_type={period_type}, period_name={period_name}, start_time={start_time}, end_time={end_time}")
 
         # Track if any updates were made
         updates_made = []
@@ -143,7 +131,6 @@ def update_timetable_column():
             if not education_stage_exists:
                 return not_found_response("Selected education stage does not exist or access denied")
 
-            frappe.logger().info(f"Update timetable column - Updating education_stage_id: {timetable_column_doc.education_stage_id} -> {education_stage_id}")
             timetable_column_doc.education_stage_id = education_stage_id
             updates_made.append(f"education_stage_id: {education_stage_id}")
 
@@ -168,19 +155,16 @@ def update_timetable_column():
             if existing:
                 return validation_error_response("Validation failed", {"period_priority": [f"Timetable column with priority '{period_priority}' already exists for this education stage"]})
 
-            frappe.logger().info(f"Update timetable column - Updating period_priority: {timetable_column_doc.period_priority} -> {period_priority}")
             timetable_column_doc.period_priority = period_priority
             updates_made.append(f"period_priority: {period_priority}")
 
         if period_type and period_type != timetable_column_doc.period_type:
             if period_type not in ['study', 'non-study']:
                 return validation_error_response("Validation failed", {"period_type": ["Period type must be 'study' or 'non-study'"]})
-            frappe.logger().info(f"Update timetable column - Updating period_type: {timetable_column_doc.period_type} -> {period_type}")
             timetable_column_doc.period_type = period_type
             updates_made.append(f"period_type: {period_type}")
 
         if period_name and period_name != timetable_column_doc.period_name:
-            frappe.logger().info(f"Update timetable column - Updating period_name: {timetable_column_doc.period_name} -> {period_name}")
             timetable_column_doc.period_name = period_name
             updates_made.append(f"period_name: {period_name}")
 
@@ -188,33 +172,29 @@ def update_timetable_column():
         current_start_time = format_time_for_html(timetable_column_doc.start_time)
         current_end_time = format_time_for_html(timetable_column_doc.end_time)
 
-        frappe.logger().info(f"Update timetable column - Time comparison: start_time '{start_time}' vs current '{current_start_time}', end_time '{end_time}' vs current '{current_end_time}'")
 
         if start_time and start_time.strip():
             if start_time != current_start_time:
-                frappe.logger().info(f"Update timetable column - Updating start_time: {current_start_time} -> {start_time}")
                 try:
                     start_time_obj = get_time(start_time)
                     timetable_column_doc.start_time = start_time
                     updates_made.append(f"start_time: {start_time}")
                 except Exception as e:
-                    frappe.log_error(f"Error parsing start_time '{start_time}': {str(e)}")
+
                     return validation_error_response("Validation failed", {"start_time": ["Invalid start time format"]})
-            else:
-                frappe.logger().info(f"Update timetable column - start_time unchanged: {start_time}")
+                else:
+                    pass
 
         if end_time and end_time.strip():
             if end_time != current_end_time:
-                frappe.logger().info(f"Update timetable column - Updating end_time: {current_end_time} -> {end_time}")
                 try:
                     end_time_obj = get_time(end_time)
                     timetable_column_doc.end_time = end_time
                     updates_made.append(f"end_time: {end_time}")
                 except Exception as e:
-                    frappe.log_error(f"Error parsing end_time '{end_time}': {str(e)}")
                     return validation_error_response("Validation failed", {"end_time": ["Invalid end time format"]})
             else:
-                frappe.logger().info(f"Update timetable column - end_time unchanged: {end_time}")
+                pass
 
         # Validate time range after updates
         if hasattr(timetable_column_doc, 'start_time') and hasattr(timetable_column_doc, 'end_time') and timetable_column_doc.start_time and timetable_column_doc.end_time:
@@ -224,14 +204,11 @@ def update_timetable_column():
                 if start_time_obj >= end_time_obj:
                     return validation_error_response("Validation failed", {"start_time": ["Start time must be before end time"]})
             except Exception as e:
-                frappe.log_error(f"Error validating time range: {str(e)}")
                 return validation_error_response("Validation failed", {"start_time": ["Invalid time values"]})
 
         # Check if any updates were made
-        frappe.logger().info(f"Update timetable column - Updates made: {updates_made}")
-
         if not updates_made:
-            frappe.logger().warning(f"Update timetable column - No updates detected, returning current data")
+
             # Return current data without changes
             timetable_data = {
                 "name": timetable_column_doc.name,
@@ -246,10 +223,8 @@ def update_timetable_column():
             return single_item_response(timetable_data, "No changes detected")
 
         # Save and commit changes
-        frappe.logger().info(f"Update timetable column - Saving document with updates: {updates_made}")
         timetable_column_doc.save()
         frappe.db.commit()
-        frappe.logger().info(f"Update timetable column - Document saved and committed successfully")
         
         # Format time fields for HTML time input (HH:MM format)
         start_time_formatted = format_time_for_html(timetable_column_doc.start_time)
@@ -268,7 +243,7 @@ def update_timetable_column():
         return single_item_response(timetable_data, "Timetable column updated successfully")
         
     except Exception as e:
-        frappe.log_error(f"Error updating timetable column {timetable_column_id}: {str(e)}")
+
         return error_response(f"Error updating timetable column: {str(e)}")
 
 
@@ -336,7 +311,7 @@ def delete_timetable_column():
         return success_response(message="Timetable column deleted successfully")
 
     except Exception as e:
-        frappe.log_error(f"Error deleting timetable column: {str(e)}")
+
         return error_response(f"Error deleting timetable column: {str(e)}")
 
 
@@ -366,7 +341,7 @@ def get_education_stages_for_timetable_column():
         return list_response(education_stages, "Education stages fetched successfully")
         
     except Exception as e:
-        frappe.log_error(f"Error fetching education stages for timetable column: {str(e)}")
+
         return error_response(f"Error fetching education stages: {str(e)}")
 
 
@@ -374,18 +349,9 @@ def get_education_stages_for_timetable_column():
 def create_timetable_column():
     """Create a new timetable column - SIMPLE VERSION"""
     try:
-        # Debug: Log which function is being called
-        frappe.logger().info("=== CREATE_TIMETABLE FUNCTION CALLED ===")
-        frappe.logger().info(f"Create timetable column - Request method: {frappe.request.method}")
-        frappe.logger().info(f"Create timetable column - Request URL: {frappe.request.url}")
 
         # Get data from request - handle both JSON and form data
         data = frappe.local.form_dict or {}
-
-        # Debug logging
-        frappe.logger().info(f"Create timetable column - Raw request data: {frappe.request.data}")
-        frappe.logger().info(f"Create timetable column - Form dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"Create timetable column - Initial data: {data}")
 
         # If request has JSON data, try to parse it
         if frappe.request.data and frappe.request.data.strip():
@@ -393,15 +359,12 @@ def create_timetable_column():
                 json_data = json.loads(frappe.request.data)
                 if json_data and isinstance(json_data, dict):
                     data = json_data
-                    frappe.logger().info(f"Create timetable column - Using JSON data: {data}")
                 else:
-                    frappe.logger().info(f"Create timetable column - JSON data is empty or not dict, using form_dict")
+                    pass
             except (json.JSONDecodeError, TypeError) as e:
                 # If JSON parsing fails, use form_dict which contains URL-encoded data
-                frappe.logger().info(f"Create timetable column - JSON parsing failed ({e}), using form_dict")
                 pass
 
-        frappe.logger().info(f"Create timetable column - Final data: {data}")
 
         # Extract values from data
         education_stage_id = data.get("education_stage_id")
@@ -411,19 +374,14 @@ def create_timetable_column():
         start_time = data.get("start_time")
         end_time = data.get("end_time")
 
-        # Debug logging for extracted values
-        frappe.logger().info(f"Create timetable column - Extracted values: education_stage_id={education_stage_id}, period_priority={period_priority}, period_type={period_type}, period_name={period_name}, start_time={start_time}, end_time={end_time}")
-
         # Input validation
         if not education_stage_id or not period_priority or not period_type or not period_name or not start_time or not end_time:
-            frappe.logger().error(f"Create timetable column - Validation failed. Missing fields: education_stage_id={bool(education_stage_id)}, period_priority={bool(period_priority)}, period_type={bool(period_type)}, period_name={bool(period_name)}, start_time={bool(start_time)}, end_time={bool(end_time)}")
             frappe.throw(_("All fields are required"))
         
         # Get campus from user context
         try:
             campus_id = get_current_campus_from_context()
         except Exception as e:
-            frappe.logger().error(f"Error getting campus context: {str(e)}")
             campus_id = None
         
         if not campus_id:
@@ -468,10 +426,6 @@ def create_timetable_column():
         timetable_column_doc.insert()
         frappe.db.commit()
 
-        # Debug: Log time values before and after formatting
-        frappe.logger().info(f"Create timetable column - Raw times from doc: start_time={timetable_column_doc.start_time}, end_time={timetable_column_doc.end_time}")
-        frappe.logger().info(f"Create timetable column - Raw times types: start_time={type(timetable_column_doc.start_time)}, end_time={type(timetable_column_doc.end_time)}")
-
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Timetable column created successfully"))
 
@@ -487,11 +441,10 @@ def create_timetable_column():
             "campus_id": timetable_column_doc.campus_id
         }
 
-        frappe.logger().info(f"Create timetable column - Returning original times: start_time={start_time}, end_time={end_time}")
         return single_item_response(timetable_data, "Timetable column created successfully")
         
     except Exception as e:
-        frappe.log_error(f"Error creating timetable column: {str(e)}")
+
         frappe.throw(_(f"Error creating timetable column: {str(e)}"))
 
 
@@ -590,13 +543,6 @@ def get_teacher_week():
         week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
         week_end = frappe.local.form_dict.get("week_end") or frappe.request.args.get("week_end")
 
-        # Debug logging
-        frappe.logger().info(f"=== GET TEACHER WEEK DEBUG ===")
-        frappe.logger().info(f"Parameters: teacher_id={teacher_id}, week_start={week_start}, week_end={week_end}")
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Request args: {getattr(frappe.request, 'args', {})}")
-        frappe.logger().info(f"Form dict: {frappe.local.form_dict}")
-
         if not teacher_id:
             return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
         if not week_start:
@@ -637,7 +583,7 @@ def get_teacher_week():
                     for t in alt2:
                         resolved_teacher_ids.add(t.name)
         except Exception as resolve_error:
-            frappe.logger().info(f"Teacher week - resolve teacher id warning: {str(resolve_error)}")
+            pass
         # Fallback to original id if nothing resolved
         if not resolved_teacher_ids:
             resolved_teacher_ids.add(teacher_id)
@@ -654,15 +600,11 @@ def get_teacher_week():
                 limit=1
             )
             filters = {"campus_id": campus_id}
-            frappe.logger().info("Teacher query - campus_id filter is available")
         except Exception as filter_error:
-            frappe.logger().info(f"Teacher query - campus_id filter not available: {str(filter_error)}, using no filters")
+            pass
             filters = {}  # Use no filters if campus_id doesn't exist
 
         # Debug: Try without class_id field first to test table
-        frappe.logger().info("=== DEBUGGING TEACHER QUERY ===")
-        frappe.logger().info(f"Final filters: {filters}")
-        frappe.logger().info(f"Filters empty: {len(filters) == 0}")
 
         # First try to get all records to test table existence
         try:
@@ -671,9 +613,8 @@ def get_teacher_week():
                 fields=["name"],
                 limit=1
             )
-            frappe.logger().info(f"Teacher query - Table exists, found {len(all_rows)} records")
         except Exception as table_error:
-            frappe.logger().info(f"Teacher query - Table error: {str(table_error)}")
+            pass
             return error_response(f"Table not found: {str(table_error)}")
 
         # Try with minimal fields first to see what exists
@@ -686,7 +627,6 @@ def get_teacher_week():
                 filters=filters,
                 limit=5
             )
-            frappe.logger().info(f"Teacher basic query successful, found {len(rows)} rows")
 
             # Step 2: Try adding more fields one by one
             available_fields = basic_fields[:]
@@ -709,9 +649,8 @@ def get_teacher_week():
                         limit=1
                     )
                     available_fields.append(field)
-                    frappe.logger().info(f"Teacher field '{field}' is available")
                 except Exception as field_error:
-                    frappe.logger().info(f"Teacher field '{field}' not available: {str(field_error)}")
+                    pass
 
             # Step 3: Use all available fields
             rows = frappe.get_all(
@@ -720,10 +659,9 @@ def get_teacher_week():
                 filters=filters,
                 order_by="day_of_week asc",
             )
-            frappe.logger().info(f"Teacher final query successful with fields: {available_fields}")
 
         except Exception as query_error:
-            frappe.logger().info(f"Teacher query error: {str(query_error)}")
+            pass
             return error_response(f"Query failed: {str(query_error)}")
         # Filter in-memory for teacher (to avoid OR filter limitation in simple get_all)
         rows = [
@@ -741,9 +679,9 @@ def get_teacher_week():
                 instance_filters = {"name": ["in", parent_ids]}
 
                 # Add date filtering if week dates are available
-                if ws and we:
+                if ws and week_end:
                     instance_filters.update({
-                        "start_date": ["<=", we],
+                        "start_date": ["<=", week_end],
                         "end_date": [">=", ws]
                     })
 
@@ -761,8 +699,7 @@ def get_teacher_week():
                 if r.get("parent") and not r.get("class_id"):
                     r["class_id"] = parent_class_map.get(r.get("parent"))
         except Exception as class_map_error:
-            frappe.logger().info(f"Teacher week - class map warning: {str(class_map_error)}")
-
+            pass
         # Enrich subject_title and teacher_names
         try:
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
@@ -808,12 +745,12 @@ def get_teacher_week():
                     teacher_names_list.append(teacher_user_map.get(r.get("teacher_2_id")) or "")
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
         except Exception as enrich_error:
-            frappe.logger().info(f"Teacher week enrich warning: {str(enrich_error)}")
+            pass
 
         entries = _build_entries(rows, ws)
         return list_response(entries, "Teacher week fetched successfully")
     except Exception as e:
-        frappe.log_error(f"Error get_teacher_week: {str(e)}")
+
         return error_response(f"Error fetching teacher week: {str(e)}")
 
 
@@ -975,12 +912,12 @@ def get_class_week():
                     teacher_names_list.append(teacher_user_map.get(r.get("teacher_2_id")) or "")
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
         except Exception as enrich_error:
-            frappe.logger().info(f"Class week enrich warning: {str(enrich_error)}")
+            pass
 
         entries = _build_entries(rows, ws)
         return list_response(entries, "Class week fetched successfully")
     except Exception as e:
-        frappe.log_error(f"Error get_class_week: {str(e)}")
+
         return error_response(f"Error fetching class week: {str(e)}")
 
 
@@ -992,9 +929,6 @@ def get_class_week():
 def test_class_week_api(class_id: str = None, week_start: str = None):
     """Test function for get_class_week API"""
     try:
-        frappe.logger().info(f"=== TEST CLASS WEEK API ===")
-        frappe.logger().info(f"Received: class_id={class_id}, week_start={week_start}")
-        frappe.logger().info(f"Request args: {getattr(frappe.request, 'args', {})}")
 
         if not class_id:
             class_id = "SIS-CLASS-00385"  # Default test class
@@ -1010,7 +944,6 @@ def test_class_week_api(class_id: str = None, week_start: str = None):
             "result": result
         }
     except Exception as e:
-        frappe.logger().info(f"Test class week API error: {str(e)}")
         return {
             "success": False,
             "message": f"Test failed: {str(e)}",
@@ -1121,7 +1054,7 @@ def import_timetable():
             return single_item_response(result, "Timetable metadata validated successfully")
 
     except Exception as e:
-        frappe.log_error(f"Error importing timetable: {str(e)}")
+
         return error_response(f"Error importing timetable: {str(e)}")
 
 
@@ -1146,7 +1079,7 @@ def save_uploaded_file(file_data, filename: str) -> str:
 
         return file_path
     except Exception as e:
-        frappe.log_error(f"Error saving uploaded file: {str(e)}")
+
         raise e
 
 
@@ -1198,7 +1131,7 @@ def get_timetables():
         return single_item_response(result, "Timetables fetched successfully")
 
     except Exception as e:
-        frappe.log_error(f"Error fetching timetables: {str(e)}")
+
         return error_response(f"Error fetching timetables: {str(e)}")
 
 
@@ -1247,7 +1180,7 @@ def get_timetable_detail():
     except frappe.DoesNotExistError:
         return not_found_response("Timetable not found")
     except Exception as e:
-        frappe.log_error(f"Error fetching timetable detail: {str(e)}")
+
         return error_response(f"Error fetching timetable detail: {str(e)}")
 
 
@@ -1276,5 +1209,250 @@ def delete_timetable():
     except frappe.DoesNotExistError:
         return not_found_response("Timetable not found")
     except Exception as e:
-        frappe.log_error(f"Error deleting timetable: {str(e)}")
+
         return error_response(f"Error deleting timetable: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_instance_row_details(row_id: str = None):
+    """Get detailed information for a specific timetable instance row for editing"""
+    try:
+        row_id = row_id or _get_request_arg("row_id")
+        if not row_id:
+            return validation_error_response("Validation failed", {"row_id": ["Row ID is required"]})
+
+        # Get the instance row
+        row = frappe.get_doc("SIS Timetable Instance Row", row_id)
+
+        # Get related data for dropdowns/edit options
+        subjects = frappe.get_all(
+            "SIS Subject",
+            fields=["name", "title"],
+            filters={"is_active": 1},
+            order_by="title asc"
+        )
+
+        # Get available teachers for this period/class combination
+        teachers = frappe.get_all(
+            "SIS Teacher",
+            fields=["name", "user_id", "first_name", "last_name", "full_name"],
+            filters={"status": "Active"},
+            order_by="full_name asc"
+        )
+
+        # Get available rooms (if room assignment is supported)
+        rooms = frappe.get_all(
+            "SIS Room",
+            fields=["name", "room_name", "capacity"],
+            filters={"is_active": 1},
+            order_by="room_name asc"
+        ) if frappe.db.has_table("SIS Room") else []
+
+        # Get instance information
+        instance = frappe.get_doc("SIS Timetable Instance", row.parent)
+
+        # Check if instance is locked
+        is_locked = instance.get("is_locked", False)
+
+        result_data = {
+            "row": {
+                "name": row.name,
+                "day_of_week": row.day_of_week,
+                "timetable_column_id": row.timetable_column_id,
+                "subject_id": row.subject_id,
+                "subject_title": row.subject_id and frappe.db.get_value("SIS Subject", row.subject_id, "title"),
+                "teacher_1_id": row.teacher_1_id,
+                "teacher_2_id": row.teacher_2_id,
+                "parent": row.parent,
+                "parent_timetable_instance": row.parent_timetable_instance
+            },
+            "instance": {
+                "name": instance.name,
+                "class_id": instance.class_id,
+                "timetable_id": instance.timetable_id,
+                "start_date": str(instance.start_date),
+                "end_date": str(instance.end_date),
+                "is_locked": is_locked
+            },
+            "options": {
+                "subjects": subjects,
+                "teachers": teachers,
+                "rooms": rooms
+            }
+        }
+
+        return single_item_response(result_data, "Instance row details fetched successfully")
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Instance row not found")
+    except Exception as e:
+
+        return error_response(f"Error fetching instance row details: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id: str = None,
+                       teacher_2_id: str = None, room_id: str = None):
+    """Update a specific timetable instance row"""
+    try:
+        # Get parameters
+        row_id = row_id or _get_request_arg("row_id")
+        subject_id = subject_id or _get_request_arg("subject_id")
+        teacher_1_id = teacher_1_id or _get_request_arg("teacher_1_id")
+        teacher_2_id = teacher_2_id or _get_request_arg("teacher_2_id")
+        room_id = room_id or _get_request_arg("room_id")
+
+        if not row_id:
+            return validation_error_response("Validation failed", {"row_id": ["Row ID is required"]})
+
+        # Get the instance row
+        row = frappe.get_doc("SIS Timetable Instance Row", row_id)
+
+        # Check if parent instance is locked
+        instance = frappe.get_doc("SIS Timetable Instance", row.parent)
+        if instance.get("is_locked"):
+            return validation_error_response("Validation failed", {
+                "instance_locked": ["Cannot edit a locked instance"]
+            })
+
+        # Validate permissions (user must have access to this instance)
+        user_campus = get_current_campus_from_context()
+        if user_campus and user_campus != instance.campus_id:
+            return forbidden_response("Access denied: Campus mismatch")
+
+        # Validate subject exists and is active
+        if subject_id and not frappe.db.exists("SIS Subject", {"name": subject_id, "is_active": 1}):
+            return validation_error_response("Validation failed", {
+                "subject_id": ["Invalid or inactive subject"]
+            })
+
+        # Validate teachers exist and are active
+        for teacher_id in [teacher_1_id, teacher_2_id]:
+            if teacher_id and not frappe.db.exists("SIS Teacher", {"name": teacher_id, "status": "Active"}):
+                return validation_error_response("Validation failed", {
+                    "teacher_id": [f"Invalid or inactive teacher: {teacher_id}"]
+                })
+
+        # Check for teacher conflicts if teachers are assigned
+        if teacher_1_id or teacher_2_id:
+            conflict_check = _check_teacher_conflicts(
+                [tid for tid in [teacher_1_id, teacher_2_id] if tid],
+                row.day_of_week,
+                row.timetable_column_id,
+                instance.start_date,
+                instance.end_date,
+                row.name  # Exclude current row from conflict check
+            )
+            if conflict_check.get("has_conflict"):
+                return validation_error_response("Validation failed", {
+                    "teacher_conflict": conflict_check["conflicts"]
+                })
+
+        # Update the row
+        update_data = {}
+        if subject_id is not None:
+            update_data["subject_id"] = subject_id
+        if teacher_1_id is not None:
+            update_data["teacher_1_id"] = teacher_1_id
+        if teacher_2_id is not None:
+            update_data["teacher_2_id"] = teacher_2_id
+        if room_id is not None and frappe.db.has_table("SIS Room"):
+            update_data["room_id"] = room_id
+
+        if update_data:
+            for field, value in update_data.items():
+                setattr(row, field, value)
+            row.save()
+            frappe.db.commit()
+
+            # Sync related data
+            _sync_related_timetables(row, instance)
+
+        result_data = {
+            "row_id": row.name,
+            "updated_fields": list(update_data.keys()),
+            "instance_id": instance.name,
+            "class_id": instance.class_id
+        }
+
+        return single_item_response(result_data, "Instance row updated successfully")
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Instance row not found")
+    except Exception as e:
+        frappe.db.rollback()
+
+        return error_response(f"Error updating instance row: {str(e)}")
+
+
+def _check_teacher_conflicts(teacher_ids: list, day_of_week: str, timetable_column_id: str,
+                           start_date, end_date, exclude_row_id: str = None):
+    """Check for teacher scheduling conflicts"""
+    try:
+        conflicts = []
+
+        for teacher_id in teacher_ids:
+            # Find other instances where this teacher is assigned at the same time
+            conflict_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name", "parent", "day_of_week", "timetable_column_id"],
+                filters={
+                    "day_of_week": day_of_week,
+                    "timetable_column_id": timetable_column_id,
+                    "teacher_1_id": teacher_id
+                }
+            )
+
+            # Also check teacher_2_id
+            conflict_rows_2 = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name", "parent", "day_of_week", "timetable_column_id"],
+                filters={
+                    "day_of_week": day_of_week,
+                    "timetable_column_id": timetable_column_id,
+                    "teacher_2_id": teacher_id
+                }
+            )
+
+            conflict_rows.extend(conflict_rows_2)
+
+            # Exclude current row if updating
+            if exclude_row_id:
+                conflict_rows = [r for r in conflict_rows if r["name"] != exclude_row_id]
+
+            if conflict_rows:
+                # Get instance and class info for conflicts
+                for conflict in conflict_rows:
+                    instance = frappe.get_doc("SIS Timetable Instance", conflict["parent"])
+                    conflicts.append({
+                        "teacher_id": teacher_id,
+                        "conflicting_class": instance.class_id,
+                        "day_of_week": day_of_week,
+                        "period": timetable_column_id
+                    })
+
+        return {
+            "has_conflict": len(conflicts) > 0,
+            "conflicts": conflicts
+        }
+
+    except Exception as e:
+
+        return {"has_conflict": False, "conflicts": []}
+
+
+def _sync_related_timetables(row, instance):
+    """Sync changes to related teacher and student timetables"""
+    try:
+        # This function would update cached data or trigger sync
+        # For now, we'll just log the sync requirement
+        frappe.logger().info(f"Sync required for row {row.name} in instance {instance.name}")
+
+        # TODO: Implement actual sync logic:
+        # 1. Update teacher timetables cache
+        # 2. Update student timetables cache
+        # 3. Clear relevant caches
+        # 4. Trigger real-time updates if needed
+
+    except Exception as e:
+        pass
