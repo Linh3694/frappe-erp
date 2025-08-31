@@ -718,12 +718,17 @@ def get_class_week():
 
         # 2) Load child rows belonging to these instances
         try:
-            row_filters = {"parent_timetable_instance": ["in", instance_ids]}
+            # Prefer standard child table linkage to avoid relying on custom link field
+            row_filters = {
+                "parent": ["in", instance_ids],
+                "parenttype": "SIS Timetable Instance",
+                "parentfield": "weekly_pattern",
+            }
             rows = frappe.get_all(
                 "SIS Timetable Instance Row",
                 fields=[
                     "name",
-                    "parent_timetable_instance",
+                    "parent",
                     "day_of_week",
                     "timetable_column_id",
                     "subject_id",
@@ -738,7 +743,7 @@ def get_class_week():
 
         # 3) Attach class_id to rows for FE and builder
         for r in rows:
-            parent = r.get("parent_timetable_instance")
+            parent = r.get("parent")
             r["class_id"] = instances_map.get(parent, {}).get("class_id")
 
         entries = _build_entries(rows, ws)
