@@ -330,12 +330,15 @@ def process_excel_import_with_metadata_v2(import_data: dict):
     """Process Excel import with metadata (title, dates, etc.) - Simplified version"""
     # Collect logs for response
     logs = []
+    frappe.logger().info(f"=== DEBUG: process_excel_import_with_metadata_v2 logs list initialized, length: {len(logs)} ===")
 
     def log_message(message: str):
         """Log both to frappe logger and collect for response"""
-        frappe.logger().info(message)
+        frappe.logger().info(f"LOG_MESSAGE: {message}")
         logs.append(f"{frappe.utils.now()}: {message}")
+        frappe.logger().info(f"=== DEBUG: Added to logs, current length: {len(logs)} ===")
 
+    frappe.logger().info("=== DEBUG: About to enter try block ===")
     try:
         # Log that function was called
         log_message("=== FUNCTION process_excel_import_with_metadata_v2 CALLED ===")
