@@ -697,58 +697,49 @@ def get_class_week():
             return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
 
         ws = _parse_iso_date(week_start)
-        campus_id = get_current_campus_from_context() or "campus-1"
+        we = _parse_iso_date(week_end) if week_end else _add_days(ws, 6)
 
-        # Test if campus_id field exists, if not, use empty filters
-        filters = {}
+        # 1) Find timetable instances for this class that overlap the requested week
+        instance_filters = {"class_id": class_id}
         try:
-            test_rows = frappe.get_all(
-                "SIS Timetable Instance Row",
-                fields=["name"],
-                filters={"campus_id": campus_id},
-                limit=1
+            instances = frappe.get_all(
+                "SIS Timetable Instance",
+                fields=["name", "class_id", "start_date", "end_date"],
+                filters=instance_filters,
             )
-            filters = {"campus_id": campus_id}
-        except Exception as filter_error:
-            filters = {}  # Use no filters if campus_id doesn't exist
+        except Exception as e:
+            return error_response(f"Failed to query instances: {str(e)}")
 
-        # Try with minimal fields first to see what exists
+        if not instances:
+            return list_response([], "Class week fetched successfully")
+
+        instance_ids = [i.name for i in instances if i.name]
+        instances_map = {i.name: i for i in instances}
+
+        # 2) Load child rows belonging to these instances
         try:
-            # Step 1: Try with only basic fields
-            basic_fields = ["name", "day_of_week"]
+            row_filters = {"parent_timetable_instance": ["in", instance_ids]}
             rows = frappe.get_all(
                 "SIS Timetable Instance Row",
-                fields=basic_fields,
-                filters=filters,  # Use the filters we already tested
-                limit=5  # Limit to see if basic query works
-            )
-
-            # Step 2: Try adding more fields one by one
-            available_fields = basic_fields[:]
-            test_fields = ["timetable_column_id", "subject_name", "teacher_1_id", "teacher_2_id"]
-
-            for field in test_fields:
-                try:
-                    test_rows = frappe.get_all(
-                        "SIS Timetable Instance Row",
-                        fields=available_fields + [field],
-                        filters=filters,  # Use the tested filters
-                        limit=1
-                    )
-                    available_fields.append(field)
-                except Exception as field_error:
-                    pass  # Field not available, skip it
-
-            # Step 3: Use all available fields
-            rows = frappe.get_all(
-                "SIS Timetable Instance Row",
-                fields=available_fields,
-                filters=filters,  # Use the tested filters
+                fields=[
+                    "name",
+                    "parent_timetable_instance",
+                    "day_of_week",
+                    "timetable_column_id",
+                    "subject_id",
+                    "teacher_1_id",
+                    "teacher_2_id",
+                ],
+                filters=row_filters,
                 order_by="day_of_week asc",
             )
+        except Exception as e:
+            return error_response(f"Failed to query instance rows: {str(e)}")
 
-        except Exception as query_error:
-            return error_response(f"Query failed: {str(query_error)}")
+        # 3) Attach class_id to rows for FE and builder
+        for r in rows:
+            parent = r.get("parent_timetable_instance")
+            r["class_id"] = instances_map.get(parent, {}).get("class_id")
 
         entries = _build_entries(rows, ws)
         return list_response(entries, "Class week fetched successfully")
