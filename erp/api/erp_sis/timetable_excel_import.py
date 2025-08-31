@@ -338,6 +338,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
     try:
         log_message("=== Starting Excel Import Processing ===")
+        log_message(f"Received import_data: {import_data}")
 
         # Extract parameters with defaults
         file_path = import_data.get("file_path", "")
@@ -349,19 +350,24 @@ def process_excel_import_with_metadata_v2(import_data: dict):
         log_message(f"Title: {title_vn}, Campus: {campus_id}")
         log_message(f"Import data keys: {list(import_data.keys())}")
         log_message(f"Dry run: {dry_run}")
+        log_message(f"Validation check - title_vn: '{title_vn}', campus_id: '{campus_id}'")
 
         # Basic validation
         if not title_vn or not campus_id:
+            log_message(f"Validation failed - missing title_vn or campus_id")
             return validation_error_response("Validation failed", {
-                "missing_fields": ["title_vn", "campus_id"]
+                "missing_fields": ["title_vn", "campus_id"],
+                "logs": logs
             })
 
         # Check file exists using standard Python
         import os
+        log_message(f"Checking file exists at: {file_path}")
         if not os.path.exists(file_path):
             log_message(f"File not found at: {file_path}")
             return validation_error_response("File not found", {
-                "file_path": ["Uploaded file not found"]
+                "file_path": ["Uploaded file not found"],
+                "logs": logs
             })
 
         log_message("File exists, proceeding with processing...")
