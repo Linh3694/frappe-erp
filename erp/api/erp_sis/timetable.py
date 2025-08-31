@@ -719,22 +719,34 @@ def import_timetable():
         start_date = data.get("start_date")
         end_date = data.get("end_date")
 
+        # Collect logs for response
+        logs = []
+
+        def log_timetable_message(message: str):
+            """Log both to frappe logger and collect for response"""
+            frappe.logger().info(message)
+            logs.append(f"{frappe.utils.now()}: {message}")
+
         # Log basic info for debugging
-        frappe.logger().info(f"Import timetable request - title_vn: {title_vn}, campus_id: {campus_id}")
-        frappe.logger().info(f"Current user: {frappe.session.user}")
-        frappe.logger().info(f"User roles: {frappe.get_roles(frappe.session.user) if frappe.session.user else 'No user'}")
+        log_timetable_message(f"Import timetable request - title_vn: {title_vn}, campus_id: {campus_id}")
+        log_timetable_message(f"Current user: {frappe.session.user}")
+        log_timetable_message(f"User roles: {frappe.get_roles(frappe.session.user) if frappe.session.user else 'No user'}")
         if hasattr(frappe.request, 'files') and frappe.request.files:
-            frappe.logger().info(f"Files available: {list(frappe.request.files.keys())}")
+            log_timetable_message(f"Files available: {list(frappe.request.files.keys())}")
 
         # Validate required fields
         if not all([title_vn, campus_id, school_year_id, education_stage_id, start_date, end_date]):
+            log_timetable_message("Validation failed - missing required fields")
             return validation_error_response("Validation failed", {
-                "required_fields": ["title_vn", "campus_id", "school_year_id", "education_stage_id", "start_date", "end_date"]
+                "required_fields": ["title_vn", "campus_id", "school_year_id", "education_stage_id", "start_date", "end_date"],
+                "logs": logs
             })
 
         # Get current user campus
         user_campus = get_current_campus_from_context()
+        log_timetable_message(f"User campus: {user_campus}, requested campus: {campus_id}")
         if user_campus and user_campus != campus_id:
+            log_timetable_message("Access denied - campus mismatch")
             return forbidden_response("Access denied: Campus mismatch")
 
         # Process Excel import if file is provided
@@ -743,7 +755,8 @@ def import_timetable():
             # File is uploaded, process it
             file_data = files['file']
             if not file_data:
-                return validation_error_response("Validation failed", {"file": ["No file uploaded"]})
+                log_timetable_message("No file uploaded")
+                return validation_error_response("Validation failed", {"file": ["No file uploaded"], "logs": logs})
 
             # Save file temporarily
             file_path = save_uploaded_file(file_data, "timetable_import.xlsx")
@@ -762,16 +775,24 @@ def import_timetable():
             }
 
             # Process the Excel import
+            log_timetable_message("Starting Excel import processing")
             result = process_excel_import_with_metadata_v2(import_data)
+
+            # Add logs to result if it's a dict
+            if isinstance(result, dict) and 'data' in result:
+                if isinstance(result['data'], dict):
+                    result['data']['logs'] = logs
 
             # Clean up temp file
             import os
             if os.path.exists(file_path):
                 os.remove(file_path)
+                log_timetable_message("Cleaned up temporary file")
 
             return result
         else:
             # No file uploaded, just validate metadata
+            log_timetable_message("No file uploaded - metadata validation only")
             result = {
                 "dry_run": dry_run,
                 "title_vn": title_vn,
@@ -782,13 +803,20 @@ def import_timetable():
                 "start_date": start_date,
                 "end_date": end_date,
                 "message": "Metadata validation completed",
-                "requires_file": True
+                "requires_file": True,
+                "logs": logs
             }
 
             return single_item_response(result, "Timetable metadata validated successfully")
 
     except Exception as e:
         frappe.log_error(f"Error importing timetable: {str(e)}")
+        # Try to add logs to error response if possible
+        try:
+            if 'logs' in locals():
+                return error_response(f"Error importing timetable: {str(e)}", {"logs": logs})
+        except:
+            pass
         return error_response(f"Error importing timetable: {str(e)}")
 
 
