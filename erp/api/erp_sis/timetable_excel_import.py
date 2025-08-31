@@ -161,7 +161,7 @@ class TimetableExcelImporter:
 
         return subject_id
 
-    def validate_and_map_teacher(self, teacher_identifier: str) -> Optional[str]:
+    def validate_and_map_teacher(self, teacher_identifier: str, suppress_error: bool = False) -> Optional[str]:
         """Map teacher identifier to SIS Teacher via supported strategies.
 
         Supported formats (in order):
@@ -209,7 +209,8 @@ class TimetableExcelImporter:
             except Exception:
                 continue
 
-        self.errors.append(f"Teacher '{ident}' not found")
+        if not suppress_error:
+            self.errors.append(f"Teacher '{ident}' not found")
         return None
 
     def validate_and_map_period(self, period_str: str, education_stage_id: str) -> Optional[str]:
@@ -313,7 +314,7 @@ class TimetableExcelImporter:
                 class_id = self.validate_and_map_class(class_str)
                 subject_id = self.validate_and_map_subject(subject_str)
                 teacher_1_id = self.validate_and_map_teacher(teacher_1_str)
-                teacher_2_id = self.validate_and_map_teacher(teacher_2_str) if teacher_2_str else None
+                teacher_2_id = self.validate_and_map_teacher(teacher_2_str, suppress_error=True) if teacher_2_str else None
                 timetable_column_id = self.validate_and_map_period(period_str, education_stage_id)
 
                 if not all([class_id, subject_id, teacher_1_id, timetable_column_id]):
@@ -559,17 +560,23 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         continue
 
                     for row in class_rows:
+                        # period_priority is required (Int)
+                        pp_str = str(row.get("period_priority") or "").strip()
+                        try:
+                            pp_val = int(pp_str)
+                        except Exception:
+                            # Try to fetch from timetable column
+                            pp_val = frappe.db.get_value("SIS Timetable Column", row.get("timetable_column_id"), "period_priority")
+
                         row_doc = frappe.get_doc({
                             "doctype": "SIS Timetable Instance Row",
-                            "timetable_instance_id": instance_doc.name,
+                            "parent_timetable_instance": instance_doc.name,
                             "day_of_week": row.get("day_of_week"),
                             "timetable_column_id": row.get("timetable_column_id"),
-                            "class_id": row.get("class_id"),
+                            "period_priority": pp_val,
                             "subject_id": row.get("subject_id"),
-                            "subject_name": row.get("subject_title"),
                             "teacher_1_id": row.get("teacher_1_id"),
-                            "teacher_2_id": row.get("teacher_2_id"),
-                            "campus_id": campus_id
+                            "teacher_2_id": row.get("teacher_2_id")
                         })
                         try:
                             row_doc.insert()
