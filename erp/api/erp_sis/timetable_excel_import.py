@@ -552,37 +552,34 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         "campus_id": campus_id
                     })
                     try:
-                        instance_doc.insert()
+                        # weekly_pattern is required; insert parent first ignoring mandatory,
+                        # then append children and save
+                        instance_doc.insert(ignore_mandatory=True)
+                        for row in class_rows:
+                            pp_str = str(row.get("period_priority") or "").strip()
+                            try:
+                                pp_val = int(pp_str)
+                            except Exception:
+                                pp_val = frappe.db.get_value("SIS Timetable Column", row.get("timetable_column_id"), "period_priority")
+
+                            child = {
+                                "parent_timetable_instance": instance_doc.name,
+                                "day_of_week": row.get("day_of_week"),
+                                "timetable_column_id": row.get("timetable_column_id"),
+                                "period_priority": pp_val,
+                                "subject_id": row.get("subject_id"),
+                                "teacher_1_id": row.get("teacher_1_id"),
+                                "teacher_2_id": row.get("teacher_2_id")
+                            }
+                            instance_doc.append("weekly_pattern", child)
+
+                        instance_doc.save()
                         instances_created += 1
-                        logs.append(f"Created instance {instance_doc.name} for class {class_id}")
+                        rows_created += len(class_rows)
+                        logs.append(f"Created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
                     except Exception as e:
                         logs.append(f"Failed to create instance for class {class_id}: {str(e)}")
                         continue
-
-                    for row in class_rows:
-                        # period_priority is required (Int)
-                        pp_str = str(row.get("period_priority") or "").strip()
-                        try:
-                            pp_val = int(pp_str)
-                        except Exception:
-                            # Try to fetch from timetable column
-                            pp_val = frappe.db.get_value("SIS Timetable Column", row.get("timetable_column_id"), "period_priority")
-
-                        row_doc = frappe.get_doc({
-                            "doctype": "SIS Timetable Instance Row",
-                            "parent_timetable_instance": instance_doc.name,
-                            "day_of_week": row.get("day_of_week"),
-                            "timetable_column_id": row.get("timetable_column_id"),
-                            "period_priority": pp_val,
-                            "subject_id": row.get("subject_id"),
-                            "teacher_1_id": row.get("teacher_1_id"),
-                            "teacher_2_id": row.get("teacher_2_id")
-                        })
-                        try:
-                            row_doc.insert()
-                            rows_created += 1
-                        except Exception as re:
-                            logs.append(f"Failed to insert row for class {class_id} at {row.get('day_of_week')}: {str(re)}")
 
             # Prepare detailed result with created records info
             created_records = {}
