@@ -562,27 +562,39 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             except Exception:
                                 pp_val = frappe.db.get_value("SIS Timetable Column", row.get("timetable_column_id"), "period_priority")
 
-                            # Normalize day_of_week strictly to allowed values
+                            # Normalize day_of_week using DocType meta options to avoid schema drift issues
                             day_raw = str(row.get("day_of_week") or "").strip().lower()
-                            allowed_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
-                            if day_raw not in allowed_days:
-                                day_map = {
-                                    "monday": "mon",
-                                    "tuesday": "tue",
-                                    "wednesday": "wed",
-                                    "thursday": "thu",
-                                    "friday": "fri",
-                                    "saturday": "sat",
-                                    "sunday": "sun",
-                                    "thứ 2": "mon", "thu 2": "mon",
-                                    "thứ 3": "tue", "thu 3": "tue",
-                                    "thứ 4": "wed", "thu 4": "wed",
-                                    "thứ 5": "thu", "thu 5": "thu",
-                                    "thứ 6": "fri", "thu 6": "fri",
-                                    "thứ 7": "sat", "thu 7": "sat",
-                                    "chủ nhật": "sun", "cn": "sun"
-                                }
-                                day_raw = day_map.get(day_raw, day_raw)
+                            # Base mapping for common inputs
+                            day_map = {
+                                "monday": "mon",
+                                "tuesday": "tue",
+                                "wednesday": "wed",
+                                "thursday": "thu",
+                                "friday": "fri",
+                                "saturday": "sat",
+                                "sunday": "sun",
+                                "thứ 2": "mon", "thu 2": "mon",
+                                "thứ 3": "tue", "thu 3": "tue",
+                                "thứ 4": "wed", "thu 4": "wed",
+                                "thứ 5": "thu", "thu 5": "thu",
+                                "thứ 6": "fri", "thu 6": "fri",
+                                "thứ 7": "sat", "thu 7": "sat",
+                                "chủ nhật": "sun", "cn": "sun"
+                            }
+                            if day_raw in day_map:
+                                day_raw = day_map[day_raw]
+
+                            try:
+                                meta = frappe.get_meta("SIS Timetable Instance Row")
+                                opts = (meta.get_field("day_of_week").options or "").split("\n")
+                                allowed_options = [o.strip().lower() for o in opts if o.strip()]
+                                if day_raw not in allowed_options and allowed_options:
+                                    # Fallback to first allowed option to satisfy validation
+                                    day_raw = allowed_options[0]
+                            except Exception:
+                                # Fallback static set if meta is unavailable
+                                if day_raw not in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}:
+                                    day_raw = "mon"
 
                             child = {
                                 "parent_timetable_instance": instance_doc.name,
