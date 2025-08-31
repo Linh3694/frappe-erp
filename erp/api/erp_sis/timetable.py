@@ -519,9 +519,13 @@ def _day_of_week_to_index(dow: str) -> int:
         "sun": 6, "sunday": 6,
     }
     key = (dow or "").strip().lower()
-    # Handle accidental storage of full options string "mon\ntue\n..."
+    # Handle accidental storage of full options string where newline may be real or escaped
+    # Case 1: actual newline characters
     if "\n" in key:
         key = key.split("\n")[0].strip()
+    # Case 2: literal backslash-n sequence stored as text
+    elif "\\n" in key:
+        key = key.split("\\n")[0].strip()
     if key not in mapping:
         # Try Vietnamese labels
         vi = {
