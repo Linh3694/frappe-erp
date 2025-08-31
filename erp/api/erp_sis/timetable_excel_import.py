@@ -347,6 +347,8 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
         log_message(f"Processing file: {file_path}")
         log_message(f"Title: {title_vn}, Campus: {campus_id}")
+        log_message(f"Import data keys: {list(import_data.keys())}")
+        log_message(f"Dry run: {dry_run}")
 
         # Basic validation
         if not title_vn or not campus_id:
@@ -496,6 +498,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "created_records": created_records if not dry_run else {},
                 "logs": logs
             }
+
+            log_message(f"Final result: {result}")
+            log_message("=== Excel Import Processing Completed ===")
+            return single_item_response(result, "Timetable import processed successfully")
 
         except Exception as e:
             log_message(f"Error processing Excel file: {str(e)}")

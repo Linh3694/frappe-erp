@@ -8,6 +8,7 @@ from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
     error_response,
     list_response,
+    single_item_response,
     validation_error_response,
 )
 from .timetable_excel_import import process_excel_import, process_excel_import_with_metadata_v2
@@ -684,6 +685,14 @@ def test_class_week_api(class_id: str = None, week_start: str = None):
 def import_timetable():
     """Import timetable from Excel with dry-run validation and final import"""
     try:
+        # Collect logs for response
+        logs = []
+
+        def log_timetable_message(message: str):
+            """Log both to frappe logger and collect for response"""
+            frappe.logger().info(message)
+            logs.append(f"{frappe.utils.now()}: {message}")
+
         # Get request data - handle both FormData and regular form data
         data = {}
 
@@ -691,21 +700,30 @@ def import_timetable():
         if hasattr(frappe.request, 'form_data') and frappe.request.form_data:
             # For werkzeug form data
             data = frappe.request.form_data
+            log_timetable_message("Using form_data")
         elif hasattr(frappe.request, 'form') and frappe.request.form:
             # For flask-style form data
             data = frappe.request.form
+            log_timetable_message("Using form")
         elif frappe.local.form_dict:
             # Fallback to form_dict
             data = frappe.local.form_dict
+            log_timetable_message("Using form_dict")
         elif hasattr(frappe.request, 'args') and frappe.request.args:
             # Try request args
             data = frappe.request.args
+            log_timetable_message("Using args")
 
         # Convert to dict if it's not already
         if hasattr(data, 'to_dict'):
             data = data.to_dict()
+            log_timetable_message("Converted to dict using to_dict()")
         elif not isinstance(data, dict):
             data = dict(data) if data else {}
+            log_timetable_message("Converted to dict using dict()")
+
+        log_timetable_message(f"Final data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        log_timetable_message(f"Raw data: {data}")
 
         # Check for dry_run parameter
         dry_run = data.get("dry_run", "false").lower() == "true"
@@ -718,14 +736,6 @@ def import_timetable():
         education_stage_id = data.get("education_stage_id")
         start_date = data.get("start_date")
         end_date = data.get("end_date")
-
-        # Collect logs for response
-        logs = []
-
-        def log_timetable_message(message: str):
-            """Log both to frappe logger and collect for response"""
-            frappe.logger().info(message)
-            logs.append(f"{frappe.utils.now()}: {message}")
 
         # Log basic info for debugging
         log_timetable_message(f"Import timetable request - title_vn: {title_vn}, campus_id: {campus_id}")
@@ -751,6 +761,9 @@ def import_timetable():
 
         # Process Excel import if file is provided
         files = frappe.request.files
+        log_timetable_message(f"Files object: {type(files)}")
+        log_timetable_message(f"Files keys: {list(files.keys()) if files else 'No files'}")
+
         if files and 'file' in files:
             # File is uploaded, process it
             file_data = files['file']
@@ -973,9 +986,3 @@ def delete_timetable():
     except Exception as e:
         frappe.log_error(f"Error deleting timetable: {str(e)}")
         return error_response(f"Error deleting timetable: {str(e)}")
-
-
-@frappe.whitelist(allow_guest=False)
-def import_timetable_excel():
-    """Import timetable from Excel file with validation"""
-    return process_excel_import()
