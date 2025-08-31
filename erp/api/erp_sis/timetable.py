@@ -1,3 +1,4 @@
+
 # Copyright (c) 2024, Wellspring International School and contributors
 # For license information, please see license.txt
 
@@ -600,15 +601,36 @@ def get_teacher_week():
             "campus_id": campus_id,
         }
 
-        rows = frappe.get_all(
-            "SIS Timetable Instance Row",
-            fields=[
-                "name", "day_of_week", "timetable_column_id", "class_id",
-                "subject_title", "subject_name", "teacher_names", "teacher_1_id", "teacher_2_id",
-            ],
-            filters=filters,
-            order_by="day_of_week asc",
-        )
+        # Debug: Try without class_id field first to test table
+        frappe.logger().info("=== DEBUGGING TEACHER QUERY ===")
+
+        # First try to get all records to test table existence
+        try:
+            all_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name"],
+                limit=1
+            )
+            frappe.logger().info(f"Teacher query - Table exists, found {len(all_rows)} records")
+        except Exception as table_error:
+            frappe.logger().info(f"Teacher query - Table error: {str(table_error)}")
+            return error_response(f"Table not found: {str(table_error)}")
+
+        # Now try with filters but handle missing class_id field
+        try:
+            rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=[
+                    "name", "day_of_week", "timetable_column_id",
+                    "subject_title", "subject_name", "teacher_names", "teacher_1_id", "teacher_2_id",
+                ],
+                filters=filters,
+                order_by="day_of_week asc",
+            )
+            frappe.logger().info(f"Teacher query successful, found {len(rows)} rows")
+        except Exception as query_error:
+            frappe.logger().info(f"Teacher query error: {str(query_error)}")
+            return error_response(f"Query failed: {str(query_error)}")
         # Filter in-memory for teacher (to avoid OR filter limitation in simple get_all)
         rows = [r for r in rows if r.get("teacher_1_id") == teacher_id or r.get("teacher_2_id") == teacher_id]
 
@@ -651,15 +673,37 @@ def get_class_week():
             "class_id": class_id,
         }
 
-        rows = frappe.get_all(
-            "SIS Timetable Instance Row",
-            fields=[
-                "name", "day_of_week", "timetable_column_id", "class_id",
-                "subject_title", "subject_name", "teacher_names", "teacher_1_id", "teacher_2_id",
-            ],
-            filters=filters,
-            order_by="day_of_week asc",
-        )
+        # Debug: Try without class_id filter first to see if table exists
+        frappe.logger().info("=== DEBUGGING QUERY ===")
+        frappe.logger().info(f"Filters: {filters}")
+
+        # First try to get all records without class_id filter to test table existence
+        try:
+            all_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name"],
+                limit=1
+            )
+            frappe.logger().info(f"Table exists, found {len(all_rows)} records")
+        except Exception as table_error:
+            frappe.logger().info(f"Table error: {str(table_error)}")
+            return error_response(f"Table not found: {str(table_error)}")
+
+        # Now try with filters but handle missing class_id field
+        try:
+            rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=[
+                    "name", "day_of_week", "timetable_column_id",
+                    "subject_title", "subject_name", "teacher_names", "teacher_1_id", "teacher_2_id",
+                ],
+                filters={"campus_id": campus_id},  # Remove class_id filter temporarily
+                order_by="day_of_week asc",
+            )
+            frappe.logger().info(f"Query successful, found {len(rows)} rows")
+        except Exception as query_error:
+            frappe.logger().info(f"Query error: {str(query_error)}")
+            return error_response(f"Query failed: {str(query_error)}")
 
         entries = _build_entries(rows, ws)
         return list_response(entries, "Class week fetched successfully")
