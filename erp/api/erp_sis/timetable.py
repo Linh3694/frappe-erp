@@ -738,6 +738,26 @@ def get_class_week():
                 filters=row_filters,
                 order_by="day_of_week asc",
             )
+            # Fallback: some rows may have been created via explicit link field
+            if not rows:
+                alt_rows = frappe.get_all(
+                    "SIS Timetable Instance Row",
+                    fields=[
+                        "name",
+                        "parent_timetable_instance",
+                        "day_of_week",
+                        "timetable_column_id",
+                        "subject_id",
+                        "teacher_1_id",
+                        "teacher_2_id",
+                    ],
+                    filters={"parent_timetable_instance": ["in", instance_ids]},
+                    order_by="day_of_week asc",
+                )
+                # Normalize to same shape
+                for r in alt_rows:
+                    r["parent"] = r.get("parent_timetable_instance")
+                rows = alt_rows
         except Exception as e:
             return error_response(f"Failed to query instance rows: {str(e)}")
 
