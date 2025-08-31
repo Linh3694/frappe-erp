@@ -10,7 +10,7 @@ from erp.utils.api_response import (
     list_response,
     validation_error_response,
 )
-from .timetable_excel_import import process_excel_import, process_excel_import_with_metadata
+from .timetable_excel_import import process_excel_import, process_excel_import_with_metadata_v2
 
 def _noop():
     return None
@@ -644,11 +644,6 @@ def get_class_week(class_id: str = None, week_start: str = None, week_end: str =
 # =========================
 
 @frappe.whitelist(allow_guest=True)
-def test_import_access():
-    """Simple test to verify import access"""
-    return {"success": True, "message": "Import access working", "data": frappe.local.form_dict}
-
-@frappe.whitelist(allow_guest=True)
 def import_timetable():
     """Import timetable from Excel with dry-run validation and final import"""
     try:
@@ -728,11 +723,12 @@ def import_timetable():
             }
 
             # Process the Excel import
-            result = process_excel_import_with_metadata(import_data)
+            result = process_excel_import_with_metadata_v2(import_data)
 
             # Clean up temp file
-            if frappe.utils.file_manager.file_exists(file_path):
-                frappe.utils.file_manager.delete_file(file_path)
+            import os
+            if os.path.exists(file_path):
+                os.remove(file_path)
 
             return result
         else:
@@ -760,15 +756,17 @@ def import_timetable():
 def save_uploaded_file(file_data, filename: str) -> str:
     """Save uploaded file temporarily and return file path"""
     try:
+        import os
+        import uuid
+
         # Create temporary directory if it doesn't exist
         temp_dir = frappe.utils.get_site_path("private", "files", "temp")
-        if not frappe.utils.file_manager.dir_exists(temp_dir):
-            frappe.utils.file_manager.create_directory(temp_dir)
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir, exist_ok=True)
 
         # Generate unique filename
-        import uuid
         unique_filename = f"{uuid.uuid4().hex}_{filename}"
-        file_path = frappe.utils.get_site_path("private", "files", "temp", unique_filename)
+        file_path = os.path.join(temp_dir, unique_filename)
 
         # Save file
         with open(file_path, 'wb') as f:
