@@ -644,6 +644,11 @@ def get_class_week(class_id: str = None, week_start: str = None, week_end: str =
 # =========================
 
 @frappe.whitelist(allow_guest=True)
+def test_import_access():
+    """Simple test to verify import access"""
+    return {"success": True, "message": "Import access working", "data": frappe.local.form_dict}
+
+@frappe.whitelist(allow_guest=True)
 def import_timetable():
     """Import timetable from Excel with dry-run validation and final import"""
     try:
