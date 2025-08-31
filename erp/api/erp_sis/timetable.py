@@ -783,6 +783,54 @@ def get_class_week():
             parent = r.get("parent")
             r["class_id"] = instances_map.get(parent, {}).get("class_id")
 
+        # 4) Enrich subject_title and teacher_names
+        try:
+            subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
+            teacher_ids = list({tid for r in rows for tid in [r.get("teacher_1_id"), r.get("teacher_2_id")] if tid})
+
+            subject_title_map = {}
+            if subject_ids:
+                for s in frappe.get_all(
+                    "SIS Subject",
+                    fields=["name", "title"],
+                    filters={"name": ["in", subject_ids]},
+                ):
+                    subject_title_map[s.name] = s.title
+
+            teacher_user_map = {}
+            if teacher_ids:
+                teachers = frappe.get_all(
+                    "SIS Teacher",
+                    fields=["name", "user_id"],
+                    filters={"name": ["in", teacher_ids]},
+                )
+                user_ids = [t.user_id for t in teachers if t.get("user_id")]
+                user_display_map = {}
+                if user_ids:
+                    for u in frappe.get_all(
+                        "User",
+                        fields=["name", "full_name", "first_name", "middle_name", "last_name"],
+                        filters={"name": ["in", user_ids]},
+                    ):
+                        display = u.get("full_name")
+                        if not display:
+                            parts = [u.get("first_name"), u.get("middle_name"), u.get("last_name")]
+                            display = " ".join([p for p in parts if p]) or u.get("name")
+                        user_display_map[u.name] = display
+                for t in teachers:
+                    teacher_user_map[t.name] = user_display_map.get(t.get("user_id")) or t.get("user_id") or t.get("name")
+
+            for r in rows:
+                r["subject_title"] = subject_title_map.get(r.get("subject_id")) or r.get("subject_title") or r.get("subject_name") or ""
+                teacher_names_list = []
+                if r.get("teacher_1_id"):
+                    teacher_names_list.append(teacher_user_map.get(r.get("teacher_1_id")) or "")
+                if r.get("teacher_2_id"):
+                    teacher_names_list.append(teacher_user_map.get(r.get("teacher_2_id")) or "")
+                r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
+        except Exception as enrich_error:
+            frappe.logger().info(f"Class week enrich warning: {str(enrich_error)}")
+
         entries = _build_entries(rows, ws)
         return list_response(entries, "Class week fetched successfully")
     except Exception as e:
