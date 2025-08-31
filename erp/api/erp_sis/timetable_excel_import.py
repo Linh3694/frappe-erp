@@ -24,6 +24,8 @@ class TimetableExcelImporter:
 
     def validate_excel_structure(self, df: pd.DataFrame) -> bool:
         """Validate Excel file structure"""
+        # Normalize headers to canonical names first
+        df = self.normalize_columns(df)
         required_columns = ['Day of Week', 'Period', 'Class', 'Subject', 'Teacher 1']
         missing_columns = []
 
@@ -44,6 +46,40 @@ class TimetableExcelImporter:
             return False
 
         return True
+
+    def normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Rename Vietnamese/variant headers to canonical English headers used by importer"""
+        try:
+            canonical_map = {
+                'day of week': 'Day of Week',
+                'thứ': 'Day of Week',
+                'thu': 'Day of Week',
+                'ngày trong tuần': 'Day of Week',
+                'period': 'Period',
+                'tiết': 'Period',
+                'class': 'Class',
+                'lớp': 'Class',
+                'subject': 'Subject',
+                'môn': 'Subject',
+                'môn học': 'Subject',
+                'teacher 1': 'Teacher 1',
+                'giáo viên 1': 'Teacher 1',
+                'gv1': 'Teacher 1',
+                'teacher 2': 'Teacher 2',
+                'giáo viên 2': 'Teacher 2',
+                'gv2': 'Teacher 2',
+            }
+            rename_map = {}
+            for col in df.columns:
+                key = str(col).strip().lower()
+                if key in canonical_map:
+                    rename_map[col] = canonical_map[key]
+            if rename_map:
+                df = df.rename(columns=rename_map)
+        except Exception:
+            # Best-effort rename, ignore errors
+            pass
+        return df
 
     def normalize_day_of_week(self, day_str: str) -> Optional[str]:
         """Convert Vietnamese day names to English"""
@@ -328,27 +364,7 @@ def process_excel_import():
 
 def process_excel_import_with_metadata_v2(import_data: dict):
     """Process Excel import with metadata (title, dates, etc.) - Simplified version"""
-    # Collect logs for response
-    logs = []
-    frappe.logger().info(f"=== DEBUG: process_excel_import_with_metadata_v2 logs list initialized, length: {len(logs)} ===")
-
-    def log_message(message: str):
-        """Log both to frappe logger and collect for response"""
-        frappe.logger().info(f"LOG_MESSAGE: {message}")
-        logs.append(f"{frappe.utils.now()}: {message}")
-        frappe.logger().info(f"=== DEBUG: Added to logs, current length: {len(logs)} ===")
-
-    frappe.logger().info("=== DEBUG: About to enter try block ===")
     try:
-        # Log that function was called
-        log_message("=== FUNCTION process_excel_import_with_metadata_v2 CALLED ===")
-        log_message(f"Import data received: {import_data}")
-        log_message(f"Import data file_path: {import_data.get('file_path', 'MISSING')}")
-        log_message(f"Import data title_vn: {import_data.get('title_vn', 'MISSING')}")
-        log_message(f"Import data campus_id: {import_data.get('campus_id', 'MISSING')}")
-        log_message(f"Import data dry_run: {import_data.get('dry_run', 'MISSING')}")
-
-        log_message("=== Starting Excel Import Processing ===")
 
         # Extract parameters with defaults
         file_path = import_data.get("file_path", "")
@@ -356,20 +372,9 @@ def process_excel_import_with_metadata_v2(import_data: dict):
         campus_id = import_data.get("campus_id", "")
         dry_run = import_data.get("dry_run", True)
 
-        log_message(f"Processing file: {file_path}")
-        log_message(f"Title: {title_vn}, Campus: {campus_id}")
-        log_message(f"Import data keys: {list(import_data.keys())}")
-        log_message(f"Dry run: {dry_run}, type: {type(dry_run)}")
-        log_message(f"Validation check - title_vn: '{title_vn}', campus_id: '{campus_id}'")
-
         # Basic validation
-        log_message("=== CHECKING VALIDATION ===")
-        log_message(f"title_vn is empty: {not title_vn}")
-        log_message(f"campus_id is empty: {not campus_id}")
 
         if not title_vn or not campus_id:
-            log_message(f"Validation failed - missing title_vn or campus_id")
-            log_message("=== EARLY RETURN: Validation Failed ===")
             result = {
                 "dry_run": dry_run,
                 "title_vn": title_vn,
@@ -380,20 +385,14 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "valid_rows": 0,
                 "errors": [{"missing_fields": ["title_vn", "campus_id"]}],
                 "warnings": [],
-                "logs": logs
+                "logs": []
             }
-            log_message(f"Validation error result: {result}")
             final_response = single_item_response(result, "Timetable import validation failed")
             return final_response
 
-        log_message("=== VALIDATION PASSED, CONTINUING ===")
-
         # Check file exists using standard Python
         import os
-        log_message(f"Checking file exists at: {file_path}")
         if not os.path.exists(file_path):
-            log_message(f"File not found at: {file_path}")
-            log_message("=== EARLY RETURN: File Not Found ===")
             result = {
                 "dry_run": dry_run,
                 "title_vn": title_vn,
@@ -404,23 +403,15 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "valid_rows": 0,
                 "errors": [{"file_path": ["Uploaded file not found"]}],
                 "warnings": [],
-                "logs": logs
+                "logs": []
             }
-            log_message(f"File not found result: {result}")
             final_response = single_item_response(result, "Timetable import file not found")
             return final_response
 
-        log_message("File exists, proceeding with processing...")
-
-        # Read and process Excel file
         try:
-            log_message("=== STARTING EXCEL PROCESSING ===")
-            # Try to import pandas
             try:
                 import pandas as pd
             except ImportError:
-                log_message("Pandas not available, skipping Excel processing")
-                log_message("=== EARLY RETURN: Pandas Not Available ===")
                 result = {
                     "dry_run": dry_run,
                     "title_vn": title_vn,
@@ -431,32 +422,28 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     "valid_rows": 0,
                     "errors": ["Pandas library not available"],
                     "warnings": [],
-                    "logs": logs
+                    "logs": []
                 }
-                log_message(f"Pandas error result: {result}")
                 final_response = single_item_response(result, "Timetable import pandas not available")
                 return final_response
 
             # Read Excel file
-            log_message("Reading Excel file...")
             try:
                 df = pd.read_excel(file_path, header=0)  # First row is header
                 total_rows = len(df)
-                log_message(f"Excel file loaded with {total_rows} rows")
-                log_message(f"Columns found: {list(df.columns)}")
-                log_message(f"First few rows preview available")
             except Exception as excel_error:
-                log_message(f"Error reading Excel file: {str(excel_error)}")
                 raise Exception(f"Failed to read Excel file: {str(excel_error)}")
 
             # Initialize importer for validation
             importer = TimetableExcelImporter(campus_id)
+            # Normalize columns upfront for downstream processing
+            df = importer.normalize_columns(df)
+            # Initialize logs collector
+            logs = []
 
             # Validate Excel structure
-            log_message("Validating Excel structure...")
             try:
                 if not importer.validate_excel_structure(df):
-                    log_message(f"Excel validation failed: {importer.errors}")
                     result = {
                         "dry_run": dry_run,
                         "title_vn": title_vn,
@@ -471,9 +458,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     }
                     return single_item_response(result, "Timetable import validation failed")
 
-                log_message("Excel structure validation passed")
             except Exception as validation_error:
-                log_message(f"Error during validation: {str(validation_error)}")
                 result = {
                     "dry_run": dry_run,
                     "title_vn": title_vn,
@@ -488,12 +473,27 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 }
                 return single_item_response(result, "Timetable import validation failed")
 
-            log_message("Excel structure validation passed")
+            # Parse to schedule_data with mapping validations
+            education_stage_id = import_data.get("education_stage_id")
+            schedule_data, ok = importer.process_excel_data(df, education_stage_id)
+            if not ok:
+                result = {
+                    "dry_run": dry_run,
+                    "title_vn": title_vn,
+                    "campus_id": campus_id,
+                    "file_path": file_path,
+                    "message": "Timetable mapping validation failed",
+                    "total_rows": total_rows,
+                    "valid_rows": len(schedule_data),
+                    "errors": importer.errors,
+                    "warnings": importer.warnings,
+                    "schedule_data": schedule_data,
+                    "logs": logs
+                }
+                return single_item_response(result, "Timetable import validation failed")
 
             # If not dry run, create the actual records
             if not dry_run:
-                log_message("Creating SIS Timetable record...")
-
                 # Create SIS Timetable record
                 timetable_doc = frappe.get_doc({
                     "doctype": "SIS Timetable",
@@ -509,12 +509,51 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 timetable_doc.insert()
 
                 timetable_id = timetable_doc.name
-                log_message(f"Created SIS Timetable: {timetable_id}")
 
-                # Process Excel data and create timetable instances
-                success_count = process_excel_data(df, timetable_id, campus_id, logs)
+                # Group rows per class and create instances + rows
+                from collections import defaultdict
+                rows_by_class = defaultdict(list)
+                for r in schedule_data:
+                    if r.get("class_id"):
+                        rows_by_class[r["class_id"].strip()].append(r)
+                instances_created = 0
+                rows_created = 0
 
-                log_message(f"Processed {success_count} timetable entries successfully")
+                for class_id, class_rows in rows_by_class.items():
+                    instance_doc = frappe.get_doc({
+                        "doctype": "SIS Timetable Instance",
+                        "timetable_id": timetable_id,
+                        "class_id": class_id,
+                        "start_date": import_data.get("start_date"),
+                        "end_date": import_data.get("end_date"),
+                        "campus_id": campus_id
+                    })
+                    try:
+                        instance_doc.insert()
+                        instances_created += 1
+                        logs.append(f"Created instance {instance_doc.name} for class {class_id}")
+                    except Exception as e:
+                        logs.append(f"Failed to create instance for class {class_id}: {str(e)}")
+                        continue
+
+                    for row in class_rows:
+                        row_doc = frappe.get_doc({
+                            "doctype": "SIS Timetable Instance Row",
+                            "timetable_instance_id": instance_doc.name,
+                            "day_of_week": row.get("day_of_week"),
+                            "timetable_column_id": row.get("timetable_column_id"),
+                            "class_id": row.get("class_id"),
+                            "subject_id": row.get("subject_id"),
+                            "subject_name": row.get("subject_title"),
+                            "teacher_1_id": row.get("teacher_1_id"),
+                            "teacher_2_id": row.get("teacher_2_id"),
+                            "campus_id": campus_id
+                        })
+                        try:
+                            row_doc.insert()
+                            rows_created += 1
+                        except Exception as re:
+                            logs.append(f"Failed to insert row for class {class_id} at {row.get('day_of_week')}: {str(re)}")
 
             # Prepare detailed result with created records info
             created_records = {}
@@ -527,10 +566,8 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         "start_date": timetable_doc.start_date,
                         "end_date": timetable_doc.end_date
                     },
-                    "instances_created": 1,  # We created 1 instance (first week)
-                    "rows_created": success_count,
-                    "subjects_created": len(df['Subject'].dropna().unique()) if 'Subject' in df.columns else 0,
-                    "teachers_created": len(df['Teacher 1'].dropna().unique()) if 'Teacher 1' in df.columns else 0
+                    "instances_created": locals().get('instances_created', 0),
+                    "rows_created": locals().get('rows_created', 0)
                 }
 
             result = {
@@ -540,25 +577,19 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "file_path": file_path,
                 "message": "Timetable import validation completed" if dry_run else "Timetable import completed successfully",
                 "total_rows": total_rows,
-                "valid_rows": total_rows - len(importer.errors),
+                "valid_rows": len(schedule_data) if 'schedule_data' in locals() else total_rows - len(importer.errors),
                 "errors": importer.errors,
                 "warnings": importer.warnings,
+                "schedule_data": schedule_data if dry_run else [],
                 "timetable_id": timetable_id if not dry_run and 'timetable_id' in locals() else None,
                 "created_records": created_records if not dry_run else {},
                 "logs": logs
             }
 
-            # Add logs to result before returning
-            result["logs"] = logs
-            log_message(f"Final result with logs: {result}")
-            log_message("=== Excel Import Processing Completed ===")
             final_response = single_item_response(result, "Timetable import processed successfully")
-            log_message(f"Final response type: {type(final_response)}")
-            log_message(f"Final response keys: {final_response.keys() if isinstance(final_response, dict) else 'Not dict'}")
             return final_response
 
         except Exception as e:
-            log_message(f"Error processing Excel file: {str(e)}")
             result = {
                 "dry_run": dry_run,
                 "title_vn": title_vn,
@@ -569,17 +600,12 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "valid_rows": 0,
                 "errors": [str(e)],
                 "warnings": [],
-                "logs": logs
+                "logs": []
             }
-            log_message(f"Error result with logs: {result}")
             final_response = single_item_response(result, "Timetable import failed")
             return final_response
 
         except Exception as e:
-            log_message(f"Error in Excel processing: {str(e)}")
-            log_message(f"Error type: {type(e)}")
-            log_message(f"Error traceback: {frappe.get_traceback()}")
-
             result = {
                 "dry_run": dry_run,
                 "title_vn": title_vn,
@@ -590,15 +616,13 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "valid_rows": 0,
                 "errors": [str(e)],
                 "warnings": [],
-                "logs": logs
+                "logs": []
             }
-            log_message(f"Outer exception result: {result}")
             final_response = single_item_response(result, "Timetable import failed")
             return final_response
 
     except Exception as e:
-        frappe.logger().info(f"Error in Excel processing outer: {str(e)}")
-        # Try to return logs even in outer exception
+        # Try to return error response
         try:
             result = {
                 "dry_run": import_data.get("dry_run", True),
@@ -610,7 +634,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "valid_rows": 0,
                 "errors": [str(e)],
                 "warnings": [],
-                "logs": logs if 'logs' in locals() else []
+                "logs": []
             }
             return single_item_response(result, "Timetable import critical error")
         except:
@@ -620,31 +644,14 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None) -> int:
     """Process Excel data and create timetable instances and rows"""
     success_count = 0
-    if logs is None:
-        logs = []
-
-    def log_data_message(message: str):
-        """Log both to frappe logger and collect for response"""
-        frappe.logger().info(message)
-        logs.append(f"{frappe.utils.now()}: {message}")
 
     try:
-        log_data_message(f"Processing Excel data for timetable: {timetable_id}")
-        log_data_message(f"DataFrame shape: {df.shape}")
-        log_data_message(f"DataFrame columns: {list(df.columns)}")
-        log_data_message(f"First 3 rows: {df.head(3).to_dict() if len(df) > 0 else 'No data'}")
-
-        # Group data by week (assuming there's a 'Week' column or we calculate from dates)
-        # For now, we'll assume all data belongs to the first week of the timetable
-
         # Get timetable dates
         timetable_doc = frappe.get_doc("SIS Timetable", timetable_id)
         start_date = timetable_doc.start_date
         end_date = timetable_doc.end_date
-        log_data_message(f"Timetable dates: {start_date} to {end_date}")
 
         # Create timetable instance for the first week
-        log_data_message("Creating timetable instance...")
         instance_doc = frappe.get_doc({
             "doctype": "SIS Timetable Instance",
             "timetable_id": timetable_id,
@@ -656,16 +663,13 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
         try:
             instance_doc.insert()
             instance_id = instance_doc.name
-            log_data_message(f"Created timetable instance: {instance_id}")
         except Exception as instance_error:
-            log_data_message(f"Error creating timetable instance: {str(instance_error)}")
             frappe.logger().error(f"Instance creation error: {str(instance_error)}")
             return 0  # Return 0 to indicate no rows processed
 
         # Process each row in Excel
         for index, row in df.iterrows():
             try:
-                log_data_message(f"Processing row {index + 1}")
                 # Extract data from Excel row using column access
                 day_of_week = str(row['Day of Week'] if 'Day of Week' in row.index else '').strip().lower()
                 period = str(row['Period'] if 'Period' in row.index else '').strip()
@@ -673,11 +677,8 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
                 subject_name = str(row['Subject'] if 'Subject' in row.index else '').strip()
                 teacher_1 = str(row['Teacher 1'] if 'Teacher 1' in row.index else '').strip()
 
-                log_data_message(f"Row data: day={day_of_week}, period={period}, class={class_name}, subject={subject_name}, teacher={teacher_1}")
-
                 # Skip empty rows
                 if not all([day_of_week, period, class_name, subject_name]):
-                    log_data_message(f"Skipping empty row {index + 1}")
                     continue
 
                 # Map day of week to standard format
@@ -703,11 +704,9 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
                 class_id = find_class(class_name, campus_id)
 
                 if not class_id:
-                    log_data_message(f"Class not found: {class_name}")
                     continue
 
                 # Create timetable instance row
-                log_data_message(f"Creating row for {mapped_day} {period} {class_name}")
                 row_doc = frappe.get_doc({
                     "doctype": "SIS Timetable Instance Row",
                     "timetable_instance_id": instance_id,
@@ -723,20 +722,15 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
                 try:
                     row_doc.insert()
                     success_count += 1
-                    log_data_message(f"Created timetable row {success_count}: {mapped_day} {period} {class_name}")
                 except Exception as row_error:
-                    log_data_message(f"Error creating row {index + 1}: {str(row_error)}")
                     frappe.logger().error(f"Row creation error: {str(row_error)}")
                     continue  # Continue to next row instead of failing
 
             except Exception as e:
-                log_data_message(f"Error processing row {index + 1}: {str(e)}")
                 continue
 
-        log_data_message(f"Successfully processed {success_count} timetable entries")
-
     except Exception as e:
-        log_data_message(f"Error in process_excel_data: {str(e)}")
+        pass
 
     return success_count
 

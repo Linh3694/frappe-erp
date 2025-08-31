@@ -691,20 +691,9 @@ def get_class_week():
         week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
         week_end = frappe.local.form_dict.get("week_end") or frappe.request.args.get("week_end")
 
-        # Debug logging
-        frappe.logger().info(f"=== GET CLASS WEEK DEBUG ===")
-        frappe.logger().info(f"Parameters: class_id={class_id}, week_start={week_start}, week_end={week_end}")
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Request args: {getattr(frappe.request, 'args', {})}")
-        frappe.logger().info(f"Form dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"Request data: {getattr(frappe.request, 'data', {})}")
-        frappe.logger().info(f"Query string: {frappe.request.query_string}")
-
         if not class_id:
-            frappe.logger().info("class_id is missing or empty")
             return validation_error_response("Validation failed", {"class_id": ["Class is required"]})
         if not week_start:
-            frappe.logger().info("week_start is missing or empty")
             return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
 
         ws = _parse_iso_date(week_start)
@@ -720,27 +709,8 @@ def get_class_week():
                 limit=1
             )
             filters = {"campus_id": campus_id}
-            frappe.logger().info("Class query - campus_id filter is available")
         except Exception as filter_error:
-            frappe.logger().info(f"Class query - campus_id filter not available: {str(filter_error)}, using no filters")
             filters = {}  # Use no filters if campus_id doesn't exist
-
-        # Debug: Try without class_id filter first to see if table exists
-        frappe.logger().info("=== DEBUGGING QUERY ===")
-        frappe.logger().info(f"Final filters: {filters}")
-        frappe.logger().info(f"Filters empty: {len(filters) == 0}")
-
-        # First try to get all records without class_id filter to test table existence
-        try:
-            all_rows = frappe.get_all(
-                "SIS Timetable Instance Row",
-                fields=["name"],
-                limit=1
-            )
-            frappe.logger().info(f"Table exists, found {len(all_rows)} records")
-        except Exception as table_error:
-            frappe.logger().info(f"Table error: {str(table_error)}")
-            return error_response(f"Table not found: {str(table_error)}")
 
         # Try with minimal fields first to see what exists
         try:
@@ -752,8 +722,6 @@ def get_class_week():
                 filters=filters,  # Use the filters we already tested
                 limit=5  # Limit to see if basic query works
             )
-            frappe.logger().info(f"Basic query successful, found {len(rows)} rows")
-            frappe.logger().info(f"Sample row: {rows[0] if rows else 'No rows'}")
 
             # Step 2: Try adding more fields one by one
             available_fields = basic_fields[:]
@@ -768,9 +736,8 @@ def get_class_week():
                         limit=1
                     )
                     available_fields.append(field)
-                    frappe.logger().info(f"Field '{field}' is available")
                 except Exception as field_error:
-                    frappe.logger().info(f"Field '{field}' not available: {str(field_error)}")
+                    pass  # Field not available, skip it
 
             # Step 3: Use all available fields
             rows = frappe.get_all(
@@ -779,10 +746,8 @@ def get_class_week():
                 filters=filters,  # Use the tested filters
                 order_by="day_of_week asc",
             )
-            frappe.logger().info(f"Final query successful with fields: {available_fields}")
 
         except Exception as query_error:
-            frappe.logger().info(f"Query error: {str(query_error)}")
             return error_response(f"Query failed: {str(query_error)}")
 
         entries = _build_entries(rows, ws)
@@ -829,14 +794,6 @@ def test_class_week_api(class_id: str = None, week_start: str = None):
 def import_timetable():
     """Import timetable from Excel with dry-run validation and final import"""
     try:
-        # Collect logs for response
-        logs = []
-
-        def log_timetable_message(message: str):
-            """Log both to frappe logger and collect for response"""
-            frappe.logger().info(message)
-            logs.append(f"{frappe.utils.now()}: {message}")
-
         # Get request data - handle both FormData and regular form data
         data = {}
 
@@ -844,30 +801,21 @@ def import_timetable():
         if hasattr(frappe.request, 'form_data') and frappe.request.form_data:
             # For werkzeug form data
             data = frappe.request.form_data
-            log_timetable_message("Using form_data")
         elif hasattr(frappe.request, 'form') and frappe.request.form:
             # For flask-style form data
             data = frappe.request.form
-            log_timetable_message("Using form")
         elif frappe.local.form_dict:
             # Fallback to form_dict
             data = frappe.local.form_dict
-            log_timetable_message("Using form_dict")
         elif hasattr(frappe.request, 'args') and frappe.request.args:
             # Try request args
             data = frappe.request.args
-            log_timetable_message("Using args")
 
         # Convert to dict if it's not already
         if hasattr(data, 'to_dict'):
             data = data.to_dict()
-            log_timetable_message("Converted to dict using to_dict()")
         elif not isinstance(data, dict):
             data = dict(data) if data else {}
-            log_timetable_message("Converted to dict using dict()")
-
-        log_timetable_message(f"Final data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
-        log_timetable_message(f"Raw data: {data}")
 
         # Check for dry_run parameter
         dry_run = data.get("dry_run", "false").lower() == "true"
@@ -881,39 +829,26 @@ def import_timetable():
         start_date = data.get("start_date")
         end_date = data.get("end_date")
 
-        # Log basic info for debugging
-        log_timetable_message(f"Import timetable request - title_vn: {title_vn}, campus_id: {campus_id}")
-        log_timetable_message(f"Current user: {frappe.session.user}")
-        log_timetable_message(f"User roles: {frappe.get_roles(frappe.session.user) if frappe.session.user else 'No user'}")
-        if hasattr(frappe.request, 'files') and frappe.request.files:
-            log_timetable_message(f"Files available: {list(frappe.request.files.keys())}")
-
         # Validate required fields
         if not all([title_vn, campus_id, school_year_id, education_stage_id, start_date, end_date]):
-            log_timetable_message("Validation failed - missing required fields")
             return validation_error_response("Validation failed", {
                 "required_fields": ["title_vn", "campus_id", "school_year_id", "education_stage_id", "start_date", "end_date"],
-                "logs": logs
+                "logs": []
             })
 
         # Get current user campus
         user_campus = get_current_campus_from_context()
-        log_timetable_message(f"User campus: {user_campus}, requested campus: {campus_id}")
         if user_campus and user_campus != campus_id:
-            log_timetable_message("Access denied - campus mismatch")
             return forbidden_response("Access denied: Campus mismatch")
 
         # Process Excel import if file is provided
         files = frappe.request.files
-        log_timetable_message(f"Files object: {type(files)}")
-        log_timetable_message(f"Files keys: {list(files.keys()) if files else 'No files'}")
 
         if files and 'file' in files:
             # File is uploaded, process it
             file_data = files['file']
             if not file_data:
-                log_timetable_message("No file uploaded")
-                return validation_error_response("Validation failed", {"file": ["No file uploaded"], "logs": logs})
+                return validation_error_response("Validation failed", {"file": ["No file uploaded"], "logs": []})
 
             # Save file temporarily
             file_path = save_uploaded_file(file_data, "timetable_import.xlsx")
@@ -932,33 +867,16 @@ def import_timetable():
             }
 
             # Process the Excel import
-            log_timetable_message("Starting Excel import processing")
-            log_timetable_message(f"Calling process_excel_import_with_metadata_v2 with: {import_data}")
             result = process_excel_import_with_metadata_v2(import_data)
-            log_timetable_message(f"process_excel_import_with_metadata_v2 returned: {type(result)}")
-            log_timetable_message(f"Result keys: {result.keys() if isinstance(result, dict) else 'Not dict'}")
-
-            # Add logs to result if it's a dict
-            if isinstance(result, dict) and 'data' in result:
-                if isinstance(result['data'], dict):
-                    result['data']['logs'] = logs
-                    log_timetable_message("Successfully merged logs into result")
-                else:
-                    log_timetable_message("Result data is not a dict, cannot merge logs")
-            else:
-                log_timetable_message("Result structure unexpected, cannot merge logs")
 
             # Clean up temp file
             import os
             if os.path.exists(file_path):
                 os.remove(file_path)
-                log_timetable_message("Cleaned up temporary file")
 
-            log_timetable_message(f"About to return result with keys: {result.keys() if isinstance(result, dict) else 'Not dict'}")
             return result
         else:
             # No file uploaded, just validate metadata
-            log_timetable_message("No file uploaded - metadata validation only")
             result = {
                 "dry_run": dry_run,
                 "title_vn": title_vn,
@@ -970,19 +888,13 @@ def import_timetable():
                 "end_date": end_date,
                 "message": "Metadata validation completed",
                 "requires_file": True,
-                "logs": logs
+                "logs": []
             }
 
             return single_item_response(result, "Timetable metadata validated successfully")
 
     except Exception as e:
         frappe.log_error(f"Error importing timetable: {str(e)}")
-        # Try to add logs to error response if possible
-        try:
-            if 'logs' in locals():
-                return error_response(f"Error importing timetable: {str(e)}", {"logs": logs})
-        except:
-            pass
         return error_response(f"Error importing timetable: {str(e)}")
 
 
