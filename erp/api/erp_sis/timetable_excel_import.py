@@ -370,12 +370,21 @@ def process_excel_import_with_metadata_v2(import_data: dict):
         if not title_vn or not campus_id:
             log_message(f"Validation failed - missing title_vn or campus_id")
             log_message("=== EARLY RETURN: Validation Failed ===")
-            error_response = validation_error_response("Validation failed", {
-                "missing_fields": ["title_vn", "campus_id"],
+            result = {
+                "dry_run": dry_run,
+                "title_vn": title_vn,
+                "campus_id": campus_id,
+                "file_path": file_path,
+                "message": "Validation failed",
+                "total_rows": 0,
+                "valid_rows": 0,
+                "errors": [{"missing_fields": ["title_vn", "campus_id"]}],
+                "warnings": [],
                 "logs": logs
-            })
-            log_message(f"Error response type: {type(error_response)}")
-            return error_response
+            }
+            log_message(f"Validation error result: {result}")
+            final_response = single_item_response(result, "Timetable import validation failed")
+            return final_response
 
         log_message("=== VALIDATION PASSED, CONTINUING ===")
 
@@ -384,10 +393,22 @@ def process_excel_import_with_metadata_v2(import_data: dict):
         log_message(f"Checking file exists at: {file_path}")
         if not os.path.exists(file_path):
             log_message(f"File not found at: {file_path}")
-            return validation_error_response("File not found", {
-                "file_path": ["Uploaded file not found"],
+            log_message("=== EARLY RETURN: File Not Found ===")
+            result = {
+                "dry_run": dry_run,
+                "title_vn": title_vn,
+                "campus_id": campus_id,
+                "file_path": file_path,
+                "message": "File not found",
+                "total_rows": 0,
+                "valid_rows": 0,
+                "errors": [{"file_path": ["Uploaded file not found"]}],
+                "warnings": [],
                 "logs": logs
-            })
+            }
+            log_message(f"File not found result: {result}")
+            final_response = single_item_response(result, "Timetable import file not found")
+            return final_response
 
         log_message("File exists, proceeding with processing...")
 
@@ -399,6 +420,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 import pandas as pd
             except ImportError:
                 log_message("Pandas not available, skipping Excel processing")
+                log_message("=== EARLY RETURN: Pandas Not Available ===")
                 result = {
                     "dry_run": dry_run,
                     "title_vn": title_vn,
@@ -411,7 +433,9 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     "warnings": [],
                     "logs": logs
                 }
-                return single_item_response(result, "Timetable import processed successfully")
+                log_message(f"Pandas error result: {result}")
+                final_response = single_item_response(result, "Timetable import pandas not available")
+                return final_response
 
             # Read Excel file
             log_message("Reading Excel file...")
@@ -524,7 +548,9 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "logs": logs
             }
 
-            log_message(f"Final result: {result}")
+            # Add logs to result before returning
+            result["logs"] = logs
+            log_message(f"Final result with logs: {result}")
             log_message("=== Excel Import Processing Completed ===")
             final_response = single_item_response(result, "Timetable import processed successfully")
             log_message(f"Final response type: {type(final_response)}")
@@ -545,9 +571,9 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "warnings": [],
                 "logs": logs
             }
-
-            log_message("=== Excel Import Processing Completed ===")
-            return single_item_response(result, "Timetable import processed successfully")
+            log_message(f"Error result with logs: {result}")
+            final_response = single_item_response(result, "Timetable import failed")
+            return final_response
 
         except Exception as e:
             log_message(f"Error in Excel processing: {str(e)}")
@@ -566,11 +592,29 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "warnings": [],
                 "logs": logs
             }
-            return single_item_response(result, "Timetable import failed")
+            log_message(f"Outer exception result: {result}")
+            final_response = single_item_response(result, "Timetable import failed")
+            return final_response
 
     except Exception as e:
         frappe.logger().info(f"Error in Excel processing outer: {str(e)}")
-        return validation_error_response("Import failed", {"error": [str(e)]})
+        # Try to return logs even in outer exception
+        try:
+            result = {
+                "dry_run": import_data.get("dry_run", True),
+                "title_vn": import_data.get("title_vn", ""),
+                "campus_id": import_data.get("campus_id", ""),
+                "file_path": import_data.get("file_path", ""),
+                "message": f"Critical error: {str(e)}",
+                "total_rows": 0,
+                "valid_rows": 0,
+                "errors": [str(e)],
+                "warnings": [],
+                "logs": logs if 'logs' in locals() else []
+            }
+            return single_item_response(result, "Timetable import critical error")
+        except:
+            return validation_error_response("Import failed", {"error": [str(e)]})
 
 
 def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None) -> int:
