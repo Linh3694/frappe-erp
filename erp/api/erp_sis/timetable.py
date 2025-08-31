@@ -610,9 +610,17 @@ def get_teacher_week(teacher_id: str = None, week_start: str = None, week_end: s
 def get_class_week(class_id: str = None, week_start: str = None, week_end: str = None):
     """Return class weekly timetable entries."""
     try:
+        # Debug logging
+        frappe.logger().info(f"=== GET CLASS WEEK DEBUG ===")
+        frappe.logger().info(f"Parameters: class_id={class_id}, week_start={week_start}, week_end={week_end}")
+        frappe.logger().info(f"Request args: {getattr(frappe.request, 'args', {})}")
+        frappe.logger().info(f"Form dict: {frappe.local.form_dict}")
+
         if not class_id:
+            frappe.logger().info("class_id is missing or empty")
             return validation_error_response("Validation failed", {"class_id": ["Class is required"]})
         if not week_start:
+            frappe.logger().info("week_start is missing or empty")
             return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
 
         ws = _parse_iso_date(week_start)
@@ -643,7 +651,36 @@ def get_class_week(class_id: str = None, week_start: str = None, week_end: str =
 # Import & CRUD API endpoints
 # =========================
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=False)
+def test_class_week_api(class_id: str = None, week_start: str = None):
+    """Test function for get_class_week API"""
+    try:
+        frappe.logger().info(f"=== TEST CLASS WEEK API ===")
+        frappe.logger().info(f"Received: class_id={class_id}, week_start={week_start}")
+        frappe.logger().info(f"Request args: {getattr(frappe.request, 'args', {})}")
+
+        if not class_id:
+            class_id = "SIS-CLASS-00385"  # Default test class
+        if not week_start:
+            week_start = "2025-08-25"  # Default test date
+
+        # Call the actual get_class_week function
+        result = get_class_week(class_id, week_start, None)
+        return {
+            "success": True,
+            "message": "Test class week API successful",
+            "test_params": {"class_id": class_id, "week_start": week_start},
+            "result": result
+        }
+    except Exception as e:
+        frappe.logger().info(f"Test class week API error: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Test failed: {str(e)}",
+            "test_params": {"class_id": class_id, "week_start": week_start}
+        }
+
+@frappe.whitelist(allow_guest=False)
 def import_timetable():
     """Import timetable from Excel with dry-run validation and final import"""
     try:
@@ -684,6 +721,8 @@ def import_timetable():
 
         # Log basic info for debugging
         frappe.logger().info(f"Import timetable request - title_vn: {title_vn}, campus_id: {campus_id}")
+        frappe.logger().info(f"Current user: {frappe.session.user}")
+        frappe.logger().info(f"User roles: {frappe.get_roles(frappe.session.user) if frappe.session.user else 'No user'}")
         if hasattr(frappe.request, 'files') and frappe.request.files:
             frappe.logger().info(f"Files available: {list(frappe.request.files.keys())}")
 

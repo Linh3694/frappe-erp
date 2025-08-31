@@ -430,6 +430,23 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
                 frappe.logger().info(f"Processed {success_count} timetable entries successfully")
 
+            # Prepare detailed result with created records info
+            created_records = {}
+            if not dry_run and 'timetable_id' in locals():
+                created_records = {
+                    "timetable": {
+                        "id": timetable_id,
+                        "name": timetable_doc.name,
+                        "title_vn": timetable_doc.title_vn,
+                        "start_date": timetable_doc.start_date,
+                        "end_date": timetable_doc.end_date
+                    },
+                    "instances_created": 1,  # We created 1 instance (first week)
+                    "rows_created": success_count,
+                    "subjects_created": len(set(row.get('Subject', '') for row in df.itertuples() if row.get('Subject', ''))),
+                    "teachers_created": len(set(row.get('Teacher 1', '') for row in df.itertuples() if row.get('Teacher 1', '')))
+                }
+
             result = {
                 "dry_run": dry_run,
                 "title_vn": title_vn,
@@ -440,7 +457,8 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "valid_rows": total_rows - len(importer.errors),
                 "errors": importer.errors,
                 "warnings": importer.warnings,
-                "timetable_id": timetable_id if not dry_run and 'timetable_id' in locals() else None
+                "timetable_id": timetable_id if not dry_run and 'timetable_id' in locals() else None,
+                "created_records": created_records if not dry_run else {}
             }
 
         except Exception as e:
