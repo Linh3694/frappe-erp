@@ -732,16 +732,31 @@ def get_teacher_week():
         ]
 
         # Attach class_id via parent instance if available
+        # Also filter instances by date range to ensure only active instances are included
         try:
             parent_ids = list({r.get("parent") for r in rows if r.get("parent")})
             parent_class_map = {}
             if parent_ids:
+                # Build filters with date range
+                instance_filters = {"name": ["in", parent_ids]}
+
+                # Add date filtering if week dates are available
+                if ws and we:
+                    instance_filters.update({
+                        "start_date": ["<=", we],
+                        "end_date": [">=", ws]
+                    })
+
                 instances = frappe.get_all(
                     "SIS Timetable Instance",
                     fields=["name", "class_id"],
-                    filters={"name": ["in", parent_ids]},
+                    filters=instance_filters,
                 )
                 parent_class_map = {i.name: i.class_id for i in instances}
+
+                # Filter out rows whose parent instances are not active for this date range
+                valid_parent_ids = set(parent_class_map.keys())
+                rows = [r for r in rows if r.get("parent") not in valid_parent_ids or r.get("parent") in valid_parent_ids]
             for r in rows:
                 if r.get("parent") and not r.get("class_id"):
                     r["class_id"] = parent_class_map.get(r.get("parent"))
@@ -820,12 +835,30 @@ def get_class_week():
         we = _parse_iso_date(week_end) if week_end else _add_days(ws, 6)
 
         # 1) Find timetable instances for this class that overlap the requested week
+        # Apply date filtering to get only instances that are valid for the requested week
         instance_filters = {"class_id": class_id}
+        date_conditions = []
+
+        # Add date range filtering: instances must be active during the requested week
+        if ws and we:
+            # Instance must start before or on the week end date
+            # AND end after or on the week start date
+            date_conditions.append(["start_date", "<=", we])
+            date_conditions.append(["end_date", ">=", ws])
+
+        if date_conditions:
+            # Combine class filter with date filters
+            instance_filters.update({
+                "start_date": ["<=", we],
+                "end_date": [">=", ws]
+            })
+
         try:
             instances = frappe.get_all(
                 "SIS Timetable Instance",
                 fields=["name", "class_id", "start_date", "end_date"],
                 filters=instance_filters,
+                order_by="start_date asc"
             )
         except Exception as e:
             return error_response(f"Failed to query instances: {str(e)}")
