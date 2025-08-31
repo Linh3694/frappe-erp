@@ -598,12 +598,26 @@ def get_teacher_week():
         ws = _parse_iso_date(week_start)
         # Query timetable rows
         campus_id = get_current_campus_from_context() or "campus-1"
-        filters = {
-            "campus_id": campus_id,
-        }
+
+        # Test if campus_id field exists, if not, use empty filters
+        filters = {}
+        try:
+            test_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name"],
+                filters={"campus_id": campus_id},
+                limit=1
+            )
+            filters = {"campus_id": campus_id}
+            frappe.logger().info("Teacher query - campus_id filter is available")
+        except Exception as filter_error:
+            frappe.logger().info(f"Teacher query - campus_id filter not available: {str(filter_error)}, using no filters")
+            filters = {}  # Use no filters if campus_id doesn't exist
 
         # Debug: Try without class_id field first to test table
         frappe.logger().info("=== DEBUGGING TEACHER QUERY ===")
+        frappe.logger().info(f"Final filters: {filters}")
+        frappe.logger().info(f"Filters empty: {len(filters) == 0}")
 
         # First try to get all records to test table existence
         try:
@@ -695,14 +709,26 @@ def get_class_week():
 
         ws = _parse_iso_date(week_start)
         campus_id = get_current_campus_from_context() or "campus-1"
-        filters = {
-            "campus_id": campus_id,
-            "class_id": class_id,
-        }
+
+        # Test if campus_id field exists, if not, use empty filters
+        filters = {}
+        try:
+            test_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name"],
+                filters={"campus_id": campus_id},
+                limit=1
+            )
+            filters = {"campus_id": campus_id}
+            frappe.logger().info("Class query - campus_id filter is available")
+        except Exception as filter_error:
+            frappe.logger().info(f"Class query - campus_id filter not available: {str(filter_error)}, using no filters")
+            filters = {}  # Use no filters if campus_id doesn't exist
 
         # Debug: Try without class_id filter first to see if table exists
         frappe.logger().info("=== DEBUGGING QUERY ===")
-        frappe.logger().info(f"Filters: {filters}")
+        frappe.logger().info(f"Final filters: {filters}")
+        frappe.logger().info(f"Filters empty: {len(filters) == 0}")
 
         # First try to get all records without class_id filter to test table existence
         try:
