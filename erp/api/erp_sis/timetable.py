@@ -643,12 +643,7 @@ def get_class_week(class_id: str = None, week_start: str = None, week_end: str =
 # Import & CRUD API endpoints
 # =========================
 
-@frappe.whitelist(allow_guest=False)
-def test_timetable_api():
-    """Test function to check if API is accessible"""
-    return {"success": True, "message": "Timetable API is working", "timestamp": str(frappe.utils.now())}
-
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=True)
 def import_timetable():
     """Import timetable from Excel with dry-run validation and final import"""
     try:
@@ -687,17 +682,10 @@ def import_timetable():
         start_date = data.get("start_date")
         end_date = data.get("end_date")
 
-        # Debug logging
-        frappe.logger().info(f"=== IMPORT TIMETABLE DEBUG ===")
-        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"request.form: {getattr(frappe.request, 'form', 'N/A')}")
-        frappe.logger().info(f"request.args: {getattr(frappe.request, 'args', 'N/A')}")
-        frappe.logger().info(f"final data: {data}")
-        frappe.logger().info(f"title_vn: {title_vn}, campus_id: {campus_id}")
-        frappe.logger().info(f"request.method: {frappe.request.method}")
-        frappe.logger().info(f"request.content_type: {getattr(frappe.request, 'content_type', 'N/A')}")
+        # Log basic info for debugging
+        frappe.logger().info(f"Import timetable request - title_vn: {title_vn}, campus_id: {campus_id}")
         if hasattr(frappe.request, 'files') and frappe.request.files:
-            frappe.logger().info(f"files available: {list(frappe.request.files.keys())}")
+            frappe.logger().info(f"Files available: {list(frappe.request.files.keys())}")
 
         # Validate required fields
         if not all([title_vn, campus_id, school_year_id, education_stage_id, start_date, end_date]):
