@@ -339,6 +339,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
     # Log that function was called
     frappe.logger().info("=== FUNCTION process_excel_import_with_metadata_v2 CALLED ===")
     frappe.logger().info(f"Import data received: {import_data}")
+    frappe.logger().info(f"Import data file_path: {import_data.get('file_path', 'MISSING')}")
+    frappe.logger().info(f"Import data title_vn: {import_data.get('title_vn', 'MISSING')}")
+    frappe.logger().info(f"Import data campus_id: {import_data.get('campus_id', 'MISSING')}")
+    frappe.logger().info(f"Import data dry_run: {import_data.get('dry_run', 'MISSING')}")
 
     try:
         log_message("=== Starting Excel Import Processing ===")
@@ -353,10 +357,14 @@ def process_excel_import_with_metadata_v2(import_data: dict):
         log_message(f"Processing file: {file_path}")
         log_message(f"Title: {title_vn}, Campus: {campus_id}")
         log_message(f"Import data keys: {list(import_data.keys())}")
-        log_message(f"Dry run: {dry_run}")
+        log_message(f"Dry run: {dry_run}, type: {type(dry_run)}")
         log_message(f"Validation check - title_vn: '{title_vn}', campus_id: '{campus_id}'")
 
         # Basic validation
+        log_message("=== CHECKING VALIDATION ===")
+        log_message(f"title_vn is empty: {not title_vn}")
+        log_message(f"campus_id is empty: {not campus_id}")
+
         if not title_vn or not campus_id:
             log_message(f"Validation failed - missing title_vn or campus_id")
             log_message("=== EARLY RETURN: Validation Failed ===")
@@ -366,6 +374,8 @@ def process_excel_import_with_metadata_v2(import_data: dict):
             })
             log_message(f"Error response type: {type(error_response)}")
             return error_response
+
+        log_message("=== VALIDATION PASSED, CONTINUING ===")
 
         # Check file exists using standard Python
         import os
