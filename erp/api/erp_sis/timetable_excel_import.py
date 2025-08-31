@@ -358,6 +358,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
         # Read and process Excel file
         try:
+            frappe.logger().info("=== STARTING EXCEL PROCESSING ===")
             # Try to import pandas
             try:
                 import pandas as pd
@@ -378,27 +379,50 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
             # Read Excel file
             frappe.logger().info("Reading Excel file...")
-            df = pd.read_excel(file_path, header=0)  # First row is header
-            total_rows = len(df)
-
-            frappe.logger().info(f"Excel file loaded with {total_rows} rows")
+            try:
+                df = pd.read_excel(file_path, header=0)  # First row is header
+                total_rows = len(df)
+                frappe.logger().info(f"Excel file loaded with {total_rows} rows")
+                frappe.logger().info(f"Columns found: {list(df.columns)}")
+                frappe.logger().info(f"First few rows: {df.head(3).to_dict() if total_rows > 0 else 'No data'}")
+            except Exception as excel_error:
+                frappe.logger().info(f"Error reading Excel file: {str(excel_error)}")
+                raise Exception(f"Failed to read Excel file: {str(excel_error)}")
 
             # Initialize importer for validation
             importer = TimetableExcelImporter(campus_id)
 
             # Validate Excel structure
-            if not importer.validate_excel_structure(df):
-                frappe.logger().info(f"Excel validation failed: {importer.errors}")
+            frappe.logger().info("Validating Excel structure...")
+            try:
+                if not importer.validate_excel_structure(df):
+                    frappe.logger().info(f"Excel validation failed: {importer.errors}")
+                    result = {
+                        "dry_run": dry_run,
+                        "title_vn": title_vn,
+                        "campus_id": campus_id,
+                        "file_path": file_path,
+                        "message": "Excel validation failed",
+                        "total_rows": total_rows,
+                        "valid_rows": 0,
+                        "errors": importer.errors,
+                        "warnings": importer.warnings
+                    }
+                    return single_item_response(result, "Timetable import validation failed")
+
+                frappe.logger().info("Excel structure validation passed")
+            except Exception as validation_error:
+                frappe.logger().info(f"Error during validation: {str(validation_error)}")
                 result = {
                     "dry_run": dry_run,
                     "title_vn": title_vn,
                     "campus_id": campus_id,
                     "file_path": file_path,
-                    "message": "Excel validation failed",
+                    "message": f"Validation error: {str(validation_error)}",
                     "total_rows": total_rows,
                     "valid_rows": 0,
-                    "errors": importer.errors,
-                    "warnings": importer.warnings
+                    "errors": [str(validation_error)],
+                    "warnings": []
                 }
                 return single_item_response(result, "Timetable import validation failed")
 
@@ -443,8 +467,8 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     },
                     "instances_created": 1,  # We created 1 instance (first week)
                     "rows_created": success_count,
-                    "subjects_created": len(set(row.get('Subject', '') for row in df.itertuples() if row.get('Subject', ''))),
-                    "teachers_created": len(set(row.get('Teacher 1', '') for row in df.itertuples() if row.get('Teacher 1', '')))
+                    "subjects_created": len(df['Subject'].dropna().unique()) if 'Subject' in df.columns else 0,
+                    "teachers_created": len(df['Teacher 1'].dropna().unique()) if 'Teacher 1' in df.columns else 0
                 }
 
             result = {
@@ -475,11 +499,29 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "warnings": []
             }
 
-        frappe.logger().info("=== Excel Import Processing Completed ===")
-        return single_item_response(result, "Timetable import processed successfully")
+            frappe.logger().info("=== Excel Import Processing Completed ===")
+            return single_item_response(result, "Timetable import processed successfully")
+
+        except Exception as e:
+            frappe.logger().info(f"Error in Excel processing: {str(e)}")
+            frappe.logger().info(f"Error type: {type(e)}")
+            frappe.logger().info(f"Error traceback: {frappe.get_traceback()}")
+
+            result = {
+                "dry_run": dry_run,
+                "title_vn": title_vn,
+                "campus_id": campus_id,
+                "file_path": file_path,
+                "message": f"Error processing Excel file: {str(e)}",
+                "total_rows": 0,
+                "valid_rows": 0,
+                "errors": [str(e)],
+                "warnings": []
+            }
+            return single_item_response(result, "Timetable import failed")
 
     except Exception as e:
-        frappe.logger().info(f"Error in Excel processing: {str(e)}")
+        frappe.logger().info(f"Error in Excel processing outer: {str(e)}")
         return validation_error_response("Import failed", {"error": [str(e)]})
 
 
@@ -514,12 +556,15 @@ def process_excel_data(df, timetable_id: str, campus_id: str) -> int:
         # Process each row in Excel
         for index, row in df.iterrows():
             try:
-                # Extract data from Excel row
-                day_of_week = str(row.get('Day of Week', '')).strip().lower()
-                period = str(row.get('Period', '')).strip()
-                class_name = str(row.get('Class', '')).strip()
-                subject_name = str(row.get('Subject', '')).strip()
-                teacher_1 = str(row.get('Teacher 1', '')).strip()
+                frappe.logger().info(f"Processing row {index + 1}")
+                # Extract data from Excel row using column access
+                day_of_week = str(row['Day of Week'] if 'Day of Week' in row.index else '').strip().lower()
+                period = str(row['Period'] if 'Period' in row.index else '').strip()
+                class_name = str(row['Class'] if 'Class' in row.index else '').strip()
+                subject_name = str(row['Subject'] if 'Subject' in row.index else '').strip()
+                teacher_1 = str(row['Teacher 1'] if 'Teacher 1' in row.index else '').strip()
+
+                frappe.logger().info(f"Row data: day={day_of_week}, period={period}, class={class_name}, subject={subject_name}, teacher={teacher_1}")
 
                 # Skip empty rows
                 if not all([day_of_week, period, class_name, subject_name]):
