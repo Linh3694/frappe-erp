@@ -634,32 +634,72 @@ def get_timetable_subjects_for_selection():
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
             # Fallback to default if no campus found
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
+
         filters = {"campus_id": campus_id}
-            
+
         timetable_subjects = frappe.get_all(
             "SIS Timetable Subject",
             fields=["name", "title_vn", "title_en"],
             filters=filters,
             order_by="title_vn asc"
         )
-        
+
         return success_response(
             data=timetable_subjects,
             message="Timetable subjects for selection fetched successfully"
         )
-        
+
     except Exception as e:
         frappe.log_error(f"Error fetching timetable subjects for selection: {str(e)}")
         return {
             "success": False,
             "data": [],
             "message": f"Error fetching timetable subjects: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_subjects_for_timetable_selection():
+    """Get subjects for timetable dropdown selection, filtered by education_stage_id"""
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            # Fallback to default if no campus found
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+
+        # Get education_stage_id from request
+        education_stage_id = frappe.local.form_dict.get("education_stage_id")
+
+        filters = {"campus_id": campus_id}
+        if education_stage_id:
+            filters["education_stage"] = education_stage_id
+
+        subjects = frappe.get_all(
+            "SIS Subject",
+            fields=["name", "title", "title_vn", "title_en", "education_stage"],
+            filters=filters,
+            order_by="title asc"
+        )
+
+        return success_response(
+            data=subjects,
+            message="Subjects for timetable selection fetched successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching subjects for timetable selection: {str(e)}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Error fetching subjects: {str(e)}"
         }
 
 

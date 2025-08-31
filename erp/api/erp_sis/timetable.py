@@ -515,6 +515,7 @@ def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
         d = _add_days(week_start, idx)
         col = columns_map.get(r.get("timetable_column_id")) or {}
         result.append({
+            "name": r.get("name"),  # Include row name for editing
             "date": d.strftime("%Y-%m-%d"),
             "day_of_week": r.get("day_of_week"),
             "timetable_column_id": r.get("timetable_column_id"),

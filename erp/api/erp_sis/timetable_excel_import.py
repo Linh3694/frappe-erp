@@ -144,20 +144,28 @@ class TimetableExcelImporter:
 
         return class_id
 
-    def validate_and_map_subject(self, subject_title: str) -> Optional[str]:
+    def validate_and_map_subject(self, subject_title: str, education_stage_id: str = None) -> Optional[str]:
         """Map subject title to SIS Subject"""
         if not subject_title:
             return None
+
+        # Build filters with campus_id and optionally education_stage_id
+        filters = {"campus_id": self.campus_id}
+        if education_stage_id:
+            filters["education_stage"] = education_stage_id
 
         subject_id = self.get_or_cache_mapping(
             "SIS Subject",
             "title",
             subject_title,
-            {"campus_id": self.campus_id}
+            filters
         )
 
         if not subject_id:
-            self.errors.append(f"Subject '{subject_title}' not found")
+            if education_stage_id:
+                self.errors.append(f"Subject '{subject_title}' not found or does not belong to the specified education stage")
+            else:
+                self.errors.append(f"Subject '{subject_title}' not found")
 
         return subject_id
 
@@ -312,7 +320,7 @@ class TimetableExcelImporter:
                     continue
 
                 class_id = self.validate_and_map_class(class_str)
-                subject_id = self.validate_and_map_subject(subject_str)
+                subject_id = self.validate_and_map_subject(subject_str, education_stage_id)
                 teacher_1_id = self.validate_and_map_teacher(teacher_1_str)
                 teacher_2_id = self.validate_and_map_teacher(teacher_2_str, suppress_error=True) if teacher_2_str else None
                 timetable_column_id = self.validate_and_map_period(period_str, education_stage_id)
