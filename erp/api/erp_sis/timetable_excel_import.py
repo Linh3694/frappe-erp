@@ -336,17 +336,16 @@ def process_excel_import_with_metadata_v2(import_data: dict):
         frappe.logger().info(message)
         logs.append(f"{frappe.utils.now()}: {message}")
 
-    # Log that function was called
-    frappe.logger().info("=== FUNCTION process_excel_import_with_metadata_v2 CALLED ===")
-    frappe.logger().info(f"Import data received: {import_data}")
-    frappe.logger().info(f"Import data file_path: {import_data.get('file_path', 'MISSING')}")
-    frappe.logger().info(f"Import data title_vn: {import_data.get('title_vn', 'MISSING')}")
-    frappe.logger().info(f"Import data campus_id: {import_data.get('campus_id', 'MISSING')}")
-    frappe.logger().info(f"Import data dry_run: {import_data.get('dry_run', 'MISSING')}")
-
     try:
+        # Log that function was called
+        log_message("=== FUNCTION process_excel_import_with_metadata_v2 CALLED ===")
+        log_message(f"Import data received: {import_data}")
+        log_message(f"Import data file_path: {import_data.get('file_path', 'MISSING')}")
+        log_message(f"Import data title_vn: {import_data.get('title_vn', 'MISSING')}")
+        log_message(f"Import data campus_id: {import_data.get('campus_id', 'MISSING')}")
+        log_message(f"Import data dry_run: {import_data.get('dry_run', 'MISSING')}")
+
         log_message("=== Starting Excel Import Processing ===")
-        log_message(f"Received import_data: {import_data}")
 
         # Extract parameters with defaults
         file_path = import_data.get("file_path", "")
