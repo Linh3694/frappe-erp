@@ -603,6 +603,44 @@ def get_teacher_week():
             return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
 
         ws = _parse_iso_date(week_start)
+
+        # Resolve teacher_id to SIS Teacher doc name(s) if passed as User email/name
+        resolved_teacher_ids = set()
+        try:
+            # Try direct match by Teacher name
+            if frappe.db.exists("SIS Teacher", teacher_id):
+                resolved_teacher_ids.add(teacher_id)
+            # Try match by user_id (User.name/email)
+            alt = frappe.get_all(
+                "SIS Teacher",
+                fields=["name"],
+                filters={"user_id": teacher_id},
+                limit=50,
+            )
+            for t in alt:
+                resolved_teacher_ids.add(t.name)
+            # If still empty and looks like email, try normalized case-sensitive name
+            if not resolved_teacher_ids and "@" in (teacher_id or ""):
+                user = frappe.get_all(
+                    "User",
+                    fields=["name"],
+                    filters={"name": teacher_id},
+                    limit=1,
+                )
+                if user:
+                    alt2 = frappe.get_all(
+                        "SIS Teacher",
+                        fields=["name"],
+                        filters={"user_id": user[0].name},
+                        limit=50,
+                    )
+                    for t in alt2:
+                        resolved_teacher_ids.add(t.name)
+        except Exception as resolve_error:
+            frappe.logger().info(f"Teacher week - resolve teacher id warning: {str(resolve_error)}")
+        # Fallback to original id if nothing resolved
+        if not resolved_teacher_ids:
+            resolved_teacher_ids.add(teacher_id)
         # Query timetable rows
         campus_id = get_current_campus_from_context() or "campus-1"
 
@@ -652,7 +690,15 @@ def get_teacher_week():
 
             # Step 2: Try adding more fields one by one
             available_fields = basic_fields[:]
-            test_fields = ["timetable_column_id", "subject_name", "teacher_1_id", "teacher_2_id"]
+            # Ensure we attempt to include essential linkage/display fields
+            test_fields = [
+                "timetable_column_id",
+                "subject_id",
+                "subject_name",
+                "teacher_1_id",
+                "teacher_2_id",
+                "parent",
+            ]
 
             for field in test_fields:
                 try:
@@ -680,7 +726,74 @@ def get_teacher_week():
             frappe.logger().info(f"Teacher query error: {str(query_error)}")
             return error_response(f"Query failed: {str(query_error)}")
         # Filter in-memory for teacher (to avoid OR filter limitation in simple get_all)
-        rows = [r for r in rows if r.get("teacher_1_id") == teacher_id or r.get("teacher_2_id") == teacher_id]
+        rows = [
+            r for r in rows
+            if (r.get("teacher_1_id") in resolved_teacher_ids) or (r.get("teacher_2_id") in resolved_teacher_ids)
+        ]
+
+        # Attach class_id via parent instance if available
+        try:
+            parent_ids = list({r.get("parent") for r in rows if r.get("parent")})
+            parent_class_map = {}
+            if parent_ids:
+                instances = frappe.get_all(
+                    "SIS Timetable Instance",
+                    fields=["name", "class_id"],
+                    filters={"name": ["in", parent_ids]},
+                )
+                parent_class_map = {i.name: i.class_id for i in instances}
+            for r in rows:
+                if r.get("parent") and not r.get("class_id"):
+                    r["class_id"] = parent_class_map.get(r.get("parent"))
+        except Exception as class_map_error:
+            frappe.logger().info(f"Teacher week - class map warning: {str(class_map_error)}")
+
+        # Enrich subject_title and teacher_names
+        try:
+            subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
+            subject_title_map = {}
+            if subject_ids:
+                for s in frappe.get_all(
+                    "SIS Subject",
+                    fields=["name", "title"],
+                    filters={"name": ["in", subject_ids]},
+                ):
+                    subject_title_map[s.name] = s.title
+
+            teacher_ids = list({tid for r in rows for tid in [r.get("teacher_1_id"), r.get("teacher_2_id")] if tid})
+            teacher_user_map = {}
+            if teacher_ids:
+                teachers = frappe.get_all(
+                    "SIS Teacher",
+                    fields=["name", "user_id"],
+                    filters={"name": ["in", teacher_ids]},
+                )
+                user_ids = [t.user_id for t in teachers if t.get("user_id")]
+                user_display_map = {}
+                if user_ids:
+                    for u in frappe.get_all(
+                        "User",
+                        fields=["name", "full_name", "first_name", "middle_name", "last_name"],
+                        filters={"name": ["in", user_ids]},
+                    ):
+                        display = u.get("full_name")
+                        if not display:
+                            parts = [u.get("first_name"), u.get("middle_name"), u.get("last_name")]
+                            display = " ".join([p for p in parts if p]) or u.get("name")
+                        user_display_map[u.name] = display
+                for t in teachers:
+                    teacher_user_map[t.name] = user_display_map.get(t.get("user_id")) or t.get("user_id") or t.get("name")
+
+            for r in rows:
+                r["subject_title"] = subject_title_map.get(r.get("subject_id")) or r.get("subject_title") or r.get("subject_name") or ""
+                teacher_names_list = []
+                if r.get("teacher_1_id"):
+                    teacher_names_list.append(teacher_user_map.get(r.get("teacher_1_id")) or "")
+                if r.get("teacher_2_id"):
+                    teacher_names_list.append(teacher_user_map.get(r.get("teacher_2_id")) or "")
+                r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
+        except Exception as enrich_error:
+            frappe.logger().info(f"Teacher week enrich warning: {str(enrich_error)}")
 
         entries = _build_entries(rows, ws)
         return list_response(entries, "Teacher week fetched successfully")
