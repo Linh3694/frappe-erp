@@ -576,9 +576,9 @@ def get_teacher_week(teacher_id: str = None, week_start: str = None, week_end: s
     """
     try:
         if not teacher_id:
-            return validation_error_response({"teacher_id": ["Teacher is required"]})
+            return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
         if not week_start:
-            return validation_error_response({"week_start": ["Week start is required"]})
+            return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
 
         ws = _parse_iso_date(week_start)
         # Query timetable rows
@@ -611,9 +611,9 @@ def get_class_week(class_id: str = None, week_start: str = None, week_end: str =
     """Return class weekly timetable entries."""
     try:
         if not class_id:
-            return validation_error_response({"class_id": ["Class is required"]})
+            return validation_error_response("Validation failed", {"class_id": ["Class is required"]})
         if not week_start:
-            return validation_error_response({"week_start": ["Week start is required"]})
+            return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
 
         ws = _parse_iso_date(week_start)
         campus_id = get_current_campus_from_context() or "campus-1"
