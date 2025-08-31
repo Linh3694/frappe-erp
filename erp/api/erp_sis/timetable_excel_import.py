@@ -508,23 +508,54 @@ def process_excel_import_with_metadata_v2(import_data: dict):
             education_stage_id = import_data.get("education_stage_id")
             schedule_data, ok = importer.process_excel_data(df, education_stage_id)
             if not ok:
+                # Categorize errors for better user experience
+                critical_errors = []
+                subject_errors = []
+                other_errors = []
+
+                for error in importer.errors:
+                    if "Subject" in error and ("not found" in error or "does not belong" in error):
+                        subject_errors.append(error)
+                    elif any(keyword in error.lower() for keyword in ["required", "missing", "invalid", "excel"]):
+                        critical_errors.append(error)
+                    else:
+                        other_errors.append(error)
+
+                # Create detailed error message
+                error_details = []
+                if critical_errors:
+                    error_details.append(f"❌ Critical errors ({len(critical_errors)}): {', '.join(critical_errors[:3])}")
+                if subject_errors:
+                    error_details.append(f"⚠️  Subject validation errors ({len(subject_errors)}): {len(subject_errors)} subjects not found or don't belong to the selected education stage")
+                if other_errors:
+                    error_details.append(f"🔍 Other errors ({len(other_errors)}): {', '.join(other_errors[:2])}")
+
+                detailed_message = "; ".join(error_details)
+
                 result = {
                     "dry_run": dry_run,
                     "title_vn": title_vn,
                     "campus_id": campus_id,
                     "file_path": file_path,
-                    "message": "Timetable mapping validation failed",
+                    "message": f"Timetable import failed: {detailed_message}",
                     "total_rows": total_rows,
                     "valid_rows": len(schedule_data),
                     "errors": importer.errors,
                     "warnings": importer.warnings,
                     "schedule_data": schedule_data,
-                    "logs": logs
+                    "logs": logs,
+                    "error_summary": {
+                        "critical_errors": critical_errors,
+                        "subject_errors": subject_errors,
+                        "other_errors": other_errors
+                    }
                 }
-                return single_item_response(result, "Timetable import validation failed")
+                return validation_error_response("Timetable import validation failed", {
+                    "import_details": result
+                })
 
-            # If not dry run, create the actual records
-            if not dry_run:
+            # If not dry run, create the actual records (only if validation passed)
+            if not dry_run and ok:
                 # Create SIS Timetable record
                 timetable_doc = frappe.get_doc({
                     "doctype": "SIS Timetable",
@@ -643,7 +674,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "title_vn": title_vn,
                 "campus_id": campus_id,
                 "file_path": file_path,
-                "message": "Timetable import validation completed" if dry_run else "Timetable import completed successfully",
+                "message": f"✅ Timetable import validation passed - {len(schedule_data)}/{total_rows} rows valid" if dry_run else f"✅ Timetable import completed successfully - Created {locals().get('instances_created', 0)} instances with {locals().get('rows_created', 0)} rows",
                 "total_rows": total_rows,
                 "valid_rows": len(schedule_data) if 'schedule_data' in locals() else total_rows - len(importer.errors),
                 "errors": importer.errors,
