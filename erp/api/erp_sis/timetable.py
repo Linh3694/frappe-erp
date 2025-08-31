@@ -565,7 +565,7 @@ def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
 
 
 @frappe.whitelist(allow_guest=False)
-def get_teacher_week(teacher_id: str = None, week_start: str = None, week_end: str = None):
+def get_teacher_week():
     """Return teacher's weekly timetable entries (normalized for FE WeeklyGrid).
 
     Expects timetable rows stored in Doctype `SIS Timetable Instance Row` with fields:
@@ -576,6 +576,18 @@ def get_teacher_week(teacher_id: str = None, week_start: str = None, week_end: s
     - class_id
     """
     try:
+        # Get parameters from frappe request
+        teacher_id = frappe.local.form_dict.get("teacher_id") or frappe.request.args.get("teacher_id")
+        week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
+        week_end = frappe.local.form_dict.get("week_end") or frappe.request.args.get("week_end")
+
+        # Debug logging
+        frappe.logger().info(f"=== GET TEACHER WEEK DEBUG ===")
+        frappe.logger().info(f"Parameters: teacher_id={teacher_id}, week_start={week_start}, week_end={week_end}")
+        frappe.logger().info(f"Request method: {frappe.request.method}")
+        frappe.logger().info(f"Request args: {getattr(frappe.request, 'args', {})}")
+        frappe.logger().info(f"Form dict: {frappe.local.form_dict}")
+
         if not teacher_id:
             return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
         if not week_start:
@@ -608,14 +620,22 @@ def get_teacher_week(teacher_id: str = None, week_start: str = None, week_end: s
 
 
 @frappe.whitelist(allow_guest=False)
-def get_class_week(class_id: str = None, week_start: str = None, week_end: str = None):
+def get_class_week():
     """Return class weekly timetable entries."""
     try:
+        # Get parameters from frappe request
+        class_id = frappe.local.form_dict.get("class_id") or frappe.request.args.get("class_id")
+        week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
+        week_end = frappe.local.form_dict.get("week_end") or frappe.request.args.get("week_end")
+
         # Debug logging
         frappe.logger().info(f"=== GET CLASS WEEK DEBUG ===")
         frappe.logger().info(f"Parameters: class_id={class_id}, week_start={week_start}, week_end={week_end}")
+        frappe.logger().info(f"Request method: {frappe.request.method}")
         frappe.logger().info(f"Request args: {getattr(frappe.request, 'args', {})}")
         frappe.logger().info(f"Form dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"Request data: {getattr(frappe.request, 'data', {})}")
+        frappe.logger().info(f"Query string: {frappe.request.query_string}")
 
         if not class_id:
             frappe.logger().info("class_id is missing or empty")
