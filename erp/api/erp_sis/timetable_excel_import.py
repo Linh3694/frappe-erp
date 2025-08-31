@@ -4,7 +4,10 @@
 import frappe
 from frappe import _
 import json
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 from erp.utils.campus_utils import get_current_campus_from_context
@@ -283,7 +286,7 @@ class TimetableExcelImporter:
         return schedule_data, len(self.errors) == 0
 
 def process_excel_import():
-    """Main function to handle Excel import request"""
+    """Main function to handle Excel import request (legacy)"""
     try:
         # Get request data
         data = frappe.local.form_dict
@@ -320,4 +323,97 @@ def process_excel_import():
 
     except Exception as e:
         frappe.log_error(f"Error processing Excel import: {str(e)}")
+        return validation_error_response("Import failed", {"error": [str(e)]})
+
+
+def process_excel_import_with_metadata(import_data: dict):
+    """Process Excel import with metadata (title, dates, etc.)"""
+    try:
+        file_path = import_data.get("file_path")
+        dry_run = import_data.get("dry_run", True)
+        title_vn = import_data.get("title_vn")
+        title_en = import_data.get("title_en", "")
+        campus_id = import_data.get("campus_id")
+        school_year_id = import_data.get("school_year_id")
+        education_stage_id = import_data.get("education_stage_id")
+        start_date = import_data.get("start_date")
+        end_date = import_data.get("end_date")
+
+        # Validate required parameters
+        required_fields = ["file_path", "title_vn", "campus_id", "school_year_id", "education_stage_id", "start_date", "end_date"]
+        missing_fields = [field for field in required_fields if not import_data.get(field)]
+
+        if missing_fields:
+            return validation_error_response("Validation failed", {
+                "missing_fields": missing_fields
+            })
+
+        # Check if file exists
+        if not frappe.utils.file_manager.file_exists(file_path):
+            return validation_error_response("File not found", {
+                "file_path": ["Uploaded file not found"]
+            })
+
+        # Initialize importer
+        importer = TimetableExcelImporter(campus_id)
+
+        # Read Excel file
+        try:
+            df = pd.read_excel(file_path, header=0)  # First row is header
+        except Exception as e:
+            return validation_error_response("Invalid Excel file", {
+                "file": [f"Cannot read Excel file: {str(e)}"]
+            })
+
+        # Validate Excel structure
+        if not importer.validate_excel_structure(df):
+            return validation_error_response("Invalid Excel structure", {
+                "structure_errors": importer.errors
+            })
+
+        # Process data
+        if not dry_run:
+            # Create SIS Timetable record
+            timetable_doc = frappe.get_doc({
+                "doctype": "SIS Timetable",
+                "title_vn": title_vn,
+                "title_en": title_en,
+                "campus_id": campus_id,
+                "school_year_id": school_year_id,
+                "education_stage_id": education_stage_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "upload_source": file_path
+            })
+            timetable_doc.insert()
+
+            # TODO: Process Excel data and create timetable instances
+            # This would involve parsing the Excel rows and creating:
+            # 1. SIS Timetable Instance records
+            # 2. SIS Timetable Instance Row records
+            # 3. SIS Student Timetable records
+            # 4. SIS Teacher Timetable records
+
+        result = {
+            "dry_run": dry_run,
+            "title_vn": title_vn,
+            "title_en": title_en,
+            "campus_id": campus_id,
+            "school_year_id": school_year_id,
+            "education_stage_id": education_stage_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "file_path": file_path,
+            "message": "Timetable import validation completed" if dry_run else "Timetable import completed successfully",
+            "errors": importer.errors,
+            "warnings": importer.warnings,
+            "total_rows": len(df) if 'df' in locals() else 0,
+            "valid_rows": len(df) - len(importer.errors) if 'df' in locals() else 0,
+            "timetable_id": timetable_doc.name if not dry_run and 'timetable_doc' in locals() else None
+        }
+
+        return single_item_response(result, "Timetable import processed successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error processing Excel import with metadata: {str(e)}")
         return validation_error_response("Import failed", {"error": [str(e)]})

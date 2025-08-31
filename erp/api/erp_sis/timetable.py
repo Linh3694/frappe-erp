@@ -10,7 +10,7 @@ from erp.utils.api_response import (
     list_response,
     validation_error_response,
 )
-from .timetable_excel_import import process_excel_import
+from .timetable_excel_import import process_excel_import, process_excel_import_with_metadata
 
 def _noop():
     return None
@@ -673,24 +673,81 @@ def import_timetable():
         if user_campus and user_campus != campus_id:
             return forbidden_response("Access denied: Campus mismatch")
 
-        # For now, return success with dry_run info
-        result = {
-            "dry_run": dry_run,
-            "title_vn": title_vn,
-            "title_en": title_en,
-            "campus_id": campus_id,
-            "school_year_id": school_year_id,
-            "education_stage_id": education_stage_id,
-            "start_date": start_date,
-            "end_date": end_date,
-            "message": "Import validation completed" if dry_run else "Import completed"
-        }
+        # Process Excel import if file is provided
+        files = frappe.request.files
+        if files and 'file' in files:
+            # File is uploaded, process it
+            file_data = files['file']
+            if not file_data:
+                return validation_error_response("Validation failed", {"file": ["No file uploaded"]})
 
-        return single_item_response(result, "Timetable import processed successfully")
+            # Save file temporarily
+            file_path = save_uploaded_file(file_data, "timetable_import.xlsx")
+
+            # Call Excel import processor with metadata
+            import_data = {
+                "file_path": file_path,
+                "title_vn": title_vn,
+                "title_en": title_en,
+                "campus_id": campus_id,
+                "school_year_id": school_year_id,
+                "education_stage_id": education_stage_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "dry_run": dry_run
+            }
+
+            # Process the Excel import
+            result = process_excel_import_with_metadata(import_data)
+
+            # Clean up temp file
+            if frappe.utils.file_manager.file_exists(file_path):
+                frappe.utils.file_manager.delete_file(file_path)
+
+            return result
+        else:
+            # No file uploaded, just validate metadata
+            result = {
+                "dry_run": dry_run,
+                "title_vn": title_vn,
+                "title_en": title_en,
+                "campus_id": campus_id,
+                "school_year_id": school_year_id,
+                "education_stage_id": education_stage_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "message": "Metadata validation completed",
+                "requires_file": True
+            }
+
+            return single_item_response(result, "Timetable metadata validated successfully")
 
     except Exception as e:
         frappe.log_error(f"Error importing timetable: {str(e)}")
         return error_response(f"Error importing timetable: {str(e)}")
+
+
+def save_uploaded_file(file_data, filename: str) -> str:
+    """Save uploaded file temporarily and return file path"""
+    try:
+        # Create temporary directory if it doesn't exist
+        temp_dir = frappe.utils.get_site_path("private", "files", "temp")
+        if not frappe.utils.file_manager.dir_exists(temp_dir):
+            frappe.utils.file_manager.create_directory(temp_dir)
+
+        # Generate unique filename
+        import uuid
+        unique_filename = f"{uuid.uuid4().hex}_{filename}"
+        file_path = frappe.utils.get_site_path("private", "files", "temp", unique_filename)
+
+        # Save file
+        with open(file_path, 'wb') as f:
+            f.write(file_data.read())
+
+        return file_path
+    except Exception as e:
+        frappe.log_error(f"Error saving uploaded file: {str(e)}")
+        raise e
 
 
 @frappe.whitelist(allow_guest=False)
