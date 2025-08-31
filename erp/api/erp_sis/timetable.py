@@ -761,6 +761,16 @@ def get_class_week():
                 for r in alt_rows:
                     r["parent"] = r.get("parent_timetable_instance")
                 rows = alt_rows
+            # Final fallback: direct SQL in case get_all filters behave differently
+            if not rows:
+                placeholders = ",".join(["%s"] * len(instance_ids))
+                sql = f"""
+                    SELECT name, parent, day_of_week, timetable_column_id, subject_id, teacher_1_id, teacher_2_id
+                    FROM `tabSIS Timetable Instance Row`
+                    WHERE parent IN ({placeholders})
+                """
+                sql_rows = frappe.db.sql(sql, instance_ids, as_dict=True)
+                rows = sql_rows or []
         except Exception as e:
             return error_response(f"Failed to query instance rows: {str(e)}")
 
