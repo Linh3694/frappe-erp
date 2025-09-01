@@ -1295,9 +1295,19 @@ def get_instance_row_details(row_id: str = None):
 def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id: str = None,
                        teacher_2_id: str = None, room_id: str = None):
     """Update a specific timetable instance row"""
+    print(f"DEBUG: update_instance_row called with params: row_id={row_id}, subject_id={subject_id}, teacher_1_id={teacher_1_id}, teacher_2_id={teacher_2_id}, room_id={room_id}")
+    print(f"DEBUG: Current user: {frappe.session.user}")
+    print(f"DEBUG: User roles: {frappe.get_roles()}")
+
+    # Also try frappe logger
     frappe.logger().info(f"update_instance_row called with params: row_id={row_id}, subject_id={subject_id}, teacher_1_id={teacher_1_id}, teacher_2_id={teacher_2_id}, room_id={room_id}")
-    frappe.logger().info(f"Current user: {frappe.session.user}")
-    frappe.logger().info(f"User roles: {frappe.get_roles()}")
+
+    # Write to a specific debug file as well
+    try:
+        with open("/tmp/timetable_debug.log", "a") as f:
+            f.write(f"{frappe.utils.now()}: API called - user: {frappe.session.user}, params: {locals()}\n")
+    except:
+        pass  # Ignore if can't write to file
 
     try:
         # Get parameters
@@ -1311,20 +1321,26 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
             return validation_error_response("Validation failed", {"row_id": ["Row ID is required"]})
 
         # Get the instance row (ignore permissions to bypass framework-level checks)
+        print(f"DEBUG: Getting instance row: {row_id}")
         frappe.logger().info(f"Getting instance row: {row_id}")
         try:
             row = frappe.get_doc("SIS Timetable Instance Row", row_id, ignore_permissions=True)
+            print(f"DEBUG: Got row, parent instance: {row.parent}")
             frappe.logger().info(f"Got row, parent instance: {row.parent}")
         except Exception as e:
+            print(f"DEBUG: Failed to get instance row: {str(e)}")
             frappe.logger().info(f"Failed to get instance row: {str(e)}")
             raise
 
         # Check if parent instance is locked
+        print(f"DEBUG: Getting parent instance: {row.parent}")
         frappe.logger().info(f"Getting parent instance: {row.parent}")
         try:
             instance = frappe.get_doc("SIS Timetable Instance", row.parent, ignore_permissions=True)
+            print(f"DEBUG: Instance locked status: {instance.get('is_locked')}")
             frappe.logger().info(f"Instance locked status: {instance.get('is_locked')}")
         except Exception as e:
+            print(f"DEBUG: Failed to get parent instance: {str(e)}")
             frappe.logger().info(f"Failed to get parent instance: {str(e)}")
             raise
 
@@ -1343,23 +1359,29 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
         #     return forbidden_response("Access denied: Campus mismatch")
 
         # Validate subject exists and is active
+        print(f"DEBUG: Validating subject: {subject_id}")
         frappe.logger().info(f"Validating subject: {subject_id}")
         if subject_id:
             subject_exists = frappe.db.exists("SIS Subject", {"name": subject_id, "is_active": 1})
+            print(f"DEBUG: Subject {subject_id} exists and active: {subject_exists}")
             frappe.logger().info(f"Subject {subject_id} exists and active: {subject_exists}")
             if not subject_exists:
+                print(f"DEBUG: Subject validation failed")
                 frappe.logger().info("Subject validation failed")
                 return validation_error_response("Validation failed", {
                     "subject_id": ["Invalid or inactive subject"]
                 })
 
         # Validate teachers exist and are active
+        print(f"DEBUG: Validating teachers: {teacher_1_id}, {teacher_2_id}")
         frappe.logger().info(f"Validating teachers: {teacher_1_id}, {teacher_2_id}")
         for teacher_id in [teacher_1_id, teacher_2_id]:
             if teacher_id:
                 teacher_exists = frappe.db.exists("SIS Teacher", {"name": teacher_id, "status": "Active"})
+                print(f"DEBUG: Teacher {teacher_id} exists and active: {teacher_exists}")
                 frappe.logger().info(f"Teacher {teacher_id} exists and active: {teacher_exists}")
                 if not teacher_exists:
+                    print(f"DEBUG: Teacher validation failed for {teacher_id}")
                     frappe.logger().info(f"Teacher validation failed for {teacher_id}")
                     return validation_error_response("Validation failed", {
                         "teacher_id": [f"Invalid or inactive teacher: {teacher_id}"]
@@ -1392,11 +1414,14 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
             update_data["room_id"] = room_id
 
         if update_data:
+            print(f"DEBUG: Updating row with data: {update_data}")
             frappe.logger().info(f"Updating row with data: {update_data}")
             for field, value in update_data.items():
                 setattr(row, field, value)
+            print(f"DEBUG: About to save row...")
             row.save(ignore_permissions=True)
             frappe.db.commit()
+            print(f"DEBUG: Row saved successfully")
             frappe.logger().info("Row saved successfully")
 
             # Sync related data (temporarily disabled for debugging)
@@ -1410,16 +1435,20 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
             "class_id": instance.class_id
         }
 
+        print(f"DEBUG: Instance row update successful")
         frappe.logger().info("Instance row update successful")
         return single_item_response(result_data, "Instance row updated successfully")
 
     except frappe.DoesNotExistError:
+        print(f"DEBUG: Instance row not found")
         frappe.logger().info("Instance row not found")
         return not_found_response("Instance row not found")
     except frappe.PermissionError as e:
+        print(f"DEBUG: Permission error: {str(e)}")
         frappe.logger().info(f"Permission error: {str(e)}")
         return forbidden_response(f"Permission denied: {str(e)}")
     except Exception as e:
+        print(f"DEBUG: Error updating instance row: {str(e)}")
         frappe.db.rollback()
         frappe.logger().info(f"Error updating instance row: {str(e)}")
 
