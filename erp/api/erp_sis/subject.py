@@ -684,7 +684,7 @@ def get_subjects_for_timetable_selection():
 
         subjects = frappe.get_all(
             "SIS Subject",
-            fields=["name", "title", "title_vn", "title_en", "education_stage"],
+            fields=["name", "title", "education_stage"],
             filters=filters,
             order_by="title asc"
         )
