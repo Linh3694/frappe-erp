@@ -1587,7 +1587,6 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
             if teacher_id:
                 print(f"DEBUG: Removing teacher timetable entries for teacher: {teacher_id}")
 
-                # Find and delete existing teacher timetable entries
                 existing_entries = frappe.get_all(
                     "SIS Teacher Timetable",
                     filters={
@@ -1598,7 +1597,36 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
                     }
                 )
 
+                # Strategy 2: If no entries found, try broader search for this teacher on this day
+                if len(existing_entries) == 0:
+                    alt_entries = frappe.get_all(
+                        "SIS Teacher Timetable",
+                        filters={
+                            "teacher_id": teacher_id,
+                            "day_of_week": row.day_of_week,
+                            "timetable_instance_id": instance.name  # Still filter by instance
+                        }
+                    )
+                    existing_entries.extend(alt_entries)
+
+                # Strategy 3: If still no entries, try even broader search (just teacher and day)
+                if len(existing_entries) == 0:
+                    broad_entries = frappe.get_all(
+                        "SIS Teacher Timetable",
+                        filters={
+                            "teacher_id": teacher_id,
+                            "day_of_week": row.day_of_week
+                        }
+                    )
+                    # Filter by class to avoid deleting wrong entries
+                    for entry in broad_entries:
+                        entry_doc = frappe.get_doc("SIS Teacher Timetable", entry.name)
+                        if entry_doc.class_id == instance.class_id:
+                            existing_entries.append(entry)
+
                 print(f"DEBUG: Found {len(existing_entries)} entries to remove for teacher {teacher_id}")
+                for entry in existing_entries:
+                    print(f"DEBUG: Will delete entry: {entry.name}")
 
                 for entry in existing_entries:
                     try:
@@ -1618,8 +1646,11 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
             if teacher_id:
                 print(f"DEBUG: Creating teacher timetable entry for teacher: {teacher_id}")
 
-                # Check if entry already exists
-                existing_entry = frappe.get_all(
+                # Check if entry already exists (try multiple strategies)
+                existing_entry = None
+
+                # Strategy 1: Full match
+                existing_entries = frappe.get_all(
                     "SIS Teacher Timetable",
                     filters={
                         "timetable_instance_id": instance.name,
@@ -1630,9 +1661,29 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
                     limit=1
                 )
 
+                if len(existing_entries) > 0:
+                    existing_entry = existing_entries[0]
+
+                # Strategy 2: If not found, check broader criteria
+                if not existing_entry:
+                    broader_entries = frappe.get_all(
+                        "SIS Teacher Timetable",
+                        filters={
+                            "teacher_id": teacher_id,
+                            "day_of_week": row.day_of_week,
+                            "timetable_instance_id": instance.name
+                        },
+                        limit=1
+                    )
+                    if len(broader_entries) > 0:
+                        existing_entry = broader_entries[0]
+
+                print(f"DEBUG: Existing entry check result: {1 if existing_entry else 0} entries found")
                 if existing_entry:
-                    print(f"DEBUG: Teacher timetable entry already exists for teacher {teacher_id}, skipping creation")
+                    print(f"DEBUG: Teacher timetable entry already exists for teacher {teacher_id}: {existing_entry['name']}, skipping creation")
                     continue
+
+                print(f"DEBUG: Creating new teacher timetable entry for teacher {teacher_id}")
 
                 try:
                     # Create new teacher timetable entry
