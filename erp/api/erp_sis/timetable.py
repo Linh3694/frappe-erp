@@ -1340,6 +1340,12 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
             row = frappe.get_doc("SIS Timetable Instance Row", row_id, ignore_permissions=True)
             print(f"DEBUG: Got row, parent instance: {row.parent}")
             frappe.logger().info(f"Got row, parent instance: {row.parent}")
+
+            # Store old teacher values for sync
+            old_teacher_1_id = getattr(row, 'teacher_1_id', None)
+            old_teacher_2_id = getattr(row, 'teacher_2_id', None)
+            print(f"DEBUG: Stored old teachers: teacher_1={old_teacher_1_id}, teacher_2={old_teacher_2_id}")
+
         except Exception as e:
             print(f"DEBUG: Failed to get instance row: {str(e)}")
             frappe.logger().info(f"Failed to get instance row: {str(e)}")
@@ -1407,6 +1413,11 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
 
         # Check for teacher conflicts if teachers are assigned
         if teacher_1_id or teacher_2_id:
+            print(f"DEBUG: Checking teacher conflicts for: {[tid for tid in [teacher_1_id, teacher_2_id] if tid]}")
+            print(f"DEBUG: Row details - day_of_week: {row.day_of_week}, timetable_column_id: {row.timetable_column_id}")
+            print(f"DEBUG: Instance details - start_date: {instance.start_date}, end_date: {instance.end_date}")
+            print(f"DEBUG: Current row to exclude: {row.name}")
+
             conflict_check = _check_teacher_conflicts(
                 [tid for tid in [teacher_1_id, teacher_2_id] if tid],
                 row.day_of_week,
@@ -1415,7 +1426,10 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
                 instance.end_date,
                 row.name  # Exclude current row from conflict check
             )
+
+            print(f"DEBUG: Conflict check result: has_conflict={conflict_check.get('has_conflict')}")
             if conflict_check.get("has_conflict"):
+                print(f"DEBUG: Teacher conflicts found: {conflict_check['conflicts']}")
                 return validation_error_response("Validation failed", {
                     "teacher_conflict": conflict_check["conflicts"]
                 })
@@ -1442,9 +1456,9 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
             print(f"DEBUG: Row saved successfully")
             frappe.logger().info("Row saved successfully")
 
-            # Sync related data (temporarily disabled for debugging)
-            # _sync_related_timetables(row, instance)
-            frappe.logger().info("Skipping related timetables sync for debugging")
+            # Sync related data with old teacher information
+            print(f"DEBUG: Calling _sync_related_timetables with old teachers")
+            _sync_related_timetables(row, instance, old_teacher_1_id, old_teacher_2_id)
 
         result_data = {
             "row_id": row.name,
@@ -1477,9 +1491,17 @@ def _check_teacher_conflicts(teacher_ids: list, day_of_week: str, timetable_colu
                            start_date, end_date, exclude_row_id: str = None):
     """Check for teacher scheduling conflicts"""
     try:
+        print(f"DEBUG: _check_teacher_conflicts called with:")
+        print(f"DEBUG:   teacher_ids: {teacher_ids}")
+        print(f"DEBUG:   day_of_week: {day_of_week}")
+        print(f"DEBUG:   timetable_column_id: {timetable_column_id}")
+        print(f"DEBUG:   exclude_row_id: {exclude_row_id}")
+
         conflicts = []
 
         for teacher_id in teacher_ids:
+            print(f"DEBUG: Checking conflicts for teacher: {teacher_id}")
+
             # Find other instances where this teacher is assigned at the same time
             conflict_rows = frappe.get_all(
                 "SIS Timetable Instance Row",
@@ -1490,6 +1512,9 @@ def _check_teacher_conflicts(teacher_ids: list, day_of_week: str, timetable_colu
                     "teacher_1_id": teacher_id
                 }
             )
+
+            print(f"DEBUG: Found {len(conflict_rows)} conflicts for teacher_1_id: {teacher_id}")
+            print(f"DEBUG: Conflict rows: {[r['name'] for r in conflict_rows]}")
 
             # Also check teacher_2_id
             conflict_rows_2 = frappe.get_all(
@@ -1504,11 +1529,19 @@ def _check_teacher_conflicts(teacher_ids: list, day_of_week: str, timetable_colu
 
             conflict_rows.extend(conflict_rows_2)
 
+            print(f"DEBUG: Total conflict rows before filtering: {len(conflict_rows)}")
+
             # Exclude current row if updating
             if exclude_row_id:
+                print(f"DEBUG: Excluding current row: {exclude_row_id}")
+                conflict_rows_before = len(conflict_rows)
                 conflict_rows = [r for r in conflict_rows if r["name"] != exclude_row_id]
+                print(f"DEBUG: Conflict rows after excluding current: {len(conflict_rows)} (removed {conflict_rows_before - len(conflict_rows)})")
+
+            print(f"DEBUG: Final conflict rows for teacher {teacher_id}: {[r['name'] for r in conflict_rows]}")
 
             if conflict_rows:
+                print(f"DEBUG: Processing {len(conflict_rows)} conflicts for teacher {teacher_id}")
                 # Get instance and class info for conflicts
                 for conflict in conflict_rows:
                     instance = frappe.get_doc("SIS Timetable Instance", conflict["parent"])
@@ -1519,28 +1552,110 @@ def _check_teacher_conflicts(teacher_ids: list, day_of_week: str, timetable_colu
                         "period": timetable_column_id
                     })
 
-        return {
+        print(f"DEBUG: Total conflicts found: {len(conflicts)}")
+        result = {
             "has_conflict": len(conflicts) > 0,
             "conflicts": conflicts
         }
+        print(f"DEBUG: Returning conflict check result: {result}")
+        return result
 
     except Exception as e:
 
         return {"has_conflict": False, "conflicts": []}
 
 
-def _sync_related_timetables(row, instance):
+def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2_id=None):
     """Sync changes to related teacher and student timetables"""
     try:
-        # This function would update cached data or trigger sync
-        # For now, we'll just log the sync requirement
-        frappe.logger().info(f"Sync required for row {row.name} in instance {instance.name}")
+        print(f"DEBUG: Starting sync for row {row.name} in instance {instance.name}")
+        print(f"DEBUG: Old teachers: teacher_1={old_teacher_1_id}, teacher_2={old_teacher_2_id}")
+        print(f"DEBUG: New teachers: teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}")
 
-        # TODO: Implement actual sync logic:
-        # 1. Update teacher timetables cache
-        # 2. Update student timetables cache
-        # 3. Clear relevant caches
-        # 4. Trigger real-time updates if needed
+        # Get current teachers from row
+        new_teacher_1_id = getattr(row, 'teacher_1_id', None)
+        new_teacher_2_id = getattr(row, 'teacher_2_id', None)
+
+        # 1. Remove old teacher timetable entries
+        teachers_to_remove = []
+        if old_teacher_1_id and old_teacher_1_id != new_teacher_1_id:
+            teachers_to_remove.append(old_teacher_1_id)
+        if old_teacher_2_id and old_teacher_2_id != new_teacher_2_id:
+            teachers_to_remove.append(old_teacher_2_id)
+
+        for teacher_id in teachers_to_remove:
+            if teacher_id:
+                print(f"DEBUG: Removing teacher timetable entries for teacher: {teacher_id}")
+
+                # Find and delete existing teacher timetable entries
+                existing_entries = frappe.get_all(
+                    "SIS Teacher Timetable",
+                    filters={
+                        "timetable_instance_id": instance.name,
+                        "day_of_week": row.day_of_week,
+                        "timetable_column_id": row.timetable_column_id,
+                        "teacher_id": teacher_id
+                    }
+                )
+
+                print(f"DEBUG: Found {len(existing_entries)} entries to remove for teacher {teacher_id}")
+
+                for entry in existing_entries:
+                    try:
+                        frappe.delete_doc("SIS Teacher Timetable", entry.name, ignore_permissions=True)
+                        print(f"DEBUG: Deleted teacher timetable entry: {entry.name}")
+                    except Exception as e:
+                        print(f"DEBUG: Error deleting teacher timetable entry {entry.name}: {str(e)}")
+
+        # 2. Create new teacher timetable entries
+        teachers_to_add = []
+        if new_teacher_1_id:
+            teachers_to_add.append(new_teacher_1_id)
+        if new_teacher_2_id:
+            teachers_to_add.append(new_teacher_2_id)
+
+        for teacher_id in teachers_to_add:
+            if teacher_id:
+                print(f"DEBUG: Creating teacher timetable entry for teacher: {teacher_id}")
+
+                # Check if entry already exists
+                existing_entry = frappe.get_all(
+                    "SIS Teacher Timetable",
+                    filters={
+                        "timetable_instance_id": instance.name,
+                        "day_of_week": row.day_of_week,
+                        "timetable_column_id": row.timetable_column_id,
+                        "teacher_id": teacher_id
+                    },
+                    limit=1
+                )
+
+                if existing_entry:
+                    print(f"DEBUG: Teacher timetable entry already exists for teacher {teacher_id}, skipping creation")
+                    continue
+
+                try:
+                    # Create new teacher timetable entry
+                    teacher_timetable = frappe.get_doc({
+                        "doctype": "SIS Teacher Timetable",
+                        "teacher_id": teacher_id,
+                        "timetable_instance_id": instance.name,
+                        "day_of_week": row.day_of_week,
+                        "timetable_column_id": row.timetable_column_id,
+                        "subject_id": getattr(row, 'subject_id', None),
+                        "class_id": instance.class_id,
+                        "room_id": getattr(row, 'room_id', None),
+                        "date": getattr(row, 'date', None)
+                    })
+
+                    teacher_timetable.insert(ignore_permissions=True)
+                    print(f"DEBUG: Created teacher timetable entry: {teacher_timetable.name}")
+
+                except Exception as e:
+                    print(f"DEBUG: Error creating teacher timetable entry for {teacher_id}: {str(e)}")
+
+        frappe.logger().info(f"Sync completed for row {row.name} in instance {instance.name}")
 
     except Exception as e:
-        pass
+        print(f"DEBUG: Error in _sync_related_timetables: {str(e)}")
+        frappe.logger().error(f"Error syncing related timetables for row {row.name}: {str(e)}")
