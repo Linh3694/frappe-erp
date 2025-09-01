@@ -1291,10 +1291,11 @@ def get_instance_row_details(row_id: str = None):
         return error_response(f"Error fetching instance row details: {str(e)}")
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id: str = None,
                        teacher_2_id: str = None, room_id: str = None):
     """Update a specific timetable instance row"""
+    print(f"DEBUG: === UPDATE_INSTANCE_ROW API CALLED ===")
     print(f"DEBUG: update_instance_row called with params: row_id={row_id}, subject_id={subject_id}, teacher_1_id={teacher_1_id}, teacher_2_id={teacher_2_id}, room_id={room_id}")
     print(f"DEBUG: Current user: {frappe.session.user}")
     print(f"DEBUG: User roles: {frappe.get_roles()}")
