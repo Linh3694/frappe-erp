@@ -1312,13 +1312,18 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
 
     try:
         # Get parameters
+        print(f"DEBUG: Raw parameters received: row_id={row_id}, subject_id={subject_id}, teacher_1_id={teacher_1_id}")
+
         row_id = row_id or _get_request_arg("row_id")
         subject_id = subject_id or _get_request_arg("subject_id")
         teacher_1_id = teacher_1_id or _get_request_arg("teacher_1_id")
         teacher_2_id = teacher_2_id or _get_request_arg("teacher_2_id")
         room_id = room_id or _get_request_arg("room_id")
 
+        print(f"DEBUG: Final parameters: row_id={row_id}, subject_id={subject_id}, teacher_1_id={teacher_1_id}")
+
         if not row_id:
+            print(f"DEBUG: Row ID is missing!")
             return validation_error_response("Validation failed", {"row_id": ["Row ID is required"]})
 
         # Get the instance row (ignore permissions to bypass framework-level checks)
@@ -1359,33 +1364,38 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
         # if user_campus and user_campus != instance.campus_id:
         #     return forbidden_response("Access denied: Campus mismatch")
 
-        # Validate subject exists and is active
+        # Validate subject exists (SIS Subject doesn't have is_active field)
         print(f"DEBUG: Validating subject: {subject_id}")
         frappe.logger().info(f"Validating subject: {subject_id}")
         if subject_id:
-            subject_exists = frappe.db.exists("SIS Subject", {"name": subject_id, "is_active": 1})
-            print(f"DEBUG: Subject {subject_id} exists and active: {subject_exists}")
-            frappe.logger().info(f"Subject {subject_id} exists and active: {subject_exists}")
+            # SIS Subject doctype doesn't have is_active field, so just check if exists
+            subject_exists = frappe.db.exists("SIS Subject", {"name": subject_id})
+            print(f"DEBUG: Subject {subject_id} exists: {subject_exists}")
+
             if not subject_exists:
-                print(f"DEBUG: Subject validation failed")
-                frappe.logger().info("Subject validation failed")
+                print(f"DEBUG: Subject {subject_id} does not exist in database")
+                # Get all subjects to see what's available
+                all_subjects = frappe.get_all("SIS Subject", fields=["name", "title"], limit=10)
+                print(f"DEBUG: Available subjects (first 10): {[s['name'] + ': ' + s['title'] for s in all_subjects]}")
                 return validation_error_response("Validation failed", {
-                    "subject_id": ["Invalid or inactive subject"]
+                    "subject_id": ["Subject does not exist"]
                 })
 
-        # Validate teachers exist and are active
+        # Validate teachers exist (SIS Teacher doesn't have status field)
         print(f"DEBUG: Validating teachers: {teacher_1_id}, {teacher_2_id}")
         frappe.logger().info(f"Validating teachers: {teacher_1_id}, {teacher_2_id}")
         for teacher_id in [teacher_1_id, teacher_2_id]:
             if teacher_id:
-                teacher_exists = frappe.db.exists("SIS Teacher", {"name": teacher_id, "status": "Active"})
-                print(f"DEBUG: Teacher {teacher_id} exists and active: {teacher_exists}")
-                frappe.logger().info(f"Teacher {teacher_id} exists and active: {teacher_exists}")
+                teacher_exists = frappe.db.exists("SIS Teacher", {"name": teacher_id})
+                print(f"DEBUG: Teacher {teacher_id} exists: {teacher_exists}")
+
                 if not teacher_exists:
-                    print(f"DEBUG: Teacher validation failed for {teacher_id}")
-                    frappe.logger().info(f"Teacher validation failed for {teacher_id}")
+                    print(f"DEBUG: Teacher {teacher_id} does not exist")
+                    # Get all teachers to see what's available
+                    all_teachers = frappe.get_all("SIS Teacher", fields=["name", "user_id"], limit=10)
+                    print(f"DEBUG: Available teachers (first 10): {[t['name'] + ': ' + (t.get('user_id') or 'No user') for t in all_teachers]}")
                     return validation_error_response("Validation failed", {
-                        "teacher_id": [f"Invalid or inactive teacher: {teacher_id}"]
+                        "teacher_id": [f"Teacher does not exist: {teacher_id}"]
                     })
 
         # Check for teacher conflicts if teachers are assigned
