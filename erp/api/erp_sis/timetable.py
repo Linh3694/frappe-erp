@@ -1314,12 +1314,19 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
         # Get parameters
         print(f"DEBUG: Raw parameters received: row_id={row_id}, subject_id={subject_id}, teacher_1_id={teacher_1_id}")
 
+        # Debug frappe.local.form_dict (POST data)
+        print(f"DEBUG: frappe.local.form_dict: {getattr(frappe.local, 'form_dict', 'NOT FOUND')}")
+        if hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
+            print(f"DEBUG: form_dict keys: {list(frappe.local.form_dict.keys())}")
+            print(f"DEBUG: form_dict values: {dict(frappe.local.form_dict)}")
+
         row_id = row_id or _get_request_arg("row_id")
         subject_id = subject_id or _get_request_arg("subject_id")
         teacher_1_id = teacher_1_id or _get_request_arg("teacher_1_id")
         teacher_2_id = teacher_2_id or _get_request_arg("teacher_2_id")
         room_id = room_id or _get_request_arg("room_id")
 
+        print(f"DEBUG: After _get_request_arg: row_id={row_id}, subject_id={subject_id}, teacher_1_id={teacher_1_id}")
         print(f"DEBUG: Final parameters: row_id={row_id}, subject_id={subject_id}, teacher_1_id={teacher_1_id}")
 
         if not row_id:
