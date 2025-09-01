@@ -1291,7 +1291,7 @@ def get_instance_row_details(row_id: str = None):
         return error_response(f"Error fetching instance row details: {str(e)}")
 
 
-@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST", "PUT"])
 def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id: str = None,
                        teacher_2_id: str = None, room_id: str = None):
     """Update a specific timetable instance row"""
