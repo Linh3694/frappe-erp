@@ -637,9 +637,17 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
                             try:
                                 meta = frappe.get_meta("SIS Timetable Instance Row")
-                                opts = (meta.get_field("day_of_week").options or "").split("\n")
+                                options_str = meta.get_field("day_of_week").options or ""
+
+                                # Handle escaped newlines in options string (like "mon\\ntue\\nwed...")
+                                if "\\n" in options_str:
+                                    opts = options_str.split("\\n")
+                                else:
+                                    opts = options_str.split("\n")
+
                                 allowed_options = [o.strip().lower() for o in opts if o.strip()]
-                                print(f"DEBUG IMPORT: Allowed options: {allowed_options}")
+                                print(f"DEBUG IMPORT: Raw options string: '{options_str}'")
+                                print(f"DEBUG IMPORT: Parsed allowed options: {allowed_options}")
 
                                 if day_raw not in allowed_options and allowed_options:
                                     print(f"DEBUG IMPORT: '{day_raw}' not in allowed options, falling back to '{allowed_options[0]}'")
@@ -666,10 +674,22 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             print(f"DEBUG IMPORT: Creating child row for {class_id}: day={day_raw}, period={pp_val}, teacher1={row.get('teacher_1_id')}")
                             instance_doc.append("weekly_pattern", child)
 
+                            # Debug: Check what was actually set in the child
+                            if hasattr(instance_doc, 'weekly_pattern') and len(instance_doc.weekly_pattern) > 0:
+                                last_child = instance_doc.weekly_pattern[-1]
+                                print(f"DEBUG IMPORT: Child after append - day_of_week: '{last_child.day_of_week}'")
+
                         instance_doc.save()
                         instances_created += 1
                         rows_created += len(class_rows)
                         print(f"DEBUG IMPORT: Successfully created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
+
+                        # Debug: Check saved data in database
+                        if hasattr(instance_doc, 'weekly_pattern') and len(instance_doc.weekly_pattern) > 0:
+                            for i, child in enumerate(instance_doc.weekly_pattern):
+                                if i < 3:  # Show first 3 children
+                                    print(f"DEBUG IMPORT: Saved child {i+1} - day_of_week: '{child.day_of_week}', name: '{child.name}'")
+
                         logs.append(f"Created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
                     except Exception as e:
                         logs.append(f"Failed to create instance for class {class_id}: {str(e)}")
