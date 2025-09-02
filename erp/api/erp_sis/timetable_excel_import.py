@@ -640,28 +640,34 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                                 options_str = meta.get_field("day_of_week").options or ""
 
                                 print(f"DEBUG IMPORT: Raw options string: '{options_str}'")
-
-                                # Handle escaped newlines in options string (like "mon\\ntue\\nwed...")
-                                if "\\n" in options_str:
-                                    opts = options_str.split("\\n")
-                                    print(f"DEBUG IMPORT: Split by '\\n', got: {opts}")
-                                else:
-                                    opts = options_str.split("\n")
-                                    print(f"DEBUG IMPORT: Split by '\n', got: {opts}")
-
-                                allowed_options = [o.strip().lower() for o in opts if o.strip()]
-                                print(f"DEBUG IMPORT: Parsed allowed options: {allowed_options}")
                                 print(f"DEBUG IMPORT: day_raw before validation: '{day_raw}'")
 
-                                if day_raw not in allowed_options and allowed_options:
-                                    print(f"DEBUG IMPORT: '{day_raw}' not in allowed options, falling back to '{allowed_options[0]}'")
-                                    # Fallback to first allowed option to satisfy validation
-                                    day_raw = allowed_options[0]
-                                elif not allowed_options:
-                                    print(f"DEBUG IMPORT: No allowed options found, using static fallback")
-                                    day_raw = "mon"
+                                # For Frappe validation, we need to use the EXACT value from options string
+                                # The options string is "mon\\ntue\\nwed\\nthu\\nfri\\nsat\\nsun"
+                                # We need to find which part of this string matches our day_raw
+
+                                # Map our normalized day to the exact option in the string
+                                day_mapping_to_option = {
+                                    "mon": "mon",
+                                    "tue": "tue",
+                                    "wed": "wed",
+                                    "thu": "thu",
+                                    "fri": "fri",
+                                    "sat": "sat",
+                                    "sun": "sun"
+                                }
+
+                                if day_raw in day_mapping_to_option:
+                                    # Keep the normalized value as it matches the option
+                                    print(f"DEBUG IMPORT: '{day_raw}' matches option, keeping as is")
                                 else:
-                                    print(f"DEBUG IMPORT: '{day_raw}' is valid, keeping as is")
+                                    # Fallback to first option
+                                    if "\\n" in options_str:
+                                        first_option = options_str.split("\\n")[0]
+                                    else:
+                                        first_option = options_str.split("\n")[0]
+                                    print(f"DEBUG IMPORT: '{day_raw}' not valid, falling back to '{first_option}'")
+                                    day_raw = first_option.strip() if first_option.strip() else "mon"
 
                             except Exception as e:
                                 print(f"DEBUG IMPORT: Error getting meta options: {str(e)}")
