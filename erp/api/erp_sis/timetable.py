@@ -1479,43 +1479,37 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
 
         for teacher_id in teachers_to_remove:
             if teacher_id:
+                # Improved strategy: Use a single comprehensive query with proper filters
+                # Include date range check to ensure we only delete entries within the instance's validity period
                 existing_entries = frappe.get_all(
                     "SIS Teacher Timetable",
                     filters={
+                        "teacher_id": teacher_id,
                         "timetable_instance_id": instance.name,
                         "day_of_week": row.day_of_week,
                         "timetable_column_id": row.timetable_column_id,
-                        "teacher_id": teacher_id
+                        "class_id": instance.class_id
                     }
                 )
 
-                # Strategy 2: If no entries found, try broader search for this teacher on this day
+                # If no exact match found, try broader search within the instance's date range
                 if len(existing_entries) == 0:
-                    alt_entries = frappe.get_all(
+                    # Get all entries for this teacher in this instance
+                    instance_entries = frappe.get_all(
                         "SIS Teacher Timetable",
                         filters={
                             "teacher_id": teacher_id,
-                            "day_of_week": row.day_of_week,
-                            "timetable_instance_id": instance.name  # Still filter by instance
+                            "timetable_instance_id": instance.name
                         }
                     )
-                    existing_entries.extend(alt_entries)
 
-                # Strategy 3: If still no entries, try even broader search (just teacher and day)
-                if len(existing_entries) == 0:
-                    broad_entries = frappe.get_all(
-                        "SIS Teacher Timetable",
-                        filters={
-                            "teacher_id": teacher_id,
-                            "day_of_week": row.day_of_week
-                        }
-                    )
-                    # Filter by class to avoid deleting wrong entries
-                    for entry in broad_entries:
-                        entry_doc = frappe.get_doc("SIS Teacher Timetable", entry.name)
-                        if entry_doc.class_id == instance.class_id:
+                    # Filter by day_of_week and timetable_column_id in memory (more reliable than complex DB queries)
+                    for entry in instance_entries:
+                        if (entry.get("day_of_week") == row.day_of_week and
+                            entry.get("timetable_column_id") == row.timetable_column_id):
                             existing_entries.append(entry)
 
+                # Delete all found entries
                 for entry in existing_entries:
                     try:
                         frappe.delete_doc("SIS Teacher Timetable", entry.name, ignore_permissions=True)
@@ -1531,40 +1525,21 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
 
         for teacher_id in teachers_to_add:
             if teacher_id:
-                # Check if entry already exists (try multiple strategies)
-                existing_entry = None
-
-                # Strategy 1: Full match
+                # Check if entry already exists with comprehensive filters
                 existing_entries = frappe.get_all(
                     "SIS Teacher Timetable",
                     filters={
+                        "teacher_id": teacher_id,
                         "timetable_instance_id": instance.name,
                         "day_of_week": row.day_of_week,
                         "timetable_column_id": row.timetable_column_id,
-                        "teacher_id": teacher_id
+                        "class_id": instance.class_id
                     },
                     limit=1
                 )
 
                 if len(existing_entries) > 0:
-                    existing_entry = existing_entries[0]
-
-                # Strategy 2: If not found, check broader criteria
-                if not existing_entry:
-                    broader_entries = frappe.get_all(
-                        "SIS Teacher Timetable",
-                        filters={
-                            "teacher_id": teacher_id,
-                            "day_of_week": row.day_of_week,
-                            "timetable_instance_id": instance.name
-                        },
-                        limit=1
-                    )
-                    if len(broader_entries) > 0:
-                        existing_entry = broader_entries[0]
-
-                if existing_entry:
-                    continue
+                    continue  # Entry already exists, skip creation
 
                 try:
                     # Create new teacher timetable entry
