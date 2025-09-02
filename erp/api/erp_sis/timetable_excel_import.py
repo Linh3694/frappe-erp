@@ -582,6 +582,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 rows_created = 0
 
                 for class_id, class_rows in rows_by_class.items():
+                    print(f"DEBUG IMPORT: Processing class {class_id} with {len(class_rows)} rows")
+                    for i, row in enumerate(class_rows[:3]):  # Show first 3 rows for debugging
+                        print(f"DEBUG IMPORT: Row {i+1}: day={row.get('day_of_week')}, period={row.get('period_priority')}, subject={row.get('subject_name')}")
+
                     instance_doc = frappe.get_doc({
                         "doctype": "SIS Timetable Instance",
                         "timetable_id": timetable_id,
@@ -602,7 +606,12 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                                 pp_val = frappe.db.get_value("SIS Timetable Column", row.get("timetable_column_id"), "period_priority")
 
                             # Normalize day_of_week using DocType meta options to avoid schema drift issues
-                            day_raw = str(row.get("day_of_week") or "").strip().lower()
+                            original_day = str(row.get("day_of_week") or "").strip()
+                            day_raw = original_day.lower()
+
+                            # Debug: Log original day
+                            print(f"DEBUG IMPORT: Processing row - Original day: '{original_day}', Raw day: '{day_raw}'")
+
                             # Base mapping for common inputs
                             day_map = {
                                 "monday": "mon",
@@ -622,18 +631,28 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             }
                             if day_raw in day_map:
                                 day_raw = day_map[day_raw]
+                                print(f"DEBUG IMPORT: Mapped '{original_day}' to '{day_raw}'")
+                            else:
+                                print(f"DEBUG IMPORT: No mapping found for '{original_day}', keeping as '{day_raw}'")
 
                             try:
                                 meta = frappe.get_meta("SIS Timetable Instance Row")
                                 opts = (meta.get_field("day_of_week").options or "").split("\n")
                                 allowed_options = [o.strip().lower() for o in opts if o.strip()]
+                                print(f"DEBUG IMPORT: Allowed options: {allowed_options}")
+
                                 if day_raw not in allowed_options and allowed_options:
+                                    print(f"DEBUG IMPORT: '{day_raw}' not in allowed options, falling back to '{allowed_options[0]}'")
                                     # Fallback to first allowed option to satisfy validation
                                     day_raw = allowed_options[0]
-                            except Exception:
+                            except Exception as e:
+                                print(f"DEBUG IMPORT: Error getting meta options: {str(e)}")
                                 # Fallback static set if meta is unavailable
                                 if day_raw not in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}:
+                                    print(f"DEBUG IMPORT: '{day_raw}' not in static set, falling back to 'mon'")
                                     day_raw = "mon"
+
+                            print(f"DEBUG IMPORT: Final day_of_week for row: '{day_raw}'")
 
                             child = {
                                 "parent_timetable_instance": instance_doc.name,
@@ -644,11 +663,13 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                                 "teacher_1_id": row.get("teacher_1_id"),
                                 "teacher_2_id": row.get("teacher_2_id")
                             }
+                            print(f"DEBUG IMPORT: Creating child row for {class_id}: day={day_raw}, period={pp_val}, teacher1={row.get('teacher_1_id')}")
                             instance_doc.append("weekly_pattern", child)
 
                         instance_doc.save()
                         instances_created += 1
                         rows_created += len(class_rows)
+                        print(f"DEBUG IMPORT: Successfully created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
                         logs.append(f"Created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
                     except Exception as e:
                         logs.append(f"Failed to create instance for class {class_id}: {str(e)}")
