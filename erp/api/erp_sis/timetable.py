@@ -1311,9 +1311,9 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
         try:
             row = frappe.get_doc("SIS Timetable Instance Row", row_id, ignore_permissions=True)
 
-            # Store old teacher values for sync
-            old_teacher_1_id = getattr(row, 'teacher_1_id', None)
-            old_teacher_2_id = getattr(row, 'teacher_2_id', None)
+            # Store old teacher values BEFORE any updates (get from database, not from current object)
+            old_teacher_1_id = frappe.db.get_value("SIS Timetable Instance Row", row_id, "teacher_1_id")
+            old_teacher_2_id = frappe.db.get_value("SIS Timetable Instance Row", row_id, "teacher_2_id")
 
         except Exception as e:
             raise
@@ -1476,6 +1476,12 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
             teachers_to_remove.append(old_teacher_1_id)
         if old_teacher_2_id and old_teacher_2_id != new_teacher_2_id:
             teachers_to_remove.append(old_teacher_2_id)
+
+        # Debug: Log what we're doing
+        if teachers_to_remove:
+            print(f"DEBUG: Removing teacher timetable entries for teachers: {teachers_to_remove}")
+            print(f"DEBUG: Old teachers: teacher_1={old_teacher_1_id}, teacher_2={old_teacher_2_id}")
+            print(f"DEBUG: New teachers: teacher_1={new_teacher_1_id}, teacher_2={new_teacher_2_id}")
 
         for teacher_id in teachers_to_remove:
             if teacher_id:
