@@ -1479,8 +1479,9 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
 
         for teacher_id in teachers_to_remove:
             if teacher_id:
-                # Improved strategy: Use a single comprehensive query with proper filters
-                # Include date range check to ensure we only delete entries within the instance's validity period
+                # Comprehensive deletion strategy to handle both manual and Excel-imported entries
+
+                # Strategy 1: Exact match with all filters (for manual edits)
                 existing_entries = frappe.get_all(
                     "SIS Teacher Timetable",
                     filters={
@@ -1492,22 +1493,53 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
                     }
                 )
 
-                # If no exact match found, try broader search within the instance's date range
+                # Strategy 2: If no exact match, get all entries for this teacher in this instance
+                # This handles Excel-imported entries that might have different date formats
                 if len(existing_entries) == 0:
-                    # Get all entries for this teacher in this instance
                     instance_entries = frappe.get_all(
+                        "SIS Teacher Timetable",
+                        filters={
+                            "teacher_id": teacher_id,
+                            "timetable_instance_id": instance.name,
+                            "class_id": instance.class_id  # Ensure same class
+                        }
+                    )
+
+                    # Filter by day_of_week and timetable_column_id in memory
+                    for entry in instance_entries:
+                        if (entry.get("day_of_week") == row.day_of_week and
+                            entry.get("timetable_column_id") == row.timetable_column_id):
+                            existing_entries.append(entry)
+
+                # Strategy 3: Fallback - find any entries for this teacher on this day/week
+                # This handles edge cases where entries might be created with different logic
+                if len(existing_entries) == 0:
+                    # Get entries by teacher and day_of_week only, then filter by instance
+                    day_entries = frappe.get_all(
+                        "SIS Teacher Timetable",
+                        filters={
+                            "teacher_id": teacher_id,
+                            "day_of_week": row.day_of_week,
+                            "class_id": instance.class_id
+                        }
+                    )
+
+                    # Filter by timetable_instance_id to ensure we're only deleting from current instance
+                    for entry in day_entries:
+                        if entry.get("timetable_instance_id") == instance.name:
+                            existing_entries.append(entry)
+
+                # Strategy 4: Last resort - delete ALL entries for this teacher in this instance
+                # This ensures no orphaned entries remain, especially for Excel-imported data
+                if len(existing_entries) == 0:
+                    all_instance_entries = frappe.get_all(
                         "SIS Teacher Timetable",
                         filters={
                             "teacher_id": teacher_id,
                             "timetable_instance_id": instance.name
                         }
                     )
-
-                    # Filter by day_of_week and timetable_column_id in memory (more reliable than complex DB queries)
-                    for entry in instance_entries:
-                        if (entry.get("day_of_week") == row.day_of_week and
-                            entry.get("timetable_column_id") == row.timetable_column_id):
-                            existing_entries.append(entry)
+                    existing_entries.extend(all_instance_entries)
 
                 # Delete all found entries
                 for entry in existing_entries:
