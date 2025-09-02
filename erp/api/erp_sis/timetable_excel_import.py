@@ -581,10 +581,13 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 instances_created = 0
                 rows_created = 0
 
+                # Collect debug logs
+                import_logs = []
+
                 for class_id, class_rows in rows_by_class.items():
-                    print(f"DEBUG IMPORT: Processing class {class_id} with {len(class_rows)} rows")
+                    import_logs.append(f"Processing class {class_id} with {len(class_rows)} rows")
                     for i, row in enumerate(class_rows[:3]):  # Show first 3 rows for debugging
-                        print(f"DEBUG IMPORT: Row {i+1}: day={row.get('day_of_week')}, period={row.get('period_priority')}, subject={row.get('subject_name')}")
+                        import_logs.append(f"Row {i+1}: day={row.get('day_of_week')}, period={row.get('period_priority')}, subject={row.get('subject_name')}")
 
                     instance_doc = frappe.get_doc({
                         "doctype": "SIS Timetable Instance",
@@ -610,7 +613,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             day_raw = original_day.lower()
 
                             # Debug: Log original day
-                            print(f"DEBUG IMPORT: Processing row - Original day: '{original_day}', Raw day: '{day_raw}'")
+                            import_logs.append(f"Processing row - Original day: '{original_day}', Raw day: '{day_raw}'")
 
                             # Base mapping for common inputs
                             day_map = {
@@ -631,57 +634,36 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             }
                             if day_raw in day_map:
                                 day_raw = day_map[day_raw]
-                                print(f"DEBUG IMPORT: Mapped '{original_day}' to '{day_raw}'")
+                                import_logs.append(f"Mapped '{original_day}' to '{day_raw}'")
                             else:
-                                print(f"DEBUG IMPORT: No mapping found for '{original_day}', keeping as '{day_raw}'")
+                                import_logs.append(f"No mapping found for '{original_day}', keeping as '{day_raw}'")
 
                             try:
                                 meta = frappe.get_meta("SIS Timetable Instance Row")
                                 options_str = meta.get_field("day_of_week").options or ""
 
-                                print(f"DEBUG IMPORT: Raw options string: '{options_str}'")
-                                print(f"DEBUG IMPORT: day_raw before validation: '{day_raw}'")
+                                import_logs.append(f"Raw options string: '{options_str}'")
+                                import_logs.append(f"day_raw before validation: '{day_raw}'")
 
-                                # For Frappe validation, we need to use the EXACT value from options string
-                                # The options string is "mon\\ntue\\nwed\\nthu\\nfri\\nsat\\nsun"
-                                # We need to find which part of this string matches our day_raw
-
-                                # Map our normalized day to the exact option in the string
-                                day_mapping_to_option = {
-                                    "mon": "mon",
-                                    "tue": "tue",
-                                    "wed": "wed",
-                                    "thu": "thu",
-                                    "fri": "fri",
-                                    "sat": "sat",
-                                    "sun": "sun"
-                                }
-
-                                if day_raw in day_mapping_to_option:
-                                    # Keep the normalized value as it matches the option
-                                    print(f"DEBUG IMPORT: '{day_raw}' matches option, keeping as is")
-                                else:
-                                    # Fallback to first option
-                                    if "\\n" in options_str:
-                                        first_option = options_str.split("\\n")[0]
-                                    else:
-                                        first_option = options_str.split("\n")[0]
-                                    print(f"DEBUG IMPORT: '{day_raw}' not valid, falling back to '{first_option}'")
-                                    day_raw = first_option.strip() if first_option.strip() else "mon"
+                                # Try to set day_of_week to the entire options string
+                                # Frappe might be expecting this format for validation
+                                import_logs.append(f"Setting day_of_week to entire options string")
+                                day_raw = options_str
+                                import_logs.append(f"day_raw after setting to options: '{day_raw}'")
 
                             except Exception as e:
-                                print(f"DEBUG IMPORT: Error getting meta options: {str(e)}")
+                                import_logs.append(f"Error getting meta options: {str(e)}")
                                 import traceback
-                                print(f"DEBUG IMPORT: Traceback: {traceback.format_exc()}")
+                                import_logs.append(f"Traceback: {traceback.format_exc()}")
 
                                 # Fallback static set if meta is unavailable
                                 if day_raw not in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}:
-                                    print(f"DEBUG IMPORT: '{day_raw}' not in static set, falling back to 'mon'")
+                                    import_logs.append(f"'{day_raw}' not in static set, falling back to 'mon'")
                                     day_raw = "mon"
                                 else:
-                                    print(f"DEBUG IMPORT: '{day_raw}' is valid in static set")
+                                    import_logs.append(f"'{day_raw}' is valid in static set")
 
-                            print(f"DEBUG IMPORT: Final day_of_week for row: '{day_raw}'")
+                            import_logs.append(f"Final day_of_week for row: '{day_raw}'")
 
                             try:
                                 child = {
@@ -693,46 +675,40 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                                     "teacher_1_id": row.get("teacher_1_id"),
                                     "teacher_2_id": row.get("teacher_2_id")
                                 }
-                                print(f"DEBUG IMPORT: Creating child row for {class_id}: day={day_raw}, period={pp_val}, teacher1={row.get('teacher_1_id')}")
-                                print(f"DEBUG IMPORT: Child dict keys: {list(child.keys())}")
+                                import_logs.append(f"Creating child row for {class_id}: day={day_raw}, period={pp_val}, teacher1={row.get('teacher_1_id')}")
+                                import_logs.append(f"Child dict keys: {list(child.keys())}")
 
                                 instance_doc.append("weekly_pattern", child)
-                                print(f"DEBUG IMPORT: Successfully appended child, weekly_pattern length: {len(instance_doc.weekly_pattern) if hasattr(instance_doc, 'weekly_pattern') else 'N/A'}")
+                                import_logs.append(f"Successfully appended child, weekly_pattern length: {len(instance_doc.weekly_pattern) if hasattr(instance_doc, 'weekly_pattern') else 'N/A'}")
 
                                 # Debug: Check what was actually set in the child
                                 if hasattr(instance_doc, 'weekly_pattern') and len(instance_doc.weekly_pattern) > 0:
                                     last_child = instance_doc.weekly_pattern[-1]
-                                    print(f"DEBUG IMPORT: Child after append - day_of_week: '{getattr(last_child, 'day_of_week', 'NOT_SET')}'")
+                                    import_logs.append(f"Child after append - day_of_week: '{getattr(last_child, 'day_of_week', 'NOT_SET')}'")
 
                             except Exception as child_error:
-                                print(f"DEBUG IMPORT: Error creating/appending child row: {str(child_error)}")
+                                import_logs.append(f"Error creating/appending child row: {str(child_error)}")
                                 import traceback
-                                print(f"DEBUG IMPORT: Child error traceback: {traceback.format_exc()}")
+                                import_logs.append(f"Child error traceback: {traceback.format_exc()}")
                                 continue  # Skip this row and continue with others
 
                         try:
                             instance_doc.save()
                             instances_created += 1
                             rows_created += len(class_rows)
-                            print(f"DEBUG IMPORT: Successfully created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
+                            import_logs.append(f"Successfully created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
 
                             # Debug: Check saved data in database
                             if hasattr(instance_doc, 'weekly_pattern') and len(instance_doc.weekly_pattern) > 0:
                                 for i, child in enumerate(instance_doc.weekly_pattern):
                                     if i < 3:  # Show first 3 children
-                                        print(f"DEBUG IMPORT: Saved child {i+1} - day_of_week: '{getattr(child, 'day_of_week', 'NOT_SET')}', name: '{getattr(child, 'name', 'NO_NAME')}'")
+                                        import_logs.append(f"Saved child {i+1} - day_of_week: '{getattr(child, 'day_of_week', 'NOT_SET')}', name: '{getattr(child, 'name', 'NO_NAME')}")
 
                         except Exception as save_error:
-                            print(f"DEBUG IMPORT: Error saving instance {instance_doc.name}: {str(save_error)}")
+                            import_logs.append(f"Error saving instance {instance_doc.name}: {str(save_error)}")
                             import traceback
-                            print(f"DEBUG IMPORT: Save error traceback: {traceback.format_exc()}")
+                            import_logs.append(f"Save error traceback: {traceback.format_exc()}")
                             continue
-
-                        # Debug: Check saved data in database
-                        if hasattr(instance_doc, 'weekly_pattern') and len(instance_doc.weekly_pattern) > 0:
-                            for i, child in enumerate(instance_doc.weekly_pattern):
-                                if i < 3:  # Show first 3 children
-                                    print(f"DEBUG IMPORT: Saved child {i+1} - day_of_week: '{child.day_of_week}', name: '{child.name}'")
 
                         logs.append(f"Created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
                     except Exception as e:
@@ -767,7 +743,8 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "schedule_data": schedule_data if dry_run else [],
                 "timetable_id": timetable_id if not dry_run and 'timetable_id' in locals() else None,
                 "created_records": created_records if not dry_run else {},
-                "logs": logs
+                "logs": logs,
+                "import_logs": import_logs if 'import_logs' in locals() else []
             }
 
             final_response = single_item_response(result, "Timetable import processed successfully")
