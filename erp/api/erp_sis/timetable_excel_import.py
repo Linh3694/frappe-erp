@@ -646,33 +646,15 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                                 import_logs.append(f"day_raw before validation: '{day_raw}'")
 
                                 # Parse options string to individual values
-                                if "\\n" in options_str:
-                                    available_options = [opt.strip() for opt in options_str.split("\\n") if opt.strip()]
-                                else:
-                                    available_options = [opt.strip() for opt in options_str.split("\n") if opt.strip()]
-
+                                available_options = [opt.strip() for opt in options_str.split("\n") if opt.strip()]
                                 import_logs.append(f"Available options: {available_options}")
 
                                 # Check if day_raw is valid
                                 if day_raw in available_options:
                                     import_logs.append(f"'{day_raw}' is valid, keeping as is")
                                 else:
-                                    import_logs.append(f"'{day_raw}' not valid, looking for alternative...")
-
-                                    # Try to find a close match
-                                    day_lower = day_raw.lower()
-                                    for option in available_options:
-                                        if day_lower in option.lower() or option.lower() in day_lower:
-                                            import_logs.append(f"Found close match: '{option}' for '{day_raw}'")
-                                            day_raw = option
-                                            break
-                                    else:
-                                        # Fallback to first available option
-                                        if available_options:
-                                            import_logs.append(f"No match found, falling back to '{available_options[0]}'")
-                                            day_raw = available_options[0]
-                                        else:
-                                            import_logs.append(f"No options available, keeping '{day_raw}'")
+                                    import_logs.append(f"'{day_raw}' not valid, falling back to 'mon'")
+                                    day_raw = "mon"  # Simple fallback
 
                             except Exception as e:
                                 import_logs.append(f"Error getting meta options: {str(e)}")
