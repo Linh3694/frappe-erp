@@ -162,7 +162,7 @@ def create_event():
 
         # Get current user as teacher
         current_user = frappe.session.user
-        teacher = frappe.db.get_value("SIS Teacher", {"user": current_user}, "name")
+        teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
 
         if not teacher:
             return error_response("Only teachers can create events", debug_info=debug_info)
@@ -235,7 +235,7 @@ def approve_event():
 
         # Get current user as teacher
         current_user = frappe.session.user
-        teacher = frappe.db.get_value("SIS Teacher", {"user": current_user}, "name")
+        teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
 
         if not teacher:
             return forbidden_response("Only teachers can approve events")
@@ -301,7 +301,7 @@ def reject_event():
 
         # Get current user as teacher
         current_user = frappe.session.user
-        teacher = frappe.db.get_value("SIS Teacher", {"user": current_user}, "name")
+        teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
 
         if not teacher:
             return forbidden_response("Only teachers can reject events")
