@@ -704,8 +704,8 @@ def create_timetable_override(event):
         # Get event participants
         participants = frappe.get_all(
             "SIS Event Student",
-            filters={"parent": event.name},
-            fields=["student"]
+            filters={"event_id": event.name},
+            fields=["student_id" if frappe.db.has_column("SIS Event Student", "student_id") else "student"]
         )
 
         if not participants:
@@ -760,9 +760,16 @@ def create_timetable_override(event):
             # Create override for each participant
             for participant in participants:
                 # Determine target type and ID
-                student_doc = frappe.get_doc("SIS Student", participant.student)
+                student_ref = participant.get("student_id") if isinstance(participant, dict) else getattr(participant, "student_id", None)
+                if not student_ref:
+                    student_ref = participant.get("student") if isinstance(participant, dict) else getattr(participant, "student", None)
                 class_id = frappe.db.get_value("SIS Class Student",
-                    {"student": participant.student, "status": "Active"}, "parent")
+                    {"student_id": student_ref, "status": "Active"}, "class_id")
+                student_ref = participant.get("student_id") if isinstance(participant, dict) else getattr(participant, "student_id", None)
+                if not student_ref:
+                    student_ref = participant.get("student") if isinstance(participant, dict) else getattr(participant, "student", None)
+                class_id = frappe.db.get_value("SIS Class Student",
+                    {"student_id": student_ref, "status": "Active"}, "class_id")
 
                 if class_id:
                     override = frappe.get_doc({
