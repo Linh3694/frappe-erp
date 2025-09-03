@@ -206,7 +206,6 @@ def create_event():
             "campus_id": campus_id,
             "title": data.get("title"),
             "description": data.get("description"),
-            "status": "pending",
             "create_by": teacher,  # This should be a valid SIS Teacher name
             "create_at": frappe.utils.now(),
         }
