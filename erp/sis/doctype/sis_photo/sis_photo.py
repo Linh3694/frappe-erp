@@ -239,8 +239,6 @@ def upload_single_photo():
             final_filename = f"{filename_without_ext}.webp"
             final_content = candidate_content
 
-            frappe.logger().info(f"✅ Successfully converted {original_filename} to WebP: {len(final_content)} bytes")
-
         except Exception as e:
             # Fallback: keep original file content/extension if WebP conversion fails for any reason
             frappe.logger().warning(f"❌ WebP conversion failed, fallback to original file. Reason: {str(e)}")
@@ -372,7 +370,7 @@ def upload_single_photo():
                 photo_url = f"/files/{final_filename}"
                 frappe.logger().warning(f"No file_url found, using fallback: {photo_url}")
 
-            frappe.logger().info(f"📁 File created: {final_filename}, URL: {photo_url}")
+
             # Set photo URL with multiple fallback strategies
             max_retries = 3
             photo_set_success = False
@@ -387,7 +385,6 @@ def upload_single_photo():
                     persisted_photo = frappe.db.get_value("SIS Photo", photo_doc.name, "photo")
                     if persisted_photo == photo_url:
                         photo_set_success = True
-                        frappe.logger().info(f"✅ Photo URL set successfully for {photo_doc.name}: {persisted_photo}")
                         break
                     else:
                         frappe.logger().warning(f"❌ Photo URL verification failed on attempt {attempt + 1}. Expected: {photo_url}, Got: {persisted_photo}")
@@ -404,7 +401,6 @@ def upload_single_photo():
                             photo_doc.save()
                         frappe.db.commit()
                         photo_set_success = True
-                        frappe.logger().info(f"✅ Photo URL set via doc.save() for {photo_doc.name}")
                         break
                     except Exception as save_err:
                         frappe.logger().error(f"doc.save() also failed on attempt {attempt + 1}: {save_err}")
@@ -417,13 +413,11 @@ def upload_single_photo():
                 file_path = photo_file.get_fullpath()
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
-                    frappe.logger().info(f"✅ File exists at: {file_path} ({file_size} bytes)")
 
                     # Additional verification: try to read the file
                     try:
                         with open(file_path, 'rb') as f:
                             sample = f.read(100)  # Read first 100 bytes
-                        frappe.logger().info(f"✅ File is readable: {len(sample)} bytes read")
                     except Exception as read_err:
                         frappe.logger().error(f"❌ File exists but not readable: {str(read_err)}")
                         raise Exception(f"File exists but not readable: {str(read_err)}")
