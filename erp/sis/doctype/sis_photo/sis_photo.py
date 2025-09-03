@@ -393,6 +393,8 @@ def upload_single_photo():
                 "file_name": final_filename,
                 "content": base64.b64encode(final_content).decode('utf-8'),
                 "is_private": 0,
+                # Attach directly to the image field so Frappe links it properly on the document
+                "attached_to_field": "photo",
                 "attached_to_doctype": "SIS Photo",
                 "attached_to_name": photo_doc.name
             })
@@ -411,8 +413,13 @@ def upload_single_photo():
             frappe.logger().info(f"📁 File URL: {photo_file.file_url}")
             frappe.logger().info(f"📁 File path: {photo_file.file_path if hasattr(photo_file, 'file_path') else 'N/A'}")
 
-            # Update photo record with file reference
-            photo_doc.photo = photo_file.file_url
+            # Update photo record with file reference (ensure file_url exists)
+            if not getattr(photo_file, 'file_url', None):
+                try:
+                    photo_file.reload()
+                except Exception:
+                    pass
+            photo_doc.photo = getattr(photo_file, 'file_url', None) or f"/files/{final_filename}"
             if not frappe.has_permission("SIS Photo", "write", user=user):
                 frappe.logger().warning(f"User {user} does not have write permission on SIS Photo")
                 photo_doc.save(ignore_permissions=True)
