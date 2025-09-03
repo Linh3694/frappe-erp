@@ -465,12 +465,16 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             filters["type"] = photo_type
         if student_id:
             filters["student_id"] = student_id
+            frappe.logger().info(f"🔍 Filtering photos by student_id: {student_id}")
         if class_id:
             filters["class_id"] = class_id
+            frappe.logger().info(f"🔍 Filtering photos by class_id: {class_id}")
         if campus_id:
             filters["campus_id"] = campus_id
         if school_year_id:
             filters["school_year_id"] = school_year_id
+
+        frappe.logger().info(f"🔍 Final filters for get_photos_list: {filters}")
 
         # Get photos with pagination
         photos = frappe.get_all(
@@ -481,6 +485,10 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             start=(int(page) - 1) * int(limit),
             limit=int(limit)
         )
+
+        frappe.logger().info(f"🔍 Query returned {len(photos)} photos with filters: {filters}")
+        if photos:
+            frappe.logger().info(f"🔍 Sample photo records: {photos[:3]}")
 
         # Convert null to undefined for optional fields (Zod expects undefined, not null)
         for photo in photos:
