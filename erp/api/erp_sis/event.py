@@ -21,9 +21,16 @@ def create_event():
     try:
         data = frappe.local.form_dict
 
+        # Debug: Log received data
+        frappe.logger().info(f"Event API received data: {data}")
+
         # Required fields validation - support both old and new format
         has_old_format = data.get('start_time') and data.get('end_time')
         has_new_format = data.get('date_schedules') or data.get('dateSchedules')
+
+        frappe.logger().info(f"has_old_format: {has_old_format}, has_new_format: {has_new_format}")
+        frappe.logger().info(f"date_schedules: {data.get('date_schedules')}")
+        frappe.logger().info(f"dateSchedules: {data.get('dateSchedules')}")
 
         if not has_old_format and not has_new_format:
             return validation_error_response("Validation failed", {
