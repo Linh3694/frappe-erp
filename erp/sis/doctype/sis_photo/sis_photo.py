@@ -148,41 +148,68 @@ def upload_single_photo():
                 frappe.logger().info(f"request.data (first 200 chars): {frappe.request.data[:200].decode('utf-8', errors='ignore')}")
             else:
                 frappe.logger().info(f"request.data: {frappe.request.data[:200] if frappe.request.data else 'None'}")
-        # Get uploaded file - try both form_dict and request data
+        # Initialize parsed parameters
+        parsed_params = {}
+
+        # Get uploaded file - handle FormData properly
         file_id = frappe.form_dict.get("file_id")
         frappe.logger().info(f"file_id from form_dict: '{file_id}'")
         frappe.logger().info(f"All form_dict parameters: {dict(frappe.form_dict)}")
 
-        # If not in form_dict, try to get from request body (for FormData)
-        if not file_id and frappe.request and frappe.request.data:
+        # For FormData, Frappe populates parameters differently
+        # Check if we have FormData parameters
+        if not file_id:
+            # Try to parse FormData manually from request
             try:
-                import json
-                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                frappe.logger().info(f"request body: {body[:500]}")
-                # For FormData, parameters might be in form fields
-                # Try to get from form_dict again as Frappe should populate it
-                file_id = frappe.form_dict.get("file_id")
-                frappe.logger().info(f"file_id after checking request body: '{file_id}'")
+                from werkzeug.datastructures import ImmutableMultiDict
+                from werkzeug.formparser import FormDataParser
+                from io import BytesIO
+
+                if frappe.request and frappe.request.data:
+                    # Create a file-like object from request data
+                    data_stream = BytesIO(frappe.request.data)
+                    content_type = frappe.request.headers.get('Content-Type', '')
+
+                    if 'multipart/form-data' in content_type:
+                        # Parse FormData
+                        form_data_parser = FormDataParser()
+                        stream, form, files = form_data_parser.parse(data_stream, content_type, cache=None)
+
+                        # Get form fields
+                        form_dict = {}
+                        for key, values in form.lists():
+                            form_dict[key] = values[0] if len(values) == 1 else values
+
+                        file_id = form_dict.get("file_id")
+                        frappe.logger().info(f"Parsed file_id from FormData: '{file_id}'")
+                        frappe.logger().info(f"All parsed FormData: {form_dict}")
+
+                        # Store parsed parameters
+                        parsed_params.update({
+                            "photo_type": form_dict.get("photo_type"),
+                            "campus_id": form_dict.get("campus_id"),
+                            "school_year_id": form_dict.get("school_year_id"),
+                            "student_code": form_dict.get("student_code"),
+                            "class_name": form_dict.get("class_name")
+                        })
+
+                        frappe.logger().info(f"Parsed parameters: {parsed_params}")
+
             except Exception as e:
-                frappe.logger().error(f"Error parsing request body: {str(e)}")
+                frappe.logger().error(f"Error parsing FormData: {str(e)}")
+                import traceback
+                frappe.logger().error(f"FormData parsing traceback: {traceback.format_exc()}")
 
         if not file_id:
-            # Return detailed debug info in response instead of just throwing error
+            # Return concise debug info to avoid character length error
             debug_info = {
                 "form_dict_keys": list(frappe.form_dict.keys()),
-                "form_dict_values": dict(frappe.form_dict),
-                "request_data_type": type(frappe.request.data) if frappe.request else None,
-                "request_data_preview": None
+                "parsed_params": parsed_params,
+                "has_request_data": bool(frappe.request and frappe.request.data)
             }
 
-            if frappe.request and frappe.request.data:
-                if isinstance(frappe.request.data, bytes):
-                    debug_info["request_data_preview"] = frappe.request.data[:500].decode('utf-8', errors='ignore')
-                else:
-                    debug_info["request_data_preview"] = str(frappe.request.data)[:500] if frappe.request.data else None
-
             frappe.logger().error(f"File ID is required - debug info: {debug_info}")
-            frappe.throw(f"File ID is required. Debug info: {debug_info}")
+            frappe.throw(f"File ID is required. Form dict: {list(frappe.form_dict.keys())}, Parsed: {parsed_params}")
 
         file_doc = frappe.get_doc("File", file_id)
         if not file_doc:
@@ -193,12 +220,12 @@ def upload_single_photo():
         if file_doc.file_size > max_size:
             frappe.throw("File size exceeds 10MB limit")
 
-        # Get parameters
-        photo_type = frappe.form_dict.get("photo_type")
-        campus_id = frappe.form_dict.get("campus_id")
-        school_year_id = frappe.form_dict.get("school_year_id")
-        student_code = frappe.form_dict.get("student_code")
-        class_name = frappe.form_dict.get("class_name")
+        # Get parameters - try parsed FormData first, then fall back to form_dict
+        photo_type = parsed_params.get("photo_type") or frappe.form_dict.get("photo_type")
+        campus_id = parsed_params.get("campus_id") or frappe.form_dict.get("campus_id")
+        school_year_id = parsed_params.get("school_year_id") or frappe.form_dict.get("school_year_id")
+        student_code = parsed_params.get("student_code") or frappe.form_dict.get("student_code")
+        class_name = parsed_params.get("class_name") or frappe.form_dict.get("class_name")
 
         if not photo_type or not campus_id or not school_year_id:
             frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
@@ -324,11 +351,13 @@ def upload_single_photo():
             }
 
         except Exception as e:
-            frappe.log_error(f"Error creating photo record: {str(e)}")
+            error_msg = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
+            frappe.log_error(f"Error creating photo record: {error_msg}")
             raise frappe.ValidationError(f"Failed to create photo record: {str(e)}")
 
     except Exception as e:
-        frappe.log_error(f"Error in upload_single_photo: {str(e)}")
+        error_msg = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
+        frappe.log_error(f"Error in upload_single_photo: {error_msg}")
         return {
             "success": False,
             "message": str(e)
