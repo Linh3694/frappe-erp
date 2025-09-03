@@ -273,18 +273,14 @@ def create_event():
         try:
             if status_field and status_field.options:
                 options_raw = status_field.options
-                # Handle both literal "\n" and real newlines
-                if "\n" in options_raw and "\n" != "\n".encode().decode():
-                    # This branch is effectively unreachable in Python, keep for clarity
-                    pass
-                allowed_statuses = []
-                if "\n" in options_raw:
-                    # Split literal sequence first
-                    allowed_statuses = [opt.strip() for opt in options_raw.split("\\n") if opt and opt.strip()]
-                if not allowed_statuses:
-                    # Fallback to real newline splitting
-                    allowed_statuses = [opt.strip() for opt in options_raw.splitlines() if opt and opt.strip()]
+                # Robust split: try double-escaped, then single-escaped, then real newline
+                parts = options_raw.split("\\\\n") if "\\\\n" in options_raw else []
+                if not parts or len(parts) == 1:
+                    parts = options_raw.split("\\n") if "\\n" in options_raw else parts
+                if not parts or len(parts) == 1:
+                    parts = options_raw.splitlines()
 
+                allowed_statuses = [opt.strip() for opt in parts if opt and opt.strip()]
                 forced_status = allowed_statuses[0] if len(allowed_statuses) > 0 else None
                 if forced_status:
                     event_data["status"] = forced_status
@@ -559,14 +555,17 @@ def get_events():
             meta = frappe.get_meta("SIS Event")
             status_field = meta.get_field("status")
             options_raw = status_field.options if status_field else ""
-            allowed_statuses = []
+            parts = []
             if options_raw:
-                allowed_statuses = [opt.strip() for opt in options_raw.split("\\n") if opt and opt.strip()] or \
-                                   [opt.strip() for opt in options_raw.splitlines() if opt and opt.strip()]
+                parts = options_raw.split("\\\\n") if "\\\\n" in options_raw else []
+                if not parts or len(parts) == 1:
+                    parts = options_raw.split("\\n") if "\\n" in options_raw else parts
+                if not parts or len(parts) == 1:
+                    parts = options_raw.splitlines()
+            allowed_statuses = [opt.strip() for opt in parts if opt and opt.strip()]
             allowed_set = set(allowed_statuses)
             for event in events:
                 if event.get("status") not in allowed_set and allowed_statuses:
-                    # default to first allowed option if current value is malformed
                     event["status"] = allowed_statuses[0]
         except Exception:
             pass
