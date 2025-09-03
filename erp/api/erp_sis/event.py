@@ -21,31 +21,67 @@ def create_event():
     try:
         data = frappe.local.form_dict
 
-        # Try to parse JSON fields if they exist as strings
-        if data.get('dateSchedules') and isinstance(data.get('dateSchedules'), str):
-            try:
-                data['dateSchedules'] = frappe.parse_json(data['dateSchedules'])
-            except:
-                pass
+        # Debug: Log received data
+        frappe.logger().info(f"Raw form_dict data received: {data}")
 
-        if data.get('date_schedules') and isinstance(data.get('date_schedules'), str):
-            try:
-                data['date_schedules'] = frappe.parse_json(data['date_schedules'])
-            except:
-                pass
+        # Try to get JSON data from request body if available
+        try:
+            import json
+            request_data = frappe.local.request.get_json()
+            if request_data:
+                frappe.logger().info(f"JSON data from request body: {request_data}")
+                # Merge with form data
+                data.update(request_data)
+        except:
+            frappe.logger().info("No JSON data in request body")
+
+        frappe.logger().info(f"Final data after merge: {data}")
+        frappe.logger().info(f"Data keys: {list(data.keys())}")
+        frappe.logger().info(f"Data types: {[(k, type(v)) for k, v in data.items()]}")
+
+        # Try to parse JSON fields if they exist as strings
+        if data.get('dateSchedules'):
+            if isinstance(data.get('dateSchedules'), str):
+                try:
+                    data['dateSchedules'] = frappe.parse_json(data['dateSchedules'])
+                    frappe.logger().info(f"Parsed dateSchedules from string: {data['dateSchedules']}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse dateSchedules: {e}")
+            else:
+                frappe.logger().info(f"dateSchedules is already an object: {data['dateSchedules']}")
+
+        if data.get('date_schedules'):
+            if isinstance(data.get('date_schedules'), str):
+                try:
+                    data['date_schedules'] = frappe.parse_json(data['date_schedules'])
+                    frappe.logger().info(f"Parsed date_schedules from string: {data['date_schedules']}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse date_schedules: {e}")
+            else:
+                frappe.logger().info(f"date_schedules is already an object: {data['date_schedules']}")
 
         # Handle array fields that might come as strings
-        if data.get('student_ids') and isinstance(data.get('student_ids'), str):
-            try:
-                data['student_ids'] = frappe.parse_json(data['student_ids'])
-            except:
-                pass
+        if data.get('student_ids'):
+            if isinstance(data.get('student_ids'), str):
+                try:
+                    data['student_ids'] = frappe.parse_json(data['student_ids'])
+                    frappe.logger().info(f"Parsed student_ids from string: {data['student_ids']}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse student_ids: {e}")
+            else:
+                frappe.logger().info(f"student_ids is already an array: {data['student_ids']}")
 
-        if data.get('teacher_ids') and isinstance(data.get('teacher_ids'), str):
-            try:
-                data['teacher_ids'] = frappe.parse_json(data['teacher_ids'])
-            except:
-                pass
+        if data.get('teacher_ids'):
+            if isinstance(data.get('teacher_ids'), str):
+                try:
+                    data['teacher_ids'] = frappe.parse_json(data['teacher_ids'])
+                    frappe.logger().info(f"Parsed teacher_ids from string: {data['teacher_ids']}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse teacher_ids: {e}")
+            else:
+                frappe.logger().info(f"teacher_ids is already an array: {data['teacher_ids']}")
+
+        frappe.logger().info(f"Final parsed data: {data}")
 
         # Required fields validation - support both old and new format
         has_old_format = data.get('start_time') and data.get('end_time')
@@ -54,7 +90,17 @@ def create_event():
         date_schedules = data.get('date_schedules') or data.get('dateSchedules')
         has_new_format = date_schedules and isinstance(date_schedules, list) and len(date_schedules) > 0
 
+        frappe.logger().info(f"Validation check - has_old_format: {has_old_format}, has_new_format: {has_new_format}")
+        frappe.logger().info(f"date_schedules: {date_schedules}, type: {type(date_schedules)}")
+        frappe.logger().info(f"data.get('date_schedules'): {data.get('date_schedules')}")
+        frappe.logger().info(f"data.get('dateSchedules'): {data.get('dateSchedules')}")
+        if isinstance(date_schedules, list):
+            frappe.logger().info(f"date_schedules length: {len(date_schedules)}")
+
         if not has_old_format and not has_new_format:
+            frappe.logger().error("Validation failed: Neither old nor new format provided")
+            frappe.logger().error(f"start_time: {data.get('start_time')}, end_time: {data.get('end_time')}")
+            frappe.logger().error(f"date_schedules: {data.get('date_schedules')}, dateSchedules: {data.get('dateSchedules')}")
             return validation_error_response("Validation failed", {
                 "time_info": ["Either start_time/end_time or dateSchedules must be provided"]
             })
