@@ -32,14 +32,19 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
         filters = {"campus_id": campus_id}
         # accept school_year_id from query/form/body
         if not school_year_id:
-            form = frappe.local.form_dict or {}
-            school_year_id = form.get("school_year_id")
+            # Check query parameters first
             try:
-                args = getattr(frappe.request, 'args', None)
-                if args and not school_year_id:
-                    school_year_id = args.get('school_year_id')
+                if hasattr(frappe.request, 'args') and frappe.request.args:
+                    school_year_id = frappe.request.args.get('school_year_id')
             except Exception:
                 pass
+
+            # Check form data
+            if not school_year_id:
+                form = frappe.local.form_dict or {}
+                school_year_id = form.get("school_year_id")
+
+            # Check request body
             if not school_year_id and frappe.request and frappe.request.data:
                 try:
                     body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
@@ -51,6 +56,8 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
         if school_year_id:
             filters["school_year_id"] = school_year_id
 
+        frappe.logger().info(f"Final filters: {filters}")
+
         classes = frappe.get_all(
             "SIS Class",
             fields=[
@@ -58,6 +65,7 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                 "title",
                 "short_title",
                 "short_title",
+                "campus_id",
                 "school_year_id",
                 "education_grade",
                 "academic_program",
@@ -76,6 +84,8 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
             limit_start=offset,
             limit_page_length=limit,
         )
+
+        frappe.logger().info(f"Found {len(classes)} classes with filters: {filters}")
 
         # Enhance classes with teacher information
         enhanced_classes = []

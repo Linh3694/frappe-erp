@@ -207,6 +207,17 @@ def get_current_campus_from_context():
             else:
                 frappe.logger().warning(f"User {user} does not have access to campus {campus_id}")
 
+        # Try to get from query parameters (for GET requests)
+        try:
+            if hasattr(frappe.request, 'args') and frappe.request.args:
+                campus_id_from_args = frappe.request.args.get('campus_id')
+                frappe.logger().info(f"Campus_id from query args: '{campus_id_from_args}'")
+                if campus_id_from_args and validate_user_campus_access(user, campus_id_from_args):
+                    frappe.logger().info(f"User {user} has access to campus from query args {campus_id_from_args}, returning it")
+                    return campus_id_from_args
+        except Exception as e:
+            frappe.logger().error(f"Error getting campus_id from query args: {str(e)}")
+
         # Try to get from filters parameter (for GET requests with filters)
         filters = frappe.local.form_dict.get("filters")
         if filters:
