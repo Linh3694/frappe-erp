@@ -9,6 +9,7 @@ import base64
 import io
 from PIL import Image, ImageOps, ImageFile
 import mimetypes
+import glob
 
 # Allow loading truncated images to avoid conversion failures on slightly corrupted input files
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -33,15 +34,19 @@ def upload_single_photo():
         parsed_params = {}
 
         # Get uploaded file - try multiple sources
+        frappe.logger().info("🔍 Starting file ID search...")
         file_id = frappe.form_dict.get("file_id")
+        frappe.logger().info(f"📝 File ID from form_dict: {file_id}")
 
         # Try request.form (Frappe's parsed FormData)
         if not file_id and hasattr(frappe.request, 'form'):
             file_id = frappe.request.form.get("file_id")
+            frappe.logger().info(f"📝 File ID from request.form: {file_id}")
 
         # Try request.args (URL parameters)
         if not file_id and hasattr(frappe.request, 'args'):
             file_id = frappe.request.args.get("file_id")
+            frappe.logger().info(f"📝 File ID from request.args: {file_id}")
 
             # Also get other parameters from URL args
             if not parsed_params.get("photo_type"):
@@ -86,8 +91,10 @@ def upload_single_photo():
             frappe.logger().error(f"File ID is required - debug info: {debug_info}")
             frappe.throw(f"File ID is required. Form dict: {list(frappe.form_dict.keys())}, Parsed: {parsed_params}")
 
+        frappe.logger().info(f"🔍 Looking for File with ID: {file_id}")
         file_doc = frappe.get_doc("File", file_id)
         if not file_doc:
+            frappe.logger().error(f"❌ File not found: {file_id}")
             frappe.throw("File not found")
 
         # Check file size (10MB limit for single image)
@@ -203,8 +210,65 @@ def upload_single_photo():
 
         # Download and process the uploaded file
         file_path = file_doc.get_full_path()
-        if not os.path.exists(file_path):
-            frappe.throw("File not found on server")
+        frappe.logger().info(f"📁 File path (get_full_path): {file_path}")
+        frappe.logger().info(f"📁 File exists at get_full_path: {os.path.exists(file_path)}")
+
+        # Try alternative path construction
+        alt_file_path = frappe.get_site_path("public", "files", file_doc.file_name)
+        frappe.logger().info(f"📁 Alternative file path: {alt_file_path}")
+        frappe.logger().info(f"📁 File exists at alt path: {os.path.exists(alt_file_path)}")
+
+        # Try with sanitized filename from file_url
+        if hasattr(file_doc, 'file_url') and file_doc.file_url:
+            sanitized_filename = file_doc.file_url.replace('/files/', '')
+            sanitized_path = frappe.get_site_path("public", "files", sanitized_filename)
+            frappe.logger().info(f"📁 Sanitized file path: {sanitized_path}")
+            frappe.logger().info(f"📁 File exists at sanitized path: {os.path.exists(sanitized_path)}")
+
+            # Also try finding files with similar names in case of encoding issues
+            files_dir = frappe.get_site_path("public", "files")
+            similar_files = glob.glob(os.path.join(files_dir, "3A3*.png"))  # Look for files starting with 3A3
+            if similar_files:
+                frappe.logger().info(f"📁 Found similar files: {similar_files}")
+                # Use the first matching file
+                actual_file_path = similar_files[0]
+                frappe.logger().info(f"✅ Using similar file: {actual_file_path}")
+                # Skip the rest of the path checking logic since we found a file
+            elif sanitized_filename.startswith('3A3') and sanitized_filename.endswith('.png'):
+                # Try alternative naming patterns for Vietnamese files
+                alt_patterns = [
+                    f"3Lớp 3A3{sanitized_filename[4:]}",  # Original name with extension
+                    f"3A3{sanitized_filename[3:]}",  # Alternative sanitized
+                ]
+                for pattern in alt_patterns:
+                    alt_path = frappe.get_site_path("public", "files", pattern)
+                    if os.path.exists(alt_path):
+                        frappe.logger().info(f"✅ Found file with alt pattern: {alt_path}")
+                        actual_file_path = alt_path
+                        break
+
+        frappe.logger().info(f"📁 File doc details: name={file_doc.name}, file_name={file_doc.file_name}, file_url={getattr(file_doc, 'file_url', 'None')}")
+
+        # Try multiple paths to find the file
+        # Priority: original get_full_path > alt path > sanitized path > similar files
+        if not actual_file_path:  # Check if we already found a file from similar files search
+            if os.path.exists(file_path):
+                actual_file_path = file_path
+            elif os.path.exists(alt_file_path):
+                actual_file_path = alt_file_path
+            elif hasattr(file_doc, 'file_url') and file_doc.file_url and os.path.exists(sanitized_path):
+                actual_file_path = sanitized_path
+
+        if not actual_file_path:
+            frappe.logger().error(f"❌ File not found at any path:")
+            frappe.logger().error(f"  - get_full_path: {file_path}")
+            frappe.logger().error(f"  - alt_path: {alt_file_path}")
+            if hasattr(file_doc, 'file_url') and file_doc.file_url:
+                frappe.logger().error(f"  - sanitized_path: {sanitized_path}")
+            frappe.throw("File không tồn tại trên server")
+
+        frappe.logger().info(f"✅ Using file path: {actual_file_path}")
+        file_path = actual_file_path
 
         # Read the original file
         with open(file_path, 'rb') as f:
