@@ -280,7 +280,8 @@ def create_event():
                 if not parts or len(parts) == 1:
                     parts = options_raw.splitlines()
 
-                allowed_statuses = [opt.strip() for opt in parts if opt and opt.strip()]
+                # Keep tokens EXACTLY as defined in DocType (no trim) to avoid hidden char mismatch
+                allowed_statuses = [opt for opt in parts if opt]
                 forced_status = allowed_statuses[0] if len(allowed_statuses) > 0 else None
                 if forced_status:
                     event_data["status"] = forced_status
@@ -347,12 +348,13 @@ def create_event():
                     es_parts = es_options_raw.split("\\n") if "\\n" in es_options_raw else es_parts
                 if not es_parts or len(es_parts) == 1:
                     es_parts = es_options_raw.splitlines()
-                es_allowed = [opt.strip() for opt in es_parts if opt and opt.strip()]
-                # Prefer a token equal to 'pending' (case-insensitive), else first option
+                # Keep tokens EXACTLY as defined in DocType (no trim)
+                es_allowed = [opt for opt in es_parts if opt]
+                # Prefer a token equal to 'pending' (case-insensitive) by comparing trimmed lower, but return original token
                 pending_match = None
                 for tok in es_allowed:
                     if tok.strip().lower() == "pending":
-                        pending_match = tok
+                        pending_match = tok  # keep original token
                         break
                 event_student_status_default = pending_match or (es_allowed[0] if es_allowed else None)
             debug_info["event_student_status_meta"] = {

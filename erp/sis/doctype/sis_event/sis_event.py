@@ -18,8 +18,6 @@ class SISEvent(Document):
 
     def validate(self):
         """Validate event data"""
-        # Ensure either old format (start_time/end_time) or new format (date_schedules) is used
-        # For new format, start_time and end_time are set to default values but should be ignored
         has_old_format = self.start_time and self.end_time and not self.date_schedules
         has_new_format = hasattr(self, 'date_schedules') and self.date_schedules and len(self.date_schedules) > 0
 
