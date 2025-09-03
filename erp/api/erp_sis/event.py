@@ -335,6 +335,41 @@ def create_event():
             frappe.db.commit()
             debug_info["schedules_created"] = created_schedule_names
 
+        # Create event student records for participants
+        try:
+            student_ids = data.get('student_ids') or []
+            created_event_students = []
+            if isinstance(student_ids, list) and len(student_ids) > 0:
+                # Resolve class_student_id for each student (pick latest assignment)
+                for sid in student_ids:
+                    try:
+                        class_student = frappe.get_all(
+                            "SIS Class Student",
+                            filters={"student_id": sid},
+                            fields=["name", "class_id"],
+                            order_by="creation desc",
+                            limit_page_length=1
+                        )
+                        class_student_id = class_student[0]["name"] if class_student else None
+                        doc = frappe.get_doc({
+                            "doctype": "SIS Event Student",
+                            "campus_id": campus_id,
+                            "event_id": event.name,
+                            "class_student_id": class_student_id,
+                            "status": "pending"
+                        })
+                        doc.insert()
+                        created_event_students.append(doc.name)
+                    except Exception as _es:
+                        if "event_student_creation_errors" not in debug_info:
+                            debug_info["event_student_creation_errors"] = []
+                        debug_info["event_student_creation_errors"].append(str(_es))
+            if created_event_students:
+                frappe.db.commit()
+                debug_info["event_students_created"] = created_event_students
+        except Exception as _e:
+            debug_info["event_student_block_error"] = str(_e)
+
         debug_info["execution_reached_success"] = True
         return single_item_response({
             "name": event.name,
@@ -484,6 +519,8 @@ def get_events():
         status = frappe.local.form_dict.get("status")
         date_from = frappe.local.form_dict.get("date_from")
         date_to = frappe.local.form_dict.get("date_to")
+        for_approval_raw = frappe.local.form_dict.get("for_approval")
+        for_approval = str(for_approval_raw).lower() in ("true", "1", "yes")
 
         # Build filters
         filters = {}
@@ -495,6 +532,77 @@ def get_events():
 
         if status:
             filters["status"] = status
+        # If requesting approval list, restrict to events with participants in classes of current teacher (homeroom or vice)
+        if for_approval:
+            # Current user as teacher
+            current_user = frappe.session.user
+            teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+            if not teacher:
+                return forbidden_response("Only teachers can view approval list")
+
+            # Find classes where user is homeroom or vice homeroom
+            class_filters = {}
+            if campus_id:
+                class_filters["campus_id"] = campus_id
+            classes = frappe.get_all(
+                "SIS Class",
+                filters=class_filters,
+                or_filters=[{"homeroom_teacher": teacher}, {"vice_homeroom_teacher": teacher}],
+                fields=["name"],
+                limit_page_length=10000
+            )
+            class_ids = [c.name for c in classes]
+
+            if not class_ids:
+                # No classes under this teacher -> empty result
+                return single_item_response({
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "limit": limit,
+                        "total": 0,
+                        "pages": 0
+                    }
+                }, "Events fetched successfully")
+
+            class_students = frappe.get_all(
+                "SIS Class Student",
+                filters={"class_id": ["in", class_ids]},
+                fields=["name"],
+                limit_page_length=100000
+            )
+            class_student_ids = [cs.name for cs in class_students]
+
+            if not class_student_ids:
+                return single_item_response({
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "limit": limit,
+                        "total": 0,
+                        "pages": 0
+                    }
+                }, "Events fetched successfully")
+
+            event_students = frappe.get_all(
+                "SIS Event Student",
+                filters={"class_student_id": ["in", class_student_ids]},
+                fields=["event_id"],
+                limit_page_length=100000
+            )
+            approval_event_ids = list({es.event_id for es in event_students})
+            if approval_event_ids:
+                filters["name"] = ["in", approval_event_ids]
+            else:
+                return single_item_response({
+                    "data": [],
+                    "pagination": {
+                        "page": page,
+                        "limit": limit,
+                        "total": 0,
+                        "pages": 0
+                    }
+                }, "Events fetched successfully")
 
         if date_from:
             filters["start_time"] = [">=", date_from]
@@ -674,3 +782,129 @@ def create_timetable_override(event):
     except Exception as e:
         frappe.log_error(f"Error creating timetable override: {str(e)}")
         # Don't raise error to avoid breaking approval process
+
+
+@frappe.whitelist(allow_guest=False)
+def get_event_detail():
+    """Get event detail with participants for approval page"""
+    try:
+        event_id = frappe.local.form_dict.get("event_id")
+        if not event_id:
+            return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]})
+
+        event = frappe.get_doc("SIS Event", event_id)
+        campus_id = get_current_campus_from_context()
+        if campus_id and event.campus_id != campus_id:
+            return forbidden_response("Access denied: Campus mismatch")
+
+        # Basic info
+        result = {
+            "name": event.name,
+            "title": event.title,
+            "description": event.description,
+            "status": event.status,
+            "create_by": event.create_by,
+            "create_at": event.create_at,
+        }
+
+        # Date schedules
+        date_schedules = frappe.get_all(
+            "SIS Event Date Schedule",
+            filters={"event_id": event.name},
+            fields=["event_date", "schedule_ids"]
+        )
+        processed_schedules = []
+        for ds in date_schedules:
+            schedule_ids = ds.schedule_ids.split(',') if ds.schedule_ids else []
+            schedules = []
+            if schedule_ids:
+                schedule_details = frappe.get_all(
+                    "SIS Timetable Column",
+                    filters={"name": ["in", schedule_ids]},
+                    fields=["name", "period_name", "start_time", "end_time", "period_type"]
+                )
+                schedules = schedule_details
+            processed_schedules.append({
+                "date": ds.event_date,
+                "scheduleIds": schedule_ids,
+                "schedules": schedules
+            })
+        result["dateSchedules"] = processed_schedules
+
+        # Participants (event students + class/student info minimal)
+        event_students = frappe.get_all(
+            "SIS Event Student",
+            filters={"event_id": event.name},
+            fields=["name", "class_student_id", "status", "approved_at", "note"]
+        )
+        participants = []
+        for es in event_students:
+            cs = frappe.get_all(
+                "SIS Class Student",
+                filters={"name": es.class_student_id},
+                fields=["student_id", "class_id", "school_year_id"],
+                limit_page_length=1
+            )
+            student_id = cs[0]["student_id"] if cs else None
+            class_id = cs[0]["class_id"] if cs else None
+            student = frappe.get_all("CRM Student", filters={"name": student_id}, fields=["student_name", "student_code"], limit_page_length=1)
+            student_name = student[0]["student_name"] if student else None
+            student_code = student[0]["student_code"] if student else None
+            participants.append({
+                "event_student_id": es.name,
+                "class_student_id": es.class_student_id,
+                "student_id": student_id,
+                "student_name": student_name,
+                "student_code": student_code,
+                "class_id": class_id,
+                "status": es.status,
+                "approved_at": es.approved_at,
+                "note": es.note,
+            })
+        result["participants"] = participants
+
+        return single_item_response(result, "Event detail fetched successfully")
+    except frappe.DoesNotExistError:
+        return not_found_response("Event not found")
+    except Exception as e:
+        frappe.log_error(f"Error fetching event detail: {str(e)}")
+        return error_response(f"Error fetching event detail: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def update_event_student_status():
+    """Approve/Reject a single event student"""
+    try:
+        data = frappe.local.form_dict
+        event_student_id = data.get("event_student_id")
+        status = data.get("status")  # approved | rejected
+        note = data.get("note")
+
+        if not event_student_id:
+            return validation_error_response("Validation failed", {"event_student_id": ["Required"]})
+        if status not in ("approved", "rejected", "pending"):
+            return validation_error_response("Validation failed", {"status": ["Invalid status"]})
+
+        es = frappe.get_doc("SIS Event Student", event_student_id)
+
+        # Permission: only homeroom/vice homeroom of the student's class can update
+        current_user = frappe.session.user
+        teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+        if not teacher:
+            return forbidden_response("Only teachers can approve/reject")
+
+        cls = frappe.get_doc("SIS Class Student", es.class_student_id)
+        klass = frappe.get_doc("SIS Class", cls.class_id)
+        if teacher not in (klass.homeroom_teacher, klass.vice_homeroom_teacher):
+            return forbidden_response("Only homeroom or vice homeroom teacher can update")
+
+        es.status = status
+        es.note = note
+        es.approved_at = frappe.utils.now() if status in ("approved", "rejected") else None
+        es.save()
+        frappe.db.commit()
+
+        return single_item_response({"event_student_id": es.name, "status": es.status, "approved_at": es.approved_at}, "Updated successfully")
+    except Exception as e:
+        frappe.log_error(f"Error updating event student: {str(e)}")
+        return error_response(f"Error updating event student: {str(e)}")
