@@ -25,28 +25,31 @@ def create_event():
         if data.get('dateSchedules') and isinstance(data.get('dateSchedules'), str):
             try:
                 data['dateSchedules'] = frappe.parse_json(data['dateSchedules'])
-                frappe.logger().info("Parsed dateSchedules from JSON string")
             except:
-                frappe.logger().info("Failed to parse dateSchedules JSON")
+                pass
 
         if data.get('date_schedules') and isinstance(data.get('date_schedules'), str):
             try:
                 data['date_schedules'] = frappe.parse_json(data['date_schedules'])
-                frappe.logger().info("Parsed date_schedules from JSON string")
             except:
-                frappe.logger().info("Failed to parse date_schedules JSON")
+                pass
+
+        # Handle array fields that might come as strings
+        if data.get('student_ids') and isinstance(data.get('student_ids'), str):
+            try:
+                data['student_ids'] = frappe.parse_json(data['student_ids'])
+            except:
+                pass
+
+        if data.get('teacher_ids') and isinstance(data.get('teacher_ids'), str):
+            try:
+                data['teacher_ids'] = frappe.parse_json(data['teacher_ids'])
+            except:
+                pass
 
         # Required fields validation - support both old and new format
         has_old_format = data.get('start_time') and data.get('end_time')
-        has_new_format = data.get('date_schedules') or data.get('dateSchedules')
-
-        frappe.logger().info(f"After parsing - has_old_format: {has_old_format}, has_new_format: {has_new_format}")
-        frappe.logger().info(f"date_schedules type: {type(data.get('date_schedules'))}, value: {data.get('date_schedules')}")
-        frappe.logger().info(f"dateSchedules type: {type(data.get('dateSchedules'))}, value: {data.get('dateSchedules')}")
-
-        frappe.logger().info(f"has_old_format: {has_old_format}, has_new_format: {has_new_format}")
-        frappe.logger().info(f"date_schedules: {data.get('date_schedules')}")
-        frappe.logger().info(f"dateSchedules: {data.get('dateSchedules')}")
+        has_new_format = (data.get('date_schedules') or data.get('dateSchedules')) and len(data.get('date_schedules') or data.get('dateSchedules') or []) > 0
 
         if not has_old_format and not has_new_format:
             return validation_error_response("Validation failed", {
@@ -65,6 +68,21 @@ def create_event():
             required_fields.append('dateSchedules')
 
         missing_fields = [field for field in required_fields if not data.get(field)]
+
+        # Additional validation for new format
+        if has_new_format:
+            student_ids = data.get('student_ids') or []
+            teacher_ids = data.get('teacher_ids') or []
+
+            if not student_ids or len(student_ids) == 0:
+                return validation_error_response("Validation failed", {
+                    "students": ["At least one student is required"]
+                })
+
+            if not teacher_ids or len(teacher_ids) == 0:
+                return validation_error_response("Validation failed", {
+                    "teachers": ["At least one teacher is required"]
+                })
 
         if missing_fields:
             return validation_error_response("Validation failed", {
