@@ -210,25 +210,26 @@ def upload_single_photo():
         with open(file_path, 'rb') as f:
             original_content = f.read()
 
-        # Convert to WebP format with fallbacks (modern format with good compression)
+        # Convert to WebP format with improved error handling and fallbacks
         try:
-
             # Open image with PIL
             src_image = Image.open(io.BytesIO(original_content))
 
             # Normalize orientation using EXIF and force RGB for all modes (handles CMYK, P, LA, RGBA, etc.)
             image = ImageOps.exif_transpose(src_image)
-            if image.mode != "RGB":
+            if image.mode not in ["RGB", "RGBA"]:
                 image = image.convert("RGB")
 
             # Create WebP content with robust parameters
             webp_buffer = io.BytesIO()
-            image.save(webp_buffer, format='WebP', quality=85, optimize=True)
+            image.save(webp_buffer, format='WebP', quality=85, optimize=True, method=6)
             candidate_content = webp_buffer.getvalue()
 
             # Sanity check: ensure generated WebP is readable
             try:
-                Image.open(io.BytesIO(candidate_content)).verify()
+                test_image = Image.open(io.BytesIO(candidate_content))
+                test_image.verify()
+                test_image.close()
             except Exception as ver_err:
                 raise Exception(f"Invalid WebP after convert: {ver_err}")
 
@@ -238,6 +239,7 @@ def upload_single_photo():
             final_filename = f"{filename_without_ext}.webp"
             final_content = candidate_content
 
+            frappe.logger().info(f"✅ Successfully converted {original_filename} to WebP: {len(final_content)} bytes")
 
         except Exception as e:
             # Fallback: keep original file content/extension if WebP conversion fails for any reason
@@ -246,7 +248,7 @@ def upload_single_photo():
             name_no_ext, ext = os.path.splitext(original_filename)
             ext = (ext or '').lower()
             if ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                ext = '.webp'  # Default to webp instead of jpg
+                ext = '.jpg'  # Fallback to JPEG instead of WebP
             final_filename = f"{name_no_ext}{ext}"
             final_content = original_content
 
@@ -334,16 +336,20 @@ def upload_single_photo():
                 else:
                     raise
 
+            # Create File document with proper content handling
             photo_file = frappe.get_doc({
                 "doctype": "File",
                 "file_name": final_filename,
-                "content": base64.b64encode(final_content).decode('utf-8'),
                 "is_private": 0,
                 # Attach directly to the image field so Frappe links it properly on the document
                 "attached_to_field": "photo",
                 "attached_to_doctype": "SIS Photo",
                 "attached_to_name": photo_doc.name
             })
+
+            # Save file content to filesystem first
+            photo_file.save_file(content=final_content, decode=False)
+            photo_file.content_type = mimetypes.guess_type(final_filename)[0] or 'image/webp'
 
             # Check File creation permissions
             if not frappe.has_permission("File", "create", user=user):
@@ -353,36 +359,80 @@ def upload_single_photo():
                 photo_file.insert()
                 frappe.db.commit()
 
+            # Ensure file_url is properly set
             if not getattr(photo_file, 'file_url', None):
                 try:
                     photo_file.reload()
-                except Exception:
-                    pass
-            photo_url = getattr(photo_file, 'file_url', None) or f"/files/{final_filename}"
-            try:
-                photo_doc.db_set('photo', photo_url, update_modified=True)
-                frappe.db.set_value("SIS Photo", photo_doc.name, "photo", photo_url, update_modified=True)
-                frappe.db.commit()
-                # Verify persistence
-                persisted_photo = frappe.db.get_value("SIS Photo", photo_doc.name, "photo")
-                frappe.logger().info(f"🔎 Persisted photo for {photo_doc.name}: {persisted_photo}")
-            except Exception as set_err:
-                frappe.logger().warning(f"db_set photo failed, fallback to doc.save(): {set_err}")
-                photo_doc.photo = photo_url
-                if not frappe.has_permission("SIS Photo", "write", user=user):
-                    photo_doc.save(ignore_permissions=True)
-                else:
-                    photo_doc.save()
-                frappe.db.commit()
-            # Check if file actually exists
+                except Exception as reload_err:
+                    frappe.logger().warning(f"Failed to reload photo_file: {str(reload_err)}")
+
+            # Get the file URL with fallback
+            photo_url = getattr(photo_file, 'file_url', None)
+            if not photo_url:
+                photo_url = f"/files/{final_filename}"
+                frappe.logger().warning(f"No file_url found, using fallback: {photo_url}")
+
+            frappe.logger().info(f"📁 File created: {final_filename}, URL: {photo_url}")
+            # Set photo URL with multiple fallback strategies
+            max_retries = 3
+            photo_set_success = False
+
+            for attempt in range(max_retries):
+                try:
+                    # Try db_set first
+                    photo_doc.db_set('photo', photo_url, update_modified=True)
+                    frappe.db.commit()
+
+                    # Verify persistence
+                    persisted_photo = frappe.db.get_value("SIS Photo", photo_doc.name, "photo")
+                    if persisted_photo == photo_url:
+                        photo_set_success = True
+                        frappe.logger().info(f"✅ Photo URL set successfully for {photo_doc.name}: {persisted_photo}")
+                        break
+                    else:
+                        frappe.logger().warning(f"❌ Photo URL verification failed on attempt {attempt + 1}. Expected: {photo_url}, Got: {persisted_photo}")
+
+                except Exception as set_err:
+                    frappe.logger().warning(f"db_set photo failed on attempt {attempt + 1}: {set_err}")
+
+                    # Fallback to direct document save
+                    try:
+                        photo_doc.photo = photo_url
+                        if not frappe.has_permission("SIS Photo", "write", user=user):
+                            photo_doc.save(ignore_permissions=True)
+                        else:
+                            photo_doc.save()
+                        frappe.db.commit()
+                        photo_set_success = True
+                        frappe.logger().info(f"✅ Photo URL set via doc.save() for {photo_doc.name}")
+                        break
+                    except Exception as save_err:
+                        frappe.logger().error(f"doc.save() also failed on attempt {attempt + 1}: {save_err}")
+
+            if not photo_set_success:
+                frappe.logger().error(f"❌ Failed to set photo URL after {max_retries} attempts for {photo_doc.name}")
+                raise Exception(f"Failed to persist photo URL after {max_retries} attempts")
+            # Check if file actually exists and is accessible
             try:
                 file_path = photo_file.get_fullpath()
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
+                    frappe.logger().info(f"✅ File exists at: {file_path} ({file_size} bytes)")
+
+                    # Additional verification: try to read the file
+                    try:
+                        with open(file_path, 'rb') as f:
+                            sample = f.read(100)  # Read first 100 bytes
+                        frappe.logger().info(f"✅ File is readable: {len(sample)} bytes read")
+                    except Exception as read_err:
+                        frappe.logger().error(f"❌ File exists but not readable: {str(read_err)}")
+                        raise Exception(f"File exists but not readable: {str(read_err)}")
                 else:
                     frappe.logger().error(f"❌ File NOT found at: {file_path}")
+                    raise Exception(f"File not found at expected path: {file_path}")
             except Exception as file_check_error:
                 frappe.logger().error(f"❌ Error checking file existence: {str(file_check_error)}")
+                raise Exception(f"File verification failed: {str(file_check_error)}")
 
             return {
                 "success": True,
@@ -442,6 +492,10 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                 del photo["photo"]
             if photo.get("description") is None:
                 del photo["description"]
+
+            # Add debug logging for photo URLs
+            if photo.get("photo"):
+                frappe.logger().info(f"📸 Retrieved photo for {photo.get('name')}: {photo.get('photo')}")
 
         # Get total count
         total_count = frappe.db.count("SIS Photo", filters)
