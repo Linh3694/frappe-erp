@@ -167,8 +167,22 @@ def upload_single_photo():
                 frappe.logger().error(f"Error parsing request body: {str(e)}")
 
         if not file_id:
-            frappe.logger().error("File ID is required - not found in any source")
-            frappe.throw("File ID is required")
+            # Return detailed debug info in response instead of just throwing error
+            debug_info = {
+                "form_dict_keys": list(frappe.form_dict.keys()),
+                "form_dict_values": dict(frappe.form_dict),
+                "request_data_type": type(frappe.request.data) if frappe.request else None,
+                "request_data_preview": None
+            }
+
+            if frappe.request and frappe.request.data:
+                if isinstance(frappe.request.data, bytes):
+                    debug_info["request_data_preview"] = frappe.request.data[:500].decode('utf-8', errors='ignore')
+                else:
+                    debug_info["request_data_preview"] = str(frappe.request.data)[:500] if frappe.request.data else None
+
+            frappe.logger().error(f"File ID is required - debug info: {debug_info}")
+            frappe.throw(f"File ID is required. Debug info: {debug_info}")
 
         file_doc = frappe.get_doc("File", file_id)
         if not file_doc:
