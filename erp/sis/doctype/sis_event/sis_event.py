@@ -33,16 +33,23 @@ class SISEvent(Document):
         """Create date schedule records if date_schedules data is provided"""
         if hasattr(self, 'date_schedules') and self.date_schedules:
             for ds in self.date_schedules:
-                if hasattr(ds, 'event_date') and hasattr(ds, 'schedule_ids'):
-                    schedule_doc = frappe.get_doc({
-                        "doctype": "SIS Event Date Schedule",
-                        "event_id": self.name,
-                        "event_date": ds.event_date,
-                        "schedule_ids": ds.schedule_ids,
-                        "create_by": self.create_by or frappe.session.user,
-                        "create_at": frappe.utils.now()
-                    })
-                    schedule_doc.insert()
+                try:
+                    if hasattr(ds, 'event_date') and hasattr(ds, 'schedule_ids'):
+                        schedule_doc = frappe.get_doc({
+                            "doctype": "SIS Event Date Schedule",
+                            "event_id": self.name,
+                            "event_date": ds.event_date,
+                            "schedule_ids": ds.schedule_ids,
+                            "create_by": self.create_by or frappe.session.user,
+                            "create_at": frappe.utils.now()
+                        })
+
+                        schedule_doc.insert()
+                except Exception as e:
+                    # Log error but don't break event creation
+                    error_msg = f"Error creating date schedule for event {self.name}: {str(e)}"
+                    print(error_msg)  # This will show in console
+                    # Continue processing other date schedules
 
     def on_update(self):
         """Update date schedule records when event is updated"""
