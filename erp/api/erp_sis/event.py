@@ -90,6 +90,7 @@ def create_event():
 
         debug_info["parsing_info"] = parsing_info
         debug_info["parsed_data"] = dict(data)
+        debug_info["execution_reached_validation"] = True
 
         # Required fields validation - support both old and new format
         start_time_value = data.get('start_time')
@@ -230,6 +231,7 @@ def create_event():
         event.insert()
         frappe.db.commit()
 
+        debug_info["execution_reached_success"] = True
         return single_item_response({
             "name": event.name,
             "title": event.title,
@@ -240,6 +242,8 @@ def create_event():
 
     except Exception as e:
         frappe.log_error(f"Error creating event: {str(e)}")
+        debug_info["exception_occurred"] = str(e)
+        debug_info["exception_type"] = str(type(e))
         return error_response(f"Error creating event: {str(e)}", debug_info=debug_info)
 
 
