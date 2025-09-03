@@ -260,6 +260,7 @@ def upload_single_photo():
         frappe.logger().info(f"📁 File exists at alt path: {os.path.exists(alt_file_path)}")
 
         # Try with sanitized filename from file_url
+        actual_file_path = None
         if hasattr(file_doc, 'file_url') and file_doc.file_url:
             sanitized_filename = file_doc.file_url.replace('/files/', '')
             sanitized_path = frappe.get_site_path("public", "files", sanitized_filename)
