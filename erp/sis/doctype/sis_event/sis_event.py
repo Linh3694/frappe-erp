@@ -34,12 +34,22 @@ class SISEvent(Document):
         if hasattr(self, 'date_schedules') and self.date_schedules:
             for ds in self.date_schedules:
                 try:
-                    if hasattr(ds, 'event_date') and hasattr(ds, 'schedule_ids'):
+                    # Handle both possible field names
+                    event_date = getattr(ds, 'event_date', getattr(ds, 'date', None))
+                    schedule_ids = getattr(ds, 'schedule_ids', getattr(ds, 'scheduleIds', None))
+
+                    if event_date and schedule_ids:
+                        # Convert schedule_ids to string if it's an array
+                        if isinstance(schedule_ids, list):
+                            schedule_ids_str = ','.join(schedule_ids)
+                        else:
+                            schedule_ids_str = str(schedule_ids)
+
                         schedule_doc = frappe.get_doc({
                             "doctype": "SIS Event Date Schedule",
                             "event_id": self.name,
-                            "event_date": ds.event_date,
-                            "schedule_ids": ds.schedule_ids,
+                            "event_date": event_date,
+                            "schedule_ids": schedule_ids_str,
                             "create_by": self.create_by or frappe.session.user,
                             "create_at": frappe.utils.now()
                         })
