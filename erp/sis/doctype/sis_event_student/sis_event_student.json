@@ -80,7 +80,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "pending\\napproved\\nrejected",
+   "options": "pending\napproved\nrejected",
    "default": "pending",
    "reqd": 1
   },

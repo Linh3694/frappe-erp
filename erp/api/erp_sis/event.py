@@ -348,9 +348,7 @@ def create_event():
                     es_parts = es_options_raw.split("\\n") if "\\n" in es_options_raw else es_parts
                 if not es_parts or len(es_parts) == 1:
                     es_parts = es_options_raw.splitlines()
-                # Keep tokens EXACTLY as defined in DocType (no trim)
                 es_allowed = [opt for opt in es_parts if opt]
-                # Prefer a token equal to 'pending' (case-insensitive) by comparing trimmed lower, but return original token
                 pending_match = None
                 for tok in es_allowed:
                     if tok.strip().lower() == "pending":
@@ -849,25 +847,35 @@ def get_event_detail():
         if not event_id:
             return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]}, debug_info=debug_info)
 
-        event = frappe.get_doc("SIS Event", event_id)
+        # Load basic event fields without auto-loading child tables
+        event_rows = frappe.get_all(
+            "SIS Event",
+            filters={"name": event_id},
+            fields=["name", "title", "description", "status", "create_by", "create_at", "campus_id"],
+            limit_page_length=1
+        )
+        if not event_rows:
+            return not_found_response("Event not found")
+        event_basic = event_rows[0]
+
         campus_id = get_current_campus_from_context()
-        if campus_id and event.campus_id != campus_id:
+        if campus_id and event_basic.get("campus_id") != campus_id:
             return forbidden_response("Access denied: Campus mismatch")
 
         # Basic info
         result = {
-            "name": event.name,
-            "title": event.title,
-            "description": event.description,
-            "status": event.status,
-            "create_by": event.create_by,
-            "create_at": event.create_at,
+            "name": event_basic.get("name"),
+            "title": event_basic.get("title"),
+            "description": event_basic.get("description"),
+            "status": event_basic.get("status"),
+            "create_by": event_basic.get("create_by"),
+            "create_at": event_basic.get("create_at"),
         }
 
         # Date schedules
         date_schedules = frappe.get_all(
             "SIS Event Date Schedule",
-            filters={"event_id": event.name},
+            filters={"event_id": event_id},
             fields=["event_date", "schedule_ids"]
         )
         processed_schedules = []
@@ -891,7 +899,7 @@ def get_event_detail():
         # Participants (event students + class/student info minimal)
         event_students = frappe.get_all(
             "SIS Event Student",
-            filters={"event_id": event.name},
+            filters={"event_id": event_id},
             fields=["name", "class_student_id", "status", "approved_at", "note"]
         )
         participants = []
