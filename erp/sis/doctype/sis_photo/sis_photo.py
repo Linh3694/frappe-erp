@@ -525,6 +525,23 @@ def upload_single_photo():
             if not photo_set_success:
                 frappe.logger().error(f"❌ Failed to set photo URL after {max_retries} attempts for {photo_doc.name}")
                 raise Exception(f"Failed to persist photo URL after {max_retries} attempts")
+
+            frappe.logger().info(f"✅ Successfully set photo URL for {photo_doc.name}: {photo_url}")
+
+            # Verify File attachment was created correctly
+            try:
+                attached_files = frappe.get_all("File",
+                    filters={
+                        "attached_to_doctype": "SIS Photo",
+                        "attached_to_name": photo_doc.name
+                    },
+                    fields=["name", "file_url", "file_name", "attached_to_field"]
+                )
+                frappe.logger().info(f"📎 File attachments for {photo_doc.name}: {len(attached_files)} found")
+                for attached_file in attached_files:
+                    frappe.logger().info(f"  - File: {attached_file.get('name')}, URL: {attached_file.get('file_url')}, Field: {attached_file.get('attached_to_field')}")
+            except Exception as attach_check_err:
+                frappe.logger().warning(f"Failed to check attachments: {str(attach_check_err)}")
             # Check if file actually exists and is accessible
             try:
                 # Use frappe's method to get file path
@@ -594,8 +611,14 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             limit=int(limit)
         )
 
+        frappe.logger().info(f"📋 Found {len(photos)} photos with filters: {filters}")
+        for photo in photos:
+            frappe.logger().info(f"📋 Photo {photo.get('name')}: photo field = '{photo.get('photo')}'")
+
         # Normalize optional fields and recover missing photo URLs if possible
         for photo in photos:
+            frappe.logger().info(f"🔍 Processing photo {photo.get('name')}: type={photo.get('type')}, has_photo={bool(photo.get('photo'))}")
+
             if photo.get("class_id") is None:
                 del photo["class_id"]
             if photo.get("student_id") is None:
@@ -603,6 +626,7 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
 
             # If photo URL missing, try to reconstruct from File attachment
             if not photo.get("photo"):
+                frappe.logger().info(f"📭 Photo URL missing for {photo.get('name')}, trying to recover...")
                 try:
                     file_rows = frappe.get_all(
                         "File",
@@ -614,12 +638,21 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                         fields=["file_url", "file_name"],
                         limit=1
                     )
+                    frappe.logger().info(f"📎 Found {len(file_rows)} attached files for {photo.get('name')}")
                     if file_rows:
                         file_url = file_rows[0].get("file_url") or f"/files/{file_rows[0].get('file_name')}"
+                        frappe.logger().info(f"📎 File URL recovered: {file_url}")
                         if file_url:
                             photo["photo"] = file_url
-                except Exception as _:
-                    pass
+                            frappe.logger().info(f"✅ Set photo URL for {photo.get('name')}: {file_url}")
+                        else:
+                            frappe.logger().warning(f"❌ Empty file URL for {photo.get('name')}")
+                    else:
+                        frappe.logger().warning(f"❌ No attached files found for {photo.get('name')}")
+                except Exception as recovery_err:
+                    frappe.logger().error(f"❌ Error recovering photo URL for {photo.get('name')}: {str(recovery_err)}")
+            else:
+                frappe.logger().info(f"✅ Photo URL already exists for {photo.get('name')}: {photo.get('photo')}")
             if not photo.get("photo") and "photo" in photo:
                 # Thử khôi phục từ File attachment một lần nữa trước khi xóa
                 try:
@@ -651,6 +684,11 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
 
         # Get total count
         total_count = frappe.db.count("SIS Photo", filters)
+
+        # Log final result
+        frappe.logger().info(f"📤 Returning {len(photos)} photos")
+        for photo in photos:
+            frappe.logger().info(f"📤 Final photo {photo.get('name')}: has_photo={bool(photo.get('photo'))}, photo='{photo.get('photo')}'")
 
         return {
             "success": True,
