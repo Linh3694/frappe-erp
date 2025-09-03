@@ -3,9 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
-import zipfile
 import os
-import tempfile
 from frappe.utils import now, get_fullname
 import base64
 import io
@@ -24,139 +22,7 @@ class SISPhoto(Document):
             frappe.throw("Class ID is required for class photos")
 
 
-@frappe.whitelist()
-def upload_zip_photos():
-    """Upload photos from zip file for students or classes"""
-    try:
-        # Get uploaded file
-        if not frappe.form_dict.get("file"):
-            frappe.throw("No file uploaded")
 
-        file_doc = frappe.get_doc("File", frappe.form_dict.file)
-        if not file_doc:
-            frappe.throw("File not found")
-
-        # Check file size (1GB limit)
-        max_size = 1024 * 1024 * 1024  # 1GB in bytes
-        if file_doc.file_size > max_size:
-            frappe.throw("File size exceeds 1GB limit")
-
-        # Get parameters
-        photo_type = frappe.form_dict.get("photo_type")
-        campus_id = frappe.form_dict.get("campus_id")
-        school_year_id = frappe.form_dict.get("school_year_id")
-
-        if not photo_type or not campus_id or not school_year_id:
-            frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
-
-        # Resolve 'type' against DocType options (case-insensitive, exact option value)
-        try:
-            type_field = frappe.get_meta("SIS Photo").get_field("type")
-            allowed_options = []
-            if type_field and getattr(type_field, "options", None):
-                allowed_options = [opt.strip() for opt in str(type_field.options).splitlines() if opt and opt.strip()]
-            # Default allowed if metadata missing
-            if not allowed_options:
-                allowed_options = ["student", "class"]
-            # Find canonical option value by case-insensitive match
-            matched_option = None
-            for opt in allowed_options:
-                if opt.lower() == photo_type.lower():
-                    matched_option = opt
-                    break
-            if not matched_option:
-                frappe.throw(f"Invalid photo type. Must be one of: {', '.join(allowed_options)}")
-            # Replace with canonical value from options to pass Select validation
-            photo_type = matched_option
-            try:
-                frappe.logger().info(f"SIS Photo upload: normalized type='{photo_type}', allowed={allowed_options}")
-            except Exception:
-                pass
-        except Exception:
-            # Fallback strict check
-            if photo_type not in ["student", "class"]:
-                frappe.throw("Invalid photo type. Must be 'student' or 'class'")
-
-        # Download and process zip file
-        file_path = file_doc.get_fullpath()
-        if not os.path.exists(file_path):
-            frappe.throw("File not found on server")
-
-        # Process zip file
-        results = []
-        with zipfile.ZipFile(file_path, 'r') as zip_ref:
-            for file_info in zip_ref.filelist:
-                if file_info.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                    # Extract file content
-                    file_content = zip_ref.read(file_info.filename)
-
-                    # Get identifier from filename (student_id or class_id)
-                    filename = os.path.basename(file_info.filename)
-                    identifier = os.path.splitext(filename)[0]
-
-                    try:
-                        # Create SIS Photo record
-                        photo_doc = frappe.get_doc({
-                            "doctype": "SIS Photo",
-                            "campus_id": campus_id,
-                            "title": filename,
-                            "type": photo_type,
-                            "school_year_id": school_year_id,
-                            "status": "Active",
-                            "description": f"Uploaded from zip file: {frappe.form_dict.file}"
-                        })
-
-                        # Set identifier based on type
-                        if photo_type == "student":
-                            photo_doc.student_id = identifier
-                        else:  # class
-                            photo_doc.class_id = identifier
-
-                        # Save the photo record first to get the name
-                        photo_doc.insert()
-
-                        # Create File document for the photo
-                        photo_file = frappe.get_doc({
-                            "doctype": "File",
-                            "file_name": filename,
-                            "content": base64.b64encode(file_content).decode('utf-8'),
-                            "is_private": 0,
-                            "attached_to_doctype": "SIS Photo",
-                            "attached_to_name": photo_doc.name
-                        })
-                        photo_file.insert()
-
-                        # Update photo record with file reference
-                        photo_doc.photo = photo_file.file_url
-                        photo_doc.save()
-
-                        results.append({
-                            "filename": filename,
-                            "identifier": identifier,
-                            "status": "success",
-                            "photo_id": photo_doc.name
-                        })
-
-                    except Exception as e:
-                        results.append({
-                            "filename": filename,
-                            "identifier": identifier,
-                            "status": "error",
-                            "error": str(e)
-                        })
-
-        return {
-            "success": True,
-            "message": f"Processed {len(results)} files",
-            "results": results
-        }
-
-    except Exception as e:
-        frappe.log_error(f"Error in upload_zip_photos: {str(e)}")
-        return {
-            "success": False,
-            "message": str(e)
-        }
 
 
 @frappe.whitelist()
@@ -281,10 +147,19 @@ def upload_single_photo():
             type_field = frappe.get_meta("SIS Photo").get_field("type")
             allowed_options = []
             if type_field and getattr(type_field, "options", None):
-                allowed_options = [opt.strip() for opt in str(type_field.options).splitlines() if opt and opt.strip()]
-            # Default allowed if metadata missing
+                # Handle escaped options from JSON (e.g., "student\\nclass" -> ["student", "class"])
+                options_str = str(type_field.options)
+                if '\\n' in options_str:
+                    # Split on literal \n after unescaping
+                    options_str = options_str.replace('\\n', '\n')
+                allowed_options = [opt.strip() for opt in options_str.splitlines() if opt and opt.strip()]
+
+            # Default allowed if metadata missing or parsing failed
             if not allowed_options:
                 allowed_options = ["student", "class"]
+
+            frappe.logger().info(f"SIS Photo upload: parsed options={allowed_options}, input photo_type='{photo_type}'")
+
             # Find canonical option value by case-insensitive match
             matched_option = None
             for opt in allowed_options:
@@ -299,7 +174,8 @@ def upload_single_photo():
                 frappe.logger().info(f"SIS Photo upload: normalized type='{photo_type}', allowed={allowed_options}")
             except Exception:
                 pass
-        except Exception:
+        except Exception as e:
+            frappe.logger().error(f"Error normalizing photo type: {str(e)}")
             # Fallback strict check
             if photo_type not in ["student", "class"]:
                 frappe.throw("Invalid photo type. Must be 'student' or 'class'")
