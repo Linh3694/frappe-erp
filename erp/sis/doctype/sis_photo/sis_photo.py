@@ -765,6 +765,27 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                     frappe.logger().warning(f"Failed to recover photo URL for {photo.get('name')}: {str(recovery_error)}")
                     del photo["photo"]
 
+            # Final fallback: infer from description's filename if exists on disk
+            if not photo.get("photo"):
+                try:
+                    desc = photo.get("description") or ""
+                    # Expect pattern like: "Single photo upload: 1A1.jpg"
+                    marker = ":"
+                    if marker in desc:
+                        candidate = desc.split(marker, 1)[1].strip()
+                        # sanitize and check both public and private files
+                        if candidate:
+                            public_path = frappe.get_site_path("public", "files", candidate)
+                            private_path = frappe.get_site_path("private", "files", candidate)
+                            if os.path.exists(public_path):
+                                photo["photo"] = f"/files/{candidate}"
+                                frappe.logger().info(f"✅ Recovered from description (public): {photo.get('photo')}")
+                            elif os.path.exists(private_path):
+                                photo["photo"] = f"/private/files/{candidate}"
+                                frappe.logger().info(f"✅ Recovered from description (private): {photo.get('photo')}")
+                except Exception as infer_err:
+                    frappe.logger().warning(f"Failed to infer photo URL from description for {photo.get('name')}: {str(infer_err)}")
+
             if photo.get("description") is None:
                 del photo["description"]
 
