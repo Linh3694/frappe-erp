@@ -14,6 +14,7 @@ whitelisted_methods = [
     "erp.sis.api.debug_api.debug_student_mapping",
     "erp.sis.api.debug_api.test_webp_conversion",
     "erp.sis.api.debug_api.get_test_webp_image",
+    "erp.sis.api.debug_api.fix_duplicate_photos",
     "erp.sis.api.debug_api.fix_student_photo_assignment",
 ]
 

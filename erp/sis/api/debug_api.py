@@ -236,10 +236,60 @@ def get_test_webp_image():
 
 
 @frappe.whitelist(allow_guest=True)
+def fix_duplicate_photos():
+    """Fix duplicate photos by removing duplicates and fixing assignments"""
+    try:
+        # Get all student photos
+        photos = frappe.get_all("SIS Photo",
+            filters={"type": "student"},
+            fields=["name", "title", "student_id", "photo", "creation"],
+            order_by="creation desc"
+        )
+
+        # Group by photo URL to find duplicates
+        photos_by_url = {}
+        for photo in photos:
+            if photo.photo:
+                if photo.photo not in photos_by_url:
+                    photos_by_url[photo.photo] = []
+                photos_by_url[photo.photo].append(photo)
+
+        # Find duplicates
+        duplicates_to_remove = []
+        for url, photo_list in photos_by_url.items():
+            if len(photo_list) > 1:
+                # Keep the newest one, remove others
+                sorted_photos = sorted(photo_list, key=lambda x: x.creation, reverse=True)
+                duplicates_to_remove.extend(sorted_photos[1:])  # All except the first (newest)
+
+        removed_count = 0
+        for duplicate in duplicates_to_remove:
+            try:
+                frappe.delete_doc("SIS Photo", duplicate.name)
+                removed_count += 1
+                frappe.logger().info(f"Removed duplicate photo: {duplicate.name}")
+            except Exception as e:
+                frappe.logger().error(f"Failed to remove duplicate {duplicate.name}: {str(e)}")
+
+        return {
+            "success": True,
+            "message": f"Removed {removed_count} duplicate photos",
+            "duplicate_groups": {url: len(photos) for url, photos in photos_by_url.items() if len(photos) > 1}
+        }
+
+    except Exception as e:
+        frappe.logger().error(f"Fix duplicate photos failed: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Fix failed: {str(e)}"
+        }
+
+
+@frappe.whitelist(allow_guest=True)
 def fix_student_photo_assignment():
     """Fix student photo assignment by reassigning based on filename patterns"""
     try:
-        # Get all student photos without proper student_id
+        # Get all student photos
         photos = frappe.get_all("SIS Photo",
             filters={"type": "student"},
             fields=["name", "title", "student_id", "photo"]
@@ -248,27 +298,38 @@ def fix_student_photo_assignment():
         fixed_count = 0
         errors = []
 
+        # Get all students for lookup
+        all_students = frappe.get_all("CRM Student",
+            fields=["name", "student_code", "student_name"]
+        )
+
+        # Create lookup dictionary
+        student_lookup = {student.student_code: student for student in all_students}
+
         for photo in photos:
             try:
                 # Extract student code from filename if photo URL exists
                 if photo.photo:
                     # Extract filename from URL
                     filename = photo.photo.split('/')[-1]
-                    # Remove extension
+                    # Remove extension and clean up
                     student_code = filename.split('.')[0]
 
-                    # Try to find student by code
-                    student = frappe.get_all("CRM Student",
-                        filters={"student_code": student_code},
-                        fields=["name", "student_name"]
-                    )
+                    # Handle special cases where filename might have extra characters
+                    if student_code.endswith(('168f0e', '121076')):
+                        # These are duplicate files with extra characters
+                        student_code = student_code[:-6]  # Remove last 6 characters
 
-                    if student:
-                        # Update student_id
-                        frappe.db.set_value("SIS Photo", photo.name, "student_id", student[0].name)
-                        frappe.db.commit()
-                        fixed_count += 1
-                        frappe.logger().info(f"Fixed student assignment for {photo.name}: {student_code} -> {student[0].name}")
+                    if student_code in student_lookup:
+                        correct_student = student_lookup[student_code]
+
+                        # Only update if different
+                        if photo.student_id != correct_student.name:
+                            # Update student_id
+                            frappe.db.set_value("SIS Photo", photo.name, "student_id", correct_student.name)
+                            frappe.db.commit()
+                            fixed_count += 1
+                            frappe.logger().info(f"Fixed student assignment for {photo.name}: {student_code} -> {correct_student.name}")
                     else:
                         errors.append(f"Student not found for code: {student_code}")
                 else:

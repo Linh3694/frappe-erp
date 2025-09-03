@@ -264,6 +264,19 @@ def upload_single_photo():
             photo_title = f"Photo of {student[0].student_name} ({student_code})"
             identifier = student_id
 
+            # Check for existing photo to prevent duplicates
+            existing_photo = frappe.get_all("SIS Photo",
+                filters={
+                    "student_id": student_id,
+                    "photo": f"/files/{final_filename}",
+                    "type": "student"
+                },
+                fields=["name"]
+            )
+
+            if existing_photo:
+                frappe.throw(f"Photo already exists for student {student_code}: {existing_photo[0].name}")
+
         else:  # class
             # Find class by name/title
             class_record = frappe.get_all("SIS Class",
