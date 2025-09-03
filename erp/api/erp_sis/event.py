@@ -211,6 +211,9 @@ def create_event():
             "create_at": frappe.utils.now(),
         }
 
+        # Will hold processed schedules for new format to be created after event insert
+        processed_schedules = []
+
         # Handle old format
         if has_old_format:
             event_data.update({
@@ -228,14 +231,25 @@ def create_event():
             event_data["timetable_column_id"] = None
 
             if date_schedules:
-                # Prepare date schedules for creation
-                processed_schedules = []
+                # Prepare date schedules for creation (do NOT attach to event doc child table)
                 for ds in date_schedules:
+                    event_date = ds.get('date') if isinstance(ds, dict) else None
+                    if not event_date and isinstance(ds, dict):
+                        event_date = ds.get('event_date')
+
+                    schedule_ids_value = []
+                    if isinstance(ds, dict):
+                        schedule_ids_value = ds.get('scheduleIds') or ds.get('schedule_ids') or []
+
+                    if isinstance(schedule_ids_value, list):
+                        schedule_ids_str = ','.join(schedule_ids_value)
+                    else:
+                        schedule_ids_str = str(schedule_ids_value) if schedule_ids_value else ''
+
                     processed_schedules.append({
-                        "event_date": ds.get('date'),
-                        "schedule_ids": ','.join(ds.get('scheduleIds', []))
+                        "event_date": event_date,
+                        "schedule_ids": schedule_ids_str
                     })
-                event_data["date_schedules"] = processed_schedules
 
         event = frappe.get_doc(event_data)
 
@@ -248,6 +262,34 @@ def create_event():
 
         event.insert()
         frappe.db.commit()
+
+        # Create date schedule records separately for new format to avoid child-table mandatory issues
+        if has_new_format and processed_schedules:
+            created_schedule_names = []
+            for ds in processed_schedules:
+                try:
+                    event_date = ds.get("event_date")
+                    schedule_ids = ds.get("schedule_ids")
+                    if not event_date or not schedule_ids:
+                        continue
+
+                    schedule_doc = frappe.get_doc({
+                        "doctype": "SIS Event Date Schedule",
+                        "event_id": event.name,
+                        "event_date": event_date,
+                        "schedule_ids": schedule_ids,
+                        "create_at": frappe.utils.now()
+                    })
+                    schedule_doc.insert()
+                    created_schedule_names.append(schedule_doc.name)
+                except Exception as e:
+                    # Collect but do not fail the whole request; these will be visible in debug_info
+                    if "schedule_creation_errors" not in debug_info:
+                        debug_info["schedule_creation_errors"] = []
+                    debug_info["schedule_creation_errors"].append(str(e))
+
+            frappe.db.commit()
+            debug_info["schedules_created"] = created_schedule_names
 
         debug_info["execution_reached_success"] = True
         return single_item_response({
@@ -497,12 +539,18 @@ def create_timetable_override(event):
         if not participants:
             return
 
-        # Handle different date formats
-        if hasattr(event, 'date_schedules') and event.date_schedules:
+        # Prefer reading schedules from SIS Event Date Schedule entries (new format)
+        date_schedules = frappe.get_all(
+            "SIS Event Date Schedule",
+            filters={"event_id": event.name},
+            fields=["event_date", "schedule_ids"]
+        )
+
+        if date_schedules:
             # New format: multiple dates and schedules
             date_schedule_overrides = []
 
-            for ds in event.date_schedules:
+            for ds in date_schedules:
                 event_date = ds.event_date
                 schedule_ids = ds.schedule_ids.split(',') if ds.schedule_ids else []
 
