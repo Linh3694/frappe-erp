@@ -278,6 +278,21 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
 
         frappe.logger().info(f"unassign_student called with: name={name}, class_id={class_id}, class_name={class_name}, student_id={student_id}, student_code={student_code}, school_year_id={school_year_id}, class_type={class_type}")
 
+        # Fallback: parse JSON body if sent as application/json
+        try:
+            if hasattr(frappe, 'request') and getattr(frappe.request, 'data', None):
+                import json
+                body = json.loads(frappe.request.data.decode('utf-8')) if isinstance(frappe.request.data, (bytes, bytearray)) else {}
+                name = name or body.get('name')
+                class_id = class_id or body.get('class_id')
+                class_name = class_name or body.get('class_name')
+                student_id = student_id or body.get('student_id')
+                student_code = student_code or body.get('student_code')
+                school_year_id = school_year_id or body.get('school_year_id')
+                class_type = class_type or body.get('class_type')
+        except Exception:
+            pass
+
         # Resolve student_id by student_code if needed
         if not student_id and student_code:
             try:
