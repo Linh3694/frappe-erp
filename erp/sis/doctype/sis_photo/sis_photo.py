@@ -147,11 +147,8 @@ def upload_single_photo():
             type_field = frappe.get_meta("SIS Photo").get_field("type")
             allowed_options = []
             if type_field and getattr(type_field, "options", None):
-                # Handle escaped options from JSON (e.g., "student\\nclass" -> ["student", "class"])
+                # Parse options from JSON (e.g., "student\nclass" -> ["student", "class"])
                 options_str = str(type_field.options)
-                if '\\n' in options_str:
-                    # Split on literal \n after unescaping
-                    options_str = options_str.replace('\\n', '\n')
                 allowed_options = [opt.strip() for opt in options_str.splitlines() if opt and opt.strip()]
 
             # Default allowed if metadata missing or parsing failed
