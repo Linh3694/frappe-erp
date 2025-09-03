@@ -255,7 +255,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
 
 
 @frappe.whitelist(allow_guest=False)
-def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None):
+    def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None, student_code=None, class_name=None):
     """Remove a student from a class
 
     Accepts either:
@@ -270,14 +270,49 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
             name = form.get('name') or (args.get('name') if args else None)
         if not class_id:
             class_id = form.get('class_id') or (args.get('class_id') if args else None)
+        if not class_name:
+            class_name = form.get('class_name') or (args.get('class_name') if args else None)
         if not student_id:
             student_id = form.get('student_id') or (args.get('student_id') if args else None)
+        if not student_code:
+            student_code = form.get('student_code') or (args.get('student_code') if args else None)
         if not school_year_id:
             school_year_id = form.get('school_year_id') or (args.get('school_year_id') if args else None)
         if not class_type:
             class_type = form.get('class_type') or (args.get('class_type') if args else None)
 
-        frappe.logger().info(f"unassign_student called with: name={name}, class_id={class_id}, student_id={student_id}, school_year_id={school_year_id}, class_type={class_type}")
+        frappe.logger().info(f"unassign_student called with: name={name}, class_id={class_id}, class_name={class_name}, student_id={student_id}, student_code={student_code}, school_year_id={school_year_id}, class_type={class_type}")
+
+        # Resolve student_id by student_code if needed
+        if not student_id and student_code:
+            try:
+                stu = frappe.get_all("CRM Student", filters={"student_code": student_code}, fields=["name"], limit=1)
+                if stu:
+                    student_id = stu[0].name
+            except Exception:
+                pass
+
+        # Resolve class_id by class_name if needed (by name or title)
+        if not class_id and class_name:
+            try:
+                cls = frappe.get_all("SIS Class", filters={"name": class_name}, fields=["name", "school_year_id"], limit=1)
+                if not cls:
+                    cls = frappe.get_all("SIS Class", filters={"title": class_name}, fields=["name", "school_year_id"], limit=1)
+                if cls:
+                    class_id = cls[0].name
+                    if not school_year_id:
+                        school_year_id = cls[0].get("school_year_id")
+            except Exception:
+                pass
+
+        # Resolve school_year_id from active year if still missing
+        if not school_year_id:
+            try:
+                active = frappe.get_all("SIS School Year", filters={"is_enable": 1}, fields=["name"], order_by="start_date desc", limit=1)
+                if active:
+                    school_year_id = active[0].name
+            except Exception:
+                pass
 
         # If name not provided, try to resolve using composite key
         if not name:
@@ -293,7 +328,7 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
 
             if not filters or 'student_id' not in filters or 'school_year_id' not in filters:
                 return error_response(
-                    message="Missing required parameter: name or (student_id, school_year_id)",
+                    message="Missing required parameter: name or (student_id|student_code, school_year_id|class_name)",
                     code="MISSING_KEY"
                 )
 
