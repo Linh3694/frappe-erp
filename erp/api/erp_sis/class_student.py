@@ -124,7 +124,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
 
 
         
-        # Validate required parameters
+        # Normalize and validate parameters
         if not class_id or not student_id or not school_year_id:
             return validation_error_response(
                 message="Missing required parameters",
@@ -134,6 +134,9 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                     "school_year_id": ["Required"] if not school_year_id else []
                 }
             )
+        class_type = (class_type or "regular").strip().lower()
+        if class_type not in ["regular", "mixed"]:
+            class_type = "regular"
         
         # Get campus from context
         from erp.utils.campus_utils import get_current_campus_from_context
@@ -141,34 +144,95 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
         if not campus_id:
             campus_id = "campus-1"  # Default fallback
         
-        # Check if assignment already exists
-        existing = frappe.db.exists("SIS Class Student", {
+        # RULES ENFORCEMENT
+        # 1) Prevent duplicate assignment to the same class in same year
+        if frappe.db.exists("SIS Class Student", {
             "class_id": class_id,
             "student_id": student_id,
-            "school_year_id": school_year_id
-        })
-        
-        if existing:
-            return error_response(
-                message="Student is already assigned to this class",
-                code="STUDENT_ALREADY_ASSIGNED"
+            "school_year_id": school_year_id,
+        }):
+            # Already in this class -> return success idempotently
+            existing_doc = frappe.get_all(
+                "SIS Class Student",
+                filters={
+                    "class_id": class_id,
+                    "student_id": student_id,
+                    "school_year_id": school_year_id,
+                },
+                fields=["name", "class_id", "student_id", "school_year_id", "class_type", "campus_id"],
+                limit=1,
             )
-        
-        # Create new class student assignment
+            return single_item_response(
+                data=existing_doc[0] if existing_doc else {
+                    "class_id": class_id,
+                    "student_id": student_id,
+                    "school_year_id": school_year_id,
+                    "class_type": class_type,
+                    "campus_id": campus_id,
+                },
+                message="Student already assigned to this class"
+            )
+
+        if class_type == "regular":
+            # 2) Regular: ensure ONLY ONE regular class per student per school year (campus-aware)
+            existing_regular = frappe.get_all(
+                "SIS Class Student",
+                filters={
+                    "student_id": student_id,
+                    "school_year_id": school_year_id,
+                    "class_type": "regular",
+                },
+                fields=["name", "class_id"],
+                order_by="creation asc",
+            )
+            if existing_regular:
+                # If same class -> already handled above
+                # Otherwise migrate the oldest regular record to the new class
+                target_name = existing_regular[0]["name"]
+                try:
+                    frappe.db.set_value("SIS Class Student", target_name, {
+                        "class_id": class_id,
+                        "campus_id": campus_id,
+                    }, update_modified=True)
+                    # Deduplicate: remove any extra regular records beyond the first
+                    for dup in existing_regular[1:]:
+                        try:
+                            frappe.delete_doc("SIS Class Student", dup["name"])
+                        except Exception:
+                            pass
+                    frappe.db.commit()
+                    updated = frappe.get_doc("SIS Class Student", target_name)
+                    return single_item_response(
+                        data={
+                            "name": updated.name,
+                            "class_id": updated.class_id,
+                            "student_id": updated.student_id,
+                            "school_year_id": updated.school_year_id,
+                            "class_type": updated.class_type,
+                            "campus_id": updated.campus_id,
+                        },
+                        message="Student moved to new regular class"
+                    )
+                except Exception as move_err:
+                    frappe.logger().error(f"Failed to move regular class assignment: {str(move_err)}")
+                    frappe.db.rollback()
+                    return error_response(
+                        message="Failed to move student to new regular class",
+                        code="MOVE_REGULAR_ERROR",
+                    )
+
+        # 3) Create new assignment (works for mixed, or regular when none existed)
         class_student = frappe.get_doc({
             "doctype": "SIS Class Student",
             "class_id": class_id,
             "student_id": student_id,
             "school_year_id": school_year_id,
             "class_type": class_type,
-            "campus_id": campus_id
+            "campus_id": campus_id,
         })
-        
         class_student.insert()
         frappe.db.commit()
-        
-        frappe.logger().info(f"Successfully assigned student {student_id} to class {class_id}")
-        
+
         return single_item_response(
             data={
                 "name": class_student.name,
@@ -176,7 +240,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                 "student_id": class_student.student_id,
                 "school_year_id": class_student.school_year_id,
                 "class_type": class_student.class_type,
-                "campus_id": class_student.campus_id
+                "campus_id": class_student.campus_id,
             },
             message="Student assigned to class successfully"
         )
