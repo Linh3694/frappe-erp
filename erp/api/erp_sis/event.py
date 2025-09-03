@@ -49,7 +49,10 @@ def create_event():
 
         # Required fields validation - support both old and new format
         has_old_format = data.get('start_time') and data.get('end_time')
-        has_new_format = (data.get('date_schedules') or data.get('dateSchedules')) and len(data.get('date_schedules') or data.get('dateSchedules') or []) > 0
+
+        # Fix validation logic for date schedules
+        date_schedules = data.get('date_schedules') or data.get('dateSchedules')
+        has_new_format = date_schedules and isinstance(date_schedules, list) and len(date_schedules) > 0
 
         if not has_old_format and not has_new_format:
             return validation_error_response("Validation failed", {
@@ -122,7 +125,6 @@ def create_event():
 
         # Handle new format
         elif has_new_format:
-            date_schedules = data.get('dateSchedules') or data.get('date_schedules')
             if date_schedules:
                 # Prepare date schedules for creation
                 processed_schedules = []
