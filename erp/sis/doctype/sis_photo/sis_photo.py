@@ -340,6 +340,8 @@ def upload_single_photo():
             # Try insert with ignore_permissions to avoid controller permission check
             try:
                 photo_doc.insert(ignore_permissions=True)
+                # Commit transaction to ensure data is immediately available
+                frappe.db.commit()
             except frappe.ValidationError as ve:
                 msg = str(ve)
                 # If Select validation on type failed, attempt to bypass validation safely
@@ -353,6 +355,8 @@ def upload_single_photo():
                         photo_doc.class_id = class_id
                     photo_doc.flags.ignore_validate = True
                     photo_doc.insert(ignore_permissions=True)
+                    # Commit transaction to ensure data is immediately available
+                    frappe.db.commit()
                 else:
                     raise
 
@@ -370,16 +374,20 @@ def upload_single_photo():
             if not frappe.has_permission("File", "create", user=user):
                 frappe.logger().warning(f"User {user} does not have create permission on File")
                 photo_file.insert(ignore_permissions=True)
+                frappe.db.commit()
             else:
                 photo_file.insert()
+                frappe.db.commit()
 
             # Update photo record with file reference
             photo_doc.photo = photo_file.file_url
             if not frappe.has_permission("SIS Photo", "write", user=user):
                 frappe.logger().warning(f"User {user} does not have write permission on SIS Photo")
                 photo_doc.save(ignore_permissions=True)
+                frappe.db.commit()
             else:
                 photo_doc.save()
+                frappe.db.commit()
 
             return {
                 "success": True,
@@ -428,6 +436,18 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             start=(int(page) - 1) * int(limit),
             limit=int(limit)
         )
+
+        # Clean up null values to prevent validation errors
+        # Convert null to undefined for optional fields (Zod expects undefined, not null)
+        for photo in photos:
+            if photo.get("class_id") is None:
+                del photo["class_id"]
+            if photo.get("student_id") is None:
+                del photo["student_id"]
+            if photo.get("photo") is None:
+                del photo["photo"]
+            if photo.get("description") is None:
+                del photo["description"]
 
         # Get total count
         total_count = frappe.db.count("SIS Photo", filters)
