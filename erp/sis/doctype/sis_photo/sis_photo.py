@@ -256,9 +256,9 @@ def upload_single_photo():
         with open(file_path, 'rb') as f:
             original_content = f.read()
 
-        # Convert to WebP format with fallbacks
+        # Convert to JPEG format with fallbacks (more broadly compatible than WebP)
         try:
-            frappe.logger().info(f"🔄 Converting image to WebP: {file_doc.file_name}, size: {len(original_content)} bytes")
+            frappe.logger().info(f"🔄 Converting image to JPEG: {file_doc.file_name}, size: {len(original_content)} bytes")
 
             # Open image with PIL
             src_image = Image.open(io.BytesIO(original_content))
@@ -270,28 +270,28 @@ def upload_single_photo():
                 image = image.convert("RGB")
                 frappe.logger().info("🔄 Converted to RGB mode")
 
-            # Create WebP content with robust parameters
-            webp_buffer = io.BytesIO()
-            image.save(webp_buffer, format='WEBP', quality=85, method=6, optimize=True)
-            candidate_content = webp_buffer.getvalue()
+            # Create JPEG content with robust parameters
+            jpeg_buffer = io.BytesIO()
+            image.save(jpeg_buffer, format='JPEG', quality=85, optimize=True, progressive=True)
+            candidate_content = jpeg_buffer.getvalue()
 
             # Sanity check: ensure generated WebP is readable
             try:
                 Image.open(io.BytesIO(candidate_content)).verify()
             except Exception as ver_err:
-                raise Exception(f"Invalid WebP after convert: {ver_err}")
+                raise Exception(f"Invalid JPEG after convert: {ver_err}")
 
-            # Use WebP result
+            # Use JPEG result
             original_filename = file_doc.file_name
             filename_without_ext = os.path.splitext(original_filename)[0]
-            final_filename = f"{filename_without_ext}.webp"
+            final_filename = f"{filename_without_ext}.jpg"
             final_content = candidate_content
 
-            frappe.logger().info(f"✅ WebP conversion successful: {len(final_content)} bytes -> {final_filename}")
+            frappe.logger().info(f"✅ JPEG conversion successful: {len(final_content)} bytes -> {final_filename}")
 
         except Exception as e:
-            # Fallback: keep original file content/extension if WebP conversion fails for any reason
-            frappe.logger().warning(f"❌ WebP conversion failed, fallback to original file. Reason: {str(e)}")
+            # Fallback: keep original file content/extension if JPEG conversion fails for any reason
+            frappe.logger().warning(f"❌ JPEG conversion failed, fallback to original file. Reason: {str(e)}")
             original_filename = file_doc.file_name
             name_no_ext, ext = os.path.splitext(original_filename)
             ext = (ext or '').lower()
