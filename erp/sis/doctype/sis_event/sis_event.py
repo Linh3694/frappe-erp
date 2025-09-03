@@ -45,12 +45,17 @@ class SISEvent(Document):
                         else:
                             schedule_ids_str = str(schedule_ids)
 
+                        # Try to get the User ID from SIS Teacher record
+                        teacher_user_id = None
+                        if self.create_by:
+                            teacher_user_id = frappe.db.get_value("SIS Teacher", {"name": self.create_by}, "user_id")
+
                         schedule_doc = frappe.get_doc({
                             "doctype": "SIS Event Date Schedule",
                             "event_id": self.name,
                             "event_date": event_date,
                             "schedule_ids": schedule_ids_str,
-                            "create_by": self.create_by or frappe.session.user,
+                            # Temporarily skip create_by to test if that's the issue
                             "create_at": frappe.utils.now()
                         })
 
