@@ -138,6 +138,16 @@ def upload_zip_photos():
 def upload_single_photo():
     """Upload single photo for student or class"""
     try:
+        # Debug logging
+        frappe.logger().info(f"upload_single_photo called")
+        frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys())}")
+        frappe.logger().info(f"form_dict: {dict(frappe.form_dict)}")
+        if frappe.request and frappe.request.data:
+            frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
+            if isinstance(frappe.request.data, bytes):
+                frappe.logger().info(f"request.data (first 200 chars): {frappe.request.data[:200].decode('utf-8', errors='ignore')}")
+            else:
+                frappe.logger().info(f"request.data: {frappe.request.data[:200] if frappe.request.data else 'None'}")
         # Get uploaded file - try both form_dict and request data
         file_id = frappe.form_dict.get("file_id")
 
