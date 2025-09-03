@@ -736,9 +736,11 @@ def create_timetable_override(event):
             for override_info in date_schedule_overrides:
                 for participant in participants:
                     # Determine target type and ID
-                    student_doc = frappe.get_doc("SIS Student", participant.student)
+                    student_ref = participant.get("student_id") if isinstance(participant, dict) else getattr(participant, "student_id", None)
+                    if not student_ref:
+                        student_ref = participant.get("student") if isinstance(participant, dict) else getattr(participant, "student", None)
                     class_id = frappe.db.get_value("SIS Class Student",
-                        {"student": participant.student, "status": "Active"}, "parent")
+                        {"student_id": student_ref, "status": "Active"}, "class_id")
 
                     if class_id:
                         override = frappe.get_doc({
@@ -795,9 +797,28 @@ def create_timetable_override(event):
 def get_event_detail():
     """Get event detail with participants for approval page"""
     try:
-        event_id = frappe.local.form_dict.get("event_id")
+        # Be robust in retrieving event_id from different sources
+        debug_info = {}
+        form_dict = frappe.local.form_dict
+        try:
+            debug_info["form_dict_keys"] = list(form_dict.keys())
+            debug_info["form_dict_preview"] = {k: form_dict.get(k) for k in list(form_dict.keys())[:10]}
+        except Exception:
+            pass
+
+        event_id = form_dict.get("event_id") or form_dict.get("id") or form_dict.get("name")
         if not event_id:
-            return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]})
+            try:
+                # Fallback to query args if available
+                args = getattr(frappe.local.request, "args", None)
+                if args:
+                    debug_info["request_args_keys"] = list(args.keys())
+                    event_id = args.get("event_id") or args.get("id") or args.get("name")
+            except Exception as e:
+                debug_info["request_args_error"] = str(e)
+
+        if not event_id:
+            return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]}, debug_info=debug_info)
 
         event = frappe.get_doc("SIS Event", event_id)
         campus_id = get_current_campus_from_context()
