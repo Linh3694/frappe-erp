@@ -89,8 +89,19 @@ def create_event():
                 parsing_info["teacher_ids"] = "already an array"
 
         debug_info["parsing_info"] = parsing_info
-        debug_info["parsed_data"] = dict(data)
-        debug_info["execution_reached_validation"] = True
+        try:
+            debug_info["parsed_data"] = dict(data)
+            debug_info["execution_reached_validation"] = True
+        except Exception as e:
+            debug_info["parsed_data_error"] = str(e)
+            debug_info["parsed_data_error_type"] = str(type(e))
+            # Try to create a safe dict representation
+            try:
+                debug_info["parsed_data_keys"] = list(data.keys())
+                debug_info["parsed_data_safe"] = {k: str(v) for k, v in data.items()}
+            except:
+                debug_info["parsed_data_fallback"] = str(data)
+            return error_response("Error creating dict representation", debug_info=debug_info)
 
         # Required fields validation - support both old and new format
         start_time_value = data.get('start_time')
