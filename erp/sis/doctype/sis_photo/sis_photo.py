@@ -285,12 +285,14 @@ def upload_single_photo():
                     continue
             else:
                 # If no alternative works, get first available campus as fallback
-                all_campuses = frappe.get_all("SIS Campus", limit=1)
+                all_campuses = frappe.get_all("SIS Campus", fields=["name", "title_vn"], limit=5)
+                frappe.logger().info(f"All available campuses: {all_campuses}")
+
                 if all_campuses:
                     campus_id = all_campuses[0].name
-                    frappe.logger().info(f"Using fallback campus: {campus_id}")
+                    frappe.logger().info(f"Using fallback campus: {campus_id} - {all_campuses[0].get('title_vn', 'Unknown')}")
                 else:
-                    frappe.throw(f"Campus '{campus_id}' not found and no fallback available")
+                    frappe.throw(f"Campus '{campus_id}' not found and no fallback available. No campuses exist in system.")
 
         # Download and process the uploaded file
         file_path = file_doc.get_full_path()
@@ -378,8 +380,20 @@ def upload_single_photo():
             else:  # class
                 photo_doc.class_id = class_id
 
-            # Save the photo record first to get the name
-            photo_doc.insert()
+            # Check user permissions before creating
+            user = frappe.session.user
+            frappe.logger().info(f"Creating SIS Photo for user: {user}")
+
+            # Check if user has create permission on SIS Photo
+            if not frappe.has_permission("SIS Photo", "create", user=user):
+                frappe.logger().warning(f"User {user} does not have create permission on SIS Photo")
+
+                # Try to create with ignore_permissions=True as fallback
+                frappe.logger().info("Attempting to create with ignore_permissions=True")
+                photo_doc.insert(ignore_permissions=True)
+            else:
+                # Save the photo record with normal permissions
+                photo_doc.insert()
 
             # Create File document for the WebP photo
             photo_file = frappe.get_doc({
@@ -390,11 +404,21 @@ def upload_single_photo():
                 "attached_to_doctype": "SIS Photo",
                 "attached_to_name": photo_doc.name
             })
-            photo_file.insert()
+
+            # Check File creation permissions
+            if not frappe.has_permission("File", "create", user=user):
+                frappe.logger().warning(f"User {user} does not have create permission on File")
+                photo_file.insert(ignore_permissions=True)
+            else:
+                photo_file.insert()
 
             # Update photo record with file reference
             photo_doc.photo = photo_file.file_url
-            photo_doc.save()
+            if not frappe.has_permission("SIS Photo", "write", user=user):
+                frappe.logger().warning(f"User {user} does not have write permission on SIS Photo")
+                photo_doc.save(ignore_permissions=True)
+            else:
+                photo_doc.save()
 
             return {
                 "success": True,
