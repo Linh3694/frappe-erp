@@ -556,10 +556,31 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                             photo["photo"] = file_url
                 except Exception as _:
                     pass
-
-            # Zod expects `photo` to be string or omitted; never null
             if not photo.get("photo") and "photo" in photo:
-                del photo["photo"]
+                # Thử khôi phục từ File attachment một lần nữa trước khi xóa
+                try:
+                    recovery_attempt = frappe.get_all(
+                        "File",
+                        filters={
+                            "attached_to_doctype": "SIS Photo",
+                            "attached_to_name": photo.get("name"),
+                            "is_private": 0
+                        },
+                        fields=["file_url", "file_name"],
+                        limit=1
+                    )
+                    if recovery_attempt:
+                        recovered_url = recovery_attempt[0].get("file_url") or f"/files/{recovery_attempt[0].get('file_name')}"
+                        if recovered_url:
+                            photo["photo"] = recovered_url
+                            frappe.logger().info(f"✅ Recovered photo URL for {photo.get('name')}: {recovered_url}")
+                        else:
+                            del photo["photo"]
+                    else:
+                        del photo["photo"]
+                except Exception as recovery_error:
+                    frappe.logger().warning(f"Failed to recover photo URL for {photo.get('name')}: {str(recovery_error)}")
+                    del photo["photo"]
 
             if photo.get("description") is None:
                 del photo["description"]
