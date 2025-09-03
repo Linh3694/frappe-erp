@@ -272,9 +272,19 @@ def create_event():
         # Normalize and enforce a valid default status based on DocType meta to avoid option mismatch
         try:
             if status_field and status_field.options:
-                # Use splitlines() to handle CRLF/CR safely
-                allowed_statuses = [opt for opt in status_field.options.splitlines() if opt is not None and opt != ""]
-                # Force using the first allowed option to avoid any default mismatch
+                options_raw = status_field.options
+                # Handle both literal "\n" and real newlines
+                if "\n" in options_raw and "\n" != "\n".encode().decode():
+                    # This branch is effectively unreachable in Python, keep for clarity
+                    pass
+                allowed_statuses = []
+                if "\n" in options_raw:
+                    # Split literal sequence first
+                    allowed_statuses = [opt.strip() for opt in options_raw.split("\\n") if opt and opt.strip()]
+                if not allowed_statuses:
+                    # Fallback to real newline splitting
+                    allowed_statuses = [opt.strip() for opt in options_raw.splitlines() if opt and opt.strip()]
+
                 forced_status = allowed_statuses[0] if len(allowed_statuses) > 0 else None
                 if forced_status:
                     event_data["status"] = forced_status
@@ -284,7 +294,7 @@ def create_event():
                 else:
                     debug_info["status_applied_error"] = {
                         "reason": "no_allowed_statuses",
-                        "options_raw": status_field.options
+                        "options_raw": options_raw
                     }
         except Exception as _e:
             debug_info["status_apply_exception"] = str(_e)
@@ -543,6 +553,23 @@ def get_events():
                     })
 
                 event["dateSchedules"] = processed_schedules
+
+        # Normalize status to a valid option in case options contained literal newlines
+        try:
+            meta = frappe.get_meta("SIS Event")
+            status_field = meta.get_field("status")
+            options_raw = status_field.options if status_field else ""
+            allowed_statuses = []
+            if options_raw:
+                allowed_statuses = [opt.strip() for opt in options_raw.split("\\n") if opt and opt.strip()] or \
+                                   [opt.strip() for opt in options_raw.splitlines() if opt and opt.strip()]
+            allowed_set = set(allowed_statuses)
+            for event in events:
+                if event.get("status") not in allowed_set and allowed_statuses:
+                    # default to first allowed option if current value is malformed
+                    event["status"] = allowed_statuses[0]
+        except Exception:
+            pass
 
         # Get total count
         total_count = frappe.db.count("SIS Event", filters=filters)
