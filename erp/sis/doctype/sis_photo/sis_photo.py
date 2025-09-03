@@ -421,18 +421,83 @@ def upload_single_photo():
             photo_title = f"Photo of {student[0].student_name} ({student_code})"
             identifier = student_id
 
-            # Check for existing photo to prevent duplicates
-            existing_photo = frappe.get_all("SIS Photo",
+            # Overwrite strategy: if an entry exists for same student + campus + year, update it
+            existing_ctx = frappe.get_all(
+                "SIS Photo",
                 filters={
                     "student_id": student_id,
-                    "photo": f"/files/{final_filename}",
-                    "type": "student"
+                    "campus_id": campus_id,
+                    "school_year_id": school_year_id,
+                    "type": "student",
                 },
-                fields=["name"]
+                fields=["name", "photo"],
+                order_by="creation desc",
+                limit=1,
             )
 
-            if existing_photo:
-                frappe.throw(f"Photo already exists for student {student_code}: {existing_photo[0].name}")
+            if existing_ctx:
+                existing_name = existing_ctx[0].name
+                photo_title = f"Photo of {student[0].student_name} ({student_code})"
+                # Replace attachments on existing doc
+                try:
+                    # Remove old attachments
+                    old_files = frappe.get_all(
+                        "File",
+                        filters={
+                            "attached_to_doctype": "SIS Photo",
+                            "attached_to_name": existing_name,
+                        },
+                        pluck="name",
+                    )
+                    for fid in old_files:
+                        try:
+                            frappe.delete_doc("File", fid)
+                        except Exception:
+                            continue
+
+                    # Attach new file to existing photo
+                    photo_file = frappe.get_doc({
+                        "doctype": "File",
+                        "file_name": final_filename,
+                        "is_private": 0,
+                        "attached_to_field": "photo",
+                        "attached_to_doctype": "SIS Photo",
+                        "attached_to_name": existing_name,
+                    })
+                    photo_file.save_file(content=final_content, decode=False)
+                    photo_file.content_type = mimetypes.guess_type(final_filename)[0] or 'image/webp'
+                    if not frappe.has_permission("File", "create", user=frappe.session.user):
+                        photo_file.insert(ignore_permissions=True)
+                    else:
+                        photo_file.insert()
+                    frappe.db.commit()
+
+                    # Ensure file_url
+                    if not getattr(photo_file, 'file_url', None):
+                        try:
+                            photo_file.reload()
+                        except Exception:
+                            pass
+                    new_url = getattr(photo_file, 'file_url', None) or f"/files/{getattr(photo_file, 'file_name', final_filename)}"
+
+                    # Update existing photo doc
+                    frappe.db.set_value("SIS Photo", existing_name, {
+                        "photo": new_url,
+                        "status": "Active",
+                        "title": photo_title,
+                        "description": f"Single photo upload (overwrite): {final_filename}",
+                    }, update_modified=True)
+                    frappe.db.commit()
+
+                    return {
+                        "success": True,
+                        "message": "Photo overwritten successfully",
+                        "photo_id": existing_name,
+                        "file_url": new_url,
+                    }
+                except Exception as ow_err:
+                    frappe.logger().error(f"Failed to overwrite existing student photo {existing_name}: {str(ow_err)}")
+                    # Fall through to create new record if overwrite fails
 
         else:  # class
             # Class photo: filename can be SIS Class.name or exact title
@@ -465,6 +530,82 @@ def upload_single_photo():
             class_id = class_record[0].name
             photo_title = f"Photo of class {class_record[0].title}"
             identifier = class_id
+
+            # Overwrite strategy for class by campus + year
+            existing_ctx = frappe.get_all(
+                "SIS Photo",
+                filters={
+                    "class_id": class_id,
+                    "campus_id": campus_id,
+                    "school_year_id": school_year_id,
+                    "type": "class",
+                },
+                fields=["name", "photo"],
+                order_by="creation desc",
+                limit=1,
+            )
+
+            if existing_ctx:
+                existing_name = existing_ctx[0].name
+                try:
+                    # Remove old attachments
+                    old_files = frappe.get_all(
+                        "File",
+                        filters={
+                            "attached_to_doctype": "SIS Photo",
+                            "attached_to_name": existing_name,
+                        },
+                        pluck="name",
+                    )
+                    for fid in old_files:
+                        try:
+                            frappe.delete_doc("File", fid)
+                        except Exception:
+                            continue
+
+                    # Attach new file to existing photo
+                    photo_file = frappe.get_doc({
+                        "doctype": "File",
+                        "file_name": final_filename,
+                        "is_private": 0,
+                        "attached_to_field": "photo",
+                        "attached_to_doctype": "SIS Photo",
+                        "attached_to_name": existing_name,
+                    })
+                    photo_file.save_file(content=final_content, decode=False)
+                    photo_file.content_type = mimetypes.guess_type(final_filename)[0] or 'image/webp'
+                    if not frappe.has_permission("File", "create", user=frappe.session.user):
+                        photo_file.insert(ignore_permissions=True)
+                    else:
+                        photo_file.insert()
+                    frappe.db.commit()
+
+                    # Ensure file_url
+                    if not getattr(photo_file, 'file_url', None):
+                        try:
+                            photo_file.reload()
+                        except Exception:
+                            pass
+                    new_url = getattr(photo_file, 'file_url', None) or f"/files/{getattr(photo_file, 'file_name', final_filename)}"
+
+                    # Update existing photo doc
+                    frappe.db.set_value("SIS Photo", existing_name, {
+                        "photo": new_url,
+                        "status": "Active",
+                        "title": photo_title,
+                        "description": f"Single photo upload (overwrite): {final_filename}",
+                    }, update_modified=True)
+                    frappe.db.commit()
+
+                    return {
+                        "success": True,
+                        "message": "Class photo overwritten successfully",
+                        "photo_id": existing_name,
+                        "file_url": new_url,
+                    }
+                except Exception as ow_err:
+                    frappe.logger().error(f"Failed to overwrite existing class photo {existing_name}: {str(ow_err)}")
+                    # Fall through to create new record if overwrite fails
 
         try:
             # Prepare SIS Photo record
