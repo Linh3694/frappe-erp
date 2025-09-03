@@ -292,15 +292,30 @@ def upload_single_photo():
 
         # If campus still not found, always use first available campus as fallback
         if not campus_found:
-            all_campuses = frappe.get_all("SIS Campus", fields=["name", "title_vn", "title_en"], limit=10)
-            frappe.logger().info(f"All available campuses in system: {all_campuses}")
-            frappe.logger().info(f"Original campus_id that failed: '{original_campus_id}'")
+            frappe.logger().info(f"Campus not found, trying fallback. Original: '{original_campus_id}'")
 
-            if all_campuses:
-                campus_id = all_campuses[0].name
-                campus_title = all_campuses[0].get('title_vn') or all_campuses[0].get('title_en', 'Unknown')
-                frappe.logger().info(f"Using fallback campus: {campus_id} - {campus_title}")
+            # Try to get ALL campuses first to see what's available
+            all_campuses = frappe.get_all("SIS Campus", fields=["name", "title_vn", "title_en"], limit=20)
+            if all_campuses and len(all_campuses) > 0:
+                first_campus = all_campuses[0]
+                campus_id = first_campus.get('name')
+                campus_title = first_campus.get('title_vn') or first_campus.get('title_en', 'Unknown')
+                frappe.logger().info(f"Selected first campus: {campus_id} - {campus_title}")
+
+                # Validate that this campus actually exists
+                try:
+                    test_doc = frappe.get_doc("SIS Campus", campus_id)
+                    frappe.logger().info(f"Successfully validated campus: {test_doc.name}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to validate campus {campus_id}: {str(e)}")
+                    # Try second campus if first fails
+                    if len(all_campuses) > 1:
+                        second_campus = all_campuses[1]
+                        campus_id = second_campus.get('name')
+                        campus_title = second_campus.get('title_vn') or second_campus.get('title_en', 'Unknown')
+                        frappe.logger().info(f"Trying second campus: {campus_id} - {campus_title}")
             else:
+                frappe.logger().error("No campuses found in system!")
                 frappe.throw(f"Campus '{original_campus_id}' not found and no fallback available. No campuses exist in system.")
 
         # Download and process the uploaded file
