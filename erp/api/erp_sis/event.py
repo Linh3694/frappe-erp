@@ -258,6 +258,36 @@ def create_event():
                         "schedule_ids": schedule_ids_str
                     })
 
+        # Validate students are assigned to classes; build quick lookup to reuse later
+        student_ids = data.get('student_ids') or []
+        class_student_lookup = {}
+        missing_students = []
+        if isinstance(student_ids, list) and len(student_ids) > 0:
+            for sid in student_ids:
+                try:
+                    class_student = frappe.get_all(
+                        "SIS Class Student",
+                        filters={"student_id": sid},
+                        fields=["name", "class_id"],
+                        order_by="creation desc",
+                        limit_page_length=1
+                    )
+                    if class_student:
+                        class_student_lookup[sid] = class_student[0]
+                    else:
+                        missing_students.append(sid)
+                except Exception as _e:
+                    missing_students.append(sid)
+        if missing_students:
+            return validation_error_response("Validation failed", {
+                "students": [
+                    f"Student(s) not assigned to any class: {', '.join(missing_students)}"
+                ]
+            }, debug_info=debug_info)
+
+        # Do not auto-assign homeroom teacher at event level; approvals are per Event Student
+        debug_info["homeroom_teacher_note"] = "Skipped setting homeroom_teacher_id at Event level; approvals handled per Event Student"
+
         # Capture status field meta for debugging
         try:
             meta = frappe.get_meta("SIS Event")
@@ -364,20 +394,13 @@ def create_event():
 
         # Create event student records for participants
         try:
-            student_ids = data.get('student_ids') or []
             created_event_students = []
             if isinstance(student_ids, list) and len(student_ids) > 0:
                 # Resolve class_student_id for each student (pick latest assignment)
                 for sid in student_ids:
                     try:
-                        class_student = frappe.get_all(
-                            "SIS Class Student",
-                            filters={"student_id": sid},
-                            fields=["name", "class_id"],
-                            order_by="creation desc",
-                            limit_page_length=1
-                        )
-                        class_student_id = class_student[0]["name"] if class_student else None
+                        cs = class_student_lookup.get(sid)
+                        class_student_id = cs["name"] if cs else None
                         doc = frappe.get_doc({
                             "doctype": "SIS Event Student",
                             "campus_id": campus_id,
