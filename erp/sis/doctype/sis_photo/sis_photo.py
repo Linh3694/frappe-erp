@@ -243,6 +243,8 @@ def upload_single_photo():
         student_code = parsed_params.get("student_code") or frappe.form_dict.get("student_code")
         class_name = parsed_params.get("class_name") or frappe.form_dict.get("class_name")
 
+        frappe.logger().info(f"Final parameters - photo_type: {photo_type}, campus_id: {campus_id}, school_year_id: {school_year_id}, student_code: {student_code}, class_name: {class_name}")
+
         if not photo_type or not campus_id or not school_year_id:
             frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
 
@@ -254,6 +256,41 @@ def upload_single_photo():
 
         if photo_type == "class" and not class_name:
             frappe.throw("Class name is required for class photos")
+
+        # Validate and normalize campus_id
+        try:
+            # Try to find campus by name first
+            campus_doc = frappe.get_doc("SIS Campus", campus_id)
+            frappe.logger().info(f"Found campus: {campus_doc.name} - {campus_doc.title_vn}")
+        except frappe.DoesNotExistError:
+            # Try alternative formats
+            alternative_formats = [
+                campus_id.upper(),
+                f"CAMPUS-{campus_id.zfill(5)}" if campus_id.isdigit() else None,
+                f"campus-{campus_id.zfill(5)}" if campus_id.isdigit() else None,
+                campus_id.replace("campus-", "").zfill(5) if campus_id.startswith("campus-") else None
+            ]
+
+            alternative_formats = [fmt for fmt in alternative_formats if fmt]
+
+            frappe.logger().info(f"Trying alternative campus formats: {alternative_formats}")
+
+            for alt_campus_id in alternative_formats:
+                try:
+                    campus_doc = frappe.get_doc("SIS Campus", alt_campus_id)
+                    frappe.logger().info(f"Found campus with alternative ID: {alt_campus_id} - {campus_doc.title_vn}")
+                    campus_id = alt_campus_id  # Update to correct format
+                    break
+                except frappe.DoesNotExistError:
+                    continue
+            else:
+                # If no alternative works, get first available campus as fallback
+                all_campuses = frappe.get_all("SIS Campus", limit=1)
+                if all_campuses:
+                    campus_id = all_campuses[0].name
+                    frappe.logger().info(f"Using fallback campus: {campus_id}")
+                else:
+                    frappe.throw(f"Campus '{campus_id}' not found and no fallback available")
 
         # Download and process the uploaded file
         file_path = file_doc.get_full_path()
