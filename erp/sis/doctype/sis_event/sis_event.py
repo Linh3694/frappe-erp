@@ -39,7 +39,8 @@ class SISEvent(Document):
                         "event_id": self.name,
                         "event_date": ds.event_date,
                         "schedule_ids": ds.schedule_ids,
-                        "create_by": self.create_by
+                        "create_by": self.create_by or frappe.session.user,
+                        "create_at": frappe.utils.now()
                     })
                     schedule_doc.insert()
 
