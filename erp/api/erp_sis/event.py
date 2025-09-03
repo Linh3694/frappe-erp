@@ -919,23 +919,61 @@ def get_event_detail():
             })
         result["dateSchedules"] = processed_schedules
 
-        # Participants (event students + class/student info minimal)
+        # Participants (event students + class/student info minimal), filtered by current teacher's classes
+        # Determine current teacher and allowed classes (homeroom or vice)
+        allowed_class_ids = set()
+        try:
+            current_user = frappe.session.user
+            teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+            if teacher:
+                class_filters = {}
+                if event_basic.get("campus_id"):
+                    class_filters["campus_id"] = event_basic.get("campus_id")
+                classes = frappe.get_all(
+                    "SIS Class",
+                    filters=class_filters,
+                    or_filters=[{"homeroom_teacher": teacher}, {"vice_homeroom_teacher": teacher}],
+                    fields=["name"],
+                    limit_page_length=10000
+                )
+                allowed_class_ids = {c.name for c in classes}
+        except Exception:
+            allowed_class_ids = set()
+
         event_students = frappe.get_all(
             "SIS Event Student",
             filters={"event_id": event_id},
             fields=["name", "class_student_id", "status", "approved_at", "note"]
         )
+
+        # Build Class Student map in bulk
+        class_student_ids = [es.class_student_id for es in event_students if es.class_student_id]
+        cs_map = {}
+        if class_student_ids:
+            cs_rows = frappe.get_all(
+                "SIS Class Student",
+                filters={"name": ["in", class_student_ids]},
+                fields=["name", "student_id", "class_id", "school_year_id"],
+                limit_page_length=100000
+            )
+            cs_map = {row.name: row for row in cs_rows}
+
         participants = []
         for es in event_students:
-            cs = frappe.get_all(
-                "SIS Class Student",
-                filters={"name": es.class_student_id},
-                fields=["student_id", "class_id", "school_year_id"],
+            cs = cs_map.get(es.class_student_id)
+            if not cs:
+                continue
+            class_id = cs.get("class_id")
+            # If teacher context available, filter by allowed classes; if no teacher, return empty list
+            if allowed_class_ids and class_id not in allowed_class_ids:
+                continue
+            student_id = cs.get("student_id")
+            student = frappe.get_all(
+                "CRM Student",
+                filters={"name": student_id},
+                fields=["student_name", "student_code"],
                 limit_page_length=1
             )
-            student_id = cs[0]["student_id"] if cs else None
-            class_id = cs[0]["class_id"] if cs else None
-            student = frappe.get_all("CRM Student", filters={"name": student_id}, fields=["student_name", "student_code"], limit_page_length=1)
             student_name = student[0]["student_name"] if student else None
             student_code = student[0]["student_code"] if student else None
             participants.append({
