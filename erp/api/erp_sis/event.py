@@ -272,16 +272,19 @@ def create_event():
         # Normalize and enforce a valid default status based on DocType meta to avoid option mismatch
         try:
             if status_field and status_field.options:
-                allowed_statuses = [opt for opt in status_field.options.split('\n') if opt is not None and opt != ""]
-                default_status = status_field.default if status_field.default else (allowed_statuses[0] if allowed_statuses else None)
-                if default_status and (default_status in allowed_statuses):
-                    event_data["status"] = default_status
-                    debug_info["status_applied"] = default_status
+                # Use splitlines() to handle CRLF/CR safely
+                allowed_statuses = [opt for opt in status_field.options.splitlines() if opt is not None and opt != ""]
+                # Force using the first allowed option to avoid any default mismatch
+                forced_status = allowed_statuses[0] if len(allowed_statuses) > 0 else None
+                if forced_status:
+                    event_data["status"] = forced_status
+                    debug_info["status_applied"] = forced_status
+                    debug_info["status_value_repr"] = repr(forced_status)
+                    debug_info["allowed_statuses_repr"] = [repr(x) for x in allowed_statuses]
                 else:
                     debug_info["status_applied_error"] = {
-                        "reason": "default_not_in_options",
-                        "default": default_status,
-                        "allowed": allowed_statuses
+                        "reason": "no_allowed_statuses",
+                        "options_raw": status_field.options
                     }
         except Exception as _e:
             debug_info["status_apply_exception"] = str(_e)
