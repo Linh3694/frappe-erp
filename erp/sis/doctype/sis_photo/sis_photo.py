@@ -237,11 +237,14 @@ def upload_single_photo():
             frappe.throw("File size exceeds 10MB limit")
 
         # Get parameters - try parsed FormData first, then fall back to form_dict
-        photo_type = parsed_params.get("photo_type") or frappe.form_dict.get("photo_type")
-        campus_id = parsed_params.get("campus_id") or frappe.form_dict.get("campus_id")
-        school_year_id = parsed_params.get("school_year_id") or frappe.form_dict.get("school_year_id")
-        student_code = parsed_params.get("student_code") or frappe.form_dict.get("student_code")
-        class_name = parsed_params.get("class_name") or frappe.form_dict.get("class_name")
+        def _norm(v):
+            return (v or "").strip()
+
+        photo_type = _norm(parsed_params.get("photo_type") or frappe.form_dict.get("photo_type")).lower()
+        campus_id = _norm(parsed_params.get("campus_id") or frappe.form_dict.get("campus_id"))
+        school_year_id = _norm(parsed_params.get("school_year_id") or frappe.form_dict.get("school_year_id"))
+        student_code = _norm(parsed_params.get("student_code") or frappe.form_dict.get("student_code"))
+        class_name = _norm(parsed_params.get("class_name") or frappe.form_dict.get("class_name"))
 
         frappe.logger().info(f"Final parameters - photo_type: {photo_type}, campus_id: {campus_id}, school_year_id: {school_year_id}, student_code: {student_code}, class_name: {class_name}")
 
