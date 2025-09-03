@@ -335,6 +335,33 @@ def create_event():
             frappe.db.commit()
             debug_info["schedules_created"] = created_schedule_names
 
+        # Prepare normalized default status for Event Student to avoid option mismatch
+        event_student_status_default = None
+        try:
+            es_meta = frappe.get_meta("SIS Event Student")
+            es_status_field = es_meta.get_field("status")
+            if es_status_field and es_status_field.options:
+                es_options_raw = es_status_field.options
+                es_parts = es_options_raw.split("\\\\n") if "\\\\n" in es_options_raw else []
+                if not es_parts or len(es_parts) == 1:
+                    es_parts = es_options_raw.split("\\n") if "\\n" in es_options_raw else es_parts
+                if not es_parts or len(es_parts) == 1:
+                    es_parts = es_options_raw.splitlines()
+                es_allowed = [opt.strip() for opt in es_parts if opt and opt.strip()]
+                # Prefer a token equal to 'pending' (case-insensitive), else first option
+                pending_match = None
+                for tok in es_allowed:
+                    if tok.strip().lower() == "pending":
+                        pending_match = tok
+                        break
+                event_student_status_default = pending_match or (es_allowed[0] if es_allowed else None)
+            debug_info["event_student_status_meta"] = {
+                "options_raw": es_status_field.options if es_status_field else None,
+                "chosen_default": event_student_status_default
+            }
+        except Exception as _e:
+            debug_info["event_student_status_meta_error"] = str(_e)
+
         # Create event student records for participants
         try:
             student_ids = data.get('student_ids') or []
@@ -356,7 +383,7 @@ def create_event():
                             "campus_id": campus_id,
                             "event_id": event.name,
                             "class_student_id": class_student_id,
-                            "status": "pending"
+                            "status": event_student_status_default or "pending"
                         })
                         doc.insert()
                         created_event_students.append(doc.name)
