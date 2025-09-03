@@ -256,7 +256,7 @@ def upload_single_photo():
             frappe.throw("Class name is required for class photos")
 
         # Download and process the uploaded file
-        file_path = file_doc.get_fullpath()
+        file_path = file_doc.get_full_path()
         if not os.path.exists(file_path):
             frappe.throw("File not found on server")
 
