@@ -45,6 +45,14 @@ def create_event():
         debug_info["final_data_keys"] = list(data.keys())
         debug_info["final_data_types"] = [(k, str(type(v))) for k, v in data.items()]
 
+        # If frontend sends status, record it and remove to avoid conflicts; rely on DocType default instead
+        if "status" in data:
+            debug_info["incoming_status"] = data.get("status")
+            try:
+                del data["status"]
+            except Exception:
+                pass
+
         # Try to parse JSON fields if they exist as strings
         parsing_info = {}
         if data.get('dateSchedules'):
@@ -249,6 +257,17 @@ def create_event():
                         "event_date": event_date,
                         "schedule_ids": schedule_ids_str
                     })
+
+        # Capture status field meta for debugging
+        try:
+            meta = frappe.get_meta("SIS Event")
+            status_field = meta.get_field("status")
+            debug_info["status_meta"] = {
+                "options": status_field.options if status_field else None,
+                "default": status_field.default if status_field else None
+            }
+        except Exception as _e:
+            debug_info["status_meta_error"] = str(_e)
 
         event = frappe.get_doc(event_data)
 
