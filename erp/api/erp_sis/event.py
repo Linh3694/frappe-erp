@@ -269,6 +269,23 @@ def create_event():
         except Exception as _e:
             debug_info["status_meta_error"] = str(_e)
 
+        # Normalize and enforce a valid default status based on DocType meta to avoid option mismatch
+        try:
+            if status_field and status_field.options:
+                allowed_statuses = [opt for opt in status_field.options.split('\n') if opt is not None and opt != ""]
+                default_status = status_field.default if status_field.default else (allowed_statuses[0] if allowed_statuses else None)
+                if default_status and (default_status in allowed_statuses):
+                    event_data["status"] = default_status
+                    debug_info["status_applied"] = default_status
+                else:
+                    debug_info["status_applied_error"] = {
+                        "reason": "default_not_in_options",
+                        "default": default_status,
+                        "allowed": allowed_statuses
+                    }
+        except Exception as _e:
+            debug_info["status_apply_exception"] = str(_e)
+
         event = frappe.get_doc(event_data)
 
         # Set homeroom teacher if provided
