@@ -5,6 +5,7 @@ import frappe
 from frappe.model.document import Document
 import os
 from frappe.utils import now, get_fullname
+from frappe.utils.file_manager import get_file_path
 import base64
 import io
 from PIL import Image, ImageOps, ImageFile
@@ -254,13 +255,22 @@ def upload_single_photo():
         frappe.logger().info(f"📁 File path (get_full_path): {file_path}")
         frappe.logger().info(f"📁 File exists at get_full_path: {os.path.exists(file_path)}")
 
+        # Robust fallback via Frappe file manager (handles private/public & name/url)
+        try:
+            fm_path = get_file_path(getattr(file_doc, 'name', None) or getattr(file_doc, 'file_name', None) or getattr(file_doc, 'file_url', None) or '')
+            if fm_path and os.path.exists(fm_path):
+                actual_file_path = fm_path
+                frappe.logger().info(f"✅ Using file path from file_manager: {actual_file_path}")
+        except Exception as e:
+            frappe.logger().warning(f"file_manager.get_file_path fallback failed: {str(e)}")
+
         # Try alternative path construction
         alt_file_path = frappe.get_site_path("public", "files", file_doc.file_name)
         frappe.logger().info(f"📁 Alternative file path: {alt_file_path}")
         frappe.logger().info(f"📁 File exists at alt path: {os.path.exists(alt_file_path)}")
 
         # Try with sanitized filename from file_url
-        actual_file_path = None
+        actual_file_path = locals().get('actual_file_path', None)
         if hasattr(file_doc, 'file_url') and file_doc.file_url:
             sanitized_filename = file_doc.file_url.replace('/files/', '')
             sanitized_path = frappe.get_site_path("public", "files", sanitized_filename)
