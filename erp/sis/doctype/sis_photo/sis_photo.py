@@ -138,11 +138,24 @@ def upload_zip_photos():
 def upload_single_photo():
     """Upload single photo for student or class"""
     try:
-        # Get uploaded file
-        if not frappe.form_dict.get("file_id"):
+        # Get uploaded file - try both form_dict and request data
+        file_id = frappe.form_dict.get("file_id")
+
+        # If not in form_dict, try to get from request body (for FormData)
+        if not file_id and frappe.request and frappe.request.data:
+            try:
+                import json
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                # For FormData, parameters might be in form fields
+                # Try to get from form_dict again as Frappe should populate it
+                file_id = frappe.form_dict.get("file_id")
+            except Exception:
+                pass
+
+        if not file_id:
             frappe.throw("File ID is required")
 
-        file_doc = frappe.get_doc("File", frappe.form_dict.file_id)
+        file_doc = frappe.get_doc("File", file_id)
         if not file_doc:
             frappe.throw("File not found")
 
