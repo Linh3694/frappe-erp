@@ -310,20 +310,12 @@ def upload_single_photo():
                 frappe.throw(f"Photo already exists for student {student_code}: {existing_photo[0].name}")
 
         else:  # class
-            # Find class by name/title
+            # Class photo: filename must equal class name exactly
+            # Ensure class_name provided matches SIS Class.name
             class_record = frappe.get_all("SIS Class",
-                filters={
-                    "name": ["like", f"%{class_name}%"]
-                },
+                filters={"name": class_name},
                 fields=["name", "title"]
             )
-
-            # If exact match not found, try title
-            if not class_record:
-                class_record = frappe.get_all("SIS Class",
-                    filters={"title": class_name},
-                    fields=["name", "title"]
-                )
 
             if not class_record:
                 frappe.throw(f"Class with name {class_name} not found")
