@@ -92,7 +92,9 @@ def create_event():
         debug_info["parsed_data"] = dict(data)
 
         # Required fields validation - support both old and new format
-        has_old_format = data.get('start_time') and data.get('end_time')
+        start_time_value = data.get('start_time')
+        end_time_value = data.get('end_time')
+        has_old_format = start_time_value and end_time_value
 
         # Fix validation logic for date schedules
         date_schedules = data.get('date_schedules') or data.get('dateSchedules')
@@ -101,6 +103,10 @@ def create_event():
         debug_info["validation_check"] = {
             "has_old_format": has_old_format,
             "has_new_format": has_new_format,
+            "start_time_value": start_time_value,
+            "end_time_value": end_time_value,
+            "start_time_type": str(type(start_time_value)),
+            "end_time_type": str(type(end_time_value)),
             "date_schedules_value": date_schedules,
             "date_schedules_type": str(type(date_schedules)),
             "data_date_schedules": data.get('date_schedules'),
