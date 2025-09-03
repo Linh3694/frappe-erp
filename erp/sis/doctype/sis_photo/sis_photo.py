@@ -210,7 +210,7 @@ def upload_single_photo():
         with open(file_path, 'rb') as f:
             original_content = f.read()
 
-        # Convert to JPEG format with fallbacks (more broadly compatible than WebP)
+        # Convert to WebP format with fallbacks (modern format with good compression)
         try:
 
             # Open image with PIL
@@ -221,32 +221,32 @@ def upload_single_photo():
             if image.mode != "RGB":
                 image = image.convert("RGB")
 
-            # Create JPEG content with robust parameters
-            jpeg_buffer = io.BytesIO()
-            image.save(jpeg_buffer, format='JPEG', quality=85, optimize=True, progressive=True)
-            candidate_content = jpeg_buffer.getvalue()
+            # Create WebP content with robust parameters
+            webp_buffer = io.BytesIO()
+            image.save(webp_buffer, format='WebP', quality=85, optimize=True)
+            candidate_content = webp_buffer.getvalue()
 
             # Sanity check: ensure generated WebP is readable
             try:
                 Image.open(io.BytesIO(candidate_content)).verify()
             except Exception as ver_err:
-                raise Exception(f"Invalid JPEG after convert: {ver_err}")
+                raise Exception(f"Invalid WebP after convert: {ver_err}")
 
-            # Use JPEG result
+            # Use WebP result
             original_filename = file_doc.file_name
             filename_without_ext = os.path.splitext(original_filename)[0]
-            final_filename = f"{filename_without_ext}.jpg"
+            final_filename = f"{filename_without_ext}.webp"
             final_content = candidate_content
 
 
         except Exception as e:
-            # Fallback: keep original file content/extension if JPEG conversion fails for any reason
-            frappe.logger().warning(f"❌ JPEG conversion failed, fallback to original file. Reason: {str(e)}")
+            # Fallback: keep original file content/extension if WebP conversion fails for any reason
+            frappe.logger().warning(f"❌ WebP conversion failed, fallback to original file. Reason: {str(e)}")
             original_filename = file_doc.file_name
             name_no_ext, ext = os.path.splitext(original_filename)
             ext = (ext or '').lower()
             if ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                ext = '.jpg'
+                ext = '.webp'  # Default to webp instead of jpg
             final_filename = f"{name_no_ext}{ext}"
             final_content = original_content
 
