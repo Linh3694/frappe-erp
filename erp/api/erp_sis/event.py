@@ -94,7 +94,7 @@ def create_event():
         # Required fields validation - support both old and new format
         start_time_value = data.get('start_time')
         end_time_value = data.get('end_time')
-        has_old_format = start_time_value and end_time_value
+        has_old_format = bool(start_time_value and end_time_value)
 
         # Fix validation logic for date schedules
         date_schedules = data.get('date_schedules') or data.get('dateSchedules')
