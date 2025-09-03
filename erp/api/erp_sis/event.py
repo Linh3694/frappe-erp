@@ -190,17 +190,24 @@ def create_event():
         current_user = frappe.session.user
         teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
 
+        debug_info["teacher_lookup"] = {
+            "current_user": current_user,
+            "teacher_found": teacher,
+            "teacher_type": str(type(teacher))
+        }
+
         if not teacher:
+            debug_info["teacher_lookup_error"] = "No teacher found for current user"
             return error_response("Only teachers can create events", debug_info=debug_info)
 
-        # Create event
+        # Create event - ensure create_by is a valid SIS Teacher
         event_data = {
             "doctype": "SIS Event",
             "campus_id": campus_id,
             "title": data.get("title"),
             "description": data.get("description"),
             "status": "pending",
-            "create_by": teacher,
+            "create_by": teacher,  # This should be a valid SIS Teacher name
             "create_at": frappe.utils.now(),
         }
 
