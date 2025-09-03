@@ -150,19 +150,23 @@ def upload_single_photo():
                 frappe.logger().info(f"request.data: {frappe.request.data[:200] if frappe.request.data else 'None'}")
         # Get uploaded file - try both form_dict and request data
         file_id = frappe.form_dict.get("file_id")
+        frappe.logger().info(f"file_id from form_dict: '{file_id}'")
 
         # If not in form_dict, try to get from request body (for FormData)
         if not file_id and frappe.request and frappe.request.data:
             try:
                 import json
                 body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                frappe.logger().info(f"request body: {body[:500]}")
                 # For FormData, parameters might be in form fields
                 # Try to get from form_dict again as Frappe should populate it
                 file_id = frappe.form_dict.get("file_id")
-            except Exception:
-                pass
+                frappe.logger().info(f"file_id after checking request body: '{file_id}'")
+            except Exception as e:
+                frappe.logger().error(f"Error parsing request body: {str(e)}")
 
         if not file_id:
+            frappe.logger().error("File ID is required - not found in any source")
             frappe.throw("File ID is required")
 
         file_doc = frappe.get_doc("File", file_id)
