@@ -255,13 +255,8 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
 
 
 @frappe.whitelist(allow_guest=False)
-    def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None, student_code=None, class_name=None):
-    """Remove a student from a class
-
-    Accepts either:
-    - name: SIS Class Student docname, or
-    - (class_id, student_id, school_year_id [, class_type]) as composite key
-    """
+def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None, student_code=None, class_name=None):
+    """Remove a student from a class"""
     try:
         # Get parameters from form_dict / request args
         form = frappe.local.form_dict or {}
