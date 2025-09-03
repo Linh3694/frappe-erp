@@ -7,7 +7,10 @@ import os
 from frappe.utils import now, get_fullname
 import base64
 import io
-from PIL import Image
+from PIL import Image, ImageOps, ImageFile
+
+# Allow loading truncated images to avoid conversion failures on slightly corrupted input files
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class SISPhoto(Document):
@@ -253,27 +256,49 @@ def upload_single_photo():
         with open(file_path, 'rb') as f:
             original_content = f.read()
 
-        # Convert to WebP format
+        # Convert to WebP format with fallbacks
         try:
+            frappe.logger().info(f"🔄 Converting image to WebP: {file_doc.file_name}, size: {len(original_content)} bytes")
+
             # Open image with PIL
-            image = Image.open(io.BytesIO(original_content))
+            src_image = Image.open(io.BytesIO(original_content))
+            frappe.logger().info(f"✅ Image opened: mode={src_image.mode}, size={src_image.size}, format={src_image.format}")
 
-            # Convert to RGB if necessary (for PNG with transparency)
-            if image.mode in ("RGBA", "LA", "P"):
+            # Normalize orientation using EXIF and force RGB for all modes (handles CMYK, P, LA, RGBA, etc.)
+            image = ImageOps.exif_transpose(src_image)
+            if image.mode != "RGB":
                 image = image.convert("RGB")
+                frappe.logger().info("🔄 Converted to RGB mode")
 
-            # Create WebP content
+            # Create WebP content with robust parameters
             webp_buffer = io.BytesIO()
-            image.save(webp_buffer, format='WebP', quality=85)
-            webp_content = webp_buffer.getvalue()
+            image.save(webp_buffer, format='WEBP', quality=85, method=6, optimize=True)
+            candidate_content = webp_buffer.getvalue()
 
-            # Create new filename with .webp extension
+            # Sanity check: ensure generated WebP is readable
+            try:
+                Image.open(io.BytesIO(candidate_content)).verify()
+            except Exception as ver_err:
+                raise Exception(f"Invalid WebP after convert: {ver_err}")
+
+            # Use WebP result
             original_filename = file_doc.file_name
             filename_without_ext = os.path.splitext(original_filename)[0]
-            webp_filename = f"{filename_without_ext}.webp"
+            final_filename = f"{filename_without_ext}.webp"
+            final_content = candidate_content
+
+            frappe.logger().info(f"✅ WebP conversion successful: {len(final_content)} bytes -> {final_filename}")
 
         except Exception as e:
-            frappe.throw(f"Error processing image: {str(e)}")
+            # Fallback: keep original file content/extension if WebP conversion fails for any reason
+            frappe.logger().warning(f"❌ WebP conversion failed, fallback to original file. Reason: {str(e)}")
+            original_filename = file_doc.file_name
+            name_no_ext, ext = os.path.splitext(original_filename)
+            ext = (ext or '').lower()
+            if ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                ext = '.jpg'
+            final_filename = f"{name_no_ext}{ext}"
+            final_content = original_content
 
         # Find the appropriate student or class record
         if photo_type == "student":
@@ -321,7 +346,7 @@ def upload_single_photo():
                 "type": photo_type,
                 "school_year_id": school_year_id,
                 "status": "Active",
-                "description": f"Single photo upload: {webp_filename}"
+                "description": f"Single photo upload: {final_filename}"
             }
             photo_doc = frappe.get_doc(payload)
 
@@ -361,10 +386,12 @@ def upload_single_photo():
                     raise
 
             # Create File document for the WebP photo
+            frappe.logger().info(f"📁 Creating File document: {final_filename}, size: {len(final_content)} bytes")
+
             photo_file = frappe.get_doc({
                 "doctype": "File",
-                "file_name": webp_filename,
-                "content": base64.b64encode(webp_content).decode('utf-8'),
+                "file_name": final_filename,
+                "content": base64.b64encode(final_content).decode('utf-8'),
                 "is_private": 0,
                 "attached_to_doctype": "SIS Photo",
                 "attached_to_name": photo_doc.name
@@ -375,9 +402,14 @@ def upload_single_photo():
                 frappe.logger().warning(f"User {user} does not have create permission on File")
                 photo_file.insert(ignore_permissions=True)
                 frappe.db.commit()
+                frappe.logger().info(f"✅ File created (ignore_permissions): {photo_file.name}")
             else:
                 photo_file.insert()
                 frappe.db.commit()
+                frappe.logger().info(f"✅ File created: {photo_file.name}")
+
+            frappe.logger().info(f"📁 File URL: {photo_file.file_url}")
+            frappe.logger().info(f"📁 File path: {photo_file.file_path if hasattr(photo_file, 'file_path') else 'N/A'}")
 
             # Update photo record with file reference
             photo_doc.photo = photo_file.file_url
@@ -388,6 +420,21 @@ def upload_single_photo():
             else:
                 photo_doc.save()
                 frappe.db.commit()
+
+            # Debug logging for file URLs and existence
+            frappe.logger().info(f"Photo uploaded successfully: photo_id={photo_doc.name}, file_url={photo_file.file_url}, photo_path={photo_doc.photo}")
+
+            # Check if file actually exists
+            try:
+                file_path = photo_file.get_fullpath()
+                if os.path.exists(file_path):
+                    frappe.logger().info(f"✅ File exists at: {file_path}")
+                    file_size = os.path.getsize(file_path)
+                    frappe.logger().info(f"✅ File size: {file_size} bytes")
+                else:
+                    frappe.logger().error(f"❌ File NOT found at: {file_path}")
+            except Exception as file_check_error:
+                frappe.logger().error(f"❌ Error checking file existence: {str(file_check_error)}")
 
             return {
                 "success": True,
@@ -437,7 +484,6 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             limit=int(limit)
         )
 
-        # Clean up null values to prevent validation errors
         # Convert null to undefined for optional fields (Zod expects undefined, not null)
         for photo in photos:
             if photo.get("class_id") is None:
