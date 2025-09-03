@@ -321,9 +321,12 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
             if class_type:
                 filters['class_type'] = class_type
 
-            if not filters or 'student_id' not in filters or 'school_year_id' not in filters:
+            # Require student_id and at least one scope key (school_year_id or class_id)
+            has_student = 'student_id' in filters
+            has_scope = ('school_year_id' in filters) or ('class_id' in filters)
+            if not (has_student and has_scope):
                 return error_response(
-                    message="Missing required parameter: name or (student_id|student_code, school_year_id|class_name)",
+                    message="Missing required parameter: name or (student_id|student_code, school_year_id|class_id)",
                     code="MISSING_KEY"
                 )
 
