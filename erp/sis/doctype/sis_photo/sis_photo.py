@@ -419,17 +419,23 @@ def upload_single_photo():
                     photo_file.reload()
                 except Exception:
                     pass
-            photo_doc.photo = getattr(photo_file, 'file_url', None) or f"/files/{final_filename}"
-            if not frappe.has_permission("SIS Photo", "write", user=user):
-                frappe.logger().warning(f"User {user} does not have write permission on SIS Photo")
-                photo_doc.save(ignore_permissions=True)
+            photo_url = getattr(photo_file, 'file_url', None) or f"/files/{final_filename}"
+
+            # Persist directly to DB to avoid any client-side cache/state issues
+            try:
+                photo_doc.db_set('photo', photo_url, update_modified=False)
                 frappe.db.commit()
-            else:
-                photo_doc.save()
+            except Exception as set_err:
+                frappe.logger().warning(f"db_set photo failed, fallback to doc.save(): {set_err}")
+                photo_doc.photo = photo_url
+                if not frappe.has_permission("SIS Photo", "write", user=user):
+                    photo_doc.save(ignore_permissions=True)
+                else:
+                    photo_doc.save()
                 frappe.db.commit()
 
             # Debug logging for file URLs and existence
-            frappe.logger().info(f"Photo uploaded successfully: photo_id={photo_doc.name}, file_url={photo_file.file_url}, photo_path={photo_doc.photo}")
+            frappe.logger().info(f"Photo uploaded successfully: photo_id={photo_doc.name}, file_url={photo_url}, photo_path={photo_doc.photo}")
 
             # Check if file actually exists
             try:
@@ -447,7 +453,7 @@ def upload_single_photo():
                 "success": True,
                 "message": "Photo uploaded successfully",
                 "photo_id": photo_doc.name,
-                "file_url": photo_file.file_url
+                "file_url": photo_url
             }
 
         except Exception as e:
