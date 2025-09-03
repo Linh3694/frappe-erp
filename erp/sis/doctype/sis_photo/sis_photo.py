@@ -151,6 +151,7 @@ def upload_single_photo():
         # Get uploaded file - try both form_dict and request data
         file_id = frappe.form_dict.get("file_id")
         frappe.logger().info(f"file_id from form_dict: '{file_id}'")
+        frappe.logger().info(f"All form_dict parameters: {dict(frappe.form_dict)}")
 
         # If not in form_dict, try to get from request body (for FormData)
         if not file_id and frappe.request and frappe.request.data:
