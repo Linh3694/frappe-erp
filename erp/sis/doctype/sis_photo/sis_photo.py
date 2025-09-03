@@ -25,55 +25,23 @@ class SISPhoto(Document):
             frappe.throw("Class ID is required for class photos")
 
 
-
-
-
 @frappe.whitelist()
 def upload_single_photo():
     """Upload single photo for student or class"""
     try:
-        # Debug logging
-        frappe.logger().info(f"upload_single_photo called")
-        frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys())}")
-        frappe.logger().info(f"form_dict: {dict(frappe.form_dict)}")
-
-        # Check all possible sources of request data
-        if frappe.request:
-            frappe.logger().info(f"Request method: {frappe.request.method}")
-            frappe.logger().info(f"Request headers: {dict(frappe.request.headers)}")
-
-            if hasattr(frappe.request, 'form') and frappe.request.form:
-                frappe.logger().info(f"request.form: {dict(frappe.request.form)}")
-
-            if hasattr(frappe.request, 'files') and frappe.request.files:
-                frappe.logger().info(f"request.files: {list(frappe.request.files.keys())}")
-
-            if hasattr(frappe.request, 'args') and frappe.request.args:
-                frappe.logger().info(f"request.args: {dict(frappe.request.args)}")
-
-            if frappe.request.data:
-                frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
-                if isinstance(frappe.request.data, bytes):
-                    data_preview = frappe.request.data[:300].decode('utf-8', errors='ignore')
-                    frappe.logger().info(f"request.data (first 300 chars): {data_preview}")
-                else:
-                    frappe.logger().info(f"request.data: {str(frappe.request.data)[:300] if frappe.request.data else 'None'}")
         # Initialize parsed parameters
         parsed_params = {}
 
         # Get uploaded file - try multiple sources
         file_id = frappe.form_dict.get("file_id")
-        frappe.logger().info(f"file_id from form_dict: '{file_id}'")
 
         # Try request.form (Frappe's parsed FormData)
         if not file_id and hasattr(frappe.request, 'form'):
             file_id = frappe.request.form.get("file_id")
-            frappe.logger().info(f"file_id from request.form: '{file_id}'")
 
         # Try request.args (URL parameters)
         if not file_id and hasattr(frappe.request, 'args'):
             file_id = frappe.request.args.get("file_id")
-            frappe.logger().info(f"file_id from request.args: '{file_id}'")
 
             # Also get other parameters from URL args
             if not parsed_params.get("photo_type"):
@@ -87,13 +55,11 @@ def upload_single_photo():
             if not parsed_params.get("class_name"):
                 parsed_params["class_name"] = frappe.request.args.get("class_name")
 
-            frappe.logger().info(f"Parameters from URL args: {parsed_params}")
 
         # Try request.files (uploaded files)
         if not file_id and hasattr(frappe.request, 'files'):
             # For file uploads, file_id might be the file name or ID
             for file_key, file_obj in frappe.request.files.items():
-                frappe.logger().info(f"Found uploaded file: {file_key} = {file_obj.filename}")
                 if file_key == "file" or file_key == "file_id":
                     # Get the File doctype record for this uploaded file
                     try:
@@ -105,7 +71,6 @@ def upload_single_photo():
                         )
                         if file_docs:
                             file_id = file_docs[0].name
-                            frappe.logger().info(f"Found File record: {file_id}")
                         break
                     except Exception as e:
                         frappe.logger().error(f"Error finding File record: {str(e)}")
@@ -140,8 +105,6 @@ def upload_single_photo():
         student_code = _norm(parsed_params.get("student_code") or frappe.form_dict.get("student_code"))
         class_name = _norm(parsed_params.get("class_name") or frappe.form_dict.get("class_name"))
 
-        frappe.logger().info(f"Final parameters - photo_type: {photo_type}, campus_id: {campus_id}, school_year_id: {school_year_id}, student_code: {student_code}, class_name: {class_name}")
-
         if not photo_type or not campus_id or not school_year_id:
             frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
 
@@ -158,7 +121,6 @@ def upload_single_photo():
             if not allowed_options:
                 allowed_options = ["student", "class"]
 
-            frappe.logger().info(f"SIS Photo upload: parsed options={allowed_options}, input photo_type='{photo_type}'")
 
             # Find canonical option value by case-insensitive match
             matched_option = None
@@ -194,7 +156,6 @@ def upload_single_photo():
         try:
             # Try to find campus by name first
             campus_doc = frappe.get_doc("SIS Campus", campus_id)
-            frappe.logger().info(f"Found campus: {campus_doc.name} - {campus_doc.title_vn}")
             campus_found = True
         except frappe.DoesNotExistError:
             # Try alternative formats
@@ -207,12 +168,10 @@ def upload_single_photo():
 
             alternative_formats = [fmt for fmt in alternative_formats if fmt]
 
-            frappe.logger().info(f"Trying alternative campus formats: {alternative_formats}")
 
             for alt_campus_id in alternative_formats:
                 try:
                     campus_doc = frappe.get_doc("SIS Campus", alt_campus_id)
-                    frappe.logger().info(f"Found campus with alternative ID: {alt_campus_id} - {campus_doc.title_vn}")
                     campus_id = alt_campus_id  # Update to correct format
                     campus_found = True
                     break
@@ -221,20 +180,16 @@ def upload_single_photo():
 
         # If campus still not found, always use first available campus as fallback
         if not campus_found:
-            frappe.logger().info(f"Campus not found, trying fallback. Original: '{original_campus_id}'")
-
             # Try to get ALL campuses first to see what's available
             all_campuses = frappe.get_all("SIS Campus", fields=["name", "title_vn", "title_en"], limit=20)
             if all_campuses and len(all_campuses) > 0:
                 first_campus = all_campuses[0]
                 campus_id = first_campus.get('name')
                 campus_title = first_campus.get('title_vn') or first_campus.get('title_en', 'Unknown')
-                frappe.logger().info(f"Selected first campus: {campus_id} - {campus_title}")
 
                 # Validate that this campus actually exists
                 try:
                     test_doc = frappe.get_doc("SIS Campus", campus_id)
-                    frappe.logger().info(f"Successfully validated campus: {test_doc.name}")
                 except Exception as e:
                     frappe.logger().error(f"Failed to validate campus {campus_id}: {str(e)}")
                     # Try second campus if first fails
@@ -242,7 +197,6 @@ def upload_single_photo():
                         second_campus = all_campuses[1]
                         campus_id = second_campus.get('name')
                         campus_title = second_campus.get('title_vn') or second_campus.get('title_en', 'Unknown')
-                        frappe.logger().info(f"Trying second campus: {campus_id} - {campus_title}")
             else:
                 frappe.logger().error("No campuses found in system!")
                 frappe.throw(f"Campus '{original_campus_id}' not found and no fallback available. No campuses exist in system.")
@@ -258,17 +212,14 @@ def upload_single_photo():
 
         # Convert to JPEG format with fallbacks (more broadly compatible than WebP)
         try:
-            frappe.logger().info(f"🔄 Converting image to JPEG: {file_doc.file_name}, size: {len(original_content)} bytes")
 
             # Open image with PIL
             src_image = Image.open(io.BytesIO(original_content))
-            frappe.logger().info(f"✅ Image opened: mode={src_image.mode}, size={src_image.size}, format={src_image.format}")
 
             # Normalize orientation using EXIF and force RGB for all modes (handles CMYK, P, LA, RGBA, etc.)
             image = ImageOps.exif_transpose(src_image)
             if image.mode != "RGB":
                 image = image.convert("RGB")
-                frappe.logger().info("🔄 Converted to RGB mode")
 
             # Create JPEG content with robust parameters
             jpeg_buffer = io.BytesIO()
@@ -287,7 +238,6 @@ def upload_single_photo():
             final_filename = f"{filename_without_ext}.jpg"
             final_content = candidate_content
 
-            frappe.logger().info(f"✅ JPEG conversion successful: {len(final_content)} bytes -> {final_filename}")
 
         except Exception as e:
             # Fallback: keep original file content/extension if JPEG conversion fails for any reason
@@ -358,7 +308,6 @@ def upload_single_photo():
 
             # Check user permissions before creating
             user = frappe.session.user
-            frappe.logger().info(f"Creating SIS Photo for user: {user}")
 
             # Always bypass validation for 'type' to avoid Select mismatch issues
             photo_doc.flags.ignore_validate = True
@@ -385,9 +334,6 @@ def upload_single_photo():
                 else:
                     raise
 
-            # Create File document for the WebP photo
-            frappe.logger().info(f"📁 Creating File document: {final_filename}, size: {len(final_content)} bytes")
-
             photo_file = frappe.get_doc({
                 "doctype": "File",
                 "file_name": final_filename,
@@ -401,30 +347,25 @@ def upload_single_photo():
 
             # Check File creation permissions
             if not frappe.has_permission("File", "create", user=user):
-                frappe.logger().warning(f"User {user} does not have create permission on File")
                 photo_file.insert(ignore_permissions=True)
                 frappe.db.commit()
-                frappe.logger().info(f"✅ File created (ignore_permissions): {photo_file.name}")
             else:
                 photo_file.insert()
                 frappe.db.commit()
-                frappe.logger().info(f"✅ File created: {photo_file.name}")
 
-            frappe.logger().info(f"📁 File URL: {photo_file.file_url}")
-            frappe.logger().info(f"📁 File path: {photo_file.file_path if hasattr(photo_file, 'file_path') else 'N/A'}")
-
-            # Update photo record with file reference (ensure file_url exists)
             if not getattr(photo_file, 'file_url', None):
                 try:
                     photo_file.reload()
                 except Exception:
                     pass
             photo_url = getattr(photo_file, 'file_url', None) or f"/files/{final_filename}"
-
-            # Persist directly to DB to avoid any client-side cache/state issues
             try:
-                photo_doc.db_set('photo', photo_url, update_modified=False)
+                photo_doc.db_set('photo', photo_url, update_modified=True)
+                frappe.db.set_value("SIS Photo", photo_doc.name, "photo", photo_url, update_modified=True)
                 frappe.db.commit()
+                # Verify persistence
+                persisted_photo = frappe.db.get_value("SIS Photo", photo_doc.name, "photo")
+                frappe.logger().info(f"🔎 Persisted photo for {photo_doc.name}: {persisted_photo}")
             except Exception as set_err:
                 frappe.logger().warning(f"db_set photo failed, fallback to doc.save(): {set_err}")
                 photo_doc.photo = photo_url
@@ -433,17 +374,11 @@ def upload_single_photo():
                 else:
                     photo_doc.save()
                 frappe.db.commit()
-
-            # Debug logging for file URLs and existence
-            frappe.logger().info(f"Photo uploaded successfully: photo_id={photo_doc.name}, file_url={photo_url}, photo_path={photo_doc.photo}")
-
             # Check if file actually exists
             try:
                 file_path = photo_file.get_fullpath()
                 if os.path.exists(file_path):
-                    frappe.logger().info(f"✅ File exists at: {file_path}")
                     file_size = os.path.getsize(file_path)
-                    frappe.logger().info(f"✅ File size: {file_size} bytes")
                 else:
                     frappe.logger().error(f"❌ File NOT found at: {file_path}")
             except Exception as file_check_error:
