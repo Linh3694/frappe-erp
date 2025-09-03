@@ -1,0 +1,105 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-EVENT-DATE-SCHEDULE-{#####}",
+ "beta": 0,
+ "creation": "2024-12-20 10:00:00.000000",
+ "custom": 0,
+ "description": "Date and schedule information for SIS Events",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "event_id",
+  "event_date",
+  "schedule_ids",
+  "create_at",
+  "create_by",
+  "update_at",
+  "update_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "event_id",
+   "fieldtype": "Link",
+   "label": "Event",
+   "options": "SIS Event",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "event_date",
+   "fieldtype": "Date",
+   "label": "Event Date",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "schedule_ids",
+   "fieldtype": "Small Text",
+   "label": "Schedule IDs",
+   "description": "Comma-separated list of timetable column IDs",
+   "reqd": 1
+  },
+  {
+   "fieldname": "create_at",
+   "fieldtype": "Datetime",
+   "label": "Created At",
+   "read_only": 1,
+   "default": "Today"
+  },
+  {
+   "fieldname": "create_by",
+   "fieldtype": "Link",
+   "label": "Created By",
+   "options": "SIS Teacher",
+   "read_only": 1
+  },
+  {
+   "fieldname": "update_at",
+   "fieldtype": "Datetime",
+   "label": "Updated At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "update_by",
+   "fieldtype": "Link",
+   "label": "Updated By",
+   "options": "SIS Teacher",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-12-20 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Event Date Schedule",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "event_id",
+ "track_changes": 1
+}

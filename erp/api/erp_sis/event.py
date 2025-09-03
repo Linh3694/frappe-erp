@@ -21,8 +21,26 @@ def create_event():
     try:
         data = frappe.local.form_dict
 
-        # Required fields validation
-        required_fields = ['title', 'start_time', 'end_time']
+        # Required fields validation - support both old and new format
+        has_old_format = data.get('start_time') and data.get('end_time')
+        has_new_format = data.get('date_schedules') or data.get('dateSchedules')
+
+        if not has_old_format and not has_new_format:
+            return validation_error_response("Validation failed", {
+                "time_info": ["Either start_time/end_time or dateSchedules must be provided"]
+            })
+
+        if has_old_format and has_new_format:
+            return validation_error_response("Validation failed", {
+                "time_info": ["Cannot use both old format (start_time/end_time) and new format (dateSchedules) simultaneously"]
+            })
+
+        required_fields = ['title']
+        if has_old_format:
+            required_fields.extend(['start_time', 'end_time'])
+        elif has_new_format:
+            required_fields.append('dateSchedules')
+
         missing_fields = [field for field in required_fields if not data.get(field)]
 
         if missing_fields:
@@ -43,18 +61,38 @@ def create_event():
             return forbidden_response("Only teachers can create events")
 
         # Create event
-        event = frappe.get_doc({
+        event_data = {
             "doctype": "SIS Event",
             "campus_id": campus_id,
             "title": data.get("title"),
             "description": data.get("description"),
-            "start_time": data.get("start_time"),
-            "end_time": data.get("end_time"),
-            "timetable_column_id": data.get("timetable_column_id"),
             "status": "pending",
             "create_by": teacher,
             "create_at": frappe.utils.now(),
-        })
+        }
+
+        # Handle old format
+        if has_old_format:
+            event_data.update({
+                "start_time": data.get("start_time"),
+                "end_time": data.get("end_time"),
+                "timetable_column_id": data.get("timetable_column_id"),
+            })
+
+        # Handle new format
+        elif has_new_format:
+            date_schedules = data.get('dateSchedules') or data.get('date_schedules')
+            if date_schedules:
+                # Prepare date schedules for creation
+                processed_schedules = []
+                for ds in date_schedules:
+                    processed_schedules.append({
+                        "event_date": ds.get('date'),
+                        "schedule_ids": ','.join(ds.get('scheduleIds', []))
+                    })
+                event_data["date_schedules"] = processed_schedules
+
+        event = frappe.get_doc(event_data)
 
         # Set homeroom teacher if provided
         if data.get("homeroom_teacher_id"):
@@ -245,6 +283,38 @@ def get_events():
             order_by="create_at desc"
         )
 
+        # Add date schedules information for each event
+        for event in events:
+            date_schedules = frappe.get_all(
+                "SIS Event Date Schedule",
+                filters={"event_id": event.name},
+                fields=["event_date", "schedule_ids"]
+            )
+
+            if date_schedules:
+                # Convert schedule_ids string to array and get schedule details
+                processed_schedules = []
+                for ds in date_schedules:
+                    schedule_ids = ds.schedule_ids.split(',') if ds.schedule_ids else []
+
+                    # Get schedule details
+                    schedules = []
+                    if schedule_ids:
+                        schedule_details = frappe.get_all(
+                            "SIS Timetable Column",
+                            filters={"name": ["in", schedule_ids]},
+                            fields=["name", "period_name", "start_time", "end_time", "period_type"]
+                        )
+                        schedules = schedule_details
+
+                    processed_schedules.append({
+                        "date": ds.event_date,
+                        "scheduleIds": schedule_ids,
+                        "schedules": schedules
+                    })
+
+                event["dateSchedules"] = processed_schedules
+
         # Get total count
         total_count = frappe.db.count("SIS Event", filters=filters)
 
@@ -278,28 +348,65 @@ def create_timetable_override(event):
         if not participants:
             return
 
-        # Get the date from start_time
-        event_date = event.start_time.date()
+        # Handle different date formats
+        if hasattr(event, 'date_schedules') and event.date_schedules:
+            # New format: multiple dates and schedules
+            date_schedule_overrides = []
 
-        # Create override for each participant
-        for participant in participants:
-            # Determine target type and ID
-            student_doc = frappe.get_doc("SIS Student", participant.student)
-            class_id = frappe.db.get_value("SIS Class Student",
-                {"student": participant.student, "status": "Active"}, "parent")
+            for ds in event.date_schedules:
+                event_date = ds.event_date
+                schedule_ids = ds.schedule_ids.split(',') if ds.schedule_ids else []
 
-            if class_id:
-                override = frappe.get_doc({
-                    "doctype": "SIS Timetable Override",
-                    "event_id": event.name,
-                    "date": event_date,
-                    "timetable_column_id": event.timetable_column_id,
-                    "target_type": "Class",
-                    "target_id": class_id,
-                    "subject_id": None,  # Event doesn't have subject
-                    "override_type": "replace"
-                })
-                override.insert()
+                for schedule_id in schedule_ids:
+                    date_schedule_overrides.append({
+                        "date": event_date,
+                        "schedule_id": schedule_id
+                    })
+
+            # Create overrides for each date-schedule combination
+            for override_info in date_schedule_overrides:
+                for participant in participants:
+                    # Determine target type and ID
+                    student_doc = frappe.get_doc("SIS Student", participant.student)
+                    class_id = frappe.db.get_value("SIS Class Student",
+                        {"student": participant.student, "status": "Active"}, "parent")
+
+                    if class_id:
+                        override = frappe.get_doc({
+                            "doctype": "SIS Timetable Override",
+                            "event_id": event.name,
+                            "date": override_info["date"],
+                            "timetable_column_id": override_info["schedule_id"],
+                            "target_type": "Class",
+                            "target_id": class_id,
+                            "subject_id": None,  # Event doesn't have subject
+                            "override_type": "replace"
+                        })
+                        override.insert()
+
+        elif event.start_time and event.timetable_column_id:
+            # Old format: single date and schedule
+            event_date = event.start_time.date()
+
+            # Create override for each participant
+            for participant in participants:
+                # Determine target type and ID
+                student_doc = frappe.get_doc("SIS Student", participant.student)
+                class_id = frappe.db.get_value("SIS Class Student",
+                    {"student": participant.student, "status": "Active"}, "parent")
+
+                if class_id:
+                    override = frappe.get_doc({
+                        "doctype": "SIS Timetable Override",
+                        "event_id": event.name,
+                        "date": event_date,
+                        "timetable_column_id": event.timetable_column_id,
+                        "target_type": "Class",
+                        "target_id": class_id,
+                        "subject_id": None,  # Event doesn't have subject
+                        "override_type": "replace"
+                    })
+                    override.insert()
 
         frappe.db.commit()
 

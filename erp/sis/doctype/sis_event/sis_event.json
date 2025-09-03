@@ -23,6 +23,8 @@
   "start_time",
   "end_time",
   "timetable_column_id",
+  "date_schedules_section",
+  "date_schedules",
   "participants_section",
   "participants",
   "workflow_section",
@@ -81,6 +83,18 @@
    "label": "Timetable Column",
    "options": "SIS Timetable Column",
    "description": "Specific period for this event"
+  },
+  {
+   "fieldname": "date_schedules_section",
+   "fieldtype": "Section Break",
+   "label": "Date & Schedule Information"
+  },
+  {
+   "fieldname": "date_schedules",
+   "fieldtype": "Table",
+   "label": "Date Schedules",
+   "options": "SIS Event Date Schedule",
+   "description": "Multiple dates and schedules for this event"
   },
   {
    "fieldname": "participants_section",
