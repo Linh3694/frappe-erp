@@ -210,45 +210,77 @@ def upload_single_photo():
         with open(file_path, 'rb') as f:
             original_content = f.read()
 
-        # Convert to WebP format with improved error handling and fallbacks
+        # Keep original image format - no conversion needed
         try:
-            # Open image with PIL
+            # Validate image format and content
             src_image = Image.open(io.BytesIO(original_content))
 
-            # Normalize orientation using EXIF and force RGB for all modes (handles CMYK, P, LA, RGBA, etc.)
+            # Verify it's a valid image
+            src_image.verify()
+            src_image.close()
+
+            # Re-open for processing
+            src_image = Image.open(io.BytesIO(original_content))
+
+            # Normalize orientation using EXIF
             image = ImageOps.exif_transpose(src_image)
-            if image.mode not in ["RGB", "RGBA"]:
+
+            # Convert to RGB if needed (for formats that don't support other modes)
+            if image.mode not in ["RGB", "RGBA", "P", "L"]:
                 image = image.convert("RGB")
 
-            # Create WebP content with robust parameters
-            webp_buffer = io.BytesIO()
-            image.save(webp_buffer, format='WebP', quality=85, optimize=True, method=6)
-            candidate_content = webp_buffer.getvalue()
-
-            # Sanity check: ensure generated WebP is readable
-            try:
-                test_image = Image.open(io.BytesIO(candidate_content))
-                test_image.verify()
-                test_image.close()
-            except Exception as ver_err:
-                raise Exception(f"Invalid WebP after convert: {ver_err}")
-
-            # Use WebP result
-            original_filename = file_doc.file_name
-            filename_without_ext = os.path.splitext(original_filename)[0]
-            final_filename = f"{filename_without_ext}.webp"
-            final_content = candidate_content
-
-        except Exception as e:
-            # Fallback: keep original file content/extension if WebP conversion fails for any reason
-            frappe.logger().warning(f"❌ WebP conversion failed, fallback to original file. Reason: {str(e)}")
+            # Save with original format
             original_filename = file_doc.file_name
             name_no_ext, ext = os.path.splitext(original_filename)
-            ext = (ext or '').lower()
-            if ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                ext = '.jpg'  # Fallback to JPEG instead of WebP
+            ext = ext.lower()
+
+            # Validate allowed formats
+            allowed_formats = {
+                '.jpg': 'JPEG',
+                '.jpeg': 'JPEG',
+                '.png': 'PNG',
+                '.gif': 'GIF',
+                '.bmp': 'BMP'
+            }
+
+            if ext not in allowed_formats:
+                # Default to JPEG for unknown formats
+                ext = '.jpg'
+                save_format = 'JPEG'
+            else:
+                save_format = allowed_formats[ext]
+
+            # Save with appropriate format and quality settings
+            buffer = io.BytesIO()
+            if save_format == 'JPEG':
+                image.save(buffer, format=save_format, quality=90, optimize=True)
+            elif save_format == 'PNG':
+                image.save(buffer, format=save_format, optimize=True)
+            else:
+                image.save(buffer, format=save_format)
+
+            final_content = buffer.getvalue()
             final_filename = f"{name_no_ext}{ext}"
-            final_content = original_content
+
+            # Verify final image
+            test_image = Image.open(io.BytesIO(final_content))
+            test_image.verify()
+
+            frappe.logger().info(f"✅ Processed image {original_filename}: {len(final_content)} bytes, format: {save_format}")
+
+        except Exception as e:
+            # If processing fails, use original content but validate it's an image
+            try:
+                # Final validation - ensure it's a valid image
+                test_image = Image.open(io.BytesIO(original_content))
+                test_image.verify()
+
+                final_content = original_content
+                final_filename = file_doc.file_name
+                frappe.logger().warning(f"⚠️  Using original image content for {file_doc.file_name}: {str(e)}")
+
+            except Exception as img_err:
+                frappe.throw(f"Invalid image file: {str(img_err)}")
 
         # Find the appropriate student or class record
         if photo_type == "student":
