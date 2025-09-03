@@ -142,63 +142,79 @@ def upload_single_photo():
         frappe.logger().info(f"upload_single_photo called")
         frappe.logger().info(f"form_dict keys: {list(frappe.form_dict.keys())}")
         frappe.logger().info(f"form_dict: {dict(frappe.form_dict)}")
-        if frappe.request and frappe.request.data:
-            frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
-            if isinstance(frappe.request.data, bytes):
-                frappe.logger().info(f"request.data (first 200 chars): {frappe.request.data[:200].decode('utf-8', errors='ignore')}")
-            else:
-                frappe.logger().info(f"request.data: {frappe.request.data[:200] if frappe.request.data else 'None'}")
+
+        # Check all possible sources of request data
+        if frappe.request:
+            frappe.logger().info(f"Request method: {frappe.request.method}")
+            frappe.logger().info(f"Request headers: {dict(frappe.request.headers)}")
+
+            if hasattr(frappe.request, 'form') and frappe.request.form:
+                frappe.logger().info(f"request.form: {dict(frappe.request.form)}")
+
+            if hasattr(frappe.request, 'files') and frappe.request.files:
+                frappe.logger().info(f"request.files: {list(frappe.request.files.keys())}")
+
+            if hasattr(frappe.request, 'args') and frappe.request.args:
+                frappe.logger().info(f"request.args: {dict(frappe.request.args)}")
+
+            if frappe.request.data:
+                frappe.logger().info(f"request.data type: {type(frappe.request.data)}")
+                if isinstance(frappe.request.data, bytes):
+                    data_preview = frappe.request.data[:300].decode('utf-8', errors='ignore')
+                    frappe.logger().info(f"request.data (first 300 chars): {data_preview}")
+                else:
+                    frappe.logger().info(f"request.data: {str(frappe.request.data)[:300] if frappe.request.data else 'None'}")
         # Initialize parsed parameters
         parsed_params = {}
 
-        # Get uploaded file - handle FormData properly
+        # Get uploaded file - try multiple sources
         file_id = frappe.form_dict.get("file_id")
         frappe.logger().info(f"file_id from form_dict: '{file_id}'")
-        frappe.logger().info(f"All form_dict parameters: {dict(frappe.form_dict)}")
 
-        # For FormData, Frappe populates parameters differently
-        # Check if we have FormData parameters
-        if not file_id:
-            # Try to parse FormData manually from request
-            try:
-                from werkzeug.datastructures import ImmutableMultiDict
-                from werkzeug.formparser import FormDataParser
-                from io import BytesIO
+        # Try request.form (Frappe's parsed FormData)
+        if not file_id and hasattr(frappe.request, 'form'):
+            file_id = frappe.request.form.get("file_id")
+            frappe.logger().info(f"file_id from request.form: '{file_id}'")
 
-                if frappe.request and frappe.request.data:
-                    # Create a file-like object from request data
-                    data_stream = BytesIO(frappe.request.data)
-                    content_type = frappe.request.headers.get('Content-Type', '')
+        # Try request.args (URL parameters)
+        if not file_id and hasattr(frappe.request, 'args'):
+            file_id = frappe.request.args.get("file_id")
+            frappe.logger().info(f"file_id from request.args: '{file_id}'")
 
-                    if 'multipart/form-data' in content_type:
-                        # Parse FormData
-                        form_data_parser = FormDataParser()
-                        stream, form, files = form_data_parser.parse(data_stream, content_type, cache=None)
+            # Also get other parameters from URL args
+            if not parsed_params.get("photo_type"):
+                parsed_params["photo_type"] = frappe.request.args.get("photo_type")
+            if not parsed_params.get("campus_id"):
+                parsed_params["campus_id"] = frappe.request.args.get("campus_id")
+            if not parsed_params.get("school_year_id"):
+                parsed_params["school_year_id"] = frappe.request.args.get("school_year_id")
+            if not parsed_params.get("student_code"):
+                parsed_params["student_code"] = frappe.request.args.get("student_code")
+            if not parsed_params.get("class_name"):
+                parsed_params["class_name"] = frappe.request.args.get("class_name")
 
-                        # Get form fields
-                        form_dict = {}
-                        for key, values in form.lists():
-                            form_dict[key] = values[0] if len(values) == 1 else values
+            frappe.logger().info(f"Parameters from URL args: {parsed_params}")
 
-                        file_id = form_dict.get("file_id")
-                        frappe.logger().info(f"Parsed file_id from FormData: '{file_id}'")
-                        frappe.logger().info(f"All parsed FormData: {form_dict}")
-
-                        # Store parsed parameters
-                        parsed_params.update({
-                            "photo_type": form_dict.get("photo_type"),
-                            "campus_id": form_dict.get("campus_id"),
-                            "school_year_id": form_dict.get("school_year_id"),
-                            "student_code": form_dict.get("student_code"),
-                            "class_name": form_dict.get("class_name")
-                        })
-
-                        frappe.logger().info(f"Parsed parameters: {parsed_params}")
-
-            except Exception as e:
-                frappe.logger().error(f"Error parsing FormData: {str(e)}")
-                import traceback
-                frappe.logger().error(f"FormData parsing traceback: {traceback.format_exc()}")
+        # Try request.files (uploaded files)
+        if not file_id and hasattr(frappe.request, 'files'):
+            # For file uploads, file_id might be the file name or ID
+            for file_key, file_obj in frappe.request.files.items():
+                frappe.logger().info(f"Found uploaded file: {file_key} = {file_obj.filename}")
+                if file_key == "file" or file_key == "file_id":
+                    # Get the File doctype record for this uploaded file
+                    try:
+                        # Find File record by filename or get the last uploaded file
+                        file_docs = frappe.get_all("File",
+                            filters={"file_name": file_obj.filename, "is_private": 0},
+                            order_by="creation desc",
+                            limit=1
+                        )
+                        if file_docs:
+                            file_id = file_docs[0].name
+                            frappe.logger().info(f"Found File record: {file_id}")
+                        break
+                    except Exception as e:
+                        frappe.logger().error(f"Error finding File record: {str(e)}")
 
         if not file_id:
             # Return concise debug info to avoid character length error
