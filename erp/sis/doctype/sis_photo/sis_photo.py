@@ -276,8 +276,33 @@ def upload_single_photo():
         if not photo_type or not campus_id or not school_year_id:
             frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
 
-        if photo_type not in ["student", "class"]:
-            frappe.throw("Invalid photo type. Must be 'student' or 'class'")
+        # Resolve 'type' against DocType options (case-insensitive, exact option value)
+        try:
+            type_field = frappe.get_meta("SIS Photo").get_field("type")
+            allowed_options = []
+            if type_field and getattr(type_field, "options", None):
+                allowed_options = [opt.strip() for opt in str(type_field.options).splitlines() if opt and opt.strip()]
+            # Default allowed if metadata missing
+            if not allowed_options:
+                allowed_options = ["student", "class"]
+            # Find canonical option value by case-insensitive match
+            matched_option = None
+            for opt in allowed_options:
+                if opt.lower() == photo_type.lower():
+                    matched_option = opt
+                    break
+            if not matched_option:
+                frappe.throw(f"Invalid photo type. Must be one of: {', '.join(allowed_options)}")
+            # Replace with canonical value from options to pass Select validation
+            photo_type = matched_option
+            try:
+                frappe.logger().info(f"SIS Photo upload: normalized type='{photo_type}', allowed={allowed_options}")
+            except Exception:
+                pass
+        except Exception:
+            # Fallback strict check
+            if photo_type not in ["student", "class"]:
+                frappe.throw("Invalid photo type. Must be 'student' or 'class'")
 
         if photo_type == "student" and not student_code:
             frappe.throw("Student code is required for student photos")
