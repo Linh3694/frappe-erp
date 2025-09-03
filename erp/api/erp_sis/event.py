@@ -125,7 +125,15 @@ def create_event():
                 "debug_info": debug_info
             })
 
+        debug_info["validation_condition_check"] = {
+            "condition_old_and_new": has_old_format and has_new_format,
+            "condition_old_format": has_old_format,
+            "condition_new_format": has_new_format,
+            "old_and_new_evaluation": f"{has_old_format} and {has_new_format} = {has_old_format and has_new_format}"
+        }
+
         if has_old_format and has_new_format:
+            debug_info["validation_error_triggered"] = "both_formats_detected"
             return validation_error_response("Validation failed", {
                 "time_info": ["Cannot use both old format (start_time/end_time) and new format (dateSchedules) simultaneously"]
             }, debug_info=debug_info)
