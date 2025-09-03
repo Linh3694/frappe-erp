@@ -34,9 +34,16 @@ class SISEvent(Document):
         if hasattr(self, 'date_schedules') and self.date_schedules:
             for ds in self.date_schedules:
                 try:
+                    # Debug: Log raw date schedule data
+                    print(f"DEBUG: Processing date schedule: {ds}")
+                    print(f"DEBUG: Date schedule type: {type(ds)}")
+
                     # Handle both possible field names
                     event_date = getattr(ds, 'event_date', getattr(ds, 'date', None))
                     schedule_ids = getattr(ds, 'schedule_ids', getattr(ds, 'scheduleIds', None))
+
+                    print(f"DEBUG: Extracted event_date: {event_date}")
+                    print(f"DEBUG: Extracted schedule_ids: {schedule_ids}")
 
                     if event_date and schedule_ids:
                         # Convert schedule_ids to string if it's an array
@@ -45,10 +52,8 @@ class SISEvent(Document):
                         else:
                             schedule_ids_str = str(schedule_ids)
 
-                        # Try to get the User ID from SIS Teacher record
-                        teacher_user_id = None
-                        if self.create_by:
-                            teacher_user_id = frappe.db.get_value("SIS Teacher", {"name": self.create_by}, "user_id")
+                        print(f"DEBUG: Converted schedule_ids_str: {schedule_ids_str}")
+                        print(f"DEBUG: Event name for event_id: {self.name}")
 
                         schedule_doc = frappe.get_doc({
                             "doctype": "SIS Event Date Schedule",
@@ -59,7 +64,9 @@ class SISEvent(Document):
                             "create_at": frappe.utils.now()
                         })
 
+                        print(f"DEBUG: Final schedule_doc data: {schedule_doc.as_dict()}")
                         schedule_doc.insert()
+                        print(f"DEBUG: Date schedule created successfully")
                 except Exception as e:
                     # Log error but don't break event creation
                     error_msg = f"Error creating date schedule for event {self.name}: {str(e)}"
