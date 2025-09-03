@@ -530,14 +530,33 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             limit=int(limit)
         )
 
-        # Convert null to undefined for optional fields (Zod expects undefined, not null)
+        # Normalize optional fields and recover missing photo URLs if possible
         for photo in photos:
             if photo.get("class_id") is None:
                 del photo["class_id"]
             if photo.get("student_id") is None:
                 del photo["student_id"]
-            if photo.get("photo") is None:
-                del photo["photo"]
+
+            # If photo URL missing, try to reconstruct from File attachment
+            if not photo.get("photo"):
+                try:
+                    file_rows = frappe.get_all(
+                        "File",
+                        filters={
+                            "attached_to_doctype": "SIS Photo",
+                            "attached_to_name": photo.get("name"),
+                            "is_private": 0
+                        },
+                        fields=["file_url", "file_name"],
+                        limit=1
+                    )
+                    if file_rows:
+                        file_url = file_rows[0].get("file_url") or f"/files/{file_rows[0].get('file_name')}"
+                        if file_url:
+                            photo["photo"] = file_url
+                except Exception as _:
+                    pass
+
             if photo.get("description") is None:
                 del photo["description"]
 
