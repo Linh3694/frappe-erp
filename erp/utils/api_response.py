@@ -25,7 +25,8 @@ def success_response(
 def error_response(
     message: str,
     errors: Optional[Dict[str, List[str]]] = None,
-    code: Optional[str] = None
+    code: Optional[str] = None,
+    debug_info: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Chuẩn hoá error response theo format cố định"""
     response = {
@@ -38,6 +39,11 @@ def error_response(
 
     if code:
         response["code"] = code
+
+    if debug_info:
+        if 'errors' not in response:
+            response['errors'] = {}
+        response['errors']['debug_info'] = debug_info
 
     return response
 
@@ -98,14 +104,20 @@ def list_response(
 def validation_error_response(
     message: str,
     errors: Dict[str, List[str]],
-    code: str = "VALIDATION_ERROR"
+    code: str = "VALIDATION_ERROR",
+    debug_info: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """Response cho validation errors"""
-    return error_response(
+    response = error_response(
         message=message,
         errors=errors,
         code=code
     )
+    if debug_info:
+        if 'errors' not in response:
+            response['errors'] = {}
+        response['errors']['debug_info'] = debug_info
+    return response
 
 
 def not_found_response(

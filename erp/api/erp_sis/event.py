@@ -21,67 +21,75 @@ def create_event():
     try:
         data = frappe.local.form_dict
 
-        # Debug: Log received data
-        frappe.logger().info(f"Raw form_dict data received: {data}")
+        # Debug: Store debug info for response
+        debug_info = {
+            "raw_form_data": dict(data),
+            "data_keys": list(data.keys()),
+            "data_types": [(k, str(type(v))) for k, v in data.items()]
+        }
 
         # Try to get JSON data from request body if available
         try:
             import json
             request_data = frappe.local.request.get_json()
             if request_data:
-                frappe.logger().info(f"JSON data from request body: {request_data}")
+                debug_info["json_request_body"] = request_data
                 # Merge with form data
                 data.update(request_data)
-        except:
-            frappe.logger().info("No JSON data in request body")
+            else:
+                debug_info["json_request_body"] = None
+        except Exception as e:
+            debug_info["json_request_body_error"] = str(e)
 
-        frappe.logger().info(f"Final data after merge: {data}")
-        frappe.logger().info(f"Data keys: {list(data.keys())}")
-        frappe.logger().info(f"Data types: {[(k, type(v)) for k, v in data.items()]}")
+        debug_info["final_data_after_merge"] = dict(data)
+        debug_info["final_data_keys"] = list(data.keys())
+        debug_info["final_data_types"] = [(k, str(type(v))) for k, v in data.items()]
 
         # Try to parse JSON fields if they exist as strings
+        parsing_info = {}
         if data.get('dateSchedules'):
             if isinstance(data.get('dateSchedules'), str):
                 try:
                     data['dateSchedules'] = frappe.parse_json(data['dateSchedules'])
-                    frappe.logger().info(f"Parsed dateSchedules from string: {data['dateSchedules']}")
+                    parsing_info["dateSchedules"] = "parsed from string"
                 except Exception as e:
-                    frappe.logger().error(f"Failed to parse dateSchedules: {e}")
+                    parsing_info["dateSchedules"] = f"parse error: {str(e)}"
             else:
-                frappe.logger().info(f"dateSchedules is already an object: {data['dateSchedules']}")
+                parsing_info["dateSchedules"] = "already an object"
 
         if data.get('date_schedules'):
             if isinstance(data.get('date_schedules'), str):
                 try:
                     data['date_schedules'] = frappe.parse_json(data['date_schedules'])
-                    frappe.logger().info(f"Parsed date_schedules from string: {data['date_schedules']}")
+                    parsing_info["date_schedules"] = "parsed from string"
                 except Exception as e:
-                    frappe.logger().error(f"Failed to parse date_schedules: {e}")
+                    parsing_info["date_schedules"] = f"parse error: {str(e)}"
             else:
-                frappe.logger().info(f"date_schedules is already an object: {data['date_schedules']}")
+                parsing_info["date_schedules"] = "already an object"
 
         # Handle array fields that might come as strings
         if data.get('student_ids'):
             if isinstance(data.get('student_ids'), str):
                 try:
                     data['student_ids'] = frappe.parse_json(data['student_ids'])
-                    frappe.logger().info(f"Parsed student_ids from string: {data['student_ids']}")
+                    parsing_info["student_ids"] = "parsed from string"
                 except Exception as e:
-                    frappe.logger().error(f"Failed to parse student_ids: {e}")
+                    parsing_info["student_ids"] = f"parse error: {str(e)}"
             else:
-                frappe.logger().info(f"student_ids is already an array: {data['student_ids']}")
+                parsing_info["student_ids"] = "already an array"
 
         if data.get('teacher_ids'):
             if isinstance(data.get('teacher_ids'), str):
                 try:
                     data['teacher_ids'] = frappe.parse_json(data['teacher_ids'])
-                    frappe.logger().info(f"Parsed teacher_ids from string: {data['teacher_ids']}")
+                    parsing_info["teacher_ids"] = "parsed from string"
                 except Exception as e:
-                    frappe.logger().error(f"Failed to parse teacher_ids: {e}")
+                    parsing_info["teacher_ids"] = f"parse error: {str(e)}"
             else:
-                frappe.logger().info(f"teacher_ids is already an array: {data['teacher_ids']}")
+                parsing_info["teacher_ids"] = "already an array"
 
-        frappe.logger().info(f"Final parsed data: {data}")
+        debug_info["parsing_info"] = parsing_info
+        debug_info["parsed_data"] = dict(data)
 
         # Required fields validation - support both old and new format
         has_old_format = data.get('start_time') and data.get('end_time')
@@ -90,31 +98,39 @@ def create_event():
         date_schedules = data.get('date_schedules') or data.get('dateSchedules')
         has_new_format = date_schedules and isinstance(date_schedules, list) and len(date_schedules) > 0
 
-        frappe.logger().info(f"Validation check - has_old_format: {has_old_format}, has_new_format: {has_new_format}")
-        frappe.logger().info(f"date_schedules: {date_schedules}, type: {type(date_schedules)}")
-        frappe.logger().info(f"data.get('date_schedules'): {data.get('date_schedules')}")
-        frappe.logger().info(f"data.get('dateSchedules'): {data.get('dateSchedules')}")
+        debug_info["validation_check"] = {
+            "has_old_format": has_old_format,
+            "has_new_format": has_new_format,
+            "date_schedules_value": date_schedules,
+            "date_schedules_type": str(type(date_schedules)),
+            "data_date_schedules": data.get('date_schedules'),
+            "data_dateSchedules": data.get('dateSchedules'),
+            "start_time": data.get('start_time'),
+            "end_time": data.get('end_time')
+        }
+
         if isinstance(date_schedules, list):
-            frappe.logger().info(f"date_schedules length: {len(date_schedules)}")
+            debug_info["validation_check"]["date_schedules_length"] = len(date_schedules)
 
         if not has_old_format and not has_new_format:
-            frappe.logger().error("Validation failed: Neither old nor new format provided")
-            frappe.logger().error(f"start_time: {data.get('start_time')}, end_time: {data.get('end_time')}")
-            frappe.logger().error(f"date_schedules: {data.get('date_schedules')}, dateSchedules: {data.get('dateSchedules')}")
+            debug_info["validation_error"] = "Neither old nor new format provided"
             return validation_error_response("Validation failed", {
-                "time_info": ["Either start_time/end_time or dateSchedules must be provided"]
+                "time_info": ["Either start_time/end_time or dateSchedules must be provided"],
+                "debug_info": debug_info
             })
 
         if has_old_format and has_new_format:
             return validation_error_response("Validation failed", {
                 "time_info": ["Cannot use both old format (start_time/end_time) and new format (dateSchedules) simultaneously"]
-            })
+            }, debug_info=debug_info)
 
         required_fields = ['title']
         if has_old_format:
             required_fields.extend(['start_time', 'end_time'])
         elif has_new_format:
-            required_fields.append('dateSchedules')
+            # Accept either dateSchedules or date_schedules
+            if not (data.get('dateSchedules') or data.get('date_schedules')):
+                required_fields.append('dateSchedules')  # This will always fail now, but we'll handle it in validation
 
         missing_fields = [field for field in required_fields if not data.get(field)]
 
@@ -125,30 +141,32 @@ def create_event():
 
             if not student_ids or len(student_ids) == 0:
                 return validation_error_response("Validation failed", {
-                    "students": ["At least one student is required"]
+                    "students": ["At least one student is required"],
+                    "debug_info": debug_info
                 })
 
             if not teacher_ids or len(teacher_ids) == 0:
                 return validation_error_response("Validation failed", {
-                    "teachers": ["At least one teacher is required"]
+                    "teachers": ["At least one teacher is required"],
+                    "debug_info": debug_info
                 })
 
         if missing_fields:
             return validation_error_response("Validation failed", {
                 field: ["This field is required"] for field in missing_fields
-            })
+            }, debug_info=debug_info)
 
         # Get campus from context
         campus_id = get_current_campus_from_context()
         if not campus_id:
-            return validation_error_response("Validation failed", {"campus_id": ["Campus context not found"]})
+            return validation_error_response("Validation failed", {"campus_id": ["Campus context not found"]}, debug_info=debug_info)
 
         # Get current user as teacher
         current_user = frappe.session.user
         teacher = frappe.db.get_value("SIS Teacher", {"user": current_user}, "name")
 
         if not teacher:
-            return forbidden_response("Only teachers can create events")
+            return error_response("Only teachers can create events", debug_info=debug_info)
 
         # Create event
         event_data = {
@@ -197,12 +215,13 @@ def create_event():
             "name": event.name,
             "title": event.title,
             "status": event.status,
-            "created_at": event.create_at
+            "created_at": event.create_at,
+            "debug_info": debug_info
         }, "Event created successfully")
 
     except Exception as e:
         frappe.log_error(f"Error creating event: {str(e)}")
-        return error_response(f"Error creating event: {str(e)}")
+        return error_response(f"Error creating event: {str(e)}", debug_info=debug_info)
 
 
 @frappe.whitelist(allow_guest=False)
