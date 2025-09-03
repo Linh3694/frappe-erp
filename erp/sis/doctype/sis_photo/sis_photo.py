@@ -409,11 +409,19 @@ def upload_single_photo():
                 except Exception as reload_err:
                     frappe.logger().warning(f"Failed to reload photo_file: {str(reload_err)}")
 
-            # Get the file URL with fallback
+            # Get the file URL with robust fallbacks
             photo_url = getattr(photo_file, 'file_url', None)
             if not photo_url:
-                photo_url = f"/files/{final_filename}"
-                frappe.logger().warning(f"No file_url found, using fallback: {photo_url}")
+                # Prefer the actual stored file_name (might be sanitized by Frappe)
+                stored_name = getattr(photo_file, 'file_name', None) or final_filename
+                candidate_url = f"/files/{stored_name}"
+                try:
+                    # Persist file_url back to File doctype for consistency
+                    frappe.db.set_value("File", photo_file.name, "file_url", candidate_url, update_modified=False)
+                    frappe.db.commit()
+                except Exception as set_file_url_err:
+                    frappe.logger().warning(f"Unable to set file_url on File: {set_file_url_err}")
+                photo_url = candidate_url
 
 
             # Set photo URL with multiple fallback strategies
