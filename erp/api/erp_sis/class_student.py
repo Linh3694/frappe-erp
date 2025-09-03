@@ -255,21 +255,65 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
 
 
 @frappe.whitelist(allow_guest=False)
-def unassign_student(name=None):
-    """Remove a student from a class"""
+def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None):
+    """Remove a student from a class
+
+    Accepts either:
+    - name: SIS Class Student docname, or
+    - (class_id, student_id, school_year_id [, class_type]) as composite key
+    """
     try:
-        # Get parameters from form_dict if not provided
+        # Get parameters from form_dict / request args
         form = frappe.local.form_dict or {}
+        args = getattr(frappe, 'request', None) and getattr(frappe.request, 'args', None)
         if not name:
-            name = form.get('name')
-            
-        frappe.logger().info(f"unassign_student called with: name={name}")
-        
+            name = form.get('name') or (args.get('name') if args else None)
+        if not class_id:
+            class_id = form.get('class_id') or (args.get('class_id') if args else None)
+        if not student_id:
+            student_id = form.get('student_id') or (args.get('student_id') if args else None)
+        if not school_year_id:
+            school_year_id = form.get('school_year_id') or (args.get('school_year_id') if args else None)
+        if not class_type:
+            class_type = form.get('class_type') or (args.get('class_type') if args else None)
+
+        frappe.logger().info(f"unassign_student called with: name={name}, class_id={class_id}, student_id={student_id}, school_year_id={school_year_id}, class_type={class_type}")
+
+        # If name not provided, try to resolve using composite key
         if not name:
-            return error_response(
-                message="Missing required parameter: name",
-                code="MISSING_NAME"
+            filters = {}
+            if class_id:
+                filters['class_id'] = class_id
+            if student_id:
+                filters['student_id'] = student_id
+            if school_year_id:
+                filters['school_year_id'] = school_year_id
+            if class_type:
+                filters['class_type'] = class_type
+
+            if not filters or 'student_id' not in filters or 'school_year_id' not in filters:
+                return error_response(
+                    message="Missing required parameter: name or (student_id, school_year_id)",
+                    code="MISSING_KEY"
+                )
+
+            candidates = frappe.get_all(
+                "SIS Class Student",
+                filters=filters,
+                fields=["name"],
+                order_by="creation desc",
+                limit=2,
             )
+            if not candidates:
+                return not_found_response(
+                    message="Class student assignment not found",
+                    code="CLASS_STUDENT_NOT_FOUND"
+                )
+            if len(candidates) > 1 and not class_id:
+                return validation_error_response(
+                    message="Multiple assignments found. Please provide class_id to unassign a specific class",
+                )
+            name = candidates[0]["name"]
         
         # Check if class student exists
         if not frappe.db.exists("SIS Class Student", name):
