@@ -557,6 +557,10 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                 except Exception as _:
                     pass
 
+            # Zod expects `photo` to be string or omitted; never null
+            if not photo.get("photo") and "photo" in photo:
+                del photo["photo"]
+
             if photo.get("description") is None:
                 del photo["description"]
 
