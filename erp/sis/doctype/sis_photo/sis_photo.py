@@ -155,6 +155,47 @@ def upload_single_photo():
         if photo_type == "class" and not class_name:
             frappe.throw("Class name is required for class photos")
 
+        # Auto-detect type based on filename if possible
+        detected_type = None
+        detection_reason = ""
+
+        if photo_type == "student" and student_code:
+            # Check if student_code looks like a class name (e.g., "1A1", "2B", etc.)
+            class_name_pattern = frappe.re.match(r'^(\d+)[A-Z]\d*$', student_code.strip())
+            if class_name_pattern:
+                detected_type = "class"
+                detection_reason = f"Student code '{student_code}' matches class name pattern"
+                frappe.logger().warning(f"⚠️  {detection_reason}. Did you mean to upload a class photo?")
+                # Try to find class with this name
+                class_check = frappe.get_all("SIS Class",
+                    filters={"title": student_code.strip()},
+                    fields=["name", "title"],
+                    limit=1
+                )
+                if class_check:
+                    frappe.logger().warning(f"⚠️  Found class '{class_check[0].title}' with matching name.")
+
+        elif photo_type == "class" and class_name:
+            # Check if class_name looks like a student code (starts with WS)
+            if class_name.strip().startswith('WS') and class_name.strip()[2:].isdigit():
+                detected_type = "student"
+                detection_reason = f"Class name '{class_name}' matches student code pattern"
+                frappe.logger().warning(f"⚠️  {detection_reason}. Did you mean to upload a student photo?")
+                # Try to find student with this code
+                student_check = frappe.get_all("CRM Student",
+                    filters={"student_code": class_name.strip()},
+                    fields=["name", "student_name"],
+                    limit=1
+                )
+                if student_check:
+                    frappe.logger().warning(f"⚠️  Found student '{student_check[0].student_name}' with matching code.")
+
+        # If we detected a type mismatch and found the correct record, suggest auto-correction
+        if detected_type and detection_reason:
+            frappe.logger().info(f"🔄 Auto-detection: {detection_reason}")
+            # For now, we'll just log the suggestion. In the future, we could auto-correct.
+            # photo_type = detected_type  # Uncomment to enable auto-correction
+
         # Store original campus_id for logging
         original_campus_id = campus_id
 
@@ -354,7 +395,16 @@ def upload_single_photo():
                 fields=["name", "student_name"]
             )
             if not student:
-                frappe.throw(f"Student with code {student_code} not found")
+                # Check if this might be a class name instead
+                class_check = frappe.get_all("SIS Class",
+                    filters={"title": student_code.strip()},
+                    fields=["name", "title"],
+                    limit=1
+                )
+                if class_check:
+                    frappe.throw(f"Student with code '{student_code}' not found. However, a class with this name exists. Did you mean to upload a class photo instead?")
+                else:
+                    frappe.throw(f"Student with code '{student_code}' not found. Please check the student code or ensure the student exists.")
 
             student_id = student[0].name
             photo_title = f"Photo of {student[0].student_name} ({student_code})"
@@ -390,7 +440,16 @@ def upload_single_photo():
                 )
 
             if not class_record:
-                frappe.throw(f"Class with name/title '{class_name}' not found")
+                # Check if this might be a student code instead
+                student_check = frappe.get_all("CRM Student",
+                    filters={"student_code": class_name.strip()},
+                    fields=["name", "student_name"],
+                    limit=1
+                )
+                if student_check:
+                    frappe.throw(f"Class with name/title '{class_name}' not found. However, a student with this code exists. Did you mean to upload a student photo instead?")
+                else:
+                    frappe.throw(f"Class with name/title '{class_name}' not found. Please check the class name or ensure the class exists.")
 
             class_id = class_record[0].name
             photo_title = f"Photo of class {class_record[0].title}"
