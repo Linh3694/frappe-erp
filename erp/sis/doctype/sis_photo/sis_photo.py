@@ -9,6 +9,7 @@ import tempfile
 from frappe.utils import now, get_fullname
 import base64
 import io
+from PIL import Image
 
 
 class SISPhoto(Document):
@@ -127,6 +128,165 @@ def upload_zip_photos():
 
     except Exception as e:
         frappe.log_error(f"Error in upload_zip_photos: {str(e)}")
+        return {
+            "success": False,
+            "message": str(e)
+        }
+
+
+@frappe.whitelist()
+def upload_single_photo():
+    """Upload single photo for student or class"""
+    try:
+        # Get uploaded file
+        if not frappe.form_dict.get("file_id"):
+            frappe.throw("File ID is required")
+
+        file_doc = frappe.get_doc("File", frappe.form_dict.file_id)
+        if not file_doc:
+            frappe.throw("File not found")
+
+        # Check file size (10MB limit for single image)
+        max_size = 10 * 1024 * 1024  # 10MB in bytes
+        if file_doc.file_size > max_size:
+            frappe.throw("File size exceeds 10MB limit")
+
+        # Get parameters
+        photo_type = frappe.form_dict.get("photo_type")
+        campus_id = frappe.form_dict.get("campus_id")
+        school_year_id = frappe.form_dict.get("school_year_id")
+        student_code = frappe.form_dict.get("student_code")
+        class_name = frappe.form_dict.get("class_name")
+
+        if not photo_type or not campus_id or not school_year_id:
+            frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
+
+        if photo_type not in ["student", "class"]:
+            frappe.throw("Invalid photo type. Must be 'student' or 'class'")
+
+        if photo_type == "student" and not student_code:
+            frappe.throw("Student code is required for student photos")
+
+        if photo_type == "class" and not class_name:
+            frappe.throw("Class name is required for class photos")
+
+        # Download and process the uploaded file
+        file_path = file_doc.get_fullpath()
+        if not os.path.exists(file_path):
+            frappe.throw("File not found on server")
+
+        # Read the original file
+        with open(file_path, 'rb') as f:
+            original_content = f.read()
+
+        # Convert to WebP format
+        try:
+            # Open image with PIL
+            image = Image.open(io.BytesIO(original_content))
+
+            # Convert to RGB if necessary (for PNG with transparency)
+            if image.mode in ("RGBA", "LA", "P"):
+                image = image.convert("RGB")
+
+            # Create WebP content
+            webp_buffer = io.BytesIO()
+            image.save(webp_buffer, format='WebP', quality=85)
+            webp_content = webp_buffer.getvalue()
+
+            # Create new filename with .webp extension
+            original_filename = file_doc.file_name
+            filename_without_ext = os.path.splitext(original_filename)[0]
+            webp_filename = f"{filename_without_ext}.webp"
+
+        except Exception as e:
+            frappe.throw(f"Error processing image: {str(e)}")
+
+        # Find the appropriate student or class record
+        if photo_type == "student":
+            # Find student by student_code
+            student = frappe.get_all("CRM Student",
+                filters={"student_code": student_code},
+                fields=["name", "student_name"]
+            )
+            if not student:
+                frappe.throw(f"Student with code {student_code} not found")
+
+            student_id = student[0].name
+            photo_title = f"Photo of {student[0].student_name} ({student_code})"
+            identifier = student_id
+
+        else:  # class
+            # Find class by name/title
+            class_record = frappe.get_all("SIS Class",
+                filters={
+                    "name": ["like", f"%{class_name}%"]
+                },
+                fields=["name", "title"]
+            )
+
+            # If exact match not found, try title
+            if not class_record:
+                class_record = frappe.get_all("SIS Class",
+                    filters={"title": class_name},
+                    fields=["name", "title"]
+                )
+
+            if not class_record:
+                frappe.throw(f"Class with name {class_name} not found")
+
+            class_id = class_record[0].name
+            photo_title = f"Photo of class {class_record[0].title}"
+            identifier = class_id
+
+        try:
+            # Create SIS Photo record
+            photo_doc = frappe.get_doc({
+                "doctype": "SIS Photo",
+                "campus_id": campus_id,
+                "title": photo_title,
+                "type": photo_type,
+                "school_year_id": school_year_id,
+                "status": "Active",
+                "description": f"Single photo upload: {webp_filename}"
+            })
+
+            # Set identifier based on type
+            if photo_type == "student":
+                photo_doc.student_id = student_id
+            else:  # class
+                photo_doc.class_id = class_id
+
+            # Save the photo record first to get the name
+            photo_doc.insert()
+
+            # Create File document for the WebP photo
+            photo_file = frappe.get_doc({
+                "doctype": "File",
+                "file_name": webp_filename,
+                "content": base64.b64encode(webp_content).decode('utf-8'),
+                "is_private": 0,
+                "attached_to_doctype": "SIS Photo",
+                "attached_to_name": photo_doc.name
+            })
+            photo_file.insert()
+
+            # Update photo record with file reference
+            photo_doc.photo = photo_file.file_url
+            photo_doc.save()
+
+            return {
+                "success": True,
+                "message": "Photo uploaded successfully",
+                "photo_id": photo_doc.name,
+                "file_url": photo_file.file_url
+            }
+
+        except Exception as e:
+            frappe.log_error(f"Error creating photo record: {str(e)}")
+            raise frappe.ValidationError(f"Failed to create photo record: {str(e)}")
+
+    except Exception as e:
+        frappe.log_error(f"Error in upload_single_photo: {str(e)}")
         return {
             "success": False,
             "message": str(e)

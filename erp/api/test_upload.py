@@ -74,3 +74,29 @@ def upload_bulk_file():
             message="Failed to upload file",
             code="FILE_UPLOAD_ERROR"
         )
+
+
+def test_single_photo_upload():
+    """
+    Test function for single photo upload
+    """
+    try:
+        # This is a test function to verify the upload_single_photo logic
+        # In production, this would be called from the frontend
+
+        # Call the actual upload function
+        from erp.sis.doctype.sis_photo.sis_photo import upload_single_photo
+
+        result = upload_single_photo()
+
+        return single_item_response(
+            data=result,
+            message="Single photo upload test completed"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error in test_single_photo_upload: {str(e)}")
+        return error_response(
+            message=f"Single photo upload test failed: {str(e)}",
+            code="SINGLE_PHOTO_UPLOAD_ERROR"
+        )
