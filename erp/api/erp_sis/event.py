@@ -128,9 +128,8 @@ def create_event():
         if has_old_format:
             required_fields.extend(['start_time', 'end_time'])
         elif has_new_format:
-            # Accept either dateSchedules or date_schedules
-            if not (data.get('dateSchedules') or data.get('date_schedules')):
-                required_fields.append('dateSchedules')  # This will always fail now, but we'll handle it in validation
+            # For new format, we don't require any specific field name since we accept both dateSchedules and date_schedules
+            pass
 
         missing_fields = [field for field in required_fields if not data.get(field)]
 
