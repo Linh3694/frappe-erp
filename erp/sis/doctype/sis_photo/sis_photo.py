@@ -13,197 +13,6 @@ import mimetypes
 # Allow loading truncated images to avoid conversion failures on slightly corrupted input files
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-
-@frappe.whitelist()
-def debug_sis_photos():
-    """Debug SIS Photo records to check student_id assignment"""
-    try:
-        # Get all SIS Photo records
-        photos = frappe.get_all("SIS Photo",
-            fields=["name", "title", "type", "student_id", "class_id", "photo", "status"],
-            limit=50
-        )
-
-        # Analyze student_id distribution
-        student_ids = {}
-        class_ids = {}
-        photos_without_student = []
-        photos_without_class = []
-
-        for photo in photos:
-            if photo.student_id:
-                if photo.student_id not in student_ids:
-                    student_ids[photo.student_id] = []
-                student_ids[photo.student_id].append(photo.name)
-            else:
-                photos_without_student.append(photo.name)
-
-            if photo.class_id:
-                if photo.class_id not in class_ids:
-                    class_ids[photo.class_id] = []
-                class_ids[photo.class_id].append(photo.name)
-            else:
-                photos_without_class.append(photo.name)
-
-        # Check for photos with same student_id
-        duplicate_students = {sid: pids for sid, pids in student_ids.items() if len(pids) > 1}
-
-        return {
-            "success": True,
-            "total_photos": len(photos),
-            "unique_students": len(student_ids),
-            "unique_classes": len(class_ids),
-            "photos_without_student": len(photos_without_student),
-            "photos_without_class": len(photos_without_class),
-            "duplicate_students": duplicate_students,
-            "sample_photos": photos[:5] if photos else []
-        }
-
-    except Exception as e:
-        frappe.logger().error(f"Debug SIS Photos failed: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Debug failed: {str(e)}"
-        }
-
-
-@frappe.whitelist()
-def fix_student_photo_assignment():
-    """Fix student photo assignment by reassigning based on filename patterns"""
-    try:
-        # Get all student photos without proper student_id
-        photos = frappe.get_all("SIS Photo",
-            filters={"type": "student"},
-            fields=["name", "title", "student_id", "photo"]
-        )
-
-        fixed_count = 0
-        errors = []
-
-        for photo in photos:
-            try:
-                # Extract student code from filename if photo URL exists
-                if photo.photo:
-                    # Extract filename from URL
-                    filename = photo.photo.split('/')[-1]
-                    # Remove extension
-                    student_code = filename.split('.')[0]
-
-                    # Try to find student by code
-                    student = frappe.get_all("CRM Student",
-                        filters={"student_code": student_code},
-                        fields=["name", "student_name"]
-                    )
-
-                    if student:
-                        # Update student_id
-                        frappe.db.set_value("SIS Photo", photo.name, "student_id", student[0].name)
-                        frappe.db.commit()
-                        fixed_count += 1
-                        frappe.logger().info(f"Fixed student assignment for {photo.name}: {student_code} -> {student[0].name}")
-                    else:
-                        errors.append(f"Student not found for code: {student_code}")
-                else:
-                    errors.append(f"No photo URL for {photo.name}")
-
-            except Exception as e:
-                errors.append(f"Error fixing {photo.name}: {str(e)}")
-
-        return {
-            "success": True,
-            "message": f"Fixed {fixed_count} student photo assignments",
-            "total_photos": len(photos),
-            "errors": errors[:10]  # Limit errors shown
-        }
-
-    except Exception as e:
-        frappe.logger().error(f"Fix student assignment failed: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Fix failed: {str(e)}"
-        }
-
-
-@frappe.whitelist()
-def get_test_webp_image():
-    """Generate and return a test WebP image for frontend testing"""
-    try:
-        from PIL import Image, ImageDraw
-        import base64
-
-        # Create a test image
-        test_image = Image.new('RGB', (200, 200), color='lightblue')
-        draw = ImageDraw.Draw(test_image)
-
-        # Add some text
-        draw.text((50, 90), "WebP Test Image", fill='black')
-        draw.text((60, 110), "SIS Photo System", fill='darkblue')
-
-        # Convert to WebP
-        webp_buffer = io.BytesIO()
-        test_image.save(webp_buffer, format='WebP', quality=85, optimize=True, method=6)
-        webp_content = webp_buffer.getvalue()
-
-        # Return as base64 data URL
-        webp_b64 = base64.b64encode(webp_content).decode('utf-8')
-        data_url = f"data:image/webp;base64,{webp_b64}"
-
-        return {
-            "success": True,
-            "message": "Test WebP image generated",
-            "webp_data_url": data_url,
-            "webp_size": len(webp_content)
-        }
-
-    except Exception as e:
-        frappe.logger().error(f"Generate test WebP failed: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Failed to generate test WebP: {str(e)}"
-        }
-
-
-@frappe.whitelist()
-def test_webp_conversion():
-    """Test WebP conversion with sample image data"""
-    try:
-        # Create a simple test image in memory
-        from PIL import Image, ImageDraw
-
-        # Create a 100x100 test image
-        test_image = Image.new('RGB', (100, 100), color='red')
-        draw = ImageDraw.Draw(test_image)
-        draw.text((10, 40), "TEST", fill='white')
-
-        # Convert to WebP
-        webp_buffer = io.BytesIO()
-        test_image.save(webp_buffer, format='WebP', quality=85, optimize=True, method=6)
-        webp_content = webp_buffer.getvalue()
-
-        # Test WebP validity
-        test_webp = Image.open(io.BytesIO(webp_content))
-        test_webp.verify()
-
-        # Convert back to check
-        test_webp = Image.open(io.BytesIO(webp_content))
-        test_webp.load()
-
-        return {
-            "success": True,
-            "message": "WebP conversion test successful",
-            "original_size": len(test_image.tobytes()),
-            "webp_size": len(webp_content),
-            "compression_ratio": f"{(1 - len(webp_content) / len(test_image.tobytes())) * 100:.1f}%"
-        }
-
-    except Exception as e:
-        frappe.logger().error(f"WebP conversion test failed: {str(e)}")
-        return {
-            "success": False,
-            "message": f"WebP conversion test failed: {str(e)}"
-        }
-
-
 class SISPhoto(Document):
     def before_insert(self):
         self.uploaded_by = get_fullname(frappe.session.user)
@@ -656,16 +465,12 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             filters["type"] = photo_type
         if student_id:
             filters["student_id"] = student_id
-            frappe.logger().info(f"🔍 Filtering photos by student_id: {student_id}")
         if class_id:
             filters["class_id"] = class_id
-            frappe.logger().info(f"🔍 Filtering photos by class_id: {class_id}")
         if campus_id:
             filters["campus_id"] = campus_id
         if school_year_id:
             filters["school_year_id"] = school_year_id
-
-        frappe.logger().info(f"🔍 Final filters for get_photos_list: {filters}")
 
         # Get photos with pagination
         photos = frappe.get_all(
@@ -677,10 +482,6 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             limit=int(limit)
         )
 
-        frappe.logger().info(f"🔍 Query returned {len(photos)} photos with filters: {filters}")
-        if photos:
-            frappe.logger().info(f"🔍 Sample photo records: {photos[:3]}")
-
         # Convert null to undefined for optional fields (Zod expects undefined, not null)
         for photo in photos:
             if photo.get("class_id") is None:
@@ -691,10 +492,6 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                 del photo["photo"]
             if photo.get("description") is None:
                 del photo["description"]
-
-            # Add debug logging for photo URLs
-            if photo.get("photo"):
-                frappe.logger().info(f"📸 Retrieved photo for {photo.get('name')}: {photo.get('photo')}")
 
         # Get total count
         total_count = frappe.db.count("SIS Photo", filters)
