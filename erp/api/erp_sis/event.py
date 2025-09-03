@@ -188,6 +188,12 @@ def create_event():
 
         # Handle new format
         elif has_new_format:
+            # For new format, set required datetime fields to current time (they won't be used)
+            current_time = frappe.utils.now_datetime()
+            event_data["start_time"] = current_time
+            event_data["end_time"] = current_time
+            event_data["timetable_column_id"] = None
+
             if date_schedules:
                 # Prepare date schedules for creation
                 processed_schedules = []
