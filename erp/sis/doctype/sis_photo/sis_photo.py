@@ -688,19 +688,40 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             if not photo.get("photo"):
                 frappe.logger().info(f"📭 Photo URL missing for {photo.get('name')}, trying to recover...")
                 try:
+                    # First try public files
                     file_rows = frappe.get_all(
                         "File",
                         filters={
                             "attached_to_doctype": "SIS Photo",
                             "attached_to_name": photo.get("name"),
-                            "is_private": 0
+                            "is_private": 0,
                         },
-                        fields=["file_url", "file_name"],
-                        limit=1
+                        fields=["file_url", "file_name", "is_private"],
+                        order_by="creation desc",
+                        limit=1,
                     )
+                    # If not found, try private files as well
+                    if not file_rows:
+                        file_rows = frappe.get_all(
+                            "File",
+                            filters={
+                                "attached_to_doctype": "SIS Photo",
+                                "attached_to_name": photo.get("name"),
+                            },
+                            fields=["file_url", "file_name", "is_private"],
+                            order_by="creation desc",
+                            limit=1,
+                        )
+
                     frappe.logger().info(f"📎 Found {len(file_rows)} attached files for {photo.get('name')}")
                     if file_rows:
-                        file_url = file_rows[0].get("file_url") or f"/files/{file_rows[0].get('file_name')}"
+                        file_row = file_rows[0]
+                        file_url = file_row.get("file_url")
+                        if not file_url:
+                            # Build URL based on privacy
+                            is_priv = bool(file_row.get("is_private"))
+                            base_path = "/private/files" if is_priv else "/files"
+                            file_url = f"{base_path}/{file_row.get('file_name')}"
                         frappe.logger().info(f"📎 File URL recovered: {file_url}")
                         if file_url:
                             photo["photo"] = file_url
@@ -714,20 +735,25 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             else:
                 frappe.logger().info(f"✅ Photo URL already exists for {photo.get('name')}: {photo.get('photo')}")
             if not photo.get("photo") and "photo" in photo:
-                # Thử khôi phục từ File attachment một lần nữa trước khi xóa
+                # Try again without privacy constraint before removing field
                 try:
                     recovery_attempt = frappe.get_all(
                         "File",
                         filters={
                             "attached_to_doctype": "SIS Photo",
                             "attached_to_name": photo.get("name"),
-                            "is_private": 0
                         },
-                        fields=["file_url", "file_name"],
-                        limit=1
+                        fields=["file_url", "file_name", "is_private"],
+                        order_by="creation desc",
+                        limit=1,
                     )
                     if recovery_attempt:
-                        recovered_url = recovery_attempt[0].get("file_url") or f"/files/{recovery_attempt[0].get('file_name')}"
+                        row = recovery_attempt[0]
+                        recovered_url = row.get("file_url")
+                        if not recovered_url:
+                            is_priv = bool(row.get("is_private"))
+                            base_path = "/private/files" if is_priv else "/files"
+                            recovered_url = f"{base_path}/{row.get('file_name')}"
                         if recovered_url:
                             photo["photo"] = recovered_url
                             frappe.logger().info(f"✅ Recovered photo URL for {photo.get('name')}: {recovered_url}")
