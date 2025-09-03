@@ -7,6 +7,15 @@ app_description = "ERP"
 app_email = "info@frappe.io"
 app_license = "MIT"
 
+# Whitelisted methods for SIS module
+whitelisted_methods = [
+    "erp.sis.api.debug_api.debug_sis_photos",
+    "erp.sis.api.debug_api.debug_upload_process",
+    "erp.sis.api.debug_api.debug_student_mapping",
+    "erp.sis.api.debug_api.test_webp_conversion",
+    "erp.sis.api.debug_api.get_test_webp_image",
+    "erp.sis.api.debug_api.fix_student_photo_assignment",
+]
 
 # Permission query for SIS module
 permission_query_conditions = {

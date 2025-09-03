@@ -410,7 +410,8 @@ def upload_single_photo():
                 raise Exception(f"Failed to persist photo URL after {max_retries} attempts")
             # Check if file actually exists and is accessible
             try:
-                file_path = photo_file.get_fullpath()
+                # Use frappe's method to get file path
+                file_path = frappe.get_site_path("public", "files", final_filename)
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
 
