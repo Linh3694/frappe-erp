@@ -999,7 +999,9 @@ def get_event_detail():
         event_students = frappe.get_all(
             "SIS Event Student",
             filters={"event_id": event_id},
-            fields=es_fields
+            fields=es_fields,
+            ignore_permissions=True if include_all_participants else False,
+            limit_page_length=100000
         )
 
         # Build Class Student map in bulk
@@ -1010,7 +1012,8 @@ def get_event_detail():
                 "SIS Class Student",
                 filters={"name": ["in", class_student_ids]},
                 fields=["name", "student_id", "class_id", "school_year_id"],
-                limit_page_length=100000
+                limit_page_length=100000,
+                ignore_permissions=True if include_all_participants else False
             )
             cs_map = {row.name: row for row in cs_rows}
 
