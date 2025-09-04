@@ -255,7 +255,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
 
 
 @frappe.whitelist(allow_guest=False)
-def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None, student_code=None, class_name=None):
+def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None, student_code=None, class_name=None, force=False):
     """Remove a student from a class"""
     try:
         # Get parameters from form_dict / request args
@@ -276,6 +276,16 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
         if not class_type:
             class_type = form.get('class_type') or (args.get('class_type') if args else None)
 
+        # Parse force flag from inputs if provided as string/number
+        if isinstance(force, str):
+            force = force.lower() in ("1", "true", "yes", "y")
+        elif not force:
+            raw_force = form.get('force') or (args.get('force') if args else None)
+            if isinstance(raw_force, str):
+                force = raw_force.lower() in ("1", "true", "yes", "y")
+            else:
+                force = bool(raw_force)
+
         frappe.logger().info(f"unassign_student called with: name={name}, class_id={class_id}, class_name={class_name}, student_id={student_id}, student_code={student_code}, school_year_id={school_year_id}, class_type={class_type}")
 
         # Fallback: parse JSON body if sent as application/json
@@ -290,6 +300,11 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                 student_code = student_code or body.get('student_code')
                 school_year_id = school_year_id or body.get('school_year_id')
                 class_type = class_type or body.get('class_type')
+                if 'force' in body and not isinstance(force, bool):
+                    try:
+                        force = str(body.get('force')).lower() in ("1", "true", "yes", "y")
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -370,14 +385,40 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                 code="CLASS_STUDENT_NOT_FOUND"
             )
         
+        # If force flag is set, delete linked SIS Event Student first
+        deleted_event_students = 0
+        if force:
+            try:
+                linked_es = frappe.get_all(
+                    "SIS Event Student",
+                    filters={"class_student_id": name},
+                    fields=["name"],
+                    limit_page_length=100000
+                )
+                for es in linked_es:
+                    try:
+                        frappe.delete_doc("SIS Event Student", es["name"]) 
+                    except Exception:
+                        # Continue deleting others; the final delete below will surface remaining links if any
+                        pass
+                if linked_es:
+                    deleted_event_students = len(linked_es)
+            except Exception as cleanup_err:
+                frappe.logger().error(f"Force cleanup failed for class student {name}: {str(cleanup_err)}")
+                return error_response(
+                    message="Failed to remove linked event participants before unassigning",
+                    code="FORCE_UNASSIGN_CLEANUP_ERROR"
+                )
+
         # Delete the assignment
         frappe.delete_doc("SIS Class Student", name)
         frappe.db.commit()
         
         frappe.logger().info(f"Successfully unassigned class student: {name}")
         
+        suffix = f" (removed {deleted_event_students} linked event participant(s))" if deleted_event_students > 0 else ""
         return success_response(
-            message="Student unassigned from class successfully"
+            message=f"Student unassigned from class successfully{suffix}"
         )
         
     except frappe.LinkExistsError as e:
