@@ -1100,6 +1100,21 @@ def get_event_detail():
             })
         result["participants"] = participants
 
+        # Optional debug info for troubleshooting empty participants in list mode
+        try:
+            if include_all_participants:
+                debug_part = {
+                    "include_all_participants": include_all_participants,
+                    "event_students_count": len(event_students),
+                    "event_students_sample": [getattr(es, "name", None) for es in event_students[:5]],
+                    "class_student_ids_sample": [getattr(es, "class_student_id", None) for es in event_students[:5]],
+                    "cs_map_count": len(cs_map or {}),
+                    "allowed_class_ids_count": len(allowed_class_ids or []),
+                }
+                result["debug_info"] = debug_part
+        except Exception:
+            pass
+
         # Event teachers list (participants distinct from homeroom/vice approvers)
         try:
             event_teacher_rows = frappe.get_all(
