@@ -125,8 +125,8 @@ def get_curriculum_by_id():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 curriculum_id = json_data.get('curriculum_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-
-
+                frappe.logger().warning(f"Failed to parse request JSON in get_curriculum_by_id: {str(e)}")
+                # Continue with curriculum_id from form_dict or None
         if not curriculum_id:
             return error_response(
                 message="Curriculum ID is required",
@@ -367,7 +367,7 @@ def update_curriculum():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 data.update(json_data)
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-
+                frappe.logger().warning(f"Failed to parse request JSON in update_curriculum: {str(e)}")
         curriculum_id = data.get('curriculum_id')
 
         if not curriculum_id:
@@ -488,7 +488,7 @@ def delete_curriculum():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 curriculum_id = json_data.get('curriculum_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-
+                frappe.logger().warning(f"Failed to parse request JSON in delete_curriculum: {str(e)}")
 
         if not curriculum_id:
             return error_response(
@@ -587,7 +587,7 @@ def check_short_title_availability():
                 short_title = json_data.get('short_title')
                 curriculum_id = json_data.get('curriculum_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-
+                frappe.logger().warning(f"Failed to parse request JSON in check_short_title_availability: {str(e)}")
         if not short_title:
             return error_response(
                 message="Short title is required",
