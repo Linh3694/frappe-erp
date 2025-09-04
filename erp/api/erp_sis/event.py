@@ -885,9 +885,19 @@ def get_event_detail():
         # Determine participant visibility mode
         include_all_participants = False
         try:
-            include_all_participants = str(form_dict.get("include_all_participants", "0")).lower() in ("1", "true", "yes")
+            # Support snake_case and camelCase flags from frontend
+            raw_flag = form_dict.get("include_all_participants")
+            if raw_flag is None:
+                raw_flag = form_dict.get("includeAllParticipants")
+            include_all_participants = str(raw_flag or "0").lower() in ("1", "true", "yes")
+
             mode_value = str(form_dict.get("mode") or "").lower()
             if mode_value == "list":
+                include_all_participants = True
+
+            # Treat readonly=1 as list mode (view-only)
+            readonly_flag = str(form_dict.get("readonly") or "0").lower() in ("1", "true", "yes")
+            if readonly_flag:
                 include_all_participants = True
         except Exception as _e:
             debug_info["include_all_flag_error"] = str(_e)
