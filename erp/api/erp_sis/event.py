@@ -983,7 +983,7 @@ def get_event_detail():
             )
             cs_map = {row.name: row for row in cs_rows}
 
-        # Build Class map for homeroom and vice-homeroom info (bulk)
+        # Build Class map for homeroom, vice-homeroom and title info (bulk)
         class_map = {}
         try:
             class_ids_needed = list({row.get("class_id") for row in cs_map.values() if row.get("class_id")})
@@ -991,7 +991,7 @@ def get_event_detail():
                 class_rows = frappe.get_all(
                     "SIS Class",
                     filters={"name": ["in", class_ids_needed]},
-                    fields=["name", "homeroom_teacher", "vice_homeroom_teacher"],
+                    fields=["name", "homeroom_teacher", "vice_homeroom_teacher", "title", "short_title"],
                     limit_page_length=100000
                 )
                 class_map = {row.name: row for row in class_rows}
@@ -1019,6 +1019,8 @@ def get_event_detail():
             klass_info = class_map.get(class_id) or {}
             homeroom_teacher_id = klass_info.get("homeroom_teacher") if isinstance(klass_info, dict) else None
             vice_homeroom_teacher_id = klass_info.get("vice_homeroom_teacher") if isinstance(klass_info, dict) else None
+            class_title = klass_info.get("title") if isinstance(klass_info, dict) else None
+            class_short_title = klass_info.get("short_title") if isinstance(klass_info, dict) else None
             participants.append({
                 "event_student_id": es.name,
                 "class_student_id": es.class_student_id,
@@ -1026,6 +1028,8 @@ def get_event_detail():
                 "student_name": student_name,
                 "student_code": student_code,
                 "class_id": class_id,
+                "class_title": class_title,
+                "class_name": class_title or class_short_title,
                 "status": es.status,
                 "approved_at": es.approved_at,
                 "note": es.note,
