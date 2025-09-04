@@ -255,7 +255,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
 
 
 @frappe.whitelist(allow_guest=False)
-def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None, student_code=None, class_name=None, force=False):
+def unassign_student(name=None, class_id=None, student_id=None, school_year_id=None, class_type=None, student_code=None, class_name=None, force=False, reassign_to_class_id=None, reassign_to_class_name=None, reassign_to_latest=False):
     """Remove a student from a class"""
     try:
         # Get parameters from form_dict / request args
@@ -286,6 +286,20 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
             else:
                 force = bool(raw_force)
 
+        # Parse reassignment flags/targets
+        if not reassign_to_class_id:
+            reassign_to_class_id = form.get('reassign_to_class_id') or (args.get('reassign_to_class_id') if args else None)
+        if not reassign_to_class_name:
+            reassign_to_class_name = form.get('reassign_to_class_name') or (args.get('reassign_to_class_name') if args else None)
+        if isinstance(reassign_to_latest, str):
+            reassign_to_latest = reassign_to_latest.lower() in ("1", "true", "yes", "y")
+        elif not reassign_to_latest:
+            raw_latest = form.get('reassign_to_latest') or (args.get('reassign_to_latest') if args else None)
+            if isinstance(raw_latest, str):
+                reassign_to_latest = raw_latest.lower() in ("1", "true", "yes", "y")
+            else:
+                reassign_to_latest = bool(raw_latest)
+
         frappe.logger().info(f"unassign_student called with: name={name}, class_id={class_id}, class_name={class_name}, student_id={student_id}, student_code={student_code}, school_year_id={school_year_id}, class_type={class_type}")
 
         # Fallback: parse JSON body if sent as application/json
@@ -303,6 +317,15 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                 if 'force' in body and not isinstance(force, bool):
                     try:
                         force = str(body.get('force')).lower() in ("1", "true", "yes", "y")
+                    except Exception:
+                        pass
+                if not reassign_to_class_id:
+                    reassign_to_class_id = body.get('reassign_to_class_id')
+                if not reassign_to_class_name:
+                    reassign_to_class_name = body.get('reassign_to_class_name')
+                if 'reassign_to_latest' in body and not isinstance(reassign_to_latest, bool):
+                    try:
+                        reassign_to_latest = str(body.get('reassign_to_latest')).lower() in ("1", "true", "yes", "y")
                     except Exception:
                         pass
         except Exception:
@@ -384,10 +407,104 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                 message="Class student assignment not found",
                 code="CLASS_STUDENT_NOT_FOUND"
             )
-        
-        # If force flag is set, delete linked SIS Event Student first
+
+        # Load current class student document for context
+        cs_doc = frappe.get_doc("SIS Class Student", name)
+
+        # Reassign flow: migrate linked records to a target class student instead of deleting them
+        migrated_event_students = 0
+        if reassign_to_class_id or reassign_to_class_name or reassign_to_latest:
+            # Resolve destination class_id
+            target_class_id = reassign_to_class_id
+            if not target_class_id and reassign_to_class_name:
+                try:
+                    # Try resolve by name then title
+                    row = frappe.get_all("SIS Class", filters={"name": reassign_to_class_name}, fields=["name"], limit=1)
+                    if not row:
+                        row = frappe.get_all("SIS Class", filters={"title": reassign_to_class_name}, fields=["name"], limit=1)
+                    if row:
+                        target_class_id = row[0].name
+                except Exception:
+                    target_class_id = None
+            if not target_class_id and reassign_to_latest:
+                try:
+                    # Pick latest other class assignment of this student in the same school year
+                    other = frappe.get_all(
+                        "SIS Class Student",
+                        filters={
+                            "student_id": cs_doc.student_id,
+                            "school_year_id": cs_doc.school_year_id,
+                            "name": ["!=", cs_doc.name]
+                        },
+                        fields=["name", "class_id"],
+                        order_by="creation desc",
+                        limit=1
+                    )
+                    if other:
+                        target_class_id = other[0].class_id
+                except Exception:
+                    target_class_id = None
+
+            if not target_class_id:
+                return validation_error_response(
+                    message="Missing target class for reassignment",
+                    errors={"reassign_to_class_id": ["Required if reassigning"]}
+                )
+
+            # Ensure destination class student exists or create
+            target_cs = frappe.get_all(
+                "SIS Class Student",
+                filters={
+                    "class_id": target_class_id,
+                    "student_id": cs_doc.student_id,
+                    "school_year_id": cs_doc.school_year_id,
+                },
+                fields=["name"],
+                limit=1
+            )
+            if target_cs:
+                target_cs_name = target_cs[0].name
+            else:
+                # Create a new class student record mirroring essential fields
+                target_doc = frappe.get_doc({
+                    "doctype": "SIS Class Student",
+                    "class_id": target_class_id,
+                    "student_id": cs_doc.student_id,
+                    "school_year_id": cs_doc.school_year_id,
+                    "class_type": cs_doc.class_type or "regular",
+                    "campus_id": cs_doc.campus_id,
+                })
+                target_doc.insert()
+                target_cs_name = target_doc.name
+
+            # Migrate linked SIS Event Student -> point to target class student
+            try:
+                linked_es = frappe.get_all(
+                    "SIS Event Student",
+                    filters={"class_student_id": cs_doc.name},
+                    fields=["name"],
+                    limit_page_length=100000
+                )
+                for es in linked_es:
+                    try:
+                        frappe.db.set_value("SIS Event Student", es["name"], {
+                            "class_student_id": target_cs_name
+                        }, update_modified=True)
+                        migrated_event_students += 1
+                    except Exception:
+                        # Continue with others
+                        pass
+                frappe.db.commit()
+            except Exception as migrate_err:
+                frappe.logger().error(f"Reassign migration failed for class student {name}: {str(migrate_err)}")
+                return error_response(
+                    message="Failed to migrate linked event participants during reassignment",
+                    code="REASSIGN_MIGRATION_ERROR"
+                )
+
+        # If force flag is set, delete linked SIS Event Student first (when not reassigning)
         deleted_event_students = 0
-        if force:
+        if force and not (reassign_to_class_id or reassign_to_class_name or reassign_to_latest):
             try:
                 linked_es = frappe.get_all(
                     "SIS Event Student",
@@ -416,7 +533,11 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
         
         frappe.logger().info(f"Successfully unassigned class student: {name}")
         
-        suffix = f" (removed {deleted_event_students} linked event participant(s))" if deleted_event_students > 0 else ""
+        suffix = ""
+        if deleted_event_students > 0:
+            suffix += f" (removed {deleted_event_students} linked event participant(s))"
+        if migrated_event_students > 0:
+            suffix += f" (migrated {migrated_event_students} linked event participant(s))"
         return success_response(
             message=f"Student unassigned from class successfully{suffix}"
         )
