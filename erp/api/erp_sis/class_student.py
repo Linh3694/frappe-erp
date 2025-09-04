@@ -24,11 +24,6 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         if not class_id:
             class_id = frappe.request.args.get("class_id")
 
-        # Debug: log all parameters
-        print(f"DEBUG: Final parameters - page: {page}, limit: {limit}, school_year_id: {school_year_id}, class_id: {class_id}")
-        print(f"DEBUG: frappe.request.args: {dict(frappe.request.args)}")
-        print(f"DEBUG: frappe.local.form_dict: {dict(frappe.local.form_dict) if frappe.local.form_dict else 'None'}")
-
         # Build filters
         filters = {}
         if school_year_id:
@@ -299,7 +294,7 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                 reassign_to_latest = raw_latest.lower() in ("1", "true", "yes", "y")
             else:
                 reassign_to_latest = bool(raw_latest)
-                
+
         # Fallback: parse JSON body if sent as application/json
         try:
             if hasattr(frappe, 'request') and getattr(frappe.request, 'data', None):
@@ -601,7 +596,6 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                         target_doc.insert()
                         target_cs_name = target_doc.name
 
-                    # Migrate linked ES
                     linked_es = frappe.get_all(
                         "SIS Event Student",
                         filters={"class_student_id": name},
@@ -637,6 +631,64 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                 frappe.delete_doc("SIS Class Student", name)
                 frappe.db.commit()
                 return success_response(message="Student unassigned (force removed linked records)")
+            
+            # Fallback auto-resolution when no flags provided
+            try:
+                cs_doc = frappe.get_doc("SIS Class Student", name)
+            except Exception:
+                cs_doc = None
+            target_cs_name = None
+            if cs_doc:
+                try:
+                    other = frappe.get_all(
+                        "SIS Class Student",
+                        filters={
+                            "student_id": cs_doc.student_id,
+                            "school_year_id": cs_doc.school_year_id,
+                            "name": ["!=", cs_doc.name]
+                        },
+                        fields=["name", "class_id"],
+                        order_by="creation desc",
+                        limit=1
+                    )
+                    if other:
+                        target_cs_name = other[0].name
+                except Exception:
+                    target_cs_name = None
+
+            if target_cs_name:
+                linked_es = frappe.get_all(
+                    "SIS Event Student",
+                    filters={"class_student_id": name},
+                    fields=["name"],
+                    limit_page_length=100000
+                )
+                for es in linked_es:
+                    try:
+                        frappe.db.set_value("SIS Event Student", es["name"], {"class_student_id": target_cs_name}, update_modified=True)
+                    except Exception:
+                        pass
+                frappe.db.commit()
+                frappe.delete_doc("SIS Class Student", name)
+                frappe.db.commit()
+                return success_response(message="Student unassigned (auto-migrated links)")
+
+            # As last resort, remove linked ES then delete
+            linked_es = frappe.get_all(
+                "SIS Event Student",
+                filters={"class_student_id": name},
+                fields=["name"],
+                limit_page_length=100000
+            )
+            for es in linked_es:
+                try:
+                    frappe.delete_doc("SIS Event Student", es["name"]) 
+                except Exception:
+                    pass
+            frappe.db.commit()
+            frappe.delete_doc("SIS Class Student", name)
+            frappe.db.commit()
+            return success_response(message="Student unassigned (auto-removed linked records)")
         except Exception as resolve_err:
             try:
                 frappe.log_error(title="Unassign auto-resolve failed", message=str(resolve_err))
