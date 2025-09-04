@@ -1003,6 +1003,18 @@ def get_event_detail():
             ignore_permissions=True if include_all_participants else False,
             limit_page_length=100000
         )
+        # Fallback: some deployments may use field name 'event' instead of 'event_id'
+        if not event_students:
+            try:
+                event_students = frappe.get_all(
+                    "SIS Event Student",
+                    filters={"event": event_id},
+                    fields=es_fields,
+                    ignore_permissions=True if include_all_participants else False,
+                    limit_page_length=100000
+                )
+            except Exception:
+                pass
 
         # Build Class Student map in bulk
         class_student_ids = [es.class_student_id for es in event_students if es.class_student_id]
