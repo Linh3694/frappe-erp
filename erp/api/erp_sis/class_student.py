@@ -380,9 +380,25 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
             message="Student unassigned from class successfully"
         )
         
-    except Exception as e:
-        frappe.log_error(f"Error unassigning student from class: {str(e)}")
+    except frappe.LinkExistsError as e:
+        # Happens when Class Student is linked to other doctypes (e.g., SIS Event Student)
         frappe.db.rollback()
+        # Log with short title to avoid CharacterLengthExceededError
+        try:
+            frappe.log_error(title="Unassign failed: linked documents", message=str(e))
+        except Exception:
+            pass
+        return error_response(
+            message=str(e),
+            code="CLASS_STUDENT_LINKED"
+        )
+    except Exception as e:
+        # Generic error handler
+        frappe.db.rollback()
+        try:
+            frappe.log_error(title="Unassign class student error", message=str(e))
+        except Exception:
+            pass
         return error_response(
             message="Error unassigning student from class",
             code="UNASSIGN_STUDENT_ERROR"
