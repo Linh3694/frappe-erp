@@ -1015,6 +1015,17 @@ def get_event_detail():
                 )
             except Exception:
                 pass
+        # Last-resort fallback: direct SQL (bypass any query-layer filters)
+        if not event_students:
+            try:
+                columns = ", ".join(es_fields)
+                rows = frappe.db.sql(f"select {columns} from `tabSIS Event Student` where event_id=%s", (event_id,), as_dict=True)
+                if not rows:
+                    rows = frappe.db.sql(f"select {columns} from `tabSIS Event Student` where event=%s", (event_id,), as_dict=True)
+                if rows:
+                    event_students = rows
+            except Exception:
+                pass
 
         # Build Class Student map in bulk
         class_student_ids = [es.class_student_id for es in event_students if es.class_student_id]
@@ -1044,10 +1055,17 @@ def get_event_detail():
         except Exception as _e:
             debug_info["class_map_error"] = str(_e)
 
+        # Helper to get value from dict or object uniformly
+        def _get(obj, key):
+            try:
+                return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+            except Exception:
+                return None
+
         participants = []
         for es in event_students:
             # Resolve class student and class
-            cs_key = getattr(es, "class_student_id", None)
+            cs_key = _get(es, "class_student_id")
             cs = cs_map.get(cs_key) if cs_key else None
             if not cs and cs_key:
                 try:
@@ -1071,7 +1089,7 @@ def get_event_detail():
             # Resolve student id: prefer from class student; fall back to ES.student field
             student_id = cs.get("student_id") if cs else None
             if not student_id and 'student_field_name' in locals() and student_field_name:
-                student_id = getattr(es, student_field_name, None)
+                student_id = _get(es, student_field_name)
 
             student_name = None
             student_code = None
@@ -1096,17 +1114,17 @@ def get_event_detail():
             class_short_title = klass_info.get("short_title")
 
             participants.append({
-                "event_student_id": getattr(es, "name", None),
-                "class_student_id": getattr(es, "class_student_id", None),
+                "event_student_id": _get(es, "name"),
+                "class_student_id": _get(es, "class_student_id"),
                 "student_id": student_id,
                 "student_name": student_name,
                 "student_code": student_code,
                 "class_id": class_id,
                 "class_title": class_title,
                 "class_name": class_title or class_short_title,
-                "status": getattr(es, "status", None),
-                "approved_at": getattr(es, "approved_at", None),
-                "note": getattr(es, "note", None),
+                "status": _get(es, "status"),
+                "approved_at": _get(es, "approved_at"),
+                "note": _get(es, "note"),
                 "homeroom_teacher_id": homeroom_teacher_id,
                 "vice_homeroom_teacher_id": vice_homeroom_teacher_id,
             })
