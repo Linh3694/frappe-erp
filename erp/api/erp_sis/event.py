@@ -1107,6 +1107,32 @@ def update_event_student_status():
         except Exception as e:
             debug_info["request_args_error"] = str(e)
 
+        # Fallback: parse raw body (URL-encoded) if still missing
+        try:
+            # frappe.local.request.get_data(as_text=True) may not exist in all versions; handle robustly
+            raw_body = None
+            try:
+                raw_body = frappe.local.request.get_data(as_text=True)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            if not raw_body:
+                try:
+                    raw_body = getattr(frappe.local.request, 'data', None)
+                    if isinstance(raw_body, (bytes, bytearray)):
+                        raw_body = raw_body.decode('utf-8', errors='ignore')
+                except Exception:
+                    raw_body = None
+            if raw_body and isinstance(raw_body, str) and '=' in raw_body:
+                from urllib.parse import parse_qs
+                parsed = parse_qs(raw_body, keep_blank_values=True)
+                # parse_qs returns values as lists
+                for k, vlist in parsed.items():
+                    if k not in data and vlist:
+                        data[k] = vlist[0]
+                debug_info["raw_body_parsed_keys"] = list(parsed.keys())
+        except Exception as e:
+            debug_info["raw_body_parse_error"] = str(e)
+
         # Accept common aliases
         event_student_id = data.get("event_student_id") or data.get("id") or data.get("name")
         status = data.get("status")  # approved | rejected | pending
