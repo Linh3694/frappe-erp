@@ -1079,13 +1079,41 @@ def get_event_detail():
 def update_event_student_status():
     """Approve/Reject a single event student"""
     try:
+        debug_info = {}
         data = frappe.local.form_dict
-        event_student_id = data.get("event_student_id")
-        status = data.get("status")  # approved | rejected
+        try:
+            debug_info["form_dict_keys"] = list(data.keys())
+            debug_info["form_dict_preview"] = {k: data.get(k) for k in list(data.keys())[:10]}
+        except Exception:
+            pass
+
+        # Try to merge JSON body if present
+        try:
+            request_json = frappe.local.request.get_json()
+            if request_json and isinstance(request_json, dict):
+                data.update(request_json)
+                debug_info["json_body_keys"] = list(request_json.keys())
+        except Exception as e:
+            debug_info["json_body_error"] = str(e)
+
+        # Fallback to URL args if missing
+        try:
+            args = getattr(frappe.local.request, "args", None)
+            if args and isinstance(args, dict):
+                for k, v in args.items():
+                    if k not in data:
+                        data[k] = v
+                debug_info["request_args_keys"] = list(args.keys())
+        except Exception as e:
+            debug_info["request_args_error"] = str(e)
+
+        # Accept common aliases
+        event_student_id = data.get("event_student_id") or data.get("id") or data.get("name")
+        status = data.get("status")  # approved | rejected | pending
         note = data.get("note")
 
         if not event_student_id:
-            return validation_error_response("Validation failed", {"event_student_id": ["Required"]})
+            return validation_error_response("Validation failed", {"event_student_id": ["Required"]}, debug_info=debug_info)
         if status not in ("approved", "rejected", "pending"):
             return validation_error_response("Validation failed", {"status": ["Invalid status"]})
 
