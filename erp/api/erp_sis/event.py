@@ -420,6 +420,31 @@ def create_event():
         except Exception as _e:
             debug_info["event_student_block_error"] = str(_e)
 
+        # Create event teacher records for participants (separate from homeroom/vice roles)
+        try:
+            created_event_teachers = []
+            teacher_ids = data.get('teacher_ids') or []
+            if isinstance(teacher_ids, list) and len(teacher_ids) > 0:
+                for tid in teacher_ids:
+                    try:
+                        teacher_doc = frappe.get_doc({
+                            "doctype": "SIS Event Teacher",
+                            "campus_id": campus_id,
+                            "event_id": event.name,
+                            "teacher_id": tid
+                        })
+                        teacher_doc.insert()
+                        created_event_teachers.append(teacher_doc.name)
+                    except Exception as _et:
+                        if "event_teacher_creation_errors" not in debug_info:
+                            debug_info["event_teacher_creation_errors"] = []
+                        debug_info["event_teacher_creation_errors"].append(str(_et))
+            if created_event_teachers:
+                frappe.db.commit()
+                debug_info["event_teachers_created"] = created_event_teachers
+        except Exception as _e:
+            debug_info["event_teacher_block_error"] = str(_e)
+
         debug_info["execution_reached_success"] = True
         return single_item_response({
             "name": event.name,
@@ -958,6 +983,21 @@ def get_event_detail():
             )
             cs_map = {row.name: row for row in cs_rows}
 
+        # Build Class map for homeroom and vice-homeroom info (bulk)
+        class_map = {}
+        try:
+            class_ids_needed = list({row.get("class_id") for row in cs_map.values() if row.get("class_id")})
+            if class_ids_needed:
+                class_rows = frappe.get_all(
+                    "SIS Class",
+                    filters={"name": ["in", class_ids_needed]},
+                    fields=["name", "homeroom_teacher", "vice_homeroom_teacher"],
+                    limit_page_length=100000
+                )
+                class_map = {row.name: row for row in class_rows}
+        except Exception as _e:
+            debug_info["class_map_error"] = str(_e)
+
         participants = []
         for es in event_students:
             cs = cs_map.get(es.class_student_id)
@@ -976,6 +1016,9 @@ def get_event_detail():
             )
             student_name = student[0]["student_name"] if student else None
             student_code = student[0]["student_code"] if student else None
+            klass_info = class_map.get(class_id) or {}
+            homeroom_teacher_id = klass_info.get("homeroom_teacher") if isinstance(klass_info, dict) else None
+            vice_homeroom_teacher_id = klass_info.get("vice_homeroom_teacher") if isinstance(klass_info, dict) else None
             participants.append({
                 "event_student_id": es.name,
                 "class_student_id": es.class_student_id,
@@ -986,8 +1029,39 @@ def get_event_detail():
                 "status": es.status,
                 "approved_at": es.approved_at,
                 "note": es.note,
+                "homeroom_teacher_id": homeroom_teacher_id,
+                "vice_homeroom_teacher_id": vice_homeroom_teacher_id,
             })
         result["participants"] = participants
+
+        # Event teachers list (participants distinct from homeroom/vice approvers)
+        try:
+            event_teacher_rows = frappe.get_all(
+                "SIS Event Teacher",
+                filters={"event_id": event_id},
+                fields=["name", "teacher_id"],
+                limit_page_length=100000
+            )
+            teacher_ids = [row.teacher_id for row in event_teacher_rows if row.get("teacher_id")]
+            teacher_user_map = {}
+            if teacher_ids:
+                t_rows = frappe.get_all(
+                    "SIS Teacher",
+                    filters={"name": ["in", teacher_ids]},
+                    fields=["name", "user_id"],
+                    limit_page_length=100000
+                )
+                teacher_user_map = {row.name: row.get("user_id") for row in t_rows}
+            result["teachers"] = [
+                {
+                    "event_teacher_id": row.name,
+                    "teacher_id": row.teacher_id,
+                    "user_id": teacher_user_map.get(row.teacher_id)
+                }
+                for row in event_teacher_rows
+            ]
+        except Exception as _e:
+            debug_info["event_teacher_list_error"] = str(_e)
 
         return single_item_response(result, "Event detail fetched successfully")
     except frappe.DoesNotExistError:
