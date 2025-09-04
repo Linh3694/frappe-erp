@@ -1,0 +1,33 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Event Attendance",
+ "module": "Sis",
+ "custom": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "editable_grid": 0,
+ "autoname": "format:SIS-EVENT-ATT-{#####}",
+ "field_order": [
+  "event_id",
+  "class_student_id",
+  "student_id",
+  "status",
+  "remarks",
+  "campus_id",
+  "recorded_by"
+ ],
+ "fields": [
+  {"fieldname": "event_id", "label": "Event", "fieldtype": "Link", "options": "SIS Event", "reqd": 1},
+  {"fieldname": "class_student_id", "label": "Class Student", "fieldtype": "Link", "options": "SIS Class Student"},
+  {"fieldname": "student_id", "label": "Student", "fieldtype": "Link", "options": "CRM Student", "reqd": 1},
+  {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "present\nabsent\nlate\nexcused", "reqd": 1},
+  {"fieldname": "remarks", "label": "Remarks", "fieldtype": "Small Text"},
+  {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"},
+  {"fieldname": "recorded_by", "label": "Recorded By", "fieldtype": "Link", "options": "User"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+  {"role": "SIS Teacher", "read": 1, "write": 1, "create": 1}
+ ]
+}
+

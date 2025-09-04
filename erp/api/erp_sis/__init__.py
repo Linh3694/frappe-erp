@@ -8,3 +8,4 @@ from .sis_class import *
 from .class_student import *
 from .calendar import *
 from .timetable import *
+from .attendance import *

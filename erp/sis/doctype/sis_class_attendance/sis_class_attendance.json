@@ -1,0 +1,39 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Class Attendance",
+ "module": "Sis",
+ "custom": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "editable_grid": 0,
+ "autoname": "format:SIS-CLASS-ATT-{#####}",
+ "field_order": [
+  "student_id",
+  "student_code",
+  "student_name",
+  "class_id",
+  "date",
+  "period",
+  "status",
+  "remarks",
+  "campus_id",
+  "recorded_by"
+ ],
+ "fields": [
+  {"fieldname": "student_id", "label": "Student", "fieldtype": "Link", "options": "CRM Student", "reqd": 1},
+  {"fieldname": "student_code", "label": "Student Code", "fieldtype": "Data"},
+  {"fieldname": "student_name", "label": "Student Name", "fieldtype": "Data"},
+  {"fieldname": "class_id", "label": "Class", "fieldtype": "Link", "options": "SIS Class", "reqd": 1},
+  {"fieldname": "date", "label": "Date", "fieldtype": "Date", "reqd": 1},
+  {"fieldname": "period", "label": "Period", "fieldtype": "Data", "reqd": 1},
+  {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "present\nabsent\nlate\nexcused", "reqd": 1},
+  {"fieldname": "remarks", "label": "Remarks", "fieldtype": "Small Text"},
+  {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"},
+  {"fieldname": "recorded_by", "label": "Recorded By", "fieldtype": "Link", "options": "User"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+  {"role": "SIS Teacher", "read": 1, "write": 1, "create": 1}
+ ]
+}
+
