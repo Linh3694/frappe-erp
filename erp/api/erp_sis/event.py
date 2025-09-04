@@ -986,10 +986,20 @@ def get_event_detail():
             except Exception:
                 allowed_class_ids = set()
 
+        # Fetch event students; include student field if present (student_id or student)
+        try:
+            student_field_name = "student_id" if frappe.db.has_column("SIS Event Student", "student_id") else ("student" if frappe.db.has_column("SIS Event Student", "student") else None)
+        except Exception:
+            student_field_name = None
+
+        es_fields = ["name", "class_student_id", "status", "approved_at", "note"]
+        if student_field_name:
+            es_fields.append(student_field_name)
+
         event_students = frappe.get_all(
             "SIS Event Student",
             filters={"event_id": event_id},
-            fields=["name", "class_student_id", "status", "approved_at", "note"]
+            fields=es_fields
         )
 
         # Build Class Student map in bulk
@@ -1021,39 +1031,53 @@ def get_event_detail():
 
         participants = []
         for es in event_students:
-            cs = cs_map.get(es.class_student_id)
-            if not cs:
-                continue
-            class_id = cs.get("class_id")
-            # Filter participants only when allowed_class_ids is populated (approval mode)
+            # Resolve class student and class
+            cs_key = getattr(es, "class_student_id", None)
+            cs = cs_map.get(cs_key) if cs_key else None
+            class_id = cs.get("class_id") if cs else None
+
+            # Approval mode: restrict to allowed classes
             if allowed_class_ids and class_id not in allowed_class_ids:
                 continue
-            student_id = cs.get("student_id")
-            student = frappe.get_all(
-                "CRM Student",
-                filters={"name": student_id},
-                fields=["student_name", "student_code"],
-                limit_page_length=1
-            )
-            student_name = student[0]["student_name"] if student else None
-            student_code = student[0]["student_code"] if student else None
-            klass_info = class_map.get(class_id) or {}
-            homeroom_teacher_id = klass_info.get("homeroom_teacher") if isinstance(klass_info, dict) else None
-            vice_homeroom_teacher_id = klass_info.get("vice_homeroom_teacher") if isinstance(klass_info, dict) else None
-            class_title = klass_info.get("title") if isinstance(klass_info, dict) else None
-            class_short_title = klass_info.get("short_title") if isinstance(klass_info, dict) else None
+
+            # Resolve student id: prefer from class student; fall back to ES.student field
+            student_id = cs.get("student_id") if cs else None
+            if not student_id and 'student_field_name' in locals() and student_field_name:
+                student_id = getattr(es, student_field_name, None)
+
+            student_name = None
+            student_code = None
+            if student_id:
+                student_row = frappe.get_all(
+                    "CRM Student",
+                    filters={"name": student_id},
+                    fields=["student_name", "student_code"],
+                    limit_page_length=1
+                )
+                if student_row:
+                    student_name = student_row[0]["student_name"]
+                    student_code = student_row[0]["student_code"]
+
+            klass_info = class_map.get(class_id) if class_id else {}
+            if not isinstance(klass_info, dict):
+                klass_info = {}
+            homeroom_teacher_id = klass_info.get("homeroom_teacher")
+            vice_homeroom_teacher_id = klass_info.get("vice_homeroom_teacher")
+            class_title = klass_info.get("title")
+            class_short_title = klass_info.get("short_title")
+
             participants.append({
-                "event_student_id": es.name,
-                "class_student_id": es.class_student_id,
+                "event_student_id": getattr(es, "name", None),
+                "class_student_id": getattr(es, "class_student_id", None),
                 "student_id": student_id,
                 "student_name": student_name,
                 "student_code": student_code,
                 "class_id": class_id,
                 "class_title": class_title,
                 "class_name": class_title or class_short_title,
-                "status": es.status,
-                "approved_at": es.approved_at,
-                "note": es.note,
+                "status": getattr(es, "status", None),
+                "approved_at": getattr(es, "approved_at", None),
+                "note": getattr(es, "note", None),
                 "homeroom_teacher_id": homeroom_teacher_id,
                 "vice_homeroom_teacher_id": vice_homeroom_teacher_id,
             })
