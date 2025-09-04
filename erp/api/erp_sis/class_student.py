@@ -299,9 +299,7 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                 reassign_to_latest = raw_latest.lower() in ("1", "true", "yes", "y")
             else:
                 reassign_to_latest = bool(raw_latest)
-
-        frappe.logger().info(f"unassign_student called with: name={name}, class_id={class_id}, class_name={class_name}, student_id={student_id}, student_code={student_code}, school_year_id={school_year_id}, class_type={class_type}")
-
+                
         # Fallback: parse JSON body if sent as application/json
         try:
             if hasattr(frappe, 'request') and getattr(frappe.request, 'data', None):
@@ -414,11 +412,9 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
         # Reassign flow: migrate linked records to a target class student instead of deleting them
         migrated_event_students = 0
         if reassign_to_class_id or reassign_to_class_name or reassign_to_latest:
-            # Resolve destination class_id
             target_class_id = reassign_to_class_id
             if not target_class_id and reassign_to_class_name:
                 try:
-                    # Try resolve by name then title
                     row = frappe.get_all("SIS Class", filters={"name": reassign_to_class_name}, fields=["name"], limit=1)
                     if not row:
                         row = frappe.get_all("SIS Class", filters={"title": reassign_to_class_name}, fields=["name"], limit=1)
@@ -428,7 +424,6 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                     target_class_id = None
             if not target_class_id and reassign_to_latest:
                 try:
-                    # Pick latest other class assignment of this student in the same school year
                     other = frappe.get_all(
                         "SIS Class Student",
                         filters={
@@ -545,7 +540,110 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
     except frappe.LinkExistsError as e:
         # Happens when Class Student is linked to other doctypes (e.g., SIS Event Student)
         frappe.db.rollback()
-        # Log with short title to avoid CharacterLengthExceededError
+        # Attempt auto-resolution if flags provided, then retry deletion
+        try:
+            # Reassignment takes precedence over force deletion
+            if reassign_to_class_id or reassign_to_class_name or reassign_to_latest:
+                try:
+                    cs_doc = frappe.get_doc("SIS Class Student", name)
+                except Exception:
+                    cs_doc = None
+                target_class_id = reassign_to_class_id
+                if not target_class_id and reassign_to_class_name:
+                    try:
+                        row = frappe.get_all("SIS Class", filters={"name": reassign_to_class_name}, fields=["name"], limit=1)
+                        if not row:
+                            row = frappe.get_all("SIS Class", filters={"title": reassign_to_class_name}, fields=["name"], limit=1)
+                        if row:
+                            target_class_id = row[0].name
+                    except Exception:
+                        target_class_id = None
+                if not target_class_id and reassign_to_latest and cs_doc:
+                    try:
+                        other = frappe.get_all(
+                            "SIS Class Student",
+                            filters={
+                                "student_id": cs_doc.student_id,
+                                "school_year_id": cs_doc.school_year_id,
+                                "name": ["!=", cs_doc.name]
+                            },
+                            fields=["name", "class_id"],
+                            order_by="creation desc",
+                            limit=1
+                        )
+                        if other:
+                            target_class_id = other[0].class_id
+                    except Exception:
+                        target_class_id = None
+                if target_class_id and cs_doc:
+                    # Ensure destination class student exists or create
+                    target_cs = frappe.get_all(
+                        "SIS Class Student",
+                        filters={
+                            "class_id": target_class_id,
+                            "student_id": cs_doc.student_id,
+                            "school_year_id": cs_doc.school_year_id,
+                        },
+                        fields=["name"],
+                        limit=1
+                    )
+                    if target_cs:
+                        target_cs_name = target_cs[0].name
+                    else:
+                        target_doc = frappe.get_doc({
+                            "doctype": "SIS Class Student",
+                            "class_id": target_class_id,
+                            "student_id": cs_doc.student_id,
+                            "school_year_id": cs_doc.school_year_id,
+                            "class_type": cs_doc.class_type or "regular",
+                            "campus_id": cs_doc.campus_id,
+                        })
+                        target_doc.insert()
+                        target_cs_name = target_doc.name
+
+                    # Migrate linked ES
+                    linked_es = frappe.get_all(
+                        "SIS Event Student",
+                        filters={"class_student_id": name},
+                        fields=["name"],
+                        limit_page_length=100000
+                    )
+                    for es in linked_es:
+                        try:
+                            frappe.db.set_value("SIS Event Student", es["name"], {"class_student_id": target_cs_name}, update_modified=True)
+                        except Exception:
+                            pass
+                    frappe.db.commit()
+
+                    # Retry delete
+                    frappe.delete_doc("SIS Class Student", name)
+                    frappe.db.commit()
+                    return success_response(message="Student unassigned (reassigned and links migrated)")
+
+            if force:
+                # Remove linked ES then retry delete
+                linked_es = frappe.get_all(
+                    "SIS Event Student",
+                    filters={"class_student_id": name},
+                    fields=["name"],
+                    limit_page_length=100000
+                )
+                for es in linked_es:
+                    try:
+                        frappe.delete_doc("SIS Event Student", es["name"])
+                    except Exception:
+                        pass
+                frappe.db.commit()
+                frappe.delete_doc("SIS Class Student", name)
+                frappe.db.commit()
+                return success_response(message="Student unassigned (force removed linked records)")
+        except Exception as resolve_err:
+            try:
+                frappe.log_error(title="Unassign auto-resolve failed", message=str(resolve_err))
+            except Exception:
+                pass
+
+        # Fall back: report link error
         try:
             frappe.log_error(title="Unassign failed: linked documents", message=str(e))
         except Exception:
