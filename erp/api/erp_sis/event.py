@@ -1037,6 +1037,19 @@ def get_event_detail():
             # Resolve class student and class
             cs_key = getattr(es, "class_student_id", None)
             cs = cs_map.get(cs_key) if cs_key else None
+            if not cs and cs_key:
+                try:
+                    fallback_cs = frappe.get_all(
+                        "SIS Class Student",
+                        filters={"name": cs_key},
+                        fields=["name", "student_id", "class_id", "school_year_id"],
+                        limit_page_length=1,
+                        ignore_permissions=True if include_all_participants else False
+                    )
+                    if fallback_cs:
+                        cs = fallback_cs[0]
+                except Exception:
+                    cs = None
             class_id = cs.get("class_id") if cs else None
 
             # Approval mode: restrict to allowed classes
@@ -1055,7 +1068,8 @@ def get_event_detail():
                     "CRM Student",
                     filters={"name": student_id},
                     fields=["student_name", "student_code"],
-                    limit_page_length=1
+                    limit_page_length=1,
+                    ignore_permissions=True if include_all_participants else False
                 )
                 if student_row:
                     student_name = student_row[0]["student_name"]
