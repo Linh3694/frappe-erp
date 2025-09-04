@@ -882,6 +882,15 @@ def get_event_detail():
             pass
 
         event_id = form_dict.get("event_id") or form_dict.get("id") or form_dict.get("name")
+        # Determine participant visibility mode
+        include_all_participants = False
+        try:
+            include_all_participants = str(form_dict.get("include_all_participants", "0")).lower() in ("1", "true", "yes")
+            mode_value = str(form_dict.get("mode") or "").lower()
+            if mode_value == "list":
+                include_all_participants = True
+        except Exception as _e:
+            debug_info["include_all_flag_error"] = str(_e)
         if not event_id:
             try:
                 # Fallback to query args if available
@@ -944,26 +953,28 @@ def get_event_detail():
             })
         result["dateSchedules"] = processed_schedules
 
-        # Participants (event students + class/student info minimal), filtered by current teacher's classes
-        # Determine current teacher and allowed classes (homeroom or vice)
+        # Participants (event students + class/student info minimal)
+        # If include_all_participants=True (list tab), do NOT filter by teacher classes
+        # Otherwise, restrict to current teacher's homeroom/vice classes
         allowed_class_ids = set()
-        try:
-            current_user = frappe.session.user
-            teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
-            if teacher:
-                class_filters = {}
-                if event_basic.get("campus_id"):
-                    class_filters["campus_id"] = event_basic.get("campus_id")
-                classes = frappe.get_all(
-                    "SIS Class",
-                    filters=class_filters,
-                    or_filters=[{"homeroom_teacher": teacher}, {"vice_homeroom_teacher": teacher}],
-                    fields=["name"],
-                    limit_page_length=10000
-                )
-                allowed_class_ids = {c.name for c in classes}
-        except Exception:
-            allowed_class_ids = set()
+        if not include_all_participants:
+            try:
+                current_user = frappe.session.user
+                teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+                if teacher:
+                    class_filters = {}
+                    if event_basic.get("campus_id"):
+                        class_filters["campus_id"] = event_basic.get("campus_id")
+                    classes = frappe.get_all(
+                        "SIS Class",
+                        filters=class_filters,
+                        or_filters=[{"homeroom_teacher": teacher}, {"vice_homeroom_teacher": teacher}],
+                        fields=["name"],
+                        limit_page_length=10000
+                    )
+                    allowed_class_ids = {c.name for c in classes}
+            except Exception:
+                allowed_class_ids = set()
 
         event_students = frappe.get_all(
             "SIS Event Student",
@@ -1004,7 +1015,7 @@ def get_event_detail():
             if not cs:
                 continue
             class_id = cs.get("class_id")
-            # If teacher context available, filter by allowed classes; if no teacher, return empty list
+            # Filter participants only when allowed_class_ids is populated (approval mode)
             if allowed_class_ids and class_id not in allowed_class_ids:
                 continue
             student_id = cs.get("student_id")
