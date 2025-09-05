@@ -119,7 +119,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
                 "SIS Class Student",
                 filters={"class_id": class_id},
                 fields=[
-                    {"fieldname": "name", "alias": "class_student_id"},
+                    "name as class_student_id",
                     "student_id",
                 ]
             )
