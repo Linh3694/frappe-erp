@@ -113,6 +113,26 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             ]
         )
 
+        # Fallback: if no logs yet, prefill with class students so FE can display and edit
+        if not student_logs:
+            fallback_students = frappe.get_all(
+                "SIS Class Student",
+                filters={"class_id": class_id},
+                fields=[
+                    {"fieldname": "name", "alias": "class_student_id"},
+                    "student_id",
+                ]
+            )
+            # Ensure consistent keys with expected response (no grades yet)
+            student_logs = [
+                {
+                    "student_id": s.get("student_id"),
+                    "class_student_id": s.get("class_student_id"),
+                }
+                for s in fallback_students
+                if s.get("student_id")
+            ]
+
         data = {
             "subject": {
                 "name": subject_id,
@@ -122,7 +142,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             },
             "students": student_logs
         }
-        meta = {"class_id": class_id, "backend_logs": {"subject_created": not bool(subject_rows)}}
+        meta = {"class_id": class_id, "backend_logs": {"subject_created": not bool(subject_rows), "prefilled_from_class_students": not bool(subject_rows) or len(student_logs) == 0}}
         return success_response(data=data, message="Class log fetched", meta=meta)
     except Exception as e:
         frappe.log_error(f"get_class_log error: {str(e)}")
