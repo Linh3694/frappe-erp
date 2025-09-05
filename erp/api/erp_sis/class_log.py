@@ -84,10 +84,13 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             # Resolve class from instance
             inst = frappe.get_doc("SIS Timetable Instance", timetable_instance)
             class_id = inst.class_id
-            from erp.sis.utils.campus_permissions import get_campus_permission
+            from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
             campus_id = None
             try:
-                campus_id = get_campus_permission("SIS Class", frappe.session.user)
+                campus_id = get_current_user_campus()
+                if not campus_id:
+                    campuses = get_user_campuses(frappe.session.user)
+                    campus_id = campuses[0] if campuses else None
             except Exception:
                 pass
             doc = frappe.get_doc({
@@ -164,10 +167,13 @@ def save_class_log():
         else:
             inst = frappe.get_doc("SIS Timetable Instance", timetable_instance)
             class_id = inst.class_id
-            from erp.sis.utils.campus_permissions import get_campus_permission
+            from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
             campus_id = None
             try:
-                campus_id = get_campus_permission("SIS Class", frappe.session.user)
+                campus_id = get_current_user_campus()
+                if not campus_id:
+                    campuses = get_user_campuses(frappe.session.user)
+                    campus_id = campuses[0] if campuses else None
             except Exception:
                 pass
             doc = frappe.get_doc({
