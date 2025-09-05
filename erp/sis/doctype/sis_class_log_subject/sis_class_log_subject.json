@@ -10,6 +10,8 @@
  "field_order": [
   "timetable_instance_id",
   "class_id",
+  "log_date",
+  "period",
   "general_comment",
   "campus_id",
   "recorded_by"
@@ -17,6 +19,8 @@
  "fields": [
   {"fieldname": "timetable_instance_id", "label": "Timetable Instance", "fieldtype": "Link", "options": "SIS Timetable Instance", "reqd": 1},
   {"fieldname": "class_id", "label": "Class", "fieldtype": "Link", "options": "SIS Class", "reqd": 1},
+  {"fieldname": "log_date", "label": "Date", "fieldtype": "Date"},
+  {"fieldname": "period", "label": "Period", "fieldtype": "Data"},
   {"fieldname": "general_comment", "label": "General Comment", "fieldtype": "Small Text"},
   {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"},
   {"fieldname": "recorded_by", "label": "Recorded By", "fieldtype": "Link", "options": "User"}

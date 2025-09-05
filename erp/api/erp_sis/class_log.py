@@ -70,9 +70,14 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             timetable_instance = inst_row[0]['name']
 
         # Ensure subject record exists for this instance
+        filters = {"timetable_instance_id": timetable_instance}
+        if date:
+            filters["log_date"] = date
+        if period:
+            filters["period"] = period
         subject_rows = frappe.get_all(
             "SIS Class Log Subject",
-            filters={"timetable_instance_id": timetable_instance},
+            filters=filters,
             fields=["name", "class_id", "general_comment"],
             limit=1
         )
@@ -97,6 +102,8 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
                 "doctype": "SIS Class Log Subject",
                 "timetable_instance_id": timetable_instance,
                 "class_id": class_id,
+                "log_date": date,
+                "period": period,
                 "recorded_by": frappe.session.user,
                 "campus_id": campus_id
             })
@@ -176,9 +183,14 @@ def save_class_log():
             timetable_instance = inst_row[0]['name']
 
         # Ensure subject exists
+        filters = {"timetable_instance_id": timetable_instance}
+        if date:
+            filters["log_date"] = date
+        if period:
+            filters["period"] = period
         subject_rows = frappe.get_all(
             "SIS Class Log Subject",
-            filters={"timetable_instance_id": timetable_instance},
+            filters=filters,
             fields=["name", "class_id"], limit=1
         )
         if subject_rows:
@@ -200,6 +212,8 @@ def save_class_log():
                 "doctype": "SIS Class Log Subject",
                 "timetable_instance_id": timetable_instance,
                 "class_id": class_id,
+                "log_date": date,
+                "period": period,
                 "recorded_by": frappe.session.user,
                 "campus_id": campus_id
             })
