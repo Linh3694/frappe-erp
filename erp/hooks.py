@@ -141,7 +141,10 @@ permission_query_conditions = {
 	"SIS Event Teacher": "erp.sis.utils.permission_query.sis_event_teacher_query",
 	"SIS Student Timetable": "erp.sis.utils.permission_query.sis_student_timetable_query",
 	"SIS Class Student": "erp.sis.utils.permission_query.sis_class_student_query",
-	"SIS Photo": "erp.sis.utils.permission_query.sis_photo_query"
+	"SIS Photo": "erp.sis.utils.permission_query.sis_photo_query",
+	"SIS Class Log Score": "erp.sis.utils.permission_query.sis_class_log_score_query",
+	"SIS Class Log Subject": "erp.sis.utils.permission_query.sis_class_log_subject_query",
+	"SIS Class Log Student": "erp.sis.utils.permission_query.sis_class_log_student_query"
 }
 
 has_permission = {
@@ -168,7 +171,10 @@ has_permission = {
 	"SIS Event Teacher": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Student Timetable": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Class Student": "erp.sis.utils.campus_permissions.has_campus_permission",
-	"SIS Photo": "erp.sis.utils.campus_permissions.has_campus_permission"
+	"SIS Photo": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Class Log Score": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Class Log Subject": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Class Log Student": "erp.sis.utils.campus_permissions.has_campus_permission"
 }
 
 # DocType Class

@@ -1,0 +1,42 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Class Log Student",
+ "module": "Sis",
+ "custom": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "editable_grid": 0,
+ "autoname": "format:SIS-CLS-LOG-STU-{#####}",
+ "field_order": [
+  "subject_id",
+  "class_student_id",
+  "student_id",
+  "homework",
+  "behavior",
+  "participation",
+  "issue",
+  "top_performance",
+  "specific_comment",
+  "value",
+  "campus_id"
+ ],
+ "fields": [
+  {"fieldname": "subject_id", "label": "Class Log Subject", "fieldtype": "Link", "options": "SIS Class Log Subject", "reqd": 1},
+  {"fieldname": "class_student_id", "label": "Class Student", "fieldtype": "Link", "options": "SIS Class Student"},
+  {"fieldname": "student_id", "label": "Student", "fieldtype": "Link", "options": "CRM Student", "reqd": 1},
+  {"fieldname": "homework", "label": "Homework", "fieldtype": "Link", "options": "SIS Class Log Score"},
+  {"fieldname": "behavior", "label": "Behavior", "fieldtype": "Link", "options": "SIS Class Log Score"},
+  {"fieldname": "participation", "label": "Participation", "fieldtype": "Link", "options": "SIS Class Log Score"},
+  {"fieldname": "issue", "label": "Issue", "fieldtype": "Link", "options": "SIS Class Log Score"},
+  {"fieldname": "top_performance", "label": "Top Performance", "fieldtype": "Link", "options": "SIS Class Log Score"},
+  {"fieldname": "specific_comment", "label": "Specific Comment", "fieldtype": "Small Text"},
+  {"fieldname": "value", "label": "Value", "fieldtype": "Float", "default": 0},
+  {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+  {"role": "SIS Teacher", "read": 1, "write": 1, "create": 1}
+ ]
+}
+
+

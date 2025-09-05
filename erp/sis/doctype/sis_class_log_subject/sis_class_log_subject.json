@@ -1,0 +1,30 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Class Log Subject",
+ "module": "Sis",
+ "custom": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "editable_grid": 0,
+ "autoname": "format:SIS-CLS-LOG-SUB-{#####}",
+ "field_order": [
+  "timetable_instance_id",
+  "class_id",
+  "general_comment",
+  "campus_id",
+  "recorded_by"
+ ],
+ "fields": [
+  {"fieldname": "timetable_instance_id", "label": "Timetable Instance", "fieldtype": "Link", "options": "SIS Timetable Instance", "reqd": 1},
+  {"fieldname": "class_id", "label": "Class", "fieldtype": "Link", "options": "SIS Class", "reqd": 1},
+  {"fieldname": "general_comment", "label": "General Comment", "fieldtype": "Small Text"},
+  {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"},
+  {"fieldname": "recorded_by", "label": "Recorded By", "fieldtype": "Link", "options": "User"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+  {"role": "SIS Teacher", "read": 1, "write": 1, "create": 1}
+ ]
+}
+
+

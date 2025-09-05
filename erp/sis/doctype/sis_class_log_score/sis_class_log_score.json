@@ -1,0 +1,34 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Class Log Score",
+ "module": "Sis",
+ "custom": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "editable_grid": 0,
+ "autoname": "format:SIS-CLS-LOG-SCORE-{#####}",
+ "field_order": [
+  "type",
+  "title_vn",
+  "title_en",
+  "value",
+  "education_stage",
+  "is_active",
+  "campus_id"
+ ],
+ "fields": [
+  {"fieldname": "type", "label": "Type", "fieldtype": "Select", "options": "homework\nbehavior\nparticipation\nissue\ntop_performance", "reqd": 1},
+  {"fieldname": "title_vn", "label": "Title (VI)", "fieldtype": "Data", "reqd": 1},
+  {"fieldname": "title_en", "label": "Title (EN)", "fieldtype": "Data"},
+  {"fieldname": "value", "label": "Value", "fieldtype": "Float", "default": 0},
+  {"fieldname": "education_stage", "label": "Education Stage", "fieldtype": "Link", "options": "SIS Education Stage"},
+  {"fieldname": "is_active", "label": "Active", "fieldtype": "Check", "default": 1},
+  {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+  {"role": "SIS Teacher", "read": 1}
+ ]
+}
+
+

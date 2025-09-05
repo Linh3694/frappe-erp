@@ -9,3 +9,5 @@ from .class_student import *
 from .calendar import *
 from .timetable import *
 from .attendance import *
+from .class_log import *
+from .seed import *

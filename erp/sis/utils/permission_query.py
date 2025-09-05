@@ -187,3 +187,18 @@ def sis_teacher_timetable_query(user):
 def sis_timetable_override_query(user):
     """Permission query for SIS Timetable Override"""
     return get_campus_permission_query("SIS Timetable Override", user)
+
+
+def sis_class_log_score_query(user):
+    """Permission query for SIS Class Log Score"""
+    return get_campus_permission_query("SIS Class Log Score", user)
+
+
+def sis_class_log_subject_query(user):
+    """Permission query for SIS Class Log Subject"""
+    return get_campus_permission_query("SIS Class Log Subject", user)
+
+
+def sis_class_log_student_query(user):
+    """Permission query for SIS Class Log Student"""
+    return get_campus_permission_query("SIS Class Log Student", user)
