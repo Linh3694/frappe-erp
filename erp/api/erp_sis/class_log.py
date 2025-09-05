@@ -109,7 +109,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             "SIS Class Log Student",
             filters={"subject_id": subject_id},
             fields=[
-                "name", "student_id", "class_student_id", "homework", "behavior", "participation", "issue", "top_performance", "specific_comment", "value"
+                "name", "student_id", "class_student_id", "homework", "behavior", "participation", "issues", "is_top_performance", "specific_comment", "value"
             ]
         )
 
@@ -221,8 +221,9 @@ def save_class_log():
                 "homework": (it or {}).get('homework'),
                 "behavior": (it or {}).get('behavior'),
                 "participation": (it or {}).get('participation'),
-                "issue": (it or {}).get('issue'),
-                "top_performance": (it or {}).get('top_performance'),
+                # legacy kept for backward compatibility but we now use 'issues' (comma-separated) and 'is_top_performance'
+                "issues": (it or {}).get('issues') or (it or {}).get('issue'),
+                "is_top_performance": 1 if ((it or {}).get('is_top_performance') or (it or {}).get('top_performance')) else 0,
                 "specific_comment": (it or {}).get('specific_comment'),
                 "value": (it or {}).get('value') or 0,
             }

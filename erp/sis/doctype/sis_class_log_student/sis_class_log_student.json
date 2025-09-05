@@ -14,8 +14,8 @@
   "homework",
   "behavior",
   "participation",
-  "issue",
-  "top_performance",
+  "issues",
+  "is_top_performance",
   "specific_comment",
   "value",
   "campus_id"
@@ -27,11 +27,13 @@
   {"fieldname": "homework", "label": "Homework", "fieldtype": "Link", "options": "SIS Class Log Score"},
   {"fieldname": "behavior", "label": "Behavior", "fieldtype": "Link", "options": "SIS Class Log Score"},
   {"fieldname": "participation", "label": "Participation", "fieldtype": "Link", "options": "SIS Class Log Score"},
-  {"fieldname": "issue", "label": "Issue", "fieldtype": "Link", "options": "SIS Class Log Score"},
-  {"fieldname": "top_performance", "label": "Top Performance", "fieldtype": "Link", "options": "SIS Class Log Score"},
+  {"fieldname": "issues", "label": "Issues", "fieldtype": "Small Text"},
+  {"fieldname": "is_top_performance", "label": "Top Performance", "fieldtype": "Check", "default": 0},
   {"fieldname": "specific_comment", "label": "Specific Comment", "fieldtype": "Small Text"},
   {"fieldname": "value", "label": "Value", "fieldtype": "Float", "default": 0},
-  {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"}
+  {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"},
+  {"fieldname": "issue", "label": "Issue (Legacy)", "fieldtype": "Link", "options": "SIS Class Log Score"},
+  {"fieldname": "top_performance", "label": "Top Performance (Legacy)", "fieldtype": "Link", "options": "SIS Class Log Score"}
  ],
  "permissions": [
   {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
