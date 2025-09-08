@@ -299,33 +299,35 @@ def get_teacher_by_id(teacher_id=None):
                     employee_source = "designation"
 
                 # Try to get additional employee information from Employee doctype
-                try:
-                    employee_info = frappe.get_all(
-                        "Employee",
-                        fields=[
-                            "employee_number",
-                            "employee_name",
-                            "designation",
-                            "department"
-                        ],
-                        filters={"user_id": teacher.user_id},
-                        limit=1
-                    )
-
-                    if employee_info:
-                        employee = employee_info[0]
-                        enriched_data.update({
-                            "employee_name": employee.get("employee_name"),
-                            "designation": employee.get("designation"),
-                            "department": employee.get("department")
-                        })
-                        # Override employee_code if Employee doctype has employee_number
-                        if employee.get("employee_number"):
-                            enriched_data["employee_code"] = employee.get("employee_number")
-                            employee_source = "employee.employee_number"
-                            frappe.logger().info(f"👨‍🏫 Updated employee_code from Employee doctype for teacher {teacher.name}")
-                except Exception as e:
-                    frappe.logger().warning(f"👨‍🏫 Could not get Employee data for teacher {teacher.name}: {str(e)}")
+                # Temporarily disabled to avoid errors
+                # try:
+                #     employee_info = frappe.get_all(
+                #         "Employee",
+                #         fields=[
+                #             "employee_number",
+                #             "employee_name",
+                #             "designation",
+                #             "department"
+                #         ],
+                #         filters={"user_id": teacher.user_id},
+                #         limit=1
+                #     )
+                #
+                #     if employee_info:
+                #         employee = employee_info[0]
+                #         enriched_data.update({
+                #             "employee_name": employee.get("employee_name"),
+                #             "designation": employee.get("designation"),
+                #             "department": employee.get("department")
+                #         })
+                #         # Override employee_code if Employee doctype has employee_number
+                #         if employee.get("employee_number"):
+                #             enriched_data["employee_code"] = employee.get("employee_number")
+                #             employee_source = "employee.employee_number"
+                #             frappe.logger().info(f"👨‍🏫 Updated employee_code from Employee doctype for teacher {teacher.name}")
+                # except Exception as e:
+                #     frappe.logger().warning(f"👨‍🏫 Could not get Employee data for teacher {teacher.name}: {str(e)}")
+                pass
 
                 frappe.logger().info(f"👨‍🏫 Enriched teacher {teacher.name} with User data: full_name='{user_doc.full_name}', employee_code='{employee_code}' (from {employee_source})")
             except frappe.DoesNotExistError:
