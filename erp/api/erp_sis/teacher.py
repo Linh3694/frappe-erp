@@ -285,7 +285,20 @@ def get_teacher_by_id(teacher_id=None):
                     "avatar_url": getattr(user_doc, 'avatar_url', None),
                     "employee_code": employee_code
                 })
-                frappe.logger().info(f"👨‍🏫 Enriched teacher {teacher.name} with User data: full_name='{user_doc.full_name}', employee_code='{employee_code}'")
+                # Log which field was used for employee_code
+                employee_source = "none"
+                if hasattr(user_doc, 'employee_code') and user_doc.employee_code:
+                    employee_source = "employee_code"
+                elif hasattr(user_doc, 'employee_number') and user_doc.employee_number:
+                    employee_source = "employee_number"
+                elif hasattr(user_doc, 'employee_id') and user_doc.employee_id:
+                    employee_source = "employee_id"
+                elif hasattr(user_doc, 'job_title') and user_doc.job_title:
+                    employee_source = "job_title"
+                elif hasattr(user_doc, 'designation') and user_doc.designation:
+                    employee_source = "designation"
+
+                frappe.logger().info(f"👨‍🏫 Enriched teacher {teacher.name} with User data: full_name='{user_doc.full_name}', employee_code='{employee_code}' (from {employee_source})")
             except frappe.DoesNotExistError:
                 frappe.logger().warning(f"👨‍🏫 User {teacher.user_id} not found for teacher {teacher.name}")
             except Exception as e:
