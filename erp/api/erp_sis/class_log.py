@@ -26,7 +26,7 @@ def get_class_log_options(education_stage=None):
         rows = frappe.get_all(
             "SIS Class Log Score",
             filters=filters,
-            fields=["name", "type", "title_vn", "title_en", "value", "education_stage"],
+            fields=["name", "type", "title_vn", "title_en", "value", "color", "education_stage"],
             order_by="type asc, value desc, title_vn asc"
         )
 
