@@ -569,8 +569,8 @@ def create_class():
                         response_data["homeroom_teacher"]
                     )
 
-                        # Try to populate employee info for homeroom teacher
-                        try:
+                    # Try to populate employee info for homeroom teacher
+                    try:
                             employee_info = frappe.get_all(
                                 "Employee",
                                 fields=["name", "employee_number", "employee_name", "designation", "department"],
@@ -624,8 +624,8 @@ def create_class():
                             "department": ""
                         }
 
-                        # Try to populate employee info for vice homeroom teacher
-                        try:
+                    # Try to populate employee info for vice homeroom teacher
+                    try:
                             employee_info = frappe.get_all(
                                 "Employee",
                                 fields=["name", "employee_number", "employee_name", "designation", "department"],
@@ -731,8 +731,8 @@ def update_class(class_id: str = None):
                         response_data["homeroom_teacher"]
                     )
 
-                        # Try to populate employee info for homeroom teacher
-                        try:
+                    # Try to populate employee info for homeroom teacher
+                    try:
                             employee_info = frappe.get_all(
                                 "Employee",
                                 fields=["name", "employee_number", "employee_name", "designation", "department"],
@@ -786,8 +786,8 @@ def update_class(class_id: str = None):
                             "department": ""
                         }
 
-                        # Try to populate employee info for vice homeroom teacher
-                        try:
+                    # Try to populate employee info for vice homeroom teacher
+                    try:
                             employee_info = frappe.get_all(
                                 "Employee",
                                 fields=["name", "employee_number", "employee_name", "designation", "department"],
