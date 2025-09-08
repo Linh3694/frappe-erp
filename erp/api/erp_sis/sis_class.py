@@ -121,6 +121,14 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
 
                         if user_info:
                             user = user_info[0]
+
+                            # Get employee code from multiple possible fields
+                            employee_code = user.get("employee_code")
+                            if not employee_code:
+                                employee_code = user.get("employee_number") or user.get("employee_id")
+                            if not employee_code:
+                                employee_code = user.get("job_title") or user.get("designation")
+
                             enhanced_class["homeroom_teacher_info"] = {
                                 "name": class_data["homeroom_teacher"],
                                 "user_id": teacher["user_id"],
@@ -129,6 +137,7 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                                 "first_name": user.get("first_name"),
                                 "last_name": user.get("last_name"),
                                 "user_image": user.get("user_image"),
+                                "employee_code": employee_code,
                                 "teacher_name": user.get("full_name") or user.get("name")
                             }
 
@@ -187,6 +196,14 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
 
                         if user_info:
                             user = user_info[0]
+
+                            # Get employee code from multiple possible fields
+                            employee_code = user.get("employee_code")
+                            if not employee_code:
+                                employee_code = user.get("employee_number") or user.get("employee_id")
+                            if not employee_code:
+                                employee_code = user.get("job_title") or user.get("designation")
+
                             enhanced_class["vice_homeroom_teacher_info"] = {
                                 "name": class_data["vice_homeroom_teacher"],
                                 "user_id": teacher["user_id"],
@@ -195,6 +212,7 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                                 "first_name": user.get("first_name"),
                                 "last_name": user.get("last_name"),
                                 "user_image": user.get("user_image"),
+                                "employee_code": employee_code,
                                 "teacher_name": user.get("full_name") or user.get("name")
                             }
 
