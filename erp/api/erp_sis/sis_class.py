@@ -564,28 +564,10 @@ def create_class():
             if teacher_info:
                 teacher = teacher_info[0]
                 if teacher.get("user_id"):
-                    user_info = frappe.get_all(
-                        "User",
-                        fields=["full_name", "first_name", "last_name", "user_image", "email"],
-                        filters={"name": teacher["user_id"]},
-                        limit=1
+                    response_data["homeroom_teacher_info"] = enrich_teacher_info(
+                        teacher["user_id"],
+                        response_data["homeroom_teacher"]
                     )
-                    if user_info:
-                        user = user_info[0]
-                        response_data["homeroom_teacher_info"] = {
-                            "name": response_data["homeroom_teacher"],
-                            "user_id": teacher["user_id"],
-                            "teacher_name": user.get("full_name") or user.get("name"),
-                            "email": user.get("email"),
-                            "full_name": user.get("full_name"),
-                            "first_name": user.get("first_name"),
-                            "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image"),
-                            "employee_code": "",  # Will be populated if employee exists
-                            "employee_name": "",
-                            "designation": "",
-                            "department": ""
-                        }
 
                         # Try to populate employee info for homeroom teacher
                         try:
@@ -744,28 +726,10 @@ def update_class(class_id: str = None):
             if teacher_info:
                 teacher = teacher_info[0]
                 if teacher.get("user_id"):
-                    user_info = frappe.get_all(
-                        "User",
-                        fields=["full_name", "first_name", "last_name", "user_image", "email"],
-                        filters={"name": teacher["user_id"]},
-                        limit=1
+                    response_data["homeroom_teacher_info"] = enrich_teacher_info(
+                        teacher["user_id"],
+                        response_data["homeroom_teacher"]
                     )
-                    if user_info:
-                        user = user_info[0]
-                        response_data["homeroom_teacher_info"] = {
-                            "name": response_data["homeroom_teacher"],
-                            "user_id": teacher["user_id"],
-                            "teacher_name": user.get("full_name") or user.get("name"),
-                            "email": user.get("email"),
-                            "full_name": user.get("full_name"),
-                            "first_name": user.get("first_name"),
-                            "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image"),
-                            "employee_code": "",  # Will be populated if employee exists
-                            "employee_name": "",
-                            "designation": "",
-                            "department": ""
-                        }
 
                         # Try to populate employee info for homeroom teacher
                         try:
