@@ -349,17 +349,10 @@ def get_class(class_id: str = None):
                     )
 
                     if user_info:
-                        user = user_info[0]
-                        class_data["homeroom_teacher_info"] = {
-                            "name": class_data["homeroom_teacher"],
-                            "user_id": teacher["user_id"],
-                            "email": user.get("email"),
-                            "full_name": user.get("full_name"),
-                            "first_name": user.get("first_name"),
-                            "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image"),
-                            "teacher_name": user.get("full_name") or user.get("name")
-                        }
+                        class_data["homeroom_teacher_info"] = enrich_teacher_info(
+                            teacher["user_id"],
+                            class_data["homeroom_teacher"]
+                        )
 
                     # Try to get employee information from Employee doctype (if available)
                     try:
@@ -418,17 +411,10 @@ def get_class(class_id: str = None):
                     )
 
                     if user_info:
-                        user = user_info[0]
-                        class_data["vice_homeroom_teacher_info"] = {
-                            "name": class_data["vice_homeroom_teacher"],
-                            "user_id": teacher["user_id"],
-                            "email": user.get("email"),
-                            "full_name": user.get("full_name"),
-                            "first_name": user.get("first_name"),
-                            "last_name": user.get("last_name"),
-                            "user_image": user.get("user_image"),
-                            "teacher_name": user.get("full_name") or user.get("name")
-                        }
+                        class_data["vice_homeroom_teacher_info"] = enrich_teacher_info(
+                            teacher["user_id"],
+                            class_data["vice_homeroom_teacher"]
+                        )
 
                     # Try to get employee information from Employee doctype (if available)
                     try:
