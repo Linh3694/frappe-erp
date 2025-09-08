@@ -96,17 +96,23 @@ def get_all_teachers():
 
                         if user_info:
                             user = user_info[0]
+
+                            # Get employee code from multiple possible fields
+                            employee_code = user.get("employee_code")
+                            if not employee_code:
+                                employee_code = user.get("employee_number") or user.get("employee_id")
+
                             enhanced_teacher.update({
                                 "email": user.get("email"),
                                 "full_name": user.get("full_name"),
                                 "first_name": user.get("first_name"),
                                 "last_name": user.get("last_name"),
                                 "user_image": user.get("user_image"),
-                                "employee_code": user.get("employee_code"),
+                                "employee_code": employee_code,
                                 "employee_id": user.get("employee_id"),
                                 "teacher_name": user.get("full_name") or user.get("name")
                             })
-                            frappe.logger().info(f"👨‍🏫 Enhanced teacher {teacher['user_id']} with: full_name='{user.get('full_name')}', email='{user.get('email')}', employee_code='{user.get('employee_code')}'")
+                            frappe.logger().info(f"👨‍🏫 Enhanced teacher {teacher['user_id']} with: full_name='{user.get('full_name')}', email='{user.get('email')}', employee_code='{employee_code}'")
                         else:
                             frappe.logger().warning(f"👨‍🏫 No user info found for {teacher['user_id']}")
                     except Exception as user_error:
@@ -254,6 +260,16 @@ def get_teacher_by_id(teacher_id=None):
         if teacher.user_id:
             try:
                 user_doc = frappe.get_doc("User", teacher.user_id)
+
+                # Get employee code from multiple possible fields
+                employee_code = None
+                if hasattr(user_doc, 'employee_code') and user_doc.employee_code:
+                    employee_code = user_doc.employee_code
+                elif hasattr(user_doc, 'employee_number') and user_doc.employee_number:
+                    employee_code = user_doc.employee_number
+                elif hasattr(user_doc, 'employee_id') and user_doc.employee_id:
+                    employee_code = user_doc.employee_id
+
                 enriched_data.update({
                     "full_name": user_doc.full_name,
                     "first_name": user_doc.first_name,
@@ -261,9 +277,9 @@ def get_teacher_by_id(teacher_id=None):
                     "email": user_doc.email,
                     "user_image": user_doc.user_image,
                     "avatar_url": getattr(user_doc, 'avatar_url', None),
-                    "employee_code": getattr(user_doc, 'employee_code', None) or getattr(user_doc, 'employee_number', None)
+                    "employee_code": employee_code
                 })
-                frappe.logger().info(f"👨‍🏫 Enriched teacher {teacher.name} with User data: full_name='{user_doc.full_name}', employee_code='{getattr(user_doc, 'employee_code', None)}'")
+                frappe.logger().info(f"👨‍🏫 Enriched teacher {teacher.name} with User data: full_name='{user_doc.full_name}', employee_code='{employee_code}'")
             except frappe.DoesNotExistError:
                 frappe.logger().warning(f"👨‍🏫 User {teacher.user_id} not found for teacher {teacher.name}")
             except Exception as e:
