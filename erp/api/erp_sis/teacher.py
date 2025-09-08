@@ -104,6 +104,8 @@ def get_all_teachers():
                         limit=1
                     )
 
+                    frappe.logger().info(f"👨‍🏫 Employee info for {teacher['user_id']}: {employee_info}")
+
                     if employee_info:
                         employee = employee_info[0]
                         enhanced_teacher.update({
@@ -115,8 +117,12 @@ def get_all_teachers():
                             "department": employee.get("department"),
                             "branch": employee.get("branch")
                         })
-                except Exception:
+                        frappe.logger().info(f"👨‍🏫 Enhanced with Employee data: employee_code='{employee.get('name')}', employee_number='{employee.get('employee_number')}'")
+                    else:
+                        frappe.logger().info(f"👨‍🏫 No Employee record found for {teacher['user_id']}")
+                except Exception as e:
                     # Employee doctype might not exist or be accessible
+                    frappe.logger().warning(f"👨‍🏫 Error getting Employee data for {teacher['user_id']}: {str(e)}")
                     pass
 
             enhanced_teachers.append(enhanced_teacher)
