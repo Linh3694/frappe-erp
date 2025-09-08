@@ -438,6 +438,8 @@ def upload_single_photo():
             if existing_ctx:
                 existing_name = existing_ctx[0].name
                 photo_title = f"Photo of {student[0].student_name} ({student_code})"
+                # Ensure uniqueness for existing photos before overwrite
+                ensure_unique_student_photo(student_id, school_year_id, campus_id)
                 # Replace attachments on existing doc
                 try:
                     # Remove old attachments
@@ -606,6 +608,10 @@ def upload_single_photo():
                 except Exception as ow_err:
                     frappe.logger().error(f"Failed to overwrite existing class photo {existing_name}: {str(ow_err)}")
                     # Fall through to create new record if overwrite fails
+
+        # Ensure uniqueness for student photos before creating
+        if photo_type == "student":
+            ensure_unique_student_photo(student_id, school_year_id, campus_id)
 
         try:
             # Prepare SIS Photo record
@@ -812,6 +818,12 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
         if school_year_id:
             filters["school_year_id"] = school_year_id
 
+        # Special handling for student photos to ensure uniqueness
+        if photo_type == "student" and student_id:
+            # For student photos, prioritize Active status and ensure only one photo per student
+            filters["status"] = "Active"  # Only return active photos
+            frappe.logger().info(f"🎯 Filtering student photos: student_id={student_id}, status=Active")
+
         # Get photos with pagination
         photos = frappe.get_all(
             "SIS Photo",
@@ -824,11 +836,11 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
 
         frappe.logger().info(f"📋 Found {len(photos)} photos with filters: {filters}")
         for photo in photos:
-            frappe.logger().info(f"📋 Photo {photo.get('name')}: photo field = '{photo.get('photo')}'")
+            frappe.logger().info(f"📋 Photo {photo.get('name')}: student_id={photo.get('student_id')}, photo='{photo.get('photo')}'")
 
         # Normalize optional fields and recover missing photo URLs if possible
         for photo in photos:
-            frappe.logger().info(f"🔍 Processing photo {photo.get('name')}: type={photo.get('type')}, has_photo={bool(photo.get('photo'))}")
+            frappe.logger().info(f"🔍 Processing photo {photo.get('name')}: type={photo.get('type')}, student_id={photo.get('student_id')}, has_photo={bool(photo.get('photo'))}")
 
             if photo.get("class_id") is None:
                 del photo["class_id"]
@@ -837,9 +849,16 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
 
             # If photo URL missing, try to reconstruct from File attachment
             if not photo.get("photo"):
-                frappe.logger().info(f"📭 Photo URL missing for {photo.get('name')}, trying to recover...")
+                frappe.logger().info(f"📭 Photo URL missing for {photo.get('name')} (student_id: {photo.get('student_id')}), trying to recover...")
                 try:
-                    # First try public files
+                    # For student photos, also check filename pattern to ensure correct recovery
+                    expected_filename = None
+                    if photo.get("type") == "student" and photo.get("student_id"):
+                        # Student photos should have filename matching student_id or student_code
+                        expected_filename = photo.get("student_id")
+                        frappe.logger().info(f"🎯 Student photo recovery: expected filename pattern for {expected_filename}")
+
+                    # First try public files with exact match
                     file_rows = frappe.get_all(
                         "File",
                         filters={
@@ -851,6 +870,7 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                         order_by="creation desc",
                         limit=1,
                     )
+
                     # If not found, try private files as well
                     if not file_rows:
                         file_rows = frappe.get_all(
@@ -868,15 +888,25 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                     if file_rows:
                         file_row = file_rows[0]
                         file_url = file_row.get("file_url")
+
+                        # Additional validation for student photos
+                        if expected_filename and photo.get("type") == "student":
+                            file_name = file_row.get("file_name", "")
+                            if expected_filename not in file_name:
+                                frappe.logger().warning(f"⚠️ File {file_name} doesn't match expected student pattern {expected_filename}")
+                                # Don't use this file for student photos if it doesn't match
+                                file_url = None
+
                         if not file_url:
                             # Build URL based on privacy
                             is_priv = bool(file_row.get("is_private"))
                             base_path = "/private/files" if is_priv else "/files"
                             file_url = f"{base_path}/{file_row.get('file_name')}"
+
                         frappe.logger().info(f"📎 File URL recovered: {file_url}")
                         if file_url:
                             photo["photo"] = file_url
-                            frappe.logger().info(f"✅ Set photo URL for {photo.get('name')}: {file_url}")
+                            frappe.logger().info(f"✅ Set photo URL for {photo.get('name')} (student: {photo.get('student_id')}): {file_url}")
                         else:
                             frappe.logger().warning(f"❌ Empty file URL for {photo.get('name')}")
                     else:
@@ -943,10 +973,24 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
         # Get total count
         total_count = frappe.db.count("SIS Photo", filters)
 
+        # Additional validation for student photos - ensure uniqueness
+        if photo_type == "student" and student_id:
+            # Filter out photos that don't belong to the requested student
+            validated_photos = []
+            for photo in photos:
+                if photo.get("student_id") == student_id:
+                    validated_photos.append(photo)
+                else:
+                    frappe.logger().warning(f"⚠️ Filtered out photo {photo.get('name')} - student_id mismatch: requested={student_id}, photo={photo.get('student_id')}")
+
+            if len(validated_photos) != len(photos):
+                frappe.logger().info(f"🎯 Validation filtered {len(photos) - len(validated_photos)} photos, keeping {len(validated_photos)} for student {student_id}")
+                photos = validated_photos
+
         # Log final result
         frappe.logger().info(f"📤 Returning {len(photos)} photos")
         for photo in photos:
-            frappe.logger().info(f"📤 Final photo {photo.get('name')}: has_photo={bool(photo.get('photo'))}, photo='{photo.get('photo')}'")
+            frappe.logger().info(f"📤 Final photo {photo.get('name')}: student_id={photo.get('student_id')}, has_photo={bool(photo.get('photo'))}, photo='{photo.get('photo')}'")
 
         return {
             "success": True,
@@ -965,6 +1009,49 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             "success": False,
             "message": str(e)
         }
+
+
+def ensure_unique_student_photo(student_id, school_year_id=None, campus_id=None):
+    """Ensure only one active photo exists per student"""
+    try:
+        if not student_id:
+            return
+
+        filters = {
+            "type": "student",
+            "student_id": student_id,
+            "status": "Active"
+        }
+
+        if school_year_id:
+            filters["school_year_id"] = school_year_id
+        if campus_id:
+            filters["campus_id"] = campus_id
+
+        # Find all active photos for this student
+        active_photos = frappe.get_all(
+            "SIS Photo",
+            filters=filters,
+            fields=["name", "creation"],
+            order_by="creation desc"
+        )
+
+        # If more than one active photo, keep only the latest
+        if len(active_photos) > 1:
+            frappe.logger().info(f"🧹 Cleaning up {len(active_photos) - 1} duplicate active photos for student {student_id}")
+
+            # Keep the most recent, deactivate others
+            for photo in active_photos[1:]:
+                try:
+                    photo_doc = frappe.get_doc("SIS Photo", photo["name"])
+                    photo_doc.status = "Inactive"
+                    photo_doc.save(ignore_permissions=True)
+                    frappe.logger().info(f"✅ Deactivated duplicate photo {photo['name']} for student {student_id}")
+                except Exception as e:
+                    frappe.logger().error(f"❌ Error deactivating photo {photo['name']}: {str(e)}")
+
+    except Exception as e:
+        frappe.logger().error(f"❌ Error in ensure_unique_student_photo: {str(e)}")
 
 
 @frappe.whitelist()
