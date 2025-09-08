@@ -73,22 +73,49 @@ def get_current_user_full():
         
         # Add employee info if exists (optional)
         try:
+            # Try to get employee info using db.get_value first (more efficient)
             employee_data = frappe.db.get_value(
-                "Employee", 
-                {"user_id": user_email}, 
-                ["employee_name", "designation", "department", "company", "name"]
+                "Employee",
+                {"user_id": user_email},
+                ["employee_name", "designation", "department", "company", "name", "employee_number"]
             )
-            
-            if employee_data and len(employee_data) >= 4:
+
+            if employee_data:
+                # employee_data is a tuple, unpack it safely
+                emp_name, designation, department, company, emp_id, emp_number = employee_data[:6]
+
                 user_data.update({
-                    "employee_name": employee_data[0] or "",
-                    "designation": employee_data[1] or "", 
-                    "job_title": employee_data[1] or "",  # Alias
-                    "department": employee_data[2] or "",
-                    "company": employee_data[3] or "",
-                    "employee_code": employee_data[4] or "",
-                    "employee_id": employee_data[4] or "",  # Alias
+                    "employee_name": emp_name or "",
+                    "designation": designation or "",
+                    "job_title": designation or "",  # Alias
+                    "department": department or "",
+                    "company": company or "",
+                    "employee_code": emp_number or emp_id or "",  # Prefer employee_number over name
+                    "employee_id": emp_id or "",
+                    "employee_number": emp_number or ""
                 })
+            else:
+                # Fallback: try get_all if get_value fails
+                employee_records = frappe.get_all(
+                    "Employee",
+                    filters={"user_id": user_email},
+                    fields=["employee_name", "designation", "department", "company", "name", "employee_number"],
+                    limit=1
+                )
+
+                if employee_records and len(employee_records) > 0:
+                    emp = employee_records[0]
+                    user_data.update({
+                        "employee_name": emp.get("employee_name") or "",
+                        "designation": emp.get("designation") or "",
+                        "job_title": emp.get("designation") or "",
+                        "department": emp.get("department") or "",
+                        "company": emp.get("company") or "",
+                        "employee_code": emp.get("employee_number") or emp.get("name") or "",
+                        "employee_id": emp.get("name") or "",
+                        "employee_number": emp.get("employee_number") or ""
+                    })
+
         except Exception as e:
             frappe.logger().debug(f"No employee record found for {user_email}: {str(e)}")
         
