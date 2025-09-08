@@ -269,6 +269,10 @@ def get_teacher_by_id(teacher_id=None):
                     employee_code = user_doc.employee_number
                 elif hasattr(user_doc, 'employee_id') and user_doc.employee_id:
                     employee_code = user_doc.employee_id
+                elif hasattr(user_doc, 'job_title') and user_doc.job_title:
+                    employee_code = user_doc.job_title
+                elif hasattr(user_doc, 'designation') and user_doc.designation:
+                    employee_code = user_doc.designation
 
                 enriched_data.update({
                     "full_name": user_doc.full_name,
