@@ -120,26 +120,10 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                         )
 
                         if user_info:
-                            user = user_info[0]
-
-                            # Get employee code from multiple possible fields
-                            employee_code = user.get("employee_code")
-                            if not employee_code:
-                                employee_code = user.get("employee_number") or user.get("employee_id")
-                            if not employee_code:
-                                employee_code = user.get("job_title") or user.get("designation")
-
-                            enhanced_class["homeroom_teacher_info"] = {
-                                "name": class_data["homeroom_teacher"],
-                                "user_id": teacher["user_id"],
-                                "email": user.get("email"),
-                                "full_name": user.get("full_name"),
-                                "first_name": user.get("first_name"),
-                                "last_name": user.get("last_name"),
-                                "user_image": user.get("user_image"),
-                                "employee_code": employee_code,
-                                "teacher_name": user.get("full_name") or user.get("name")
-                            }
+                            enhanced_class["homeroom_teacher_info"] = enrich_teacher_info(
+                                teacher["user_id"],
+                                class_data["homeroom_teacher"]
+                            )
 
                         # Try to get employee information from Employee doctype (if available)
                         try:
@@ -195,26 +179,10 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                         )
 
                         if user_info:
-                            user = user_info[0]
-
-                            # Get employee code from multiple possible fields
-                            employee_code = user.get("employee_code")
-                            if not employee_code:
-                                employee_code = user.get("employee_number") or user.get("employee_id")
-                            if not employee_code:
-                                employee_code = user.get("job_title") or user.get("designation")
-
-                            enhanced_class["vice_homeroom_teacher_info"] = {
-                                "name": class_data["vice_homeroom_teacher"],
-                                "user_id": teacher["user_id"],
-                                "email": user.get("email"),
-                                "full_name": user.get("full_name"),
-                                "first_name": user.get("first_name"),
-                                "last_name": user.get("last_name"),
-                                "user_image": user.get("user_image"),
-                                "employee_code": employee_code,
-                                "teacher_name": user.get("full_name") or user.get("name")
-                            }
+                            enhanced_class["vice_homeroom_teacher_info"] = enrich_teacher_info(
+                                teacher["user_id"],
+                                class_data["vice_homeroom_teacher"]
+                            )
 
                         # Try to get employee information from Employee doctype (if available)
                         try:
@@ -257,6 +225,85 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
     except Exception as e:
         frappe.log_error(f"Error fetching classes: {str(e)}")
         return error_response(f"Error fetching classes: {str(e)}")
+
+
+def enrich_teacher_info(teacher_user_id, teacher_name):
+    """Helper function to enrich teacher info with employee code"""
+    if not teacher_user_id:
+        return None
+
+    try:
+        # Get user information
+        user_info = frappe.get_all(
+            "User",
+            fields=[
+                "name",
+                "email",
+                "full_name",
+                "first_name",
+                "last_name",
+                "user_image"
+            ],
+            filters={"name": teacher_user_id},
+            limit=1
+        )
+
+        if user_info:
+            user = user_info[0]
+
+            # Get employee code from multiple possible fields
+            employee_code = user.get("employee_code")
+            if not employee_code:
+                employee_code = user.get("employee_number") or user.get("employee_id")
+            if not employee_code:
+                employee_code = user.get("job_title") or user.get("designation")
+
+            teacher_info = {
+                "name": teacher_name,
+                "user_id": teacher_user_id,
+                "email": user.get("email"),
+                "full_name": user.get("full_name"),
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name"),
+                "user_image": user.get("user_image"),
+                "employee_code": employee_code,
+                "teacher_name": user.get("full_name") or user.get("name")
+            }
+
+            # Try to get additional employee information from Employee doctype
+            try:
+                employee_info = frappe.get_all(
+                    "Employee",
+                    fields=[
+                        "employee_number",
+                        "employee_name",
+                        "designation",
+                        "department"
+                    ],
+                    filters={"user_id": teacher_user_id},
+                    limit=1
+                )
+
+                if employee_info:
+                    employee = employee_info[0]
+                    teacher_info.update({
+                        "employee_name": employee.get("employee_name"),
+                        "designation": employee.get("designation"),
+                        "department": employee.get("department")
+                    })
+                    # Override employee_code if Employee doctype has it
+                    if employee.get("employee_number"):
+                        teacher_info["employee_code"] = employee.get("employee_number")
+            except Exception:
+                # Employee doctype might not exist or be accessible
+                pass
+
+            return teacher_info
+
+    except Exception as e:
+        frappe.logger().error(f"Error enriching teacher info for {teacher_user_id}: {str(e)}")
+
+    return None
 
 
 @frappe.whitelist(allow_guest=False)
