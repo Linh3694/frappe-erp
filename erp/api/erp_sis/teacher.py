@@ -101,6 +101,8 @@ def get_all_teachers():
                             employee_code = user.get("employee_code")
                             if not employee_code:
                                 employee_code = user.get("employee_number") or user.get("employee_id")
+                            if not employee_code:
+                                employee_code = user.get("job_title") or user.get("designation")
 
                             enhanced_teacher.update({
                                 "email": user.get("email"),
