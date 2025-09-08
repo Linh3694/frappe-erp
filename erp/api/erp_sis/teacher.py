@@ -45,10 +45,12 @@ def get_all_teachers():
         enhanced_teachers = []
         for teacher in teachers:
             enhanced_teacher = teacher.copy()
+            frappe.logger().info(f"👨‍🏫 Processing teacher: {teacher.get('name')}, user_id: {teacher.get('user_id')}")
 
             # Ensure user_id is always present (use name if user_id is missing)
             if not teacher.get("user_id"):
                 enhanced_teacher["user_id"] = teacher.get("name")
+                frappe.logger().info(f"👨‍🏫 Set user_id to name: {teacher.get('name')}")
 
             # Get user information
             if teacher.get("user_id"):
@@ -68,6 +70,8 @@ def get_all_teachers():
                     limit=1
                 )
 
+                frappe.logger().info(f"👨‍🏫 User info for {teacher['user_id']}: {user_info}")
+
                 if user_info:
                     user = user_info[0]
                     enhanced_teacher.update({
@@ -80,6 +84,9 @@ def get_all_teachers():
                         "employee_id": user.get("employee_id"),
                         "teacher_name": user.get("full_name") or user.get("name")
                     })
+                    frappe.logger().info(f"👨‍🏫 Enhanced teacher {teacher['user_id']} with: full_name='{user.get('full_name')}', email='{user.get('email')}', employee_code='{user.get('employee_code')}'")
+                else:
+                    frappe.logger().warning(f"👨‍🏫 No user info found for {teacher['user_id']}")
 
                 # Try to get employee information from Employee doctype (if available)
                 try:
@@ -178,13 +185,35 @@ def get_teacher_by_id(teacher_id=None):
                 "message": f"Teacher {teacher_id} not found or access denied"
             }
 
+        # Enrich teacher data with User information
+        enriched_data = {
+            "name": teacher.name,
+            "user_id": teacher.user_id,
+            "education_stage_id": teacher.education_stage_id,
+            "campus_id": teacher.campus_id
+        }
+
+        # Get additional data from User doctype if user_id exists
+        if teacher.user_id:
+            try:
+                user_doc = frappe.get_doc("User", teacher.user_id)
+                enriched_data.update({
+                    "full_name": user_doc.full_name,
+                    "first_name": user_doc.first_name,
+                    "last_name": user_doc.last_name,
+                    "email": user_doc.email,
+                    "user_image": user_doc.user_image,
+                    "avatar_url": getattr(user_doc, 'avatar_url', None),
+                    "employee_code": getattr(user_doc, 'employee_code', None) or getattr(user_doc, 'employee_number', None)
+                })
+                frappe.logger().info(f"👨‍🏫 Enriched teacher {teacher.name} with User data: full_name='{user_doc.full_name}', employee_code='{getattr(user_doc, 'employee_code', None)}'")
+            except frappe.DoesNotExistError:
+                frappe.logger().warning(f"👨‍🏫 User {teacher.user_id} not found for teacher {teacher.name}")
+            except Exception as e:
+                frappe.logger().error(f"👨‍🏫 Error enriching teacher {teacher.name} with User data: {str(e)}")
+
         return single_item_response(
-            data={
-                "name": teacher.name,
-                "user_id": teacher.user_id,
-                "education_stage_id": teacher.education_stage_id,
-                "campus_id": teacher.campus_id
-            },
+            data=enriched_data,
             message="Teacher fetched successfully"
         )
         
