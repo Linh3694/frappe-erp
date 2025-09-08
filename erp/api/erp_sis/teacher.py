@@ -16,6 +16,8 @@ from erp.utils.api_response import (
 @frappe.whitelist(allow_guest=False)
 def get_all_teachers():
     """Get all teachers with detailed information including user profile data"""
+    frappe.logger().info(f"👨‍🏫 ===== get_all_teachers API called =====")
+
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -175,6 +177,8 @@ def get_all_teachers():
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def get_teacher_by_id(teacher_id=None):
     """Get a specific teacher by ID"""
+    frappe.logger().info(f"👨‍🏫 ===== get_teacher_by_id API called =====")
+
     try:
         # Get teacher_id from form_dict if not provided as parameter
         if not teacher_id:
