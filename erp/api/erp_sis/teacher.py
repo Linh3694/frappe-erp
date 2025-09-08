@@ -59,89 +59,102 @@ def get_all_teachers():
 
         # Enhance teachers with user information
         enhanced_teachers = []
+        frappe.logger().info(f"👨‍🏫 Starting to enhance {len(teachers)} teachers")
+
         for teacher in teachers:
-            enhanced_teacher = teacher.copy()
-            frappe.logger().info(f"👨‍🏫 Processing teacher: {teacher.get('name')}, user_id: {teacher.get('user_id')}")
+            try:
+                enhanced_teacher = teacher.copy()
+                frappe.logger().info(f"👨‍🏫 Processing teacher: {teacher.get('name')}, user_id: {teacher.get('user_id')}")
 
-            # Ensure user_id is always present (use name if user_id is missing)
-            if not teacher.get("user_id"):
-                enhanced_teacher["user_id"] = teacher.get("name")
-                frappe.logger().info(f"👨‍🏫 Set user_id to name: {teacher.get('name')}")
+                # Ensure user_id is always present (use name if user_id is missing)
+                if not teacher.get("user_id"):
+                    enhanced_teacher["user_id"] = teacher.get("name")
+                    frappe.logger().info(f"👨‍🏫 Set user_id to name: {teacher.get('name')}")
 
-            # Get user information
-            if teacher.get("user_id"):
-                user_info = frappe.get_all(
-                    "User",
-                    fields=[
-                        "name",
-                        "email",
-                        "full_name",
-                        "first_name",
-                        "last_name",
-                        "user_image",
-                        "employee_code",
-                        "employee_id"
-                    ],
-                    filters={"name": teacher["user_id"]},
-                    limit=1
-                )
+                # Get user information
+                if teacher.get("user_id"):
+                    try:
+                        user_info = frappe.get_all(
+                            "User",
+                            fields=[
+                                "name",
+                                "email",
+                                "full_name",
+                                "first_name",
+                                "last_name",
+                                "user_image",
+                                "employee_code",
+                                "employee_id"
+                            ],
+                            filters={"name": teacher["user_id"]},
+                            limit=1
+                        )
 
-                frappe.logger().info(f"👨‍🏫 User info for {teacher['user_id']}: {user_info}")
+                        frappe.logger().info(f"👨‍🏫 User info for {teacher['user_id']}: {user_info}")
 
-                if user_info:
-                    user = user_info[0]
-                    enhanced_teacher.update({
-                        "email": user.get("email"),
-                        "full_name": user.get("full_name"),
-                        "first_name": user.get("first_name"),
-                        "last_name": user.get("last_name"),
-                        "user_image": user.get("user_image"),
-                        "employee_code": user.get("employee_code"),
-                        "employee_id": user.get("employee_id"),
-                        "teacher_name": user.get("full_name") or user.get("name")
-                    })
-                    frappe.logger().info(f"👨‍🏫 Enhanced teacher {teacher['user_id']} with: full_name='{user.get('full_name')}', email='{user.get('email')}', employee_code='{user.get('employee_code')}'")
-                else:
-                    frappe.logger().warning(f"👨‍🏫 No user info found for {teacher['user_id']}")
+                        if user_info:
+                            user = user_info[0]
+                            enhanced_teacher.update({
+                                "email": user.get("email"),
+                                "full_name": user.get("full_name"),
+                                "first_name": user.get("first_name"),
+                                "last_name": user.get("last_name"),
+                                "user_image": user.get("user_image"),
+                                "employee_code": user.get("employee_code"),
+                                "employee_id": user.get("employee_id"),
+                                "teacher_name": user.get("full_name") or user.get("name")
+                            })
+                            frappe.logger().info(f"👨‍🏫 Enhanced teacher {teacher['user_id']} with: full_name='{user.get('full_name')}', email='{user.get('email')}', employee_code='{user.get('employee_code')}'")
+                        else:
+                            frappe.logger().warning(f"👨‍🏫 No user info found for {teacher['user_id']}")
+                    except Exception as user_error:
+                        frappe.logger().error(f"👨‍🏫 Error getting user info for {teacher['user_id']}: {str(user_error)}")
 
-                # Try to get employee information from Employee doctype (if available)
-                try:
-                    employee_info = frappe.get_all(
-                        "Employee",
-                        fields=[
-                            "name",
-                            "employee_number",
-                            "employee_name",
-                            "designation",
-                            "department",
-                            "branch"
-                        ],
-                        filters={"user_id": teacher["user_id"]},
-                        limit=1
-                    )
+                    # Try to get employee information from Employee doctype (if available)
+                    try:
+                        employee_info = frappe.get_all(
+                            "Employee",
+                            fields=[
+                                "name",
+                                "employee_number",
+                                "employee_name",
+                                "designation",
+                                "department",
+                                "branch"
+                            ],
+                            filters={"user_id": teacher["user_id"]},
+                            limit=1
+                        )
 
-                    frappe.logger().info(f"👨‍🏫 Employee info for {teacher['user_id']}: {employee_info}")
+                        frappe.logger().info(f"👨‍🏫 Employee info for {teacher['user_id']}: {employee_info}")
 
-                    if employee_info:
-                        employee = employee_info[0]
-                        enhanced_teacher.update({
-                            "employee_code": employee.get("name"),  # Use 'name' field as employee code (like get_current_user.py)
-                            "employee_id": employee.get("name"),    # Alias for compatibility
-                            "employee_number": employee.get("employee_number"),  # Keep original field
-                            "employee_name": employee.get("employee_name"),
-                            "designation": employee.get("designation"),
-                            "department": employee.get("department"),
-                            "branch": employee.get("branch")
-                        })
-                        frappe.logger().info(f"👨‍🏫 Enhanced with Employee data: employee_code='{employee.get('name')}', employee_number='{employee.get('employee_number')}'")
-                    else:
-                        frappe.logger().info(f"👨‍🏫 No Employee record found for {teacher['user_id']}")
-                except Exception as e:
-                    # Employee doctype might not exist or be accessible
-                    frappe.logger().warning(f"👨‍🏫 Error getting Employee data for {teacher['user_id']}: {str(e)}")
-                    pass
+                        if employee_info:
+                            employee = employee_info[0]
+                            enhanced_teacher.update({
+                                "employee_code": employee.get("name"),  # Use 'name' field as employee code (like get_current_user.py)
+                                "employee_id": employee.get("name"),    # Alias for compatibility
+                                "employee_number": employee.get("employee_number"),  # Keep original field
+                                "employee_name": employee.get("employee_name"),
+                                "designation": employee.get("designation"),
+                                "department": employee.get("department"),
+                                "branch": employee.get("branch")
+                            })
+                            frappe.logger().info(f"👨‍🏫 Enhanced with Employee data: employee_code='{employee.get('name')}', employee_number='{employee.get('employee_number')}'")
+                        else:
+                            frappe.logger().info(f"👨‍🏫 No Employee record found for {teacher['user_id']}")
+                    except Exception as emp_error:
+                        # Employee doctype might not exist or be accessible
+                        frappe.logger().warning(f"👨‍🏫 Error getting Employee data for {teacher['user_id']}: {str(emp_error)}")
 
-            enhanced_teachers.append(enhanced_teacher)
+                enhanced_teachers.append(enhanced_teacher)
+                frappe.logger().info(f"👨‍🏫 Successfully processed teacher: {teacher.get('name')}")
+
+            except Exception as teacher_error:
+                frappe.logger().error(f"👨‍🏫 Error processing teacher {teacher.get('name')}: {str(teacher_error)}")
+                # Still add the teacher even if enhancement fails
+                enhanced_teachers.append(teacher)
+
+        frappe.logger().info(f"👨‍🏫 Returning {len(enhanced_teachers)} enhanced teachers")
 
         return list_response(
             data=enhanced_teachers,
@@ -149,10 +162,13 @@ def get_all_teachers():
         )
 
     except Exception as e:
+        frappe.logger().error(f"👨‍🏫 Critical error in get_all_teachers: {str(e)}")
         frappe.log_error(f"Error fetching teachers: {str(e)}")
-        return error_response(
-            message="Error fetching teachers",
-            code="FETCH_TEACHERS_ERROR"
+
+        # Return empty list instead of error to prevent frontend crash
+        return list_response(
+            data=[],
+            message="No teachers available"
         )
 
 
@@ -255,6 +271,7 @@ def get_teacher_by_id(teacher_id=None):
         )
         
     except Exception as e:
+        frappe.logger().error(f"👨‍🏫 Critical error in get_teacher_by_id: {str(e)}")
         frappe.log_error(f"Error fetching teacher {teacher_id}: {str(e)}")
         return error_response(
             message="Error fetching teacher",
