@@ -19,13 +19,17 @@ def get_all_teachers():
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
+        frappe.logger().info(f"👨‍🏫 get_all_teachers called by user: {frappe.session.user}")
 
-        if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        # TEMPORARILY DISABLE CAMPUS FILTERING TO DEBUG
+        # if not campus_id:
+        #     # Fallback to default if no campus found
+        #     campus_id = "campus-1"
+        #     frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
-        filters = {"campus_id": campus_id}
+        # filters = {"campus_id": campus_id}
+        filters = {}  # No filtering temporarily
+        frappe.logger().info(f"👨‍🏫 Using filters (DISABLED CAMPUS): {filters}")
 
         teachers = frappe.get_all(
             "SIS Teacher",
@@ -40,6 +44,18 @@ def get_all_teachers():
             filters=filters,
             order_by="user_id asc"
         )
+
+        frappe.logger().info(f"👨‍🏫 Found {len(teachers)} teachers with filters: {filters}")
+        if teachers:
+            frappe.logger().info(f"👨‍🏫 Sample teachers: {teachers[:3]}")
+        else:
+            # Try without campus filter to see if there are any teachers at all
+            all_teachers = frappe.get_all("SIS Teacher", fields=["name", "user_id", "campus_id"], limit=5)
+            frappe.logger().info(f"👨‍🏫 Total teachers in system (no filter): {len(all_teachers)}")
+            if all_teachers:
+                frappe.logger().info(f"👨‍🏫 Sample all teachers: {all_teachers}")
+                campus_ids = list(set([t.get("campus_id") for t in all_teachers if t.get("campus_id")]))
+                frappe.logger().info(f"👨‍🏫 Available campus_ids in teachers: {campus_ids}")
 
         # Enhance teachers with user information
         enhanced_teachers = []
@@ -163,25 +179,40 @@ def get_teacher_by_id(teacher_id=None):
                 code="MISSING_TEACHER_ID"
             )
 
+        frappe.logger().info(f"👨‍🏫 get_teacher_by_id called with teacher_id: {teacher_id}")
+
         # Get current user's campus
         campus_id = get_current_campus_from_context()
+        frappe.logger().info(f"👨‍🏫 User's campus: {campus_id}")
 
         if not campus_id:
             campus_id = "campus-1"
+            frappe.logger().info(f"👨‍🏫 Using default campus: {campus_id}")
 
         # Try to find teacher by name first (without campus filter)
         try:
             teacher = frappe.get_doc("SIS Teacher", teacher_id)
+            frappe.logger().info(f"👨‍🏫 Found teacher: name={teacher.name}, user_id={teacher.user_id}, campus_id={teacher.campus_id}")
         except frappe.DoesNotExistError:
+            frappe.logger().error(f"👨‍🏫 Teacher {teacher_id} not found in SIS Teacher doctype")
+
+            # Check if there are any teachers in the system at all
+            all_teachers = frappe.get_all("SIS Teacher", fields=["name", "user_id"], limit=5)
+            frappe.logger().info(f"👨‍🏫 Total teachers in system: {len(all_teachers)}")
+            if all_teachers:
+                frappe.logger().info(f"👨‍🏫 Sample teachers: {all_teachers}")
+
             return not_found_response(
                 message="Teacher not found",
                 code="TEACHER_NOT_FOUND"
             )
 
         # Check if teacher belongs to user's campus (if campus filtering is needed)
-        if teacher.campus_id != campus_id:
-            # For now, allow access but log the mismatch
-            frappe.logger().warning(f"Teacher {teacher_id} campus mismatch: {teacher.campus_id} != {campus_id}")
+        # TEMPORARILY DISABLE CAMPUS CHECK TO DEBUG
+        # if teacher.campus_id != campus_id:
+        #     # For now, allow access but log the mismatch
+        #     frappe.logger().warning(f"Teacher {teacher_id} campus mismatch: {teacher.campus_id} != {campus_id}")
+        frappe.logger().info(f"👨‍🏫 Campus check disabled for debugging")
 
         # Return teacher data
         if not teacher:
