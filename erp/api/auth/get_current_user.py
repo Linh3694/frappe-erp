@@ -73,29 +73,9 @@ def get_current_user_full():
         
         # Add employee info if exists (optional)
         try:
-            # Try to get employee info using db.get_value first (more efficient)
-            employee_data = frappe.db.get_value(
-                "Employee",
-                {"user_id": user_email},
-                ["employee_name", "designation", "department", "company", "name", "employee_number"]
-            )
-
-            if employee_data:
-                # employee_data is a tuple, unpack it safely
-                emp_name, designation, department, company, emp_id, emp_number = employee_data[:6]
-
-                user_data.update({
-                    "employee_name": emp_name or "",
-                    "designation": designation or "",
-                    "job_title": designation or "",  # Alias
-                    "department": department or "",
-                    "company": company or "",
-                    "employee_code": emp_number or emp_id or "",  # Prefer employee_number over name
-                    "employee_id": emp_id or "",
-                    "employee_number": emp_number or ""
-                })
-            else:
-                # Fallback: try get_all if get_value fails
+            # Check if Employee table exists and is accessible
+            if frappe.db.table_exists("Employee"):
+                # Use get_all for more reliable query with better error handling
                 employee_records = frappe.get_all(
                     "Employee",
                     filters={"user_id": user_email},
@@ -108,16 +88,22 @@ def get_current_user_full():
                     user_data.update({
                         "employee_name": emp.get("employee_name") or "",
                         "designation": emp.get("designation") or "",
-                        "job_title": emp.get("designation") or "",
+                        "job_title": emp.get("designation") or "",  # Alias
                         "department": emp.get("department") or "",
                         "company": emp.get("company") or "",
                         "employee_code": emp.get("employee_number") or emp.get("name") or "",
                         "employee_id": emp.get("name") or "",
                         "employee_number": emp.get("employee_number") or ""
                     })
+                    frappe.logger().info(f"Employee data found for {user_email}: employee_code={emp.get('employee_number') or emp.get('name')}")
+                else:
+                    frappe.logger().debug(f"No employee record found for {user_email}")
+            else:
+                frappe.logger().warning("Employee table does not exist or is not accessible")
 
         except Exception as e:
-            frappe.logger().debug(f"No employee record found for {user_email}: {str(e)}")
+            frappe.logger().error(f"Error retrieving employee data for {user_email}: {str(e)}")
+            # Don't fail the entire request, just log the error
         
         # Add campus roles analysis
         campus_roles = [role for role in user_roles if role.startswith("Campus ")]
