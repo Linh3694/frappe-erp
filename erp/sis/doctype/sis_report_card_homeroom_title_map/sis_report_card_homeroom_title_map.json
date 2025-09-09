@@ -1,0 +1,16 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Report Card Homeroom Title Map",
+ "module": "SIS",
+ "istable": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "comment_title_id"
+ ],
+ "fields": [
+  {"fieldname": "title", "fieldtype": "Data", "label": "Tên tiêu đề", "in_list_view": 1, "reqd": 1},
+  {"fieldname": "comment_title_id", "fieldtype": "Link", "label": "Tiêu đề nhận xét", "options": "SIS Report Card Comment Title", "in_list_view": 1, "reqd": 1}
+ ]
+}
+

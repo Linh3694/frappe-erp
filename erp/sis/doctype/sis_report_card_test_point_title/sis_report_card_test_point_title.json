@@ -1,0 +1,14 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Report Card Test Point Title",
+ "module": "SIS",
+ "istable": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title"
+ ],
+ "fields": [
+  {"fieldname": "title", "fieldtype": "Data", "label": "Tiêu đề", "in_list_view": 1, "reqd": 1}
+ ]
+}
+

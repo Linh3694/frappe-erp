@@ -9,12 +9,10 @@ from frappe.model.document import Document
 
 class SISReportCardHomeroomCommentOption(Document):
 	def validate(self):
-		# Validate that title is not empty
 		if not self.title or not self.title.strip():
 			frappe.throw(_("Tên tùy chọn không được để trống"))
 
 	def autoname(self):
-		# Generate name based on title
 		if self.title:
 			from frappe.utils import slug
 			base_name = slug(self.title)

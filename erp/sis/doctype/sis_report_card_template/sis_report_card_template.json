@@ -1,0 +1,51 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Report Card Template",
+ "module": "SIS",
+ "istable": 0,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "is_published",
+  "curriculum",
+  "education_stage",
+  "school_year",
+  "education_grade",
+  "semester_part",
+  "campus_id",
+  "scores_enabled",
+  "scores",
+  "homeroom_enabled",
+  "homeroom_titles",
+  "subject_eval_enabled",
+  "subjects"
+ ],
+ "fields": [
+  {"fieldname": "title", "fieldtype": "Data", "label": "Tên báo cáo", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "is_published", "fieldtype": "Check", "label": "Phát hành"},
+  {"fieldname": "curriculum", "fieldtype": "Link", "label": "Chương trình học", "options": "SIS Curriculum"},
+  {"fieldname": "education_stage", "fieldtype": "Link", "label": "Cấp học", "options": "SIS Education Stage"},
+  {"fieldname": "school_year", "fieldtype": "Link", "label": "Năm học", "options": "SIS School Year", "reqd": 1},
+  {"fieldname": "education_grade", "fieldtype": "Link", "label": "Khối", "options": "SIS Education Grade"},
+  {"fieldname": "semester_part", "fieldtype": "Select", "label": "Kì học", "options": "Mid Term 1\nEnd Term 1\nMid Term 2\nEnd Term 2", "reqd": 1},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Trường học", "options": "SIS Campus", "reqd": 1},
+
+  {"fieldname": "scores_enabled", "fieldtype": "Check", "label": "Bật bảng điểm"},
+  {"fieldname": "scores", "fieldtype": "Table", "label": "Bảng điểm", "options": "SIS Report Card Score Config"},
+
+  {"fieldname": "homeroom_enabled", "fieldtype": "Check", "label": "Bật nhận xét chủ nhiệm"},
+  {"fieldname": "homeroom_titles", "fieldtype": "Table", "label": "Nhận xét chủ nhiệm", "options": "SIS Report Card Homeroom Title Map"},
+
+  {"fieldname": "subject_eval_enabled", "fieldtype": "Check", "label": "Bật đánh giá môn học"},
+  {"fieldname": "subjects", "fieldtype": "Table", "label": "Cấu hình môn học", "options": "SIS Report Card Subject Config"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1},
+  {"role": "SIS Admin", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1}
+ ],
+ "title_field": "title",
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
+

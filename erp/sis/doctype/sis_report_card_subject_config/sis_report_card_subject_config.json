@@ -1,0 +1,28 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Report Card Subject Config",
+ "module": "SIS",
+ "istable": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "subject_id",
+  "test_point_enabled",
+  "rubric_enabled",
+  "criteria_id",
+  "scale_id",
+  "comment_title_enabled",
+  "comment_title_id",
+  "test_point_titles"
+ ],
+ "fields": [
+  {"fieldname": "subject_id", "fieldtype": "Link", "label": "Môn học", "options": "SIS Subject", "in_list_view": 1, "reqd": 1},
+  {"fieldname": "test_point_enabled", "fieldtype": "Check", "label": "Điểm kiểm tra"},
+  {"fieldname": "rubric_enabled", "fieldtype": "Check", "label": "Bảng đánh giá"},
+  {"fieldname": "criteria_id", "fieldtype": "Link", "label": "Tiêu chí đánh giá", "options": "SIS Report Card Evaluation Criteria"},
+  {"fieldname": "scale_id", "fieldtype": "Link", "label": "Thang đánh giá", "options": "SIS Report Card Evaluation Scale"},
+  {"fieldname": "comment_title_enabled", "fieldtype": "Check", "label": "Tiêu đề nhận xét"},
+  {"fieldname": "comment_title_id", "fieldtype": "Link", "label": "Tiêu đề nhận xét", "options": "SIS Report Card Comment Title"},
+  {"fieldname": "test_point_titles", "fieldtype": "Table", "label": "Tiêu đề điểm kiểm tra", "options": "SIS Report Card Test Point Title"}
+ ]
+}
+

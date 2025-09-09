@@ -1,0 +1,24 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Report Card Score Config",
+ "module": "SIS",
+ "istable": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "subject_id",
+  "display_name",
+  "subject_type",
+  "weight1_count",
+  "weight2_count",
+  "weight3_count"
+ ],
+ "fields": [
+  {"fieldname": "subject_id", "fieldtype": "Link", "label": "Môn học", "options": "SIS Subject", "in_list_view": 1, "reqd": 1},
+  {"fieldname": "display_name", "fieldtype": "Data", "label": "Tên hiển thị", "in_list_view": 1},
+  {"fieldname": "subject_type", "fieldtype": "Select", "label": "Loại đánh giá", "options": "Môn tính điểm\nMôn đánh giá", "in_list_view": 1, "reqd": 1},
+  {"fieldname": "weight1_count", "fieldtype": "Int", "label": "SL hệ số 1", "in_list_view": 1, "default": "0"},
+  {"fieldname": "weight2_count", "fieldtype": "Int", "label": "SL hệ số 2", "in_list_view": 1, "default": "0"},
+  {"fieldname": "weight3_count", "fieldtype": "Int", "label": "SL hệ số 3", "in_list_view": 1, "default": "0"}
+ ]
+}
+
