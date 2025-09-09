@@ -563,7 +563,7 @@ def validate_comment_titles():
             return error_response(
                 message=f"Các tiêu đề nhận xét sau không tồn tại: {', '.join(invalid_titles)}",
                 code="INVALID_COMMENT_TITLES",
-                data=result
+                debug_info=result
             )
 
         return success_response(
