@@ -192,12 +192,6 @@ def create_comment_title():
                 errors={"title": ["Required"]}
             )
 
-        if not campus_id:
-            return validation_error_response(
-                message="Trường học là bắt buộc",
-                errors={"campus_id": ["Required"]}
-            )
-
         if not options or len(options) == 0:
             return validation_error_response(
                 message="Phải có ít nhất một tùy chọn",
@@ -212,20 +206,34 @@ def create_comment_title():
                     errors={"options": [f"Option {i+1} title is required"]}
                 )
 
-        # Get campus from user context if not provided
+        # Get campus from user context or auto-select
         if not campus_id:
             campus_id = get_current_campus_from_context()
 
-            if not campus_id:
-                # Get first available campus
-                first_campus = frappe.get_all("SIS Campus", fields=["name"], limit=1)
-                if first_campus:
-                    campus_id = first_campus[0].name
-                else:
-                    return error_response(
-                        message="No campus available",
-                        code="NO_CAMPUS_AVAILABLE"
-                    )
+        if not campus_id:
+            # Get first available campus instead of hardcoded campus-1
+            first_campus = frappe.get_all("SIS Campus", fields=["name"], limit=1)
+            if first_campus:
+                campus_id = first_campus[0].name
+                frappe.logger().warning(f"No campus found for user {frappe.session.user}, using first available: {campus_id}")
+            else:
+                # Create default campus if none exists
+                default_campus = frappe.get_doc({
+                    "doctype": "SIS Campus",
+                    "title_vn": "Trường Mặc Định",
+                    "title_en": "Default Campus"
+                })
+                default_campus.insert()
+                frappe.db.commit()
+                campus_id = default_campus.name
+                frappe.logger().info(f"Created default campus: {campus_id}")
+
+        # Validate campus exists
+        if not frappe.db.exists("SIS Campus", campus_id):
+            return error_response(
+                message=f"Không thể tìm thấy Trường học: {campus_id}",
+                code="CAMPUS_NOT_FOUND"
+            )
 
         # Check if title already exists for this campus
         existing = frappe.db.exists(
