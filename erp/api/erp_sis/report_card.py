@@ -131,31 +131,81 @@ def _apply_scores(parent_doc, scores_payload: List[Dict[str, Any]]):
         )
 
 
+def _validate_comment_title_exists(comment_title_id: str, campus_id: str) -> bool:
+    """Validate that a comment title exists and belongs to the current campus."""
+    if not comment_title_id:
+        frappe.logger().warning(f"Comment title validation: empty comment_title_id provided")
+        return False
+
+    try:
+        doc = frappe.get_doc("SIS Report Card Comment Title", comment_title_id)
+        if doc.campus_id != campus_id:
+            frappe.logger().error(f"Comment title {comment_title_id} exists but belongs to campus {doc.campus_id}, not {campus_id}")
+            return False
+        frappe.logger().info(f"Comment title {comment_title_id} validation successful for campus {campus_id}")
+        return True
+    except frappe.DoesNotExistError:
+        frappe.logger().error(f"Comment title {comment_title_id} does not exist in database")
+        return False
+    except Exception as e:
+        frappe.logger().error(f"Error validating comment title {comment_title_id}: {str(e)}")
+        return False
+
+
 def _apply_homeroom_titles(parent_doc, titles_payload: List[Dict[str, Any]]):
+    campus_id = _current_campus_id()
     parent_doc.homeroom_titles = []
-    for h in titles_payload or []:
+
+    frappe.logger().info(f"Applying {len(titles_payload or [])} homeroom titles for campus {campus_id}")
+
+    for i, h in enumerate(titles_payload or []):
+        comment_title_id = h.get("comment_title_id")
+        title_text = (h.get("title") or "").strip()
+
+        frappe.logger().debug(f"Processing homeroom title {i+1}: title='{title_text}', comment_title_id='{comment_title_id}'")
+
+        if comment_title_id and not _validate_comment_title_exists(comment_title_id, campus_id):
+            frappe.throw(_(
+                "Tiêu đề nhận xét '{0}' không tồn tại hoặc không thuộc về trường này"
+            ).format(comment_title_id), frappe.LinkValidationError)
+
         parent_doc.append(
             "homeroom_titles",
             {
-                "title": (h.get("title") or "").strip(),
-                "comment_title_id": h.get("comment_title_id"),
+                "title": title_text,
+                "comment_title_id": comment_title_id,
             },
         )
 
 
 def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
+    campus_id = _current_campus_id()
     parent_doc.subjects = []
-    for sub in subjects_payload or []:
+
+    frappe.logger().info(f"Applying {len(subjects_payload or [])} subjects for campus {campus_id}")
+
+    for i, sub in enumerate(subjects_payload or []):
+        subject_id = sub.get("subject_id")
+        comment_title_id = sub.get("comment_title_id")
+        comment_title_enabled = sub.get("comment_title_enabled", False)
+
+        frappe.logger().debug(f"Processing subject {i+1}: subject_id='{subject_id}', comment_title_id='{comment_title_id}', comment_title_enabled={comment_title_enabled}")
+
+        if comment_title_id and not _validate_comment_title_exists(comment_title_id, campus_id):
+            frappe.throw(_(
+                "Tiêu đề nhận xét '{0}' không tồn tại hoặc không thuộc về trường này"
+            ).format(comment_title_id), frappe.LinkValidationError)
+
         row = parent_doc.append(
             "subjects",
             {
-                "subject_id": sub.get("subject_id"),
+                "subject_id": subject_id,
                 "test_point_enabled": 1 if sub.get("test_point_enabled") else 0,
                 "rubric_enabled": 1 if sub.get("rubric_enabled") else 0,
                 "criteria_id": sub.get("criteria_id"),
                 "scale_id": sub.get("scale_id"),
-                "comment_title_enabled": 1 if sub.get("comment_title_enabled") else 0,
-                "comment_title_id": sub.get("comment_title_id"),
+                "comment_title_enabled": 1 if comment_title_enabled else 0,
+                "comment_title_id": comment_title_id,
             },
         )
 
@@ -265,10 +315,14 @@ def get_template_by_id(template_id: Optional[str] = None):
         return error_response("Error fetching report card template")
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"]) 
+@frappe.whitelist(allow_guest=False, methods=["POST"])
 def create_template():
     try:
         data = _get_request_payload()
+
+        # Log incoming data for debugging
+        frappe.logger().info(f"Creating report card template with title: {data.get('title')}")
+        frappe.logger().debug(f"Template data: homeroom_titles={len(data.get('homeroom_titles', []))}, subjects={len(data.get('subjects', []))}")
 
         # Required fields
         required = ["title", "school_year", "education_stage", "semester_part"]
@@ -319,9 +373,39 @@ def create_template():
 
         created = frappe.get_doc("SIS Report Card Template", doc.name)
         return single_item_response(_doc_to_template_dict(created), "Template created successfully")
+    except frappe.LinkValidationError as e:
+        # Handle specific link validation errors with more context
+        error_msg = str(e)
+        frappe.logger().error(f"Link validation error creating template: {error_msg}")
+
+        # Provide user-friendly error message for comment title issues
+        if "Tiêu đề nhận xét" in error_msg or "comment title" in error_msg.lower():
+            return error_response(
+                message="Không thể tạo mẫu báo cáo: Một hoặc nhiều tiêu đề nhận xét không tồn tại hoặc đã bị xóa. Vui lòng làm mới trang và thử lại.",
+                code="COMMENT_TITLE_NOT_FOUND"
+            )
+        else:
+            return error_response(
+                message=f"Lỗi liên kết dữ liệu: {error_msg}",
+                code="LINK_VALIDATION_ERROR"
+            )
+    except frappe.CharacterLengthExceededError as e:
+        # Handle character length exceeded errors
+        error_msg = str(e)
+        frappe.logger().error(f"Character length exceeded creating template: {error_msg}")
+        return error_response(
+            message="Tiêu đề quá dài. Vui lòng rút ngắn tiêu đề và thử lại.",
+            code="TITLE_TOO_LONG"
+        )
     except Exception as e:
-        frappe.log_error(f"Error creating report card template: {str(e)}")
-        return error_response("Error creating report card template")
+        error_msg = str(e)
+        frappe.logger().error(f"Unexpected error creating report card template: {error_msg}")
+
+        # Include error details in API response for debugging (as per user preference)
+        return error_response(
+            message=f"Lỗi hệ thống khi tạo mẫu báo cáo: {error_msg}",
+            code="TEMPLATE_CREATE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
@@ -331,6 +415,10 @@ def update_template(template_id: Optional[str] = None):
         template_id = template_id or data.get("template_id") or data.get("name")
         if not template_id:
             return validation_error_response(message="Template ID is required", errors={"template_id": ["Required"]})
+
+        # Log incoming data for debugging
+        frappe.logger().info(f"Updating report card template {template_id} with title: {data.get('title')}")
+        frappe.logger().debug(f"Template update data: homeroom_titles={len(data.get('homeroom_titles', []))}, subjects={len(data.get('subjects', []))}")
 
         campus_id = _current_campus_id()
         try:
@@ -373,9 +461,39 @@ def update_template(template_id: Optional[str] = None):
         doc.reload()
 
         return success_response(data=_doc_to_template_dict(doc), message="Template updated successfully")
+    except frappe.LinkValidationError as e:
+        # Handle specific link validation errors with more context
+        error_msg = str(e)
+        frappe.logger().error(f"Link validation error updating template {template_id}: {error_msg}")
+
+        # Provide user-friendly error message for comment title issues
+        if "Tiêu đề nhận xét" in error_msg or "comment title" in error_msg.lower():
+            return error_response(
+                message="Không thể cập nhật mẫu báo cáo: Một hoặc nhiều tiêu đề nhận xét không tồn tại hoặc đã bị xóa. Vui lòng làm mới trang và thử lại.",
+                code="COMMENT_TITLE_NOT_FOUND"
+            )
+        else:
+            return error_response(
+                message=f"Lỗi liên kết dữ liệu: {error_msg}",
+                code="LINK_VALIDATION_ERROR"
+            )
+    except frappe.CharacterLengthExceededError as e:
+        # Handle character length exceeded errors
+        error_msg = str(e)
+        frappe.logger().error(f"Character length exceeded updating template {template_id}: {error_msg}")
+        return error_response(
+            message="Tiêu đề quá dài. Vui lòng rút ngắn tiêu đề và thử lại.",
+            code="TITLE_TOO_LONG"
+        )
     except Exception as e:
-        frappe.log_error(f"Error updating report card template {template_id}: {str(e)}")
-        return error_response("Error updating report card template")
+        error_msg = str(e)
+        frappe.logger().error(f"Unexpected error updating report card template {template_id}: {error_msg}")
+
+        # Include error details in API response for debugging (as per user preference)
+        return error_response(
+            message=f"Lỗi hệ thống khi cập nhật mẫu báo cáo: {error_msg}",
+            code="TEMPLATE_UPDATE_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
@@ -408,6 +526,59 @@ def delete_template(template_id: Optional[str] = None):
 
 
 # Helper APIs for Task/ReportCard
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def validate_comment_titles():
+    """Validate that comment titles exist before saving templates."""
+    try:
+        data = _get_request_payload()
+        comment_title_ids = data.get("comment_title_ids", [])
+
+        if not comment_title_ids:
+            return validation_error_response(
+                message="Danh sách comment_title_ids là bắt buộc",
+                errors={"comment_title_ids": ["Required"]}
+            )
+
+        campus_id = _current_campus_id()
+        invalid_titles = []
+        valid_titles = []
+
+        frappe.logger().info(f"Validating {len(comment_title_ids)} comment titles for campus {campus_id}")
+
+        for comment_title_id in comment_title_ids:
+            if _validate_comment_title_exists(comment_title_id, campus_id):
+                valid_titles.append(comment_title_id)
+            else:
+                invalid_titles.append(comment_title_id)
+
+        result = {
+            "valid_titles": valid_titles,
+            "invalid_titles": invalid_titles,
+            "all_valid": len(invalid_titles) == 0
+        }
+
+        if invalid_titles:
+            frappe.logger().warning(f"Invalid comment titles found: {invalid_titles}")
+            return error_response(
+                message=f"Các tiêu đề nhận xét sau không tồn tại: {', '.join(invalid_titles)}",
+                code="INVALID_COMMENT_TITLES",
+                data=result
+            )
+
+        return success_response(
+            data=result,
+            message="Tất cả tiêu đề nhận xét đều hợp lệ"
+        )
+
+    except Exception as e:
+        error_msg = str(e)
+        frappe.logger().error(f"Error validating comment titles: {error_msg}")
+        return error_response(
+            message=f"Lỗi khi kiểm tra tiêu đề nhận xét: {error_msg}",
+            code="VALIDATION_ERROR"
+        )
+
 
 @frappe.whitelist(allow_guest=False)
 def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int = 50):
