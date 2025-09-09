@@ -99,17 +99,34 @@ def get_all_homeroom_comments(page=1, limit=20, include_all_campuses=0):
 def get_homeroom_comment_by_id(comment_id=None):
     """Get a specific homeroom comment by ID"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"get_homeroom_comment_by_id: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get comment_id from multiple sources
         if not comment_id:
-            comment_id = frappe.local.form_dict.get("comment_id")
-
-        # Try from JSON data
-        if not comment_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                comment_id = json_data.get("comment_id")
-            except Exception:
-                pass
+            comment_id = (
+                pick(form, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(local_form, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(request_args, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(payload, ['comment_id', 'id', 'name', 'commentId'])
+            )
 
         if not comment_id:
             return error_response(
@@ -285,17 +302,34 @@ def create_homeroom_comment():
 def update_homeroom_comment(comment_id=None):
     """Update an existing homeroom comment"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"update_homeroom_comment: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get comment_id from multiple sources
         if not comment_id:
-            comment_id = frappe.local.form_dict.get("comment_id")
-
-        # Try from JSON data
-        if not comment_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                comment_id = json_data.get("comment_id")
-            except Exception:
-                pass
+            comment_id = (
+                pick(form, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(local_form, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(request_args, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(payload, ['comment_id', 'id', 'name', 'commentId'])
+            )
 
         if not comment_id:
             return error_response(
@@ -408,17 +442,34 @@ def update_homeroom_comment(comment_id=None):
 def delete_homeroom_comment(comment_id=None):
     """Delete a homeroom comment"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"delete_homeroom_comment: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get comment_id from multiple sources
         if not comment_id:
-            comment_id = frappe.local.form_dict.get("comment_id")
-
-        # Try from JSON data
-        if not comment_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                comment_id = json_data.get("comment_id")
-            except Exception:
-                pass
+            comment_id = (
+                pick(form, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(local_form, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(request_args, ['comment_id', 'id', 'name', 'commentId'])
+                or pick(payload, ['comment_id', 'id', 'name', 'commentId'])
+            )
 
         if not comment_id:
             return error_response(

@@ -99,17 +99,34 @@ def get_all_evaluation_criterias(page=1, limit=20, include_all_campuses=0):
 def get_evaluation_criteria_by_id(criteria_id=None):
     """Get a specific evaluation criteria by ID"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"get_evaluation_criteria_by_id: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get criteria_id from multiple sources
         if not criteria_id:
-            criteria_id = frappe.local.form_dict.get("criteria_id")
-
-        # Try from JSON data
-        if not criteria_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                criteria_id = json_data.get("criteria_id")
-            except Exception:
-                pass
+            criteria_id = (
+                pick(form, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(local_form, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(request_args, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(payload, ['criteria_id', 'id', 'name', 'criteriaId'])
+            )
 
         if not criteria_id:
             return error_response(
@@ -285,17 +302,34 @@ def create_evaluation_criteria():
 def update_evaluation_criteria(criteria_id=None):
     """Update an existing evaluation criteria"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"update_evaluation_criteria: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get criteria_id from multiple sources
         if not criteria_id:
-            criteria_id = frappe.local.form_dict.get("criteria_id")
-
-        # Try from JSON data
-        if not criteria_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                criteria_id = json_data.get("criteria_id")
-            except Exception:
-                pass
+            criteria_id = (
+                pick(form, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(local_form, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(request_args, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(payload, ['criteria_id', 'id', 'name', 'criteriaId'])
+            )
 
         if not criteria_id:
             return error_response(
@@ -408,17 +442,34 @@ def update_evaluation_criteria(criteria_id=None):
 def delete_evaluation_criteria(criteria_id=None):
     """Delete an evaluation criteria"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"delete_evaluation_criteria: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get criteria_id from multiple sources
         if not criteria_id:
-            criteria_id = frappe.local.form_dict.get("criteria_id")
-
-        # Try from JSON data
-        if not criteria_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                criteria_id = json_data.get("criteria_id")
-            except Exception:
-                pass
+            criteria_id = (
+                pick(form, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(local_form, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(request_args, ['criteria_id', 'id', 'name', 'criteriaId'])
+                or pick(payload, ['criteria_id', 'id', 'name', 'criteriaId'])
+            )
 
         if not criteria_id:
             return error_response(

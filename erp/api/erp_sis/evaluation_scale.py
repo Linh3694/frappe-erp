@@ -99,17 +99,34 @@ def get_all_evaluation_scales(page=1, limit=20, include_all_campuses=0):
 def get_evaluation_scale_by_id(scale_id=None):
     """Get a specific evaluation scale by ID"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"get_evaluation_scale_by_id: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get scale_id from multiple sources
         if not scale_id:
-            scale_id = frappe.local.form_dict.get("scale_id")
-
-        # Try from JSON data
-        if not scale_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                scale_id = json_data.get("scale_id")
-            except Exception:
-                pass
+            scale_id = (
+                pick(form, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(local_form, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(request_args, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(payload, ['scale_id', 'id', 'name', 'scaleId'])
+            )
 
         if not scale_id:
             return error_response(
@@ -285,17 +302,34 @@ def create_evaluation_scale():
 def update_evaluation_scale(scale_id=None):
     """Update an existing evaluation scale"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"update_evaluation_scale: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get scale_id from multiple sources
         if not scale_id:
-            scale_id = frappe.local.form_dict.get("scale_id")
-
-        # Try from JSON data
-        if not scale_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                scale_id = json_data.get("scale_id")
-            except Exception:
-                pass
+            scale_id = (
+                pick(form, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(local_form, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(request_args, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(payload, ['scale_id', 'id', 'name', 'scaleId'])
+            )
 
         if not scale_id:
             return error_response(
@@ -408,17 +442,34 @@ def update_evaluation_scale(scale_id=None):
 def delete_evaluation_scale(scale_id=None):
     """Delete an evaluation scale"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"delete_evaluation_scale: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get scale_id from multiple sources
         if not scale_id:
-            scale_id = frappe.local.form_dict.get("scale_id")
-
-        # Try from JSON data
-        if not scale_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                scale_id = json_data.get("scale_id")
-            except Exception:
-                pass
+            scale_id = (
+                pick(form, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(local_form, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(request_args, ['scale_id', 'id', 'name', 'scaleId'])
+                or pick(payload, ['scale_id', 'id', 'name', 'scaleId'])
+            )
 
         if not scale_id:
             return error_response(

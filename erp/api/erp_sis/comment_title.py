@@ -99,17 +99,34 @@ def get_all_comment_titles(page=1, limit=20, include_all_campuses=0):
 def get_comment_title_by_id(title_id=None):
     """Get a specific comment title by ID"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"get_comment_title_by_id: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get title_id from multiple sources
         if not title_id:
-            title_id = frappe.local.form_dict.get("title_id")
-
-        # Try from JSON data
-        if not title_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                title_id = json_data.get("title_id")
-            except Exception:
-                pass
+            title_id = (
+                pick(form, ['title_id', 'id', 'name', 'titleId'])
+                or pick(local_form, ['title_id', 'id', 'name', 'titleId'])
+                or pick(request_args, ['title_id', 'id', 'name', 'titleId'])
+                or pick(payload, ['title_id', 'id', 'name', 'titleId'])
+            )
 
         if not title_id:
             return error_response(
@@ -285,17 +302,34 @@ def create_comment_title():
 def update_comment_title(title_id=None):
     """Update an existing comment title"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"update_comment_title: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get title_id from multiple sources
         if not title_id:
-            title_id = frappe.local.form_dict.get("title_id")
-
-        # Try from JSON data
-        if not title_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                title_id = json_data.get("title_id")
-            except Exception:
-                pass
+            title_id = (
+                pick(form, ['title_id', 'id', 'name', 'titleId'])
+                or pick(local_form, ['title_id', 'id', 'name', 'titleId'])
+                or pick(request_args, ['title_id', 'id', 'name', 'titleId'])
+                or pick(payload, ['title_id', 'id', 'name', 'titleId'])
+            )
 
         if not title_id:
             return error_response(
@@ -408,17 +442,34 @@ def update_comment_title(title_id=None):
 def delete_comment_title(title_id=None):
     """Delete a comment title"""
     try:
+        # Collect identifiers from multiple sources for robustness
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"delete_comment_title: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
         # Get title_id from multiple sources
         if not title_id:
-            title_id = frappe.local.form_dict.get("title_id")
-
-        # Try from JSON data
-        if not title_id and frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                title_id = json_data.get("title_id")
-            except Exception:
-                pass
+            title_id = (
+                pick(form, ['title_id', 'id', 'name', 'titleId'])
+                or pick(local_form, ['title_id', 'id', 'name', 'titleId'])
+                or pick(request_args, ['title_id', 'id', 'name', 'titleId'])
+                or pick(payload, ['title_id', 'id', 'name', 'titleId'])
+            )
 
         if not title_id:
             return error_response(
