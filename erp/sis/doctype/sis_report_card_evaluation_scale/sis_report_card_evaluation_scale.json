@@ -1,81 +1,43 @@
 {
  "actions": [],
- "allow_copy": 0,
- "allow_events_in_timeline": 0,
- "allow_guest_to_view": 0,
- "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:SIS-RC-ES-{#####}",
- "beta": 0,
- "creation": "2024-12-19 10:00:00.000000",
- "custom": 0,
- "description": "SIS Report Card Evaluation Scale Management",
- "docstatus": 0,
+ "creation": "2024-01-01 00:00:00.000000",
  "doctype": "DocType",
- "document_type": "Document",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "basic_information",
-  "title_vn",
-  "title_en",
-  "description",
-  "options_section",
-  "options",
-  "campus_id"
+  "title",
+  "campus_id",
+  "options"
  ],
  "fields": [
   {
-   "fieldname": "basic_information",
-   "fieldtype": "Section Break",
-   "label": "Basic Information"
-  },
-  {
-   "fieldname": "title_vn",
+   "fieldname": "title",
    "fieldtype": "Data",
-   "label": "Evaluation Scale Name (VN)",
-   "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "title_en",
-   "fieldtype": "Data",
-   "label": "Evaluation Scale Name (EN)",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "description",
-   "fieldtype": "Text",
-   "label": "Description"
-  },
-  {
-   "fieldname": "options_section",
-   "fieldtype": "Section Break",
-   "label": "Options"
-  },
-  {
-   "fieldname": "options",
-   "fieldtype": "Table",
-   "label": "Scale Options",
-   "options": "SIS Report Card Evaluation Scale Option",
+   "in_list_view": 1,
+   "label": "Thang đánh giá",
    "reqd": 1
   },
   {
    "fieldname": "campus_id",
    "fieldtype": "Link",
-   "label": "Campus",
+   "label": "Trường học",
    "options": "SIS Campus",
+   "reqd": 1
+  },
+  {
+   "fieldname": "options",
+   "fieldtype": "Table",
+   "label": "Các tùy chọn",
+   "options": "SIS Report Card Evaluation Scale Option",
    "reqd": 1
   }
  ],
  "index_web_pages_for_search": 1,
- "istable": 0,
  "links": [],
- "modified": "2024-12-19 10:00:00.000000",
+ "modified": "2024-01-01 00:00:00.000000",
  "modified_by": "Administrator",
- "module": "Sis",
+ "module": "SIS",
  "name": "SIS Report Card Evaluation Scale",
  "owner": "Administrator",
  "permissions": [
@@ -99,26 +61,12 @@
    "print": 1,
    "read": 1,
    "report": 1,
-   "role": "SIS Manager",
-   "share": 1,
-   "write": 1
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Registrar",
+   "role": "SIS Admin",
    "share": 1,
    "write": 1
   }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "title_field": "title_vn",
- "track_changes": 1
+ "title_field": "title"
 }
