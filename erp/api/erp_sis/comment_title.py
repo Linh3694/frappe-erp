@@ -62,6 +62,18 @@ def get_all_comment_titles(page=1, limit=20, include_all_campuses=0):
 
         frappe.logger().info(f"Found {len(titles)} comment titles from database")
 
+        # Enrich titles with options data
+        for title in titles:
+            title_doc = frappe.get_doc("SIS Report Card Comment Title", title.name)
+            options = []
+            if title_doc.options:
+                for option in title_doc.options:
+                    options.append({
+                        "name": option.name,
+                        "title": option.title
+                    })
+            title["options"] = options
+
         # Get total count
         total_count = frappe.db.count("SIS Report Card Comment Title", filters=filters)
 

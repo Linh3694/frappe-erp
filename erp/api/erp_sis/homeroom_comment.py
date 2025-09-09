@@ -62,6 +62,18 @@ def get_all_homeroom_comments(page=1, limit=20, include_all_campuses=0):
 
         frappe.logger().info(f"Found {len(comments)} homeroom comments from database")
 
+        # Enrich comments with options data
+        for comment in comments:
+            comment_doc = frappe.get_doc("SIS Report Card Homeroom Comment", comment.name)
+            options = []
+            if comment_doc.options:
+                for option in comment_doc.options:
+                    options.append({
+                        "name": option.name,
+                        "title": option.title
+                    })
+            comment["options"] = options
+
         # Get total count
         total_count = frappe.db.count("SIS Report Card Homeroom Comment", filters=filters)
 

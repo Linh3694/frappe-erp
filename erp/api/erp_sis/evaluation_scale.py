@@ -44,7 +44,7 @@ def get_all_evaluation_scales(page=1, limit=20, include_all_campuses=0):
         # Calculate offset for pagination
         offset = (page - 1) * limit
 
-        # Get evaluation scales
+        # Get evaluation scales with options
         scales = frappe.get_all(
             "SIS Report Card Evaluation Scale",
             fields=[
@@ -61,6 +61,18 @@ def get_all_evaluation_scales(page=1, limit=20, include_all_campuses=0):
         )
 
         frappe.logger().info(f"Found {len(scales)} evaluation scales from database")
+
+        # Enrich scales with options data
+        for scale in scales:
+            scale_doc = frappe.get_doc("SIS Report Card Evaluation Scale", scale.name)
+            options = []
+            if scale_doc.options:
+                for option in scale_doc.options:
+                    options.append({
+                        "name": option.name,
+                        "title": option.title
+                    })
+            scale["options"] = options
 
         # Get total count
         total_count = frappe.db.count("SIS Report Card Evaluation Scale", filters=filters)

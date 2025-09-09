@@ -62,6 +62,18 @@ def get_all_evaluation_criterias(page=1, limit=20, include_all_campuses=0):
 
         frappe.logger().info(f"Found {len(criterias)} evaluation criterias from database")
 
+        # Enrich criterias with options data
+        for criteria in criterias:
+            criteria_doc = frappe.get_doc("SIS Report Card Evaluation Criteria", criteria.name)
+            options = []
+            if criteria_doc.options:
+                for option in criteria_doc.options:
+                    options.append({
+                        "name": option.name,
+                        "title": option.title
+                    })
+            criteria["options"] = options
+
         # Get total count
         total_count = frappe.db.count("SIS Report Card Evaluation Criteria", filters=filters)
 
