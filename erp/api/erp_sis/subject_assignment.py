@@ -329,10 +329,12 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 # Skip if data is empty or just whitespace
                 if json_str.strip():
                     json_data = json.loads(json_str)
+                    frappe.logger().info(f"UPDATE DEBUG - Parsed JSON data: {json_data}")
                     assignment_id = json_data.get('assignment_id') or assignment_id
                     teacher_id = json_data.get('teacher_id') or teacher_id
                     subject_id = json_data.get('subject_id') or subject_id
                     class_id = json_data.get('class_id') if 'class_id' in json_data else None
+                    frappe.logger().info(f"UPDATE DEBUG - Final values: assignment_id={assignment_id}, teacher_id={teacher_id}, subject_id={subject_id}, class_id={class_id}")
             except Exception as e:
                 # Silently handle JSON parse errors
                 pass
@@ -427,9 +429,21 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
             frappe.logger().info(f"UPDATE DEBUG - Updated subject_id to: {subject_id}")
         
         # Update class_id if provided
-        if class_id is not None and class_id != getattr(assignment_doc, 'class_id', None):
+        # Debug class_id update - also add to response
+        current_class_id = getattr(assignment_doc, 'class_id', 'NOT_SET')
+        debug_info = {
+            'current_class_id': current_class_id,
+            'new_class_id': class_id,
+            'will_update': class_id is not None and class_id != current_class_id
+        }
+        frappe.logger().info(f"UPDATE DEBUG - About to update class_id: {debug_info}")
+
+        if class_id is not None and class_id != current_class_id:
+            frappe.logger().info(f"UPDATE DEBUG - Setting class_id to: {class_id}")
             assignment_doc.class_id = class_id
-            frappe.logger().info(f"UPDATE DEBUG - Updated class_id to: {class_id}")
+            updated_class_id = getattr(assignment_doc, 'class_id', 'NOT_SET')
+            frappe.logger().info(f"UPDATE DEBUG - After setting, class_id is: {updated_class_id}")
+            debug_info['updated_class_id'] = updated_class_id
 
         # Check for duplicate assignment after updates
         if teacher_id or subject_id or class_id is not None:
@@ -489,7 +503,8 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 "campus_id": result.campus_id,
                 "teacher_name": result.teacher_name,
                 "subject_title": result.subject_title,
-                "class_title": result.class_title
+                "class_title": result.class_title,
+                "debug_info": debug_info if 'debug_info' in locals() else None
             }
             return single_item_response(assignment_data, "Subject assignment updated successfully")
         else:
@@ -497,7 +512,8 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 "name": assignment_doc.name,
                 "teacher_id": assignment_doc.teacher_id,
                 "subject_id": assignment_doc.subject_id,
-                "campus_id": assignment_doc.campus_id
+                "campus_id": assignment_doc.campus_id,
+                "debug_info": debug_info if 'debug_info' in locals() else None
             }
             return single_item_response(assignment_data, "Subject assignment updated successfully")
         
