@@ -314,6 +314,8 @@ def create_subject_assignment():
 def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=None):
     """Update an existing subject assignment"""
     try:
+        frappe.logger().info(f"UPDATE DEBUG - API called with assignment_id={assignment_id}, teacher_id={teacher_id}, subject_id={subject_id}")
+
         # Get data from POST body first (JSON payload)
         if frappe.request.data:
             try:
@@ -387,6 +389,10 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
         except frappe.DoesNotExistError:
             return not_found_response("Subject assignment not found")
         
+        # Debug log received data
+        frappe.logger().info(f"UPDATE DEBUG - Received data: teacher_id={teacher_id}, subject_id={subject_id}, class_id={class_id}")
+        frappe.logger().info(f"UPDATE DEBUG - Current assignment: teacher={assignment_doc.teacher_id}, subject={assignment_doc.subject_id}, class={assignment_doc.class_id}")
+
         # Update fields if provided
         if teacher_id and teacher_id != assignment_doc.teacher_id:
             # Verify teacher exists and belongs to same campus
@@ -402,6 +408,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 return not_found_response("Selected teacher does not exist or access denied")
 
             assignment_doc.teacher_id = teacher_id
+            frappe.logger().info(f"UPDATE DEBUG - Updated teacher_id to: {teacher_id}")
 
         if subject_id and subject_id != assignment_doc.subject_id:
             # Verify subject exists and belongs to same campus
@@ -417,13 +424,21 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 return not_found_response("Selected subject does not exist or access denied")
 
             assignment_doc.subject_id = subject_id
+            frappe.logger().info(f"UPDATE DEBUG - Updated subject_id to: {subject_id}")
         
+        # Update class_id if provided
+        if class_id is not None and class_id != getattr(assignment_doc, 'class_id', None):
+            assignment_doc.class_id = class_id
+            frappe.logger().info(f"UPDATE DEBUG - Updated class_id to: {class_id}")
+
         # Check for duplicate assignment after updates
         if teacher_id or subject_id or class_id is not None:
             final_teacher_id = teacher_id or assignment_doc.teacher_id
             final_subject_id = subject_id or assignment_doc.subject_id
             final_class_id = class_id if class_id is not None else getattr(assignment_doc, 'class_id', None)
-            
+
+            frappe.logger().info(f"UPDATE DEBUG - Checking duplicates: teacher={final_teacher_id}, subject={final_subject_id}, class={final_class_id}")
+
             filters = {
                 "teacher_id": final_teacher_id,
                 "subject_id": final_subject_id,
@@ -434,13 +449,16 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 filters["class_id"] = final_class_id
             existing = frappe.db.exists("SIS Subject Assignment", filters)
             if existing:
+                frappe.logger().info(f"UPDATE DEBUG - Duplicate found: {existing}")
                 return validation_error_response(
                     message="Teacher already assigned to this subject",
                     errors={"assignment": [f"This teacher is already assigned to this subject" ]}
                 )
-        
+
+        frappe.logger().info(f"UPDATE DEBUG - Saving assignment with final values: teacher={assignment_doc.teacher_id}, subject={assignment_doc.subject_id}, class={getattr(assignment_doc, 'class_id', None)}")
         assignment_doc.save()
         frappe.db.commit()
+        frappe.logger().info(f"UPDATE DEBUG - Successfully saved assignment: {assignment_doc.name}")
 
         # Get updated data with display names
         updated_data = frappe.db.sql("""
