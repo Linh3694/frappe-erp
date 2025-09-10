@@ -130,47 +130,70 @@ def create():
 @frappe.whitelist(allow_guest=False)
 def update():
     try:
+        frappe.logger().info(f"🔧 ===== update_subject_department API called =====")
+        frappe.logger().info(f"🔧 form_dict: {frappe.form_dict}")
+        frappe.logger().info(f"🔧 request.data exists: {bool(frappe.request.data)}")
+        if frappe.request.data:
+            frappe.logger().info(f"🔧 request.data type: {type(frappe.request.data)}")
+            frappe.logger().info(f"🔧 request.data content: {frappe.request.data}")
+
         id = None
         # Accept multiple param names for compatibility
         candidate_keys = ["id", "subject_department_id"]
         if frappe.form_dict:
+            frappe.logger().info(f"🔧 Reading from frappe.form_dict")
             for k in candidate_keys:
                 if k in frappe.form_dict and frappe.form_dict.get(k):
                     id = frappe.form_dict.get(k)
+                    frappe.logger().info(f"🔧 Found id from form_dict: {id} (key: {k})")
                     break
         if not id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
+            frappe.logger().info(f"🔧 Reading from frappe.local.form_dict")
             for k in candidate_keys:
                 if k in frappe.local.form_dict and frappe.local.form_dict.get(k):
                     id = frappe.local.form_dict.get(k)
+                    frappe.logger().info(f"🔧 Found id from local.form_dict: {id} (key: {k})")
                     break
         if not id and frappe.request.data:
             try:
+                frappe.logger().info(f"🔧 Trying to parse URL-encoded data")
                 from urllib.parse import parse_qs
                 data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                frappe.logger().info(f"🔧 URL-encoded string: {data_str}")
                 if data_str.strip():
                     parsed = parse_qs(data_str)
+                    frappe.logger().info(f"🔧 Parsed URL-encoded data: {parsed}")
                     for k in candidate_keys:
                         if k in parsed and parsed.get(k, [None])[0]:
                             id = parsed.get(k, [None])[0]
+                            frappe.logger().info(f"🔧 Found id from URL-encoded: {id} (key: {k})")
                             break
-            except Exception:
+            except Exception as e:
+                frappe.logger().error(f"🔧 Error parsing URL-encoded: {str(e)}")
                 pass
         if not id and frappe.request.data:
             try:
+                frappe.logger().info(f"🔧 Trying to parse JSON data")
                 import json
                 json_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                frappe.logger().info(f"🔧 JSON string: {json_str}")
                 if json_str.strip():
                     data = json.loads(json_str)
+                    frappe.logger().info(f"🔧 Parsed JSON data: {data}")
                     for k in candidate_keys:
                         if k in data and data.get(k):
                             id = data.get(k)
+                            frappe.logger().info(f"🔧 Found id from JSON: {id} (key: {k})")
                             break
-            except Exception:
+            except Exception as e:
+                frappe.logger().error(f"🔧 Error parsing JSON: {str(e)}")
                 pass
 
         if not id:
+            frappe.logger().error(f"🔧 No ID found in any source - returning validation error")
             return validation_error_response(message="ID is required", errors={"id": ["Required"]})
 
+        frappe.logger().info(f"🔧 Final ID used: {id}")
         doc = frappe.get_doc("SIS Subject Department", id)
 
         # Read fields similarly from multiple sources
