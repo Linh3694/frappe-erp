@@ -204,12 +204,15 @@ def update():
                         debug_info["parsed_url_encoded"] = parsed
 
                         for k in candidate_keys:
+                            frappe.logger().info(f"🔧 Checking candidate key '{k}' in parsed data")
                             if k in parsed and parsed[k]:
                                 id = parsed[k][0]  # parse_qs returns lists
                                 frappe.logger().info(f"🔧 Found id from URL-encoded: {id} (key: {k})")
                                 debug_info["id_source"] = "url_encoded"
                                 debug_info["id_value"] = id
                                 break
+                            else:
+                                frappe.logger().info(f"🔧 Key '{k}' not found or empty in parsed data")
                     except Exception as url_error:
                         frappe.logger().info(f"🔧 URL-encoded parsing failed: {str(url_error)}, trying JSON")
                         debug_info["url_encoded_error"] = str(url_error)
