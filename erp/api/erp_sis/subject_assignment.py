@@ -470,9 +470,25 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 )
 
         frappe.logger().info(f"UPDATE DEBUG - Saving assignment with final values: teacher={assignment_doc.teacher_id}, subject={assignment_doc.subject_id}, class={getattr(assignment_doc, 'class_id', None)}")
-        assignment_doc.save()
-        frappe.db.commit()
-        frappe.logger().info(f"UPDATE DEBUG - Successfully saved assignment: {assignment_doc.name}")
+
+        try:
+            assignment_doc.save()
+            frappe.db.commit()
+            frappe.logger().info(f"UPDATE DEBUG - Successfully saved assignment: {assignment_doc.name}")
+
+            # Check if class_id was actually saved
+            saved_doc = frappe.get_doc("SIS Subject Assignment", assignment_doc.name)
+            saved_class_id = getattr(saved_doc, 'class_id', None)
+            frappe.logger().info(f"UPDATE DEBUG - After reload, saved class_id: {saved_class_id}")
+
+            debug_info['saved_class_id'] = saved_class_id
+            debug_info['save_successful'] = True
+
+        except Exception as save_error:
+            frappe.logger().error(f"UPDATE DEBUG - Error saving assignment: {str(save_error)}")
+            debug_info['save_error'] = str(save_error)
+            debug_info['save_successful'] = False
+            raise save_error
 
         # Get updated data with display names
         updated_data = frappe.db.sql("""
