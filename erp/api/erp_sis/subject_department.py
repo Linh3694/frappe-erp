@@ -138,11 +138,22 @@ def update():
 
     debug_info = {
         "session_user": frappe.session.user,
+        "session_sid": getattr(frappe.session, 'sid', None),
+        "user_is_authenticated": bool(frappe.session.user and frappe.session.user != "Guest"),
         "form_dict_keys": list(frappe.form_dict.keys()) if frappe.form_dict else [],
         "request_method": frappe.request.method,
         "request_content_type": frappe.request.content_type,
-        "raw_request_data": str(frappe.request.data) if frappe.request.data else None
+        "raw_request_data": str(frappe.request.data) if frappe.request.data else None,
+        "request_headers": dict(frappe.request.headers) if hasattr(frappe.request, 'headers') else None
     }
+
+    # Check authentication
+    if not frappe.session.user or frappe.session.user == "Guest":
+        debug_info["auth_issue"] = "User not authenticated or is Guest"
+        frappe.logger().warning(f"🔧 Unauthenticated request - user: {frappe.session.user}")
+    else:
+        debug_info["auth_issue"] = "User authenticated"
+        frappe.logger().info(f"🔧 Authenticated request - user: {frappe.session.user}")
 
     try:
         frappe.logger().info(f"🔧 ===== update_subject_department API called =====")
