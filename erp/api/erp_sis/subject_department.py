@@ -22,8 +22,48 @@ def get_all():
 @frappe.whitelist(allow_guest=False)
 def get_by_id(id=None):
     try:
-        if not id:
-            id = frappe.form_dict.get("id")
+        # Accept multiple sources and keys for robustness (align with update())
+        if not id and frappe.form_dict:
+            id = (
+                frappe.form_dict.get("id")
+                or frappe.form_dict.get("name")
+                or frappe.form_dict.get("subject_department_id")
+            )
+
+        if not id and hasattr(frappe.request, 'args') and frappe.request.args:
+            for key in ["id", "name", "subject_department_id"]:
+                if key in frappe.request.args and frappe.request.args[key]:
+                    id = frappe.request.args[key]
+                    break
+
+        if not id and frappe.request.data:
+            # Try urlencoded first
+            try:
+                from urllib.parse import parse_qs
+                data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                if data_str.strip():
+                    parsed = parse_qs(data_str, keep_blank_values=True)
+                    for key in ["id", "name", "subject_department_id"]:
+                        if key in parsed and parsed[key]:
+                            id = parsed[key][0]
+                            break
+            except Exception:
+                pass
+
+        if not id and frappe.request.data:
+            # Fallback to JSON
+            try:
+                import json
+                json_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                if json_str.strip():
+                    data = json.loads(json_str)
+                    for key in ["id", "name", "subject_department_id"]:
+                        if key in data and data[key]:
+                            id = data[key]
+                            break
+            except Exception:
+                pass
+
         if not id:
             return validation_error_response(message="ID is required", errors={"id": ["Required"]})
 
