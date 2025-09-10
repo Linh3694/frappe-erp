@@ -329,12 +329,22 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 # Skip if data is empty or just whitespace
                 if json_str.strip():
                     json_data = json.loads(json_str)
+                    frappe.logger().info(f"UPDATE DEBUG - Raw JSON string: {json_str}")
                     frappe.logger().info(f"UPDATE DEBUG - Parsed JSON data: {json_data}")
+                    frappe.logger().info(f"UPDATE DEBUG - JSON keys: {list(json_data.keys())}")
+
                     assignment_id = json_data.get('assignment_id') or assignment_id
                     teacher_id = json_data.get('teacher_id') or teacher_id
                     subject_id = json_data.get('subject_id') or subject_id
-                    class_id = json_data.get('class_id') if 'class_id' in json_data else None
+
+                    # Try different possible field names for class_id
+                    class_id = (json_data.get('class_id') or
+                               json_data.get('class') or
+                               json_data.get('classId') or
+                               (json_data.get('data', {}).get('class_id') if json_data.get('data') else None))
+
                     frappe.logger().info(f"UPDATE DEBUG - Final values: assignment_id={assignment_id}, teacher_id={teacher_id}, subject_id={subject_id}, class_id={class_id}")
+                    frappe.logger().info(f"UPDATE DEBUG - class_id sources checked: class_id={json_data.get('class_id')}, class={json_data.get('class')}, classId={json_data.get('classId')}")
             except Exception as e:
                 # Silently handle JSON parse errors
                 pass
