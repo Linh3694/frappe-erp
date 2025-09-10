@@ -5,11 +5,11 @@
  "allow_guest_to_view": 0,
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:SIS_TEACHER-{#####}",
+ "autoname": "format:SIS_SUBJECT_DEPARTMENT-{#####}",
  "beta": 0,
- "creation": "2024-08-20 09:00:00.000000",
+ "creation": "2025-09-10 00:00:00.000000",
  "custom": 0,
- "description": "SIS Teacher Management",
+ "description": "SIS Subject Department Management",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -18,9 +18,9 @@
  "field_order": [
   "basic_information",
   "campus_id",
-  "user_id",
-  "education_stage_id",
-  "subject_department_id"
+  "title_vn",
+  "title_en",
+  "education_stage_id"
  ],
  "fields": [
   {
@@ -37,12 +37,17 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "user_id",
-   "fieldtype": "Link",
-   "label": "User",
-   "options": "User",
+   "fieldname": "title_vn",
+   "fieldtype": "Data",
+   "label": "Department Name (VN)",
    "reqd": 1,
-   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "label": "Department Name (EN)",
+   "reqd": 1,
    "in_list_view": 1
   },
   {
@@ -50,21 +55,15 @@
    "fieldtype": "Link",
    "label": "Education Stage",
    "options": "SIS Education Stage"
-  },
-  {
-   "fieldname": "subject_department_id",
-   "fieldtype": "Link",
-   "label": "Subject Department",
-   "options": "SIS Subject Department"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-08-20 09:00:00.000000",
+ "modified": "2025-09-10 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
- "name": "SIS Teacher",
+ "name": "SIS Subject Department",
  "owner": "Administrator",
  "permissions": [
   {
@@ -107,6 +106,8 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "user_id",
+ "title_field": "title_vn",
  "track_changes": 1
 }
+
+

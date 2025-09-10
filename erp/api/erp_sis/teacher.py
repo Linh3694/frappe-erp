@@ -156,6 +156,12 @@ def get_all_teachers():
                         # Employee doctype might not exist or be accessible
                         frappe.logger().warning(f"👨‍🏫 Error getting Employee data for {teacher['user_id']}: {str(emp_error)}")
 
+                # include subject_department_id if exists
+                try:
+                    teacher_doc = frappe.get_doc("SIS Teacher", teacher.get('name'))
+                    enhanced_teacher["subject_department_id"] = getattr(teacher_doc, 'subject_department_id', None)
+                except Exception:
+                    pass
                 enhanced_teachers.append(enhanced_teacher)
                 frappe.logger().info(f"👨‍🏫 Successfully processed teacher: {teacher.get('name')}")
 
@@ -356,16 +362,19 @@ def create_teacher():
         # Try multiple ways to get the parameters
         user_id = None
         education_stage_id = None
+        subject_department_id = None
 
         # Method 1: Try frappe.form_dict (for form data)
         if frappe.form_dict:
             user_id = frappe.form_dict.get('user_id')
             education_stage_id = frappe.form_dict.get('education_stage_id')
+            subject_department_id = frappe.form_dict.get('subject_department_id')
 
         # Method 2: Try frappe.local.form_dict
         if not user_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
             user_id = frappe.local.form_dict.get('user_id')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
+            subject_department_id = frappe.local.form_dict.get('subject_department_id')
 
         # Method 3: Parse raw request data (for application/x-www-form-urlencoded)
         if not user_id and frappe.request.data:
@@ -380,6 +389,7 @@ def create_teacher():
                     parsed_data = parse_qs(data_str)
                     user_id = parsed_data.get('user_id', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
+                    subject_department_id = parsed_data.get('subject_department_id', [None])[0]
             except Exception:
                 pass
 
@@ -395,6 +405,7 @@ def create_teacher():
                     json_data = json.loads(json_str)
                     user_id = json_data.get('user_id')
                     education_stage_id = json_data.get('education_stage_id')
+                    subject_department_id = json_data.get('subject_department_id')
             except Exception:
                 pass
 
@@ -457,6 +468,7 @@ def create_teacher():
             "doctype": "SIS Teacher",
             "user_id": user_id,
             "education_stage_id": education_stage_id,
+            "subject_department_id": subject_department_id,
             "campus_id": campus_id
         })
         
@@ -470,6 +482,7 @@ def create_teacher():
                 "name": teacher_doc.name,
                 "user_id": teacher_doc.user_id,
                 "education_stage_id": teacher_doc.education_stage_id,
+                "subject_department_id": getattr(teacher_doc, 'subject_department_id', None),
                 "campus_id": teacher_doc.campus_id
             },
             message="Teacher created successfully"
@@ -491,18 +504,21 @@ def update_teacher():
         teacher_id = None
         user_id = None
         education_stage_id = None
+        subject_department_id = None
 
         # Method 1: Try frappe.form_dict (for form data)
         if frappe.form_dict:
             teacher_id = frappe.form_dict.get('teacher_id')
             user_id = frappe.form_dict.get('user_id')
             education_stage_id = frappe.form_dict.get('education_stage_id')
+            subject_department_id = frappe.form_dict.get('subject_department_id')
 
         # Method 2: Try frappe.local.form_dict
         if not teacher_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
             teacher_id = frappe.local.form_dict.get('teacher_id')
             user_id = frappe.local.form_dict.get('user_id')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
+            subject_department_id = frappe.local.form_dict.get('subject_department_id')
 
         # Method 3: Parse raw request data (for application/x-www-form-urlencoded)
         if not teacher_id and frappe.request.data:
@@ -518,6 +534,7 @@ def update_teacher():
                     teacher_id = parsed_data.get('teacher_id', [None])[0]
                     user_id = parsed_data.get('user_id', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
+                    subject_department_id = parsed_data.get('subject_department_id', [None])[0]
             except Exception:
                 pass
 
@@ -535,6 +552,7 @@ def update_teacher():
                     teacher_id = json_data.get('teacher_id')
                     user_id = json_data.get('user_id')
                     education_stage_id = json_data.get('education_stage_id')
+                    subject_department_id = json_data.get('subject_department_id')
             except Exception:
                 pass
 
@@ -638,6 +656,17 @@ def update_teacher():
 
             teacher_doc.education_stage_id = education_stage_id
         
+        # Update subject department if provided
+        if subject_department_id is not None and subject_department_id != getattr(teacher_doc, 'subject_department_id', None):
+            if subject_department_id:
+                exists_sd = frappe.db.exists("SIS Subject Department", subject_department_id)
+                if not exists_sd:
+                    return error_response(
+                        message="Selected subject department does not exist",
+                        code="SUBJECT_DEPARTMENT_NOT_FOUND"
+                    )
+            teacher_doc.subject_department_id = subject_department_id
+
         teacher_doc.save()
         frappe.db.commit()
         
@@ -646,6 +675,7 @@ def update_teacher():
                 "name": teacher_doc.name,
                 "user_id": teacher_doc.user_id,
                 "education_stage_id": teacher_doc.education_stage_id,
+                "subject_department_id": getattr(teacher_doc, 'subject_department_id', None),
                 "campus_id": teacher_doc.campus_id
             },
             message="Teacher updated successfully"
