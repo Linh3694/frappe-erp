@@ -130,16 +130,29 @@ def create():
 @frappe.whitelist(allow_guest=False)
 def update():
     try:
-        id = frappe.form_dict.get("id") if frappe.form_dict else None
+        id = None
+        # Accept multiple param names for compatibility
+        candidate_keys = ["id", "subject_department_id"]
+        if frappe.form_dict:
+            for k in candidate_keys:
+                if k in frappe.form_dict and frappe.form_dict.get(k):
+                    id = frappe.form_dict.get(k)
+                    break
         if not id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
-            id = frappe.local.form_dict.get("id")
+            for k in candidate_keys:
+                if k in frappe.local.form_dict and frappe.local.form_dict.get(k):
+                    id = frappe.local.form_dict.get(k)
+                    break
         if not id and frappe.request.data:
             try:
                 from urllib.parse import parse_qs
                 data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
                 if data_str.strip():
                     parsed = parse_qs(data_str)
-                    id = parsed.get('id', [None])[0]
+                    for k in candidate_keys:
+                        if k in parsed and parsed.get(k, [None])[0]:
+                            id = parsed.get(k, [None])[0]
+                            break
             except Exception:
                 pass
         if not id and frappe.request.data:
@@ -148,7 +161,10 @@ def update():
                 json_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
                 if json_str.strip():
                     data = json.loads(json_str)
-                    id = data.get('id')
+                    for k in candidate_keys:
+                        if k in data and data.get(k):
+                            id = data.get(k)
+                            break
             except Exception:
                 pass
 
