@@ -261,6 +261,7 @@ def get_teacher_by_id(teacher_id=None):
             "name": teacher.name,
             "user_id": teacher.user_id,
             "education_stage_id": teacher.education_stage_id,
+            "subject_department_id": getattr(teacher, 'subject_department_id', None),
             "campus_id": teacher.campus_id
         }
 
@@ -657,15 +658,17 @@ def update_teacher():
             teacher_doc.education_stage_id = education_stage_id
         
         # Update subject department if provided
-        if subject_department_id is not None and subject_department_id != getattr(teacher_doc, 'subject_department_id', None):
-            if subject_department_id:
+        current_sd = getattr(teacher_doc, 'subject_department_id', None)
+        if subject_department_id is not None and subject_department_id != current_sd:
+            if subject_department_id and subject_department_id.strip():  # Check for non-empty string
                 exists_sd = frappe.db.exists("SIS Subject Department", subject_department_id)
                 if not exists_sd:
                     return error_response(
                         message="Selected subject department does not exist",
                         code="SUBJECT_DEPARTMENT_NOT_FOUND"
                     )
-            teacher_doc.subject_department_id = subject_department_id
+            # Allow empty string to clear the field
+            teacher_doc.subject_department_id = subject_department_id if subject_department_id and subject_department_id.strip() else None
 
         teacher_doc.save()
         frappe.db.commit()
