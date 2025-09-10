@@ -48,9 +48,52 @@ def get_by_id(id=None):
 @frappe.whitelist(allow_guest=False)
 def create():
     try:
-        title_vn = frappe.form_dict.get("title_vn")
-        title_en = frappe.form_dict.get("title_en")
-        education_stage_id = frappe.form_dict.get("education_stage_id")
+        title_vn = None
+        title_en = None
+        education_stage_id = None
+
+        # Method 1: form_dict
+        if frappe.form_dict:
+            title_vn = frappe.form_dict.get("title_vn")
+            title_en = frappe.form_dict.get("title_en")
+            education_stage_id = frappe.form_dict.get("education_stage_id")
+
+        # Method 2: local.form_dict
+        if (not title_vn or not title_en) and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
+            title_vn = title_vn or frappe.local.form_dict.get("title_vn")
+            title_en = title_en or frappe.local.form_dict.get("title_en")
+            education_stage_id = education_stage_id or frappe.local.form_dict.get("education_stage_id")
+
+        # Method 3: parse raw request data (urlencoded)
+        if (not title_vn or not title_en) and frappe.request.data:
+            try:
+                from urllib.parse import parse_qs
+                data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                if data_str.strip():
+                    parsed = parse_qs(data_str)
+                    title_vn = title_vn or parsed.get('title_vn', [None])[0]
+                    title_en = title_en or parsed.get('title_en', [None])[0]
+                    education_stage_id = education_stage_id or parsed.get('education_stage_id', [None])[0]
+            except Exception:
+                pass
+
+        # Method 4: JSON fallback
+        if (not title_vn or not title_en) and frappe.request.data:
+            try:
+                import json
+                json_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                if json_str.strip():
+                    data = json.loads(json_str)
+                    title_vn = title_vn or data.get('title_vn')
+                    title_en = title_en or data.get('title_en')
+                    education_stage_id = education_stage_id or data.get('education_stage_id')
+            except Exception:
+                pass
+
+        # Normalize 'none' to None
+        if isinstance(education_stage_id, str) and education_stage_id.lower() == 'none':
+            education_stage_id = None
+
         if not title_vn or not title_en:
             return validation_error_response(
                 message="title_vn and title_en are required",
@@ -87,17 +130,77 @@ def create():
 @frappe.whitelist(allow_guest=False)
 def update():
     try:
-        id = frappe.form_dict.get("id")
+        id = frappe.form_dict.get("id") if frappe.form_dict else None
+        if not id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
+            id = frappe.local.form_dict.get("id")
+        if not id and frappe.request.data:
+            try:
+                from urllib.parse import parse_qs
+                data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                if data_str.strip():
+                    parsed = parse_qs(data_str)
+                    id = parsed.get('id', [None])[0]
+            except Exception:
+                pass
+        if not id and frappe.request.data:
+            try:
+                import json
+                json_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                if json_str.strip():
+                    data = json.loads(json_str)
+                    id = data.get('id')
+            except Exception:
+                pass
+
         if not id:
             return validation_error_response(message="ID is required", errors={"id": ["Required"]})
 
         doc = frappe.get_doc("SIS Subject Department", id)
 
+        # Read fields similarly from multiple sources
+        def read_field(key: str):
+            val = None
+            if frappe.form_dict and key in frappe.form_dict:
+                val = frappe.form_dict.get(key)
+            if val is None and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict and key in frappe.local.form_dict:
+                val = frappe.local.form_dict.get(key)
+            if val is None and frappe.request.data:
+                try:
+                    from urllib.parse import parse_qs
+                    data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                    if data_str.strip():
+                        parsed = parse_qs(data_str)
+                        val = parsed.get(key, [None])[0]
+                except Exception:
+                    pass
+            if val is None and frappe.request.data:
+                try:
+                    import json
+                    json_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                    if json_str.strip():
+                        data = json.loads(json_str)
+                        val = data.get(key)
+                except Exception:
+                    pass
+            return val
+
+        title_vn = read_field('title_vn')
+        title_en = read_field('title_en')
+        education_stage_id = read_field('education_stage_id')
+
+        if isinstance(education_stage_id, str) and education_stage_id.lower() == 'none':
+            education_stage_id = None
+
         changed = False
-        for field in ["title_vn", "title_en", "education_stage_id"]:
-            if field in frappe.form_dict and frappe.form_dict.get(field) is not None:
-                setattr(doc, field, frappe.form_dict.get(field))
-                changed = True
+        if title_vn is not None:
+            doc.title_vn = title_vn
+            changed = True
+        if title_en is not None:
+            doc.title_en = title_en
+            changed = True
+        if education_stage_id is not None:
+            doc.education_stage_id = education_stage_id
+            changed = True
 
         if changed:
             doc.save()
