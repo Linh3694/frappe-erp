@@ -129,50 +129,79 @@ def create():
 
 @frappe.whitelist(allow_guest=False)
 def update():
-  
+    frappe.logger().info(f"🔧 ===== update_subject_department API STARTED =====")
+    frappe.logger().info(f"🔧 Session user: {frappe.session.user}")
+    frappe.logger().info(f"🔧 Form dict keys: {list(frappe.form_dict.keys()) if frappe.form_dict else 'None'}")
+    frappe.logger().info(f"🔧 Request method: {frappe.request.method}")
+    frappe.logger().info(f"🔧 Request content type: {frappe.request.content_type}")
+    frappe.logger().info(f"🔧 Raw request data: {frappe.request.data}")
+
+    debug_info = {
+        "session_user": frappe.session.user,
+        "form_dict_keys": list(frappe.form_dict.keys()) if frappe.form_dict else [],
+        "request_method": frappe.request.method,
+        "request_content_type": frappe.request.content_type,
+        "raw_request_data": str(frappe.request.data) if frappe.request.data else None
+    }
 
     try:
+        frappe.logger().info(f"🔧 ===== update_subject_department API called =====")
         id = None
         # Accept multiple param names for compatibility
         candidate_keys = ["id", "subject_department_id"]
+
+        # Update debug_info with initial state
+        debug_info["candidate_keys"] = candidate_keys
+        debug_info["attempt_order"] = ["form_dict", "request_args", "url_encoded", "json"]
 
         # First try: direct parameter from function call
         id = frappe.form_dict.get('id') or frappe.form_dict.get('subject_department_id')
         if id:
             frappe.logger().info(f"🔧 Found id from direct form_dict access: {id}")
+            debug_info["id_source"] = "form_dict"
+            debug_info["id_value"] = id
         else:
             frappe.logger().info(f"🔧 No id found in direct form_dict access")
+            debug_info["id_source"] = "not_found_in_form_dict"
 
         # Second try: check URL query parameters for GET-style parameters
         if not id and hasattr(frappe.request, 'args') and frappe.request.args:
             frappe.logger().info(f"🔧 Checking request.args: {frappe.request.args}")
+            debug_info["request_args"] = frappe.request.args
             for k in candidate_keys:
                 if k in frappe.request.args and frappe.request.args[k]:
                     id = frappe.request.args[k]
                     frappe.logger().info(f"🔧 Found id from request.args: {id} (key: {k})")
+                    debug_info["id_source"] = "request_args"
+                    debug_info["id_value"] = id
                     break
 
-        # Second try: parse from request.data for form-urlencoded data
+        # Third try: parse from request.data for form-urlencoded data
         if not id and frappe.request.data:
             try:
-                frappe.logger().info(f"🔧 Attempting to parse request.data for URL-encoded")
+                frappe.logger().info(f"🔧 Attempting to parse request.data")
                 from urllib.parse import parse_qs
                 data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
                 frappe.logger().info(f"🔧 Raw request data: {data_str}")
+                debug_info["raw_request_data"] = data_str
 
                 if data_str.strip():
                     # First try: parse as URL-encoded form data
                     try:
                         parsed = parse_qs(data_str, keep_blank_values=True)
                         frappe.logger().info(f"🔧 Parsed as URL-encoded: {parsed}")
+                        debug_info["parsed_url_encoded"] = parsed
 
                         for k in candidate_keys:
                             if k in parsed and parsed[k]:
                                 id = parsed[k][0]  # parse_qs returns lists
                                 frappe.logger().info(f"🔧 Found id from URL-encoded: {id} (key: {k})")
+                                debug_info["id_source"] = "url_encoded"
+                                debug_info["id_value"] = id
                                 break
-                    except Exception:
-                        frappe.logger().info(f"🔧 URL-encoded parsing failed, trying JSON")
+                    except Exception as url_error:
+                        frappe.logger().info(f"🔧 URL-encoded parsing failed: {str(url_error)}, trying JSON")
+                        debug_info["url_encoded_error"] = str(url_error)
 
                     # Second try: parse as JSON if URL-encoded failed
                     if not id:
@@ -180,22 +209,39 @@ def update():
                             import json
                             json_data = json.loads(data_str)
                             frappe.logger().info(f"🔧 Parsed as JSON: {json_data}")
+                            debug_info["parsed_json"] = json_data
 
                             for k in candidate_keys:
                                 if k in json_data and json_data[k]:
                                     id = json_data[k]
                                     frappe.logger().info(f"🔧 Found id from JSON: {id} (key: {k})")
+                                    debug_info["id_source"] = "json"
+                                    debug_info["id_value"] = id
                                     break
-                        except Exception:
-                            frappe.logger().info(f"🔧 JSON parsing also failed")
+                        except Exception as json_error:
+                            frappe.logger().info(f"🔧 JSON parsing also failed: {str(json_error)}")
+                            debug_info["json_error"] = str(json_error)
             except Exception as e:
                 frappe.logger().error(f"🔧 Error parsing request.data: {str(e)}")
+                debug_info["parse_error"] = str(e)
 
         if not id:
-            frappe.logger().error(f"🔧 No ID found in any source - returning validation error")
-            return validation_error_response(message="ID is required", errors={"id": ["Required"]})
+            frappe.logger().error(f"🔧 No ID found in any source - returning validation error with debug info")
+            debug_info["final_id"] = None
+            debug_info["candidate_keys_tried"] = candidate_keys
+
+            # Return validation error with debug information
+            return validation_error_response(
+                message="ID is required",
+                errors={"id": ["Required"]},
+                debug_info=debug_info
+            )
 
         frappe.logger().info(f"🔧 Final ID used: {id}")
+        debug_info["final_id"] = id
+        debug_info["id_source"] = debug_info.get("id_source", "unknown")
+        debug_info["id_value"] = id
+
         doc = frappe.get_doc("SIS Subject Department", id)
 
         # Read fields similarly from multiple sources
@@ -247,21 +293,29 @@ def update():
             doc.save()
             frappe.db.commit()
 
+        # Include debug info in successful response for troubleshooting
+        response_data = {
+            "name": doc.name,
+            "title_vn": doc.title_vn,
+            "title_en": doc.title_en,
+            "campus_id": doc.campus_id,
+            "education_stage_id": getattr(doc, "education_stage_id", None),
+            "_debug_info": debug_info  # Include debug info for troubleshooting
+        }
+
         return single_item_response(
-            data={
-                "name": doc.name,
-                "title_vn": doc.title_vn,
-                "title_en": doc.title_en,
-                "campus_id": doc.campus_id,
-                "education_stage_id": getattr(doc, "education_stage_id", None),
-            },
+            data=response_data,
             message="Updated successfully",
         )
     except frappe.DoesNotExistError:
-        return not_found_response(message="Subject Department not found", code="NOT_FOUND")
+        debug_info["error_type"] = "DoesNotExistError"
+        debug_info["error_message"] = "Subject Department not found"
+        return error_response(message="Subject Department not found", code="NOT_FOUND", debug_info=debug_info)
     except Exception as e:
         frappe.log_error(f"Error update subject_department: {str(e)}")
-        return error_response(message="Error updating subject department", code="UPDATE_ERROR")
+        debug_info["error_type"] = "Exception"
+        debug_info["error_message"] = str(e)
+        return error_response(message="Error updating subject department", code="UPDATE_ERROR", debug_info=debug_info)
 
 
 @frappe.whitelist(allow_guest=False)
