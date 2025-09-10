@@ -37,15 +37,18 @@ def get_all_subject_assignments():
                 sa.name,
                 sa.teacher_id,
                 sa.subject_id,
+                sa.class_id,
                 sa.campus_id,
                 sa.creation,
                 sa.modified,
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
-                s.title as subject_title
+                s.title as subject_title,
+                c.title as class_title
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
+            LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
             WHERE sa.campus_id = %s
             ORDER BY sa.teacher_id asc
         """, (campus_id,), as_dict=True)
@@ -126,13 +129,16 @@ def get_subject_assignment_by_id(assignment_id=None):
                 sa.name,
                 sa.teacher_id,
                 sa.subject_id,
+                sa.class_id,
                 sa.campus_id,
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
-                s.title as subject_title
+                s.title as subject_title,
+                c.title as class_title
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
+            LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
             WHERE sa.name = %s AND sa.campus_id = %s
         """, (assignment_id, campus_id), as_dict=True)
 
@@ -146,9 +152,11 @@ def get_subject_assignment_by_id(assignment_id=None):
             "name": assignment.name,
             "teacher_id": assignment.teacher_id,
             "subject_id": assignment.subject_id,
+            "class_id": assignment.class_id,
             "campus_id": assignment.campus_id,
             "teacher_name": assignment.teacher_name,
-            "subject_title": assignment.subject_title
+            "subject_title": assignment.subject_title,
+            "class_title": assignment.class_title
         }
         return single_item_response(assignment_data, "Subject assignment fetched successfully")
         
@@ -159,7 +167,10 @@ def get_subject_assignment_by_id(assignment_id=None):
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def create_subject_assignment():
-    """Create a new subject assignment - SIMPLE VERSION"""
+    """Create new subject assignments. Supports single or bulk creation.
+    - Single: { teacher_id, subject_id, class_id? }
+    - Bulk: { teacher_id, class_id, subject_ids: [subject_id, ...] }
+    """
     try:
         # Get data from request - follow Education Stage pattern
         data = {}
@@ -182,10 +193,14 @@ def create_subject_assignment():
         # Extract values from data
         teacher_id = data.get("teacher_id")
         subject_id = data.get("subject_id")
+        class_id = data.get("class_id")
+        subject_ids = data.get("subject_ids")
         
         # Input validation
-        if not teacher_id or not subject_id:
-            frappe.throw(_("Teacher ID and Subject ID are required"))
+        if not teacher_id:
+            frappe.throw(_("Teacher ID is required"))
+        if not subject_id and not subject_ids:
+            frappe.throw(_("Subject ID or subject_ids is required"))
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -194,18 +209,14 @@ def create_subject_assignment():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        # Check if assignment already exists
-        existing = frappe.db.exists(
-            "SIS Subject Assignment",
-            {
-                "teacher_id": teacher_id,
-                "subject_id": subject_id,
-                "campus_id": campus_id
-            }
-        )
-        
-        if existing:
-            frappe.throw(_("This teacher is already assigned to this subject"))
+        # Optional class validation
+        if class_id:
+            class_exists = frappe.db.exists(
+                "SIS Class",
+                {"name": class_id, "campus_id": campus_id}
+            )
+            if not class_exists:
+                return not_found_response("Selected class does not exist or access denied")
         
         # Verify teacher exists and belongs to same campus
         teacher_exists = frappe.db.exists(
@@ -219,67 +230,80 @@ def create_subject_assignment():
         if not teacher_exists:
             return not_found_response("Selected teacher does not exist or access denied")
         
-        # Verify subject exists and belongs to same campus
-        subject_exists = frappe.db.exists(
-            "SIS Subject",
-            {
-                "name": subject_id,
-                "campus_id": campus_id
+        created_names = []
+        create_list = subject_ids if isinstance(subject_ids, list) else [subject_id] if subject_id else []
+        for sid in create_list:
+            # Verify subject exists and belongs to same campus
+            subject_exists = frappe.db.exists(
+                "SIS Subject",
+                {"name": sid, "campus_id": campus_id}
+            )
+            if not subject_exists:
+                return not_found_response(f"Selected subject does not exist or access denied: {sid}")
+
+            # Duplicate check, include class if provided
+            filters = {
+                "teacher_id": teacher_id,
+                "subject_id": sid,
+                "campus_id": campus_id,
             }
-        )
-        
-        if not subject_exists:
-            return not_found_response("Selected subject does not exist or access denied")
-        
-        # Create new subject assignment
-        assignment_doc = frappe.get_doc({
-            "doctype": "SIS Subject Assignment",
-            "teacher_id": teacher_id,
-            "subject_id": subject_id,
-            "campus_id": campus_id
-        })
-        
-        assignment_doc.insert()
+            if class_id:
+                filters["class_id"] = class_id
+            existing = frappe.db.exists("SIS Subject Assignment", filters)
+            if existing:
+                continue
+
+            assignment_doc = frappe.get_doc({
+                "doctype": "SIS Subject Assignment",
+                "teacher_id": teacher_id,
+                "subject_id": sid,
+                "class_id": class_id,
+                "campus_id": campus_id
+            })
+            assignment_doc.insert()
+            created_names.append(assignment_doc.name)
+
         frappe.db.commit()
 
         # Get created data with display names
-        created_data = frappe.db.sql("""
-            SELECT
-                sa.name,
-                sa.teacher_id,
-                sa.subject_id,
-                sa.campus_id,
-                COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
-                s.title as subject_title
-            FROM `tabSIS Subject Assignment` sa
-            LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
-            LEFT JOIN `tabUser` u ON t.user_id = u.name
-            LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
-            WHERE sa.name = %s
-        """, (assignment_doc.name,), as_dict=True)
+        created_data = []
+        if created_names:
+            created_data = frappe.db.sql("""
+                SELECT
+                    sa.name,
+                    sa.teacher_id,
+                    sa.subject_id,
+                    sa.class_id,
+                    sa.campus_id,
+                    COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
+                    s.title as subject_title,
+                    c.title as class_title
+                FROM `tabSIS Subject Assignment` sa
+                LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+                LEFT JOIN `tabUser` u ON t.user_id = u.name
+                LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
+                LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
+                WHERE sa.name in %s
+            """, (tuple(created_names),), as_dict=True)
 
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Subject assignment created successfully"))
 
-        if created_data:
+        frappe.msgprint(_("Subject assignment created successfully"))
+        if created_data and len(created_data) == 1:
             result = created_data[0]
-            assignment_data = {
+            return single_item_response({
                 "name": result.name,
                 "teacher_id": result.teacher_id,
                 "subject_id": result.subject_id,
+                "class_id": result.class_id,
                 "campus_id": result.campus_id,
                 "teacher_name": result.teacher_name,
-                "subject_title": result.subject_title
-            }
-            return single_item_response(assignment_data, "Subject assignment created successfully")
+                "subject_title": result.subject_title,
+                "class_title": result.class_title
+            }, "Subject assignment created successfully")
         else:
-            assignment_data = {
-                "name": assignment_doc.name,
-                "teacher_id": assignment_doc.teacher_id,
-                "subject_id": assignment_doc.subject_id,
-                "campus_id": assignment_doc.campus_id
-            }
-            return single_item_response(assignment_data, "Subject assignment created successfully")
+            return list_response(created_data, "Subject assignments created successfully")
         
     except Exception as e:
         frappe.log_error(f"Error creating subject assignment: {str(e)}")
@@ -306,6 +330,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                     assignment_id = json_data.get('assignment_id') or assignment_id
                     teacher_id = json_data.get('teacher_id') or teacher_id
                     subject_id = json_data.get('subject_id') or subject_id
+                    class_id = json_data.get('class_id') if 'class_id' in json_data else None
             except Exception as e:
                 # Silently handle JSON parse errors
                 pass
@@ -337,6 +362,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
             teacher_id = frappe.form_dict.get('teacher_id')
         if not subject_id:
             subject_id = frappe.form_dict.get('subject_id')
+        class_id = frappe.form_dict.get('class_id') if 'class_id' in frappe.form_dict else None
 
         if not assignment_id:
             return validation_error_response(
@@ -393,24 +419,24 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
             assignment_doc.subject_id = subject_id
         
         # Check for duplicate assignment after updates
-        if teacher_id or subject_id:
+        if teacher_id or subject_id or class_id is not None:
             final_teacher_id = teacher_id or assignment_doc.teacher_id
             final_subject_id = subject_id or assignment_doc.subject_id
+            final_class_id = class_id if class_id is not None else getattr(assignment_doc, 'class_id', None)
             
-            existing = frappe.db.exists(
-                "SIS Subject Assignment",
-                {
-                    "teacher_id": final_teacher_id,
-                    "subject_id": final_subject_id,
-                    "campus_id": campus_id,
-                    "name": ["!=", assignment_id]
-                }
-            )
-            
+            filters = {
+                "teacher_id": final_teacher_id,
+                "subject_id": final_subject_id,
+                "campus_id": campus_id,
+                "name": ["!=", assignment_id]
+            }
+            if final_class_id:
+                filters["class_id"] = final_class_id
+            existing = frappe.db.exists("SIS Subject Assignment", filters)
             if existing:
                 return validation_error_response(
                     message="Teacher already assigned to this subject",
-                    errors={"assignment": [f"This teacher is already assigned to this subject"]}
+                    errors={"assignment": [f"This teacher is already assigned to this subject" ]}
                 )
         
         assignment_doc.save()
@@ -422,13 +448,16 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 sa.name,
                 sa.teacher_id,
                 sa.subject_id,
+                sa.class_id,
                 sa.campus_id,
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
-                s.title as subject_title
+                s.title as subject_title,
+                c.title as class_title
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
+            LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
             WHERE sa.name = %s
         """, (assignment_doc.name,), as_dict=True)
 
@@ -438,9 +467,11 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 "name": result.name,
                 "teacher_id": result.teacher_id,
                 "subject_id": result.subject_id,
+                "class_id": result.class_id,
                 "campus_id": result.campus_id,
                 "teacher_name": result.teacher_name,
-                "subject_title": result.subject_title
+                "subject_title": result.subject_title,
+                "class_title": result.class_title
             }
             return single_item_response(assignment_data, "Subject assignment updated successfully")
         else:
@@ -568,7 +599,9 @@ def get_teachers_for_assignment():
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_subjects_for_assignment():
-    """Get subjects for dropdown selection"""
+    """Get subjects for dropdown selection.
+    Optional: pass teacher_id to filter by teacher's education_stage_id.
+    """
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -577,6 +610,12 @@ def get_subjects_for_assignment():
             campus_id = "campus-1"
         
         filters = {"campus_id": campus_id}
+        # If teacher_id provided, restrict subjects by teacher's education stage
+        teacher_id = frappe.request.args.get('teacher_id') or frappe.form_dict.get('teacher_id')
+        if teacher_id:
+            teacher_stage = frappe.db.get_value("SIS Teacher", teacher_id, "education_stage_id")
+            if teacher_stage:
+                filters["education_stage"] = teacher_stage
             
         subjects = frappe.get_all(
             "SIS Subject",

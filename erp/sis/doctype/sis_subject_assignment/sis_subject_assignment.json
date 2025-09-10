@@ -19,6 +19,7 @@
   "basic_information",
   "campus_id",
   "teacher_id",
+  "class_id",
   "subject_id"
  ],
  "fields": [
@@ -41,6 +42,14 @@
    "label": "Teacher",
    "options": "SIS Teacher",
    "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "label": "Class",
+   "options": "SIS Class",
+   "reqd": 0,
    "in_list_view": 1
   },
   {
