@@ -8,6 +8,7 @@
  "field_order": [
   "title",
   "is_published",
+  "program_type",
   "curriculum",
   "education_stage",
   "school_year",
@@ -24,6 +25,7 @@
  "fields": [
   {"fieldname": "title", "fieldtype": "Data", "label": "Tên báo cáo", "reqd": 1, "in_list_view": 1},
   {"fieldname": "is_published", "fieldtype": "Check", "label": "Phát hành"},
+  {"fieldname": "program_type", "fieldtype": "Select", "label": "Loại chương trình", "options": "vn\nintl", "default": "vn"},
   {"fieldname": "curriculum", "fieldtype": "Link", "label": "Chương trình học", "options": "SIS Curriculum"},
   {"fieldname": "education_stage", "fieldtype": "Link", "label": "Cấp học", "options": "SIS Education Stage"},
   {"fieldname": "school_year", "fieldtype": "Link", "label": "Năm học", "options": "SIS School Year", "reqd": 1},

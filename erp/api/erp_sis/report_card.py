@@ -85,6 +85,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                 "comment_title_enabled": 1 if getattr(row, "comment_title_enabled", 0) else 0,
                 "comment_title_id": getattr(row, "comment_title_id", None),
                 "test_point_titles": [],
+                "scoreboard": None,
             }
             # nested child table for test point titles
             try:
@@ -92,6 +93,19 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                     subject_detail["test_point_titles"].append({"name": t.name, "title": getattr(t, "title", None)})
             except Exception:
                 pass
+            # scoreboard JSON (optional)
+            try:
+                sb = getattr(row, "scoreboard", None)
+                if sb:
+                    # Ensure valid JSON/dict
+                    if isinstance(sb, str):
+                        import json as _json
+                        subject_detail["scoreboard"] = _json.loads(sb)
+                    else:
+                        subject_detail["scoreboard"] = sb
+            except Exception:
+                pass
+
             subjects.append(subject_detail)
     except Exception:
         pass
@@ -100,6 +114,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
         "name": doc.name,
         "title": getattr(doc, "title", None),
         "is_published": 1 if getattr(doc, "is_published", 0) else 0,
+        "program_type": getattr(doc, "program_type", None),
         "curriculum": getattr(doc, "curriculum", None),
         "education_stage": getattr(doc, "education_stage", None),
         "school_year": getattr(doc, "school_year", None),
@@ -215,6 +230,14 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
             for t in sub.get("test_point_titles") or []:
                 if (t.get("title") or "").strip():
                     row.append("test_point_titles", {"title": t.get("title").strip()})
+        except Exception:
+            pass
+
+        # Save scoreboard JSON if provided
+        try:
+            if sub.get("scoreboard") is not None:
+                import json as _json
+                row.set("scoreboard", _json.dumps(sub.get("scoreboard")))
         except Exception:
             pass
 
@@ -351,6 +374,7 @@ def create_template():
                 "doctype": "SIS Report Card Template",
                 "title": (data.get("title") or "").strip(),
                 "is_published": 1 if data.get("is_published") else 0,
+                "program_type": (data.get("program_type") or "vn"),
                 "curriculum": data.get("curriculum"),
                 "education_stage": data.get("education_stage"),
                 "school_year": data.get("school_year"),
@@ -433,6 +457,7 @@ def update_template(template_id: Optional[str] = None):
         for field in [
             "title",
             "is_published",
+            "program_type",
             "curriculum",
             "education_stage",
             "school_year",
@@ -446,6 +471,9 @@ def update_template(template_id: Optional[str] = None):
                 value = data.get(field)
                 if field in ["is_published", "scores_enabled", "homeroom_enabled", "subject_eval_enabled"]:
                     value = 1 if value else 0
+                if field == "program_type":
+                    # sanitize value to 'vn' | 'intl'
+                    value = "intl" if str(value).lower() == "intl" else "vn"
                 doc.set(field, value)
 
         # Replace child tables if payload provided
