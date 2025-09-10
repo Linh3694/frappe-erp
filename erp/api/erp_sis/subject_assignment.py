@@ -605,10 +605,10 @@ def get_subjects_for_assignment():
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
             campus_id = "campus-1"
-        
+
         filters = {"campus_id": campus_id}
         # If teacher_id provided, restrict subjects by teacher's education stage
         teacher_id = frappe.request.args.get('teacher_id') or frappe.form_dict.get('teacher_id')
@@ -616,7 +616,7 @@ def get_subjects_for_assignment():
             teacher_stage = frappe.db.get_value("SIS Teacher", teacher_id, "education_stage_id")
             if teacher_stage:
                 filters["education_stage"] = teacher_stage
-            
+
         subjects = frappe.get_all(
             "SIS Subject",
             fields=[
@@ -626,9 +626,110 @@ def get_subjects_for_assignment():
             filters=filters,
             order_by="title asc"
         )
-        
+
         return list_response(subjects, "Subjects fetched successfully")
-        
+
     except Exception as e:
         frappe.log_error(f"Error fetching subjects for assignment: {str(e)}")
         return error_response(f"Error fetching subjects: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def get_education_grades_for_teacher():
+    """Get education grades for teacher selection.
+    Pass teacher_id to filter by teacher's education_stage_id.
+    """
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
+        # Get teacher_id from request
+        teacher_id = frappe.request.args.get('teacher_id') or frappe.form_dict.get('teacher_id')
+        if not teacher_id:
+            return validation_error_response(
+                message="Teacher ID is required",
+                errors={"teacher_id": ["Teacher ID is required"]}
+            )
+
+        # Get teacher's education stage
+        teacher_stage = frappe.db.get_value("SIS Teacher", teacher_id, "education_stage_id")
+        if not teacher_stage:
+            return list_response([], "No education grades found for this teacher")
+
+        filters = {
+            "campus_id": campus_id,
+            "education_stage_id": teacher_stage
+        }
+
+        education_grades = frappe.get_all(
+            "SIS Education Grade",
+            fields=[
+                "name",
+                "title_vn as grade_name",
+                "title_en",
+                "grade_code",
+                "education_stage_id as education_stage",
+                "sort_order"
+            ],
+            filters=filters,
+            order_by="sort_order asc, title_vn asc"
+        )
+
+        return list_response(education_grades, "Education grades fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching education grades for teacher: {str(e)}")
+        return error_response(f"Error fetching education grades: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def get_classes_for_education_grade():
+    """Get classes for education grade selection.
+    Pass education_grade_id to filter classes.
+    Also supports school_year_id for filtering.
+    """
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
+        # Get education_grade_id from request
+        education_grade_id = frappe.request.args.get('education_grade_id') or frappe.form_dict.get('education_grade_id')
+        if not education_grade_id:
+            return validation_error_response(
+                message="Education grade ID is required",
+                errors={"education_grade_id": ["Education grade ID is required"]}
+            )
+
+        # Get school_year_id from request (optional)
+        school_year_id = frappe.request.args.get('school_year_id') or frappe.form_dict.get('school_year_id')
+
+        filters = {
+            "campus_id": campus_id,
+            "education_grade_id": education_grade_id
+        }
+
+        # Add school year filter if provided
+        if school_year_id:
+            filters["school_year_id"] = school_year_id
+
+        classes = frappe.get_all(
+            "SIS Class",
+            fields=[
+                "name",
+                "title"
+            ],
+            filters=filters,
+            order_by="title asc"
+        )
+
+        return list_response(classes, "Classes fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching classes for education grade: {str(e)}")
+        return error_response(f"Error fetching classes: {str(e)}")
