@@ -688,7 +688,7 @@ def get_education_grades_for_teacher():
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_classes_for_education_grade():
     """Get classes for education grade selection.
-    Pass education_grade_id to filter classes.
+    Pass education_grade_id to filter classes by education_grade field.
     Also supports school_year_id for filtering.
     """
     try:
@@ -702,8 +702,8 @@ def get_classes_for_education_grade():
         education_grade_id = frappe.request.args.get('education_grade_id') or frappe.form_dict.get('education_grade_id')
         if not education_grade_id:
             return validation_error_response(
-                message="Education grade ID is required",
-                errors={"education_grade_id": ["Education grade ID is required"]}
+                message="Education grade is required",
+                errors={"education_grade_id": ["Education grade is required"]}
             )
 
         # Get school_year_id from request (optional)
@@ -711,7 +711,7 @@ def get_classes_for_education_grade():
 
         filters = {
             "campus_id": campus_id,
-            "education_grade_id": education_grade_id
+            "education_grade": education_grade_id
         }
 
         # Add school year filter if provided
@@ -728,6 +728,7 @@ def get_classes_for_education_grade():
             order_by="title asc"
         )
 
+        frappe.logger().info(f"Classes for education_grade '{education_grade_id}' in campus '{campus_id}': {len(classes)} found")
         return list_response(classes, "Classes fetched successfully")
 
     except Exception as e:
