@@ -35,23 +35,13 @@ def execute():
     except Exception:
         pass
 
-    # 1) Tiểu học - Giữa kì 1 - CTVN
+    # Primary School - Vietnamese Program (common for mid/end term as structure is the same)
     _ensure_form(
-        code="PRIM_MID_TERM1_VN",
-        title="Tiểu học - Giữa kì 1 - CTVN",
+        code="PRIM_VN",
+        title="Tiểu học - CTVN",
         program_type="vn",
         campus_id=campus_id,
-        pages=[{"page_no": 1}],
-        toggles={"scores_enabled": 0, "homeroom_enabled": 1, "subject_eval_enabled": 1},
-    )
-
-    # 2) Tiểu học - Cuối kì 1 - CTVN
-    _ensure_form(
-        code="PRIM_END_TERM1_VN",
-        title="Tiểu học - Cuối kì 1 - CTVN",
-        program_type="vn",
-        campus_id=campus_id,
-        pages=[{"page_no": 1}],
+        pages=[{"page_no": 1, "background_image": "/files/report_forms/PRIM_VN/page_1.png"}],
         toggles={"scores_enabled": 0, "homeroom_enabled": 1, "subject_eval_enabled": 1},
     )
 
