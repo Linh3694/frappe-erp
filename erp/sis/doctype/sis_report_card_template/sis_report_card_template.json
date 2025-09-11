@@ -19,6 +19,8 @@
   "scores_enabled",
   "scores",
   "homeroom_enabled",
+  "homeroom_conduct_enabled",
+  "homeroom_conduct_year_enabled",
   "homeroom_titles",
   "subject_eval_enabled",
   "subjects"
@@ -39,10 +41,15 @@
   {"fieldname": "scores", "fieldtype": "Table", "label": "Bảng điểm", "options": "SIS Report Card Score Config"},
 
   {"fieldname": "homeroom_enabled", "fieldtype": "Check", "label": "Bật nhận xét chủ nhiệm"},
+  {"fieldname": "homeroom_conduct_enabled", "fieldtype": "Check", "label": "Bật xếp loại rèn luyện"},
+  {"fieldname": "homeroom_conduct_year_enabled", "fieldtype": "Check", "label": "Bật xếp loại rèn luyện cả năm"},
   {"fieldname": "homeroom_titles", "fieldtype": "Table", "label": "Nhận xét chủ nhiệm", "options": "SIS Report Card Homeroom Title Map"},
 
   {"fieldname": "subject_eval_enabled", "fieldtype": "Check", "label": "Bật đánh giá môn học"},
-  {"fieldname": "subjects", "fieldtype": "Table", "label": "Cấu hình môn học", "options": "SIS Report Card Subject Config"}
+  {"fieldname": "subjects", "fieldtype": "Table", "label": "Cấu hình môn học", "options": "SIS Report Card Subject Config"},
+  {"fieldname": "intl_overall_mark_enabled", "fieldtype": "Check", "label": "Bật Overall Mark (INTL)"},
+  {"fieldname": "intl_overall_grade_enabled", "fieldtype": "Check", "label": "Bật Overall Grade (INTL)"},
+  {"fieldname": "intl_comment_enabled", "fieldtype": "Check", "label": "Bật Nhận xét (INTL)"}
  ],
  "permissions": [
   {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1},

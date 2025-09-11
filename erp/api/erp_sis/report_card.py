@@ -125,8 +125,13 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
         "scores_enabled": 1 if getattr(doc, "scores_enabled", 0) else 0,
         "scores": scores,
         "homeroom_enabled": 1 if getattr(doc, "homeroom_enabled", 0) else 0,
+        "homeroom_conduct_enabled": 1 if getattr(doc, "homeroom_conduct_enabled", 0) else 0,
+        "homeroom_conduct_year_enabled": 1 if getattr(doc, "homeroom_conduct_year_enabled", 0) else 0,
         "homeroom_titles": homeroom_titles,
         "subject_eval_enabled": 1 if getattr(doc, "subject_eval_enabled", 0) else 0,
+        "intl_overall_mark_enabled": 1 if getattr(doc, "intl_overall_mark_enabled", 0) else 0,
+        "intl_overall_grade_enabled": 1 if getattr(doc, "intl_overall_grade_enabled", 0) else 0,
+        "intl_comment_enabled": 1 if getattr(doc, "intl_comment_enabled", 0) else 0,
         "subjects": subjects,
     }
 
@@ -479,11 +484,18 @@ def update_template(template_id: Optional[str] = None):
             "semester_part",
             "scores_enabled",
             "homeroom_enabled",
+            "homeroom_conduct_enabled",
+            "homeroom_conduct_year_enabled",
             "subject_eval_enabled",
+            "intl_overall_mark_enabled",
+            "intl_overall_grade_enabled",
+            "intl_comment_enabled",
         ]:
             if field in data:
                 value = data.get(field)
-                if field in ["is_published", "scores_enabled", "homeroom_enabled", "subject_eval_enabled"]:
+                if field in ["is_published", "scores_enabled", "homeroom_enabled", "subject_eval_enabled", "intl_overall_mark_enabled", "intl_overall_grade_enabled", "intl_comment_enabled"]:
+                    value = 1 if value else 0
+                if field in ["homeroom_conduct_enabled", "homeroom_conduct_year_enabled"]:
                     value = 1 if value else 0
                 if field == "program_type":
                     # sanitize value to 'vn' | 'intl'
