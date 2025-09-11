@@ -51,6 +51,9 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
         .bg { position: absolute; inset: 0; }
         .overlay { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
         .text { position: absolute; font-family: Arial, sans-serif; font-size: 12pt; color: #000; }
+        .text.bold { font-weight: 600; }
+        .text.center { text-align: center; }
+        .text.right { text-align: right; }
         table { border-collapse: collapse; width: 100%; }
         .hidden { display: none; }
       </style>
@@ -71,12 +74,23 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
                 y = el.get("y", 0)
                 w = el.get("w", None)
                 fs = el.get("style", {}).get("fontSize", 12)
+                fw = el.get("style", {}).get("fontWeight", 400)
+                ta = el.get("style", {}).get("textAlign", None)
                 content = report_data
                 for key in (el.get("binding") or "").split('.'):
                     if not key:
                         continue
                     content = content.get(key, "") if isinstance(content, dict) else ""
-                overlay_items.append(f'<div class="text" style="left:{x}%;top:{y}%;width:{(str(w)+"%") if w else "auto"};font-size:{fs}pt;">{frappe.safe_encode(content) if content else ""}</div>')
+                classes = ["text"]
+                if fw and int(fw) >= 600:
+                    classes.append("bold")
+                if ta == "center":
+                    classes.append("center")
+                if ta == "right":
+                    classes.append("right")
+                overlay_items.append(
+                    f'<div class="{" ".join(classes)}" style="left:{x}%;top:{y}%;width:{(str(w)+"%") if w else "auto"};font-size:{fs}pt;">{frappe.utils.escape_html(content or "")}</div>'
+                )
             # More types (table, matrix) can be added later
         page_html = f"""
           <div class=\"page\">
