@@ -60,12 +60,17 @@ def _doc_to_dict(doc):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_forms(page: int = 1, limit: int = 50):
+def get_all_forms(page: int = 1, limit: int = 50, include_all_campuses: int = 0):
     try:
         page = int(page or 1)
         limit = int(limit or 50)
         offset = (page - 1) * limit
-        filters = {"campus_id": _current_campus_id()}
+        include_all_campuses = int(include_all_campuses or 0)
+        if include_all_campuses:
+            from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
+            filters = get_campus_filter_for_all_user_campuses()
+        else:
+            filters = {"campus_id": _current_campus_id()}
         rows = frappe.get_all(
             "SIS Report Card Form",
             fields=[
