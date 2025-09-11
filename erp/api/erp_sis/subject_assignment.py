@@ -173,9 +173,13 @@ def get_subject_assignment_by_id(assignment_id=None):
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def create_subject_assignment():
-    """Create new subject assignments. Supports single or bulk creation.
+    """Create new subject assignments.
+
+    Supported payloads (backward compatible):
     - Single: { teacher_id, subject_id, class_id? }
-    - Bulk: { teacher_id, class_id, subject_ids: [subject_id, ...] }
+    - Bulk by subjects for one class: { teacher_id, class_id, subject_ids: [subject_id, ...] }
+    - Bulk by classes and subjects: { teacher_id, assignments: [ { class_id, subject_ids: [...] }, ... ] }
+      Also supports: { teacher_id, classes: [class_id, ...], subject_ids: [...] } (applies same subjects to many classes)
     """
     try:
         # Get data from request - follow Education Stage pattern
@@ -201,12 +205,14 @@ def create_subject_assignment():
         subject_id = data.get("subject_id")
         class_id = data.get("class_id")
         subject_ids = data.get("subject_ids")
+        assignments = data.get("assignments") or []
+        classes = data.get("classes") or []
         
         # Input validation
         if not teacher_id:
             frappe.throw(_("Teacher ID is required"))
-        if not subject_id and not subject_ids:
-            frappe.throw(_("Subject ID or subject_ids is required"))
+        if not subject_id and not subject_ids and not assignments and not classes:
+            frappe.throw(_("Subject ID or subject_ids or assignments is required"))
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -215,14 +221,34 @@ def create_subject_assignment():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        # Optional class validation
-        if class_id:
-            class_exists = frappe.db.exists(
-                "SIS Class",
-                {"name": class_id, "campus_id": campus_id}
-            )
-            if not class_exists:
-                return not_found_response("Selected class does not exist or access denied")
+        # Normalize unified assignment list
+        normalized_assignments = []
+
+        # Case 1: explicit assignments list
+        if isinstance(assignments, list) and assignments:
+            for a in assignments:
+                cid = a.get("class_id")
+                sids = a.get("subject_ids") or ([] if a.get("subject_id") is None else [a.get("subject_id")])
+                if cid and sids:
+                    normalized_assignments.append({"class_id": cid, "subject_ids": sids})
+
+        # Case 2: top-level classes + subject_ids (apply same subjects to many classes)
+        if not normalized_assignments and isinstance(classes, list) and classes and isinstance(subject_ids, list) and subject_ids:
+            for cid in classes:
+                normalized_assignments.append({"class_id": cid, "subject_ids": subject_ids})
+
+        # Case 3: legacy single/bulk for one class
+        if not normalized_assignments:
+            effective_subject_ids = subject_ids if isinstance(subject_ids, list) and subject_ids else ([subject_id] if subject_id else [])
+            normalized_assignments.append({"class_id": class_id, "subject_ids": effective_subject_ids})
+
+        # Validate classes (if provided) belong to campus
+        class_id_set = {na.get("class_id") for na in normalized_assignments if na.get("class_id")}
+        for cid in list(class_id_set):
+            if cid:
+                class_exists = frappe.db.exists("SIS Class", {"name": cid, "campus_id": campus_id})
+                if not class_exists:
+                    return not_found_response(f"Selected class does not exist or access denied: {cid}")
         
         # Verify teacher exists and belongs to same campus
         teacher_exists = frappe.db.exists(
@@ -237,37 +263,38 @@ def create_subject_assignment():
             return not_found_response("Selected teacher does not exist or access denied")
         
         created_names = []
-        create_list = subject_ids if isinstance(subject_ids, list) else [subject_id] if subject_id else []
-        for sid in create_list:
-            # Verify subject exists and belongs to same campus
-            subject_exists = frappe.db.exists(
-                "SIS Subject",
-                {"name": sid, "campus_id": campus_id}
-            )
-            if not subject_exists:
-                return not_found_response(f"Selected subject does not exist or access denied: {sid}")
+        for item in normalized_assignments:
+            cid = item.get("class_id")
+            sids = item.get("subject_ids") or []
+            # Validate and create for each subject
+            for sid in sids:
+                subject_exists = frappe.db.exists(
+                    "SIS Subject",
+                    {"name": sid, "campus_id": campus_id}
+                )
+                if not subject_exists:
+                    return not_found_response(f"Selected subject does not exist or access denied: {sid}")
 
-            # Duplicate check, include class if provided
-            filters = {
-                "teacher_id": teacher_id,
-                "subject_id": sid,
-                "campus_id": campus_id,
-            }
-            if class_id:
-                filters["class_id"] = class_id
-            existing = frappe.db.exists("SIS Subject Assignment", filters)
-            if existing:
-                continue
+                filters = {
+                    "teacher_id": teacher_id,
+                    "subject_id": sid,
+                    "campus_id": campus_id,
+                }
+                if cid:
+                    filters["class_id"] = cid
+                existing = frappe.db.exists("SIS Subject Assignment", filters)
+                if existing:
+                    continue
 
-            assignment_doc = frappe.get_doc({
-                "doctype": "SIS Subject Assignment",
-                "teacher_id": teacher_id,
-                "subject_id": sid,
-                "class_id": class_id,
-                "campus_id": campus_id
-            })
-            assignment_doc.insert()
-            created_names.append(assignment_doc.name)
+                assignment_doc = frappe.get_doc({
+                    "doctype": "SIS Subject Assignment",
+                    "teacher_id": teacher_id,
+                    "subject_id": sid,
+                    "class_id": cid,
+                    "campus_id": campus_id
+                })
+                assignment_doc.insert()
+                created_names.append(assignment_doc.name)
 
         frappe.db.commit()
 
