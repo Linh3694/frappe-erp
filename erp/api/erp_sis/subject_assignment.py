@@ -43,12 +43,15 @@ def get_all_subject_assignments():
                 sa.modified,
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 s.title as subject_title,
-                c.title as class_title
+                c.title as class_title,
+                c.education_grade as education_grade_id,
+                eg.title_vn as education_grade_name
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
             LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
+            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
             WHERE sa.campus_id = %s
             ORDER BY sa.teacher_id asc
         """, (campus_id,), as_dict=True)
@@ -133,12 +136,15 @@ def get_subject_assignment_by_id(assignment_id=None):
                 sa.campus_id,
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 s.title as subject_title,
-                c.title as class_title
+                c.title as class_title,
+                c.education_grade as education_grade_id,
+                eg.title_vn as education_grade_name
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
             LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
+            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
             WHERE sa.name = %s AND sa.campus_id = %s
         """, (assignment_id, campus_id), as_dict=True)
 
@@ -277,12 +283,15 @@ def create_subject_assignment():
                     sa.campus_id,
                     COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                     s.title as subject_title,
-                    c.title as class_title
+                    c.title as class_title,
+                    c.education_grade as education_grade_id,
+                    eg.title_vn as education_grade_name
                 FROM `tabSIS Subject Assignment` sa
                 LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
                 LEFT JOIN `tabUser` u ON t.user_id = u.name
                 LEFT JOIN `tabSIS Subject` s ON sa.subject_id = s.name
                 LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
+                LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
                 WHERE sa.name in %s
             """, (tuple(created_names),), as_dict=True)
 
@@ -532,6 +541,8 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
                 "teacher_name": result.teacher_name,
                 "subject_title": result.subject_title,
                 "class_title": result.class_title,
+                "education_grade_id": result.education_grade_id,
+                "education_grade_name": result.education_grade_name,
                 "debug_info": debug_info if 'debug_info' in locals() else None
             }
             return single_item_response(assignment_data, "Subject assignment updated successfully")
