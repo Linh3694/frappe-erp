@@ -115,6 +115,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
         "title": getattr(doc, "title", None),
         "is_published": 1 if getattr(doc, "is_published", 0) else 0,
         "program_type": getattr(doc, "program_type", None),
+        "form_id": getattr(doc, "form_id", None),
         "curriculum": getattr(doc, "curriculum", None),
         "education_stage": getattr(doc, "education_stage", None),
         "school_year": getattr(doc, "school_year", None),
@@ -238,6 +239,17 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
             if sub.get("scoreboard") is not None:
                 import json as _json
                 row.set("scoreboard", _json.dumps(sub.get("scoreboard")))
+        except Exception:
+            pass
+
+        # If template has a form_id selected, auto-apply section toggles based on form
+        try:
+            if getattr(parent_doc, "form_id", None):
+                form = frappe.get_doc("SIS Report Card Form", parent_doc.form_id)
+                if form:
+                    parent_doc.scores_enabled = 1 if getattr(form, "scores_enabled", 0) else parent_doc.scores_enabled
+                    parent_doc.homeroom_enabled = 1 if getattr(form, "homeroom_enabled", 0) else parent_doc.homeroom_enabled
+                    parent_doc.subject_eval_enabled = 1 if getattr(form, "subject_eval_enabled", 0) else parent_doc.subject_eval_enabled
         except Exception:
             pass
 
@@ -375,6 +387,7 @@ def create_template():
                 "title": (data.get("title") or "").strip(),
                 "is_published": 1 if data.get("is_published") else 0,
                 "program_type": (data.get("program_type") or "vn"),
+                "form_id": data.get("form_id"),
                 "curriculum": data.get("curriculum"),
                 "education_stage": data.get("education_stage"),
                 "school_year": data.get("school_year"),
@@ -458,6 +471,7 @@ def update_template(template_id: Optional[str] = None):
             "title",
             "is_published",
             "program_type",
+            "form_id",
             "curriculum",
             "education_stage",
             "school_year",

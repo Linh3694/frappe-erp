@@ -1,0 +1,146 @@
+import frappe
+import json
+from typing import Any, Dict, Optional
+
+from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.api_response import success_response, error_response, validation_error_response, not_found_response, forbidden_response, single_item_response
+
+
+def _campus() -> str:
+    return get_current_campus_from_context() or "campus-1"
+
+
+def _payload() -> Dict[str, Any]:
+    data = {}
+    if getattr(frappe, "request", None) and getattr(frappe.request, "data", None):
+        try:
+            raw = frappe.request.data
+            body = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+            parsed = json.loads(body or "{}")
+            if isinstance(parsed, dict):
+                data = parsed
+        except Exception:
+            data = frappe.local.form_dict or {}
+    else:
+        data = frappe.local.form_dict or {}
+    return data
+
+
+def _load_form(form_id: str):
+    form = frappe.get_doc("SIS Report Card Form", form_id)
+    if form.campus_id != _campus():
+        frappe.throw("Access denied", frappe.PermissionError)
+    return form
+
+
+def _load_report(report_id: str):
+    report = frappe.get_doc("SIS Student Report Card", report_id)
+    if report.campus_id != _campus():
+        frappe.throw("Access denied", frappe.PermissionError)
+    return report
+
+
+def _build_html(form, report_data: Dict[str, Any]) -> str:
+    # Minimal SSR: render background pages with absolutely positioned containers; FE can evolve later
+    pages_html = []
+    base_styles = """
+      <style>
+        @page { size: A4; margin: 0; }
+        body { margin: 0; }
+        .page { position: relative; width: 210mm; height: 297mm; page-break-after: always; }
+        .bg { position: absolute; inset: 0; }
+        .overlay { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+        .text { position: absolute; font-family: Arial, sans-serif; font-size: 12pt; color: #000; }
+        table { border-collapse: collapse; width: 100%; }
+        .hidden { display: none; }
+      </style>
+    """
+    for p in (getattr(form, "pages", None) or []):
+        bg_url = p.background_image or ""
+        # Placeholders: allow user to upload later; keep an empty background if not set
+        layout = {}
+        try:
+            layout = json.loads(p.layout_json or "{}") if isinstance(p.layout_json, (str, bytes)) else (p.layout_json or {})
+        except Exception:
+            layout = {}
+
+        overlay_items = []
+        for el in (layout.get("elements") or []):
+            if el.get("type") == "text":
+                x = el.get("x", 0)
+                y = el.get("y", 0)
+                w = el.get("w", None)
+                fs = el.get("style", {}).get("fontSize", 12)
+                content = report_data
+                for key in (el.get("binding") or "").split('.'):
+                    if not key:
+                        continue
+                    content = content.get(key, "") if isinstance(content, dict) else ""
+                overlay_items.append(f'<div class="text" style="left:{x}%;top:{y}%;width:{(str(w)+"%") if w else "auto"};font-size:{fs}pt;">{frappe.safe_encode(content) if content else ""}</div>')
+            # More types (table, matrix) can be added later
+        page_html = f"""
+          <div class=\"page\">
+            {f'<img class=\"bg\" src=\"{bg_url}\" />' if bg_url else ''}
+            <div class=\"overlay\">{''.join(overlay_items)}</div>
+          </div>
+        """
+        pages_html.append(page_html)
+    html = f"<html><head><meta charset=\"utf-8\" />{base_styles}</head><body>{''.join(pages_html)}</body></html>"
+    return html
+
+
+@frappe.whitelist(allow_guest=False)
+def get_report_html(report_id: Optional[str] = None):
+    try:
+        report_id = report_id or (frappe.local.form_dict or {}).get("report_id") or ((frappe.request.args.get("report_id") if getattr(frappe, "request", None) and getattr(frappe.request, "args", None) else None))
+        if not report_id:
+            payload = _payload()
+            report_id = payload.get("report_id")
+        if not report_id:
+            return validation_error_response(message="report_id is required")
+        report = _load_report(report_id)
+        form = _load_form(report.form_id)
+        data = json.loads(report.data_json or "{}")
+        html = _build_html(form, data)
+        return single_item_response({"html": html}, "HTML built")
+    except frappe.DoesNotExistError:
+        return not_found_response("Report not found")
+    except frappe.PermissionError:
+        return forbidden_response("Access denied")
+    except Exception as e:
+        frappe.log_error(f"Error get_report_html: {str(e)}")
+        return error_response("Error building html")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_report_pdf(report_id: Optional[str] = None, filename: Optional[str] = None):
+    """Server-side render to PDF using Frappe's PDF engine."""
+    try:
+        report_id = report_id or (frappe.local.form_dict or {}).get("report_id") or ((frappe.request.args.get("report_id") if getattr(frappe, "request", None) and getattr(frappe.request, "args", None) else None))
+        if not report_id:
+            payload = _payload()
+            report_id = payload.get("report_id")
+        if not report_id:
+            return validation_error_response(message="report_id is required")
+        report = _load_report(report_id)
+        form = _load_form(report.form_id)
+        data = json.loads(report.data_json or "{}")
+        html = _build_html(form, data)
+
+        from frappe.utils.pdf import get_pdf
+        pdf_content = get_pdf(html)
+
+        if not filename:
+            filename = f"report-card-{report.student_id}-{report.semester_part}.pdf"
+
+        frappe.local.response.filename = filename
+        frappe.local.response.filecontent = pdf_content
+        frappe.local.response.type = "download"
+        return
+    except frappe.PermissionError:
+        return forbidden_response("Access denied")
+    except Exception as e:
+        frappe.log_error(f"Error get_report_pdf: {str(e)}")
+        return error_response("Error rendering pdf")
+
+

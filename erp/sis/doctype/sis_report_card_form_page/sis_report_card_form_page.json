@@ -1,0 +1,19 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Report Card Form Page",
+ "module": "SIS",
+ "istable": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "page_no",
+  "background_image",
+  "layout_json"
+ ],
+ "fields": [
+  {"fieldname": "page_no", "fieldtype": "Int", "label": "Số trang", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "background_image", "fieldtype": "Attach Image", "label": "Ảnh nền A4", "in_list_view": 1},
+  {"fieldname": "layout_json", "fieldtype": "Long Text", "label": "Layout JSON", "description": "Cấu hình vị trí các phần tử render"}
+ ]
+}
+
+

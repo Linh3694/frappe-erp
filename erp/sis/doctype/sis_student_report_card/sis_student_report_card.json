@@ -1,0 +1,41 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Student Report Card",
+ "module": "SIS",
+ "istable": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "template_id",
+  "form_id",
+  "class_id",
+  "student_id",
+  "school_year",
+  "semester_part",
+  "status",
+  "campus_id",
+  "data_json"
+ ],
+ "fields": [
+  {"fieldname": "title", "fieldtype": "Data", "label": "Tiêu đề", "in_list_view": 1},
+  {"fieldname": "template_id", "fieldtype": "Link", "label": "Template", "options": "SIS Report Card Template", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "form_id", "fieldtype": "Link", "label": "Form", "options": "SIS Report Card Form", "reqd": 1},
+  {"fieldname": "class_id", "fieldtype": "Link", "label": "Lớp", "options": "SIS Class", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "student_id", "fieldtype": "Link", "label": "Học sinh", "options": "SIS Student", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "school_year", "fieldtype": "Link", "label": "Năm học", "options": "SIS School Year", "reqd": 1},
+  {"fieldname": "semester_part", "fieldtype": "Select", "label": "Kì", "options": "Mid Term 1\nEnd Term 1\nMid Term 2\nEnd Term 2", "reqd": 1},
+  {"fieldname": "status", "fieldtype": "Select", "label": "Trạng thái", "options": "draft\nlocked\npublished", "default": "draft", "in_list_view": 1},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Trường học", "options": "SIS Campus", "reqd": 1},
+  {"fieldname": "data_json", "fieldtype": "Long Text", "label": "Dữ liệu báo cáo"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1},
+  {"role": "SIS Admin", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1},
+  {"role": "SIS Teacher", "read": 1, "write": 1}
+ ],
+ "title_field": "title",
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
+
+

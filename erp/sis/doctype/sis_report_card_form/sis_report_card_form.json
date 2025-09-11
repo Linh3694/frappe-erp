@@ -1,0 +1,39 @@
+{
+ "doctype": "DocType",
+ "name": "SIS Report Card Form",
+ "module": "SIS",
+ "istable": 0,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "code",
+  "title",
+  "program_type",
+  "campus_id",
+  "scores_enabled",
+  "homeroom_enabled",
+  "subject_eval_enabled",
+  "pages",
+  "is_system"
+ ],
+ "fields": [
+  {"fieldname": "code", "fieldtype": "Data", "label": "Mã form", "reqd": 1, "unique": 1, "in_list_view": 1},
+  {"fieldname": "title", "fieldtype": "Data", "label": "Tên form", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "program_type", "fieldtype": "Select", "label": "Loại chương trình", "options": "vn\nintl", "default": "vn"},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Trường học", "options": "SIS Campus", "reqd": 1},
+  {"fieldname": "scores_enabled", "fieldtype": "Check", "label": "Bảng điểm"},
+  {"fieldname": "homeroom_enabled", "fieldtype": "Check", "label": "Nhận xét chủ nhiệm"},
+  {"fieldname": "subject_eval_enabled", "fieldtype": "Check", "label": "Đánh giá môn học"},
+  {"fieldname": "pages", "fieldtype": "Table", "label": "Trang", "options": "SIS Report Card Form Page"},
+  {"fieldname": "is_system", "fieldtype": "Check", "label": "Hệ thống (không cho sửa/xóa)"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1},
+  {"role": "SIS Admin", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1}
+ ],
+ "title_field": "title",
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
+
+
