@@ -179,8 +179,23 @@ def _apply_homeroom_titles(parent_doc, titles_payload: List[Dict[str, Any]]):
 
     frappe.logger().info(f"Applying {len(titles_payload or [])} homeroom titles for campus {campus_id}")
 
+    # Determine a default comment_title_id for this campus when client omits it
+    default_comment_title_id = None
+    try:
+        default_row = frappe.get_all(
+            "SIS Report Card Comment Title",
+            fields=["name"],
+            filters={"campus_id": campus_id},
+            limit=1,
+        )
+        if default_row:
+            default_comment_title_id = default_row[0]["name"]
+            frappe.logger().info(f"Homeroom titles: Using default comment_title_id '{default_comment_title_id}' for campus '{campus_id}' when missing")
+    except Exception as _e:
+        frappe.logger().warning(f"Could not fetch default comment_title for campus {campus_id}: {str(_e)}")
+
     for i, h in enumerate(titles_payload or []):
-        comment_title_id = h.get("comment_title_id")
+        comment_title_id = h.get("comment_title_id") or default_comment_title_id
         title_text = (h.get("title") or "").strip()
 
         frappe.logger().debug(f"Processing homeroom title {i+1}: title='{title_text}', comment_title_id='{comment_title_id}'")
@@ -189,6 +204,12 @@ def _apply_homeroom_titles(parent_doc, titles_payload: List[Dict[str, Any]]):
             frappe.throw(_(
                 "Tiêu đề nhận xét '{0}' không tồn tại hoặc không thuộc về trường này"
             ).format(comment_title_id), frappe.LinkValidationError)
+
+        # If still missing a valid comment_title_id, raise a clearer validation error
+        if not comment_title_id:
+            frappe.throw(_(
+                "Thiếu 'comment_title_id' cho nhận xét chủ nhiệm. Vui lòng chọn một 'Tiêu đề nhận xét' cho trường hoặc tạo trước rồi thử lại."
+            ), frappe.LinkValidationError)
 
         parent_doc.append(
             "homeroom_titles",
