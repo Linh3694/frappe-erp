@@ -376,7 +376,9 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, subject_id=No
             teacher_id = frappe.form_dict.get('teacher_id')
         if not subject_id:
             subject_id = frappe.form_dict.get('subject_id')
-        class_id = frappe.form_dict.get('class_id') if 'class_id' in frappe.form_dict else None
+        # Preserve class_id parsed from JSON; only fallback to form_dict if not already set
+        if 'class_id' in frappe.form_dict and ('class_id' not in locals() or class_id is None):
+            class_id = frappe.form_dict.get('class_id')
 
         if not assignment_id:
             return validation_error_response(
