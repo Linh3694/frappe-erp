@@ -49,35 +49,40 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
         if template.campus_id != campus_id:
             return forbidden_response("Access denied: Template belongs to another campus")
 
-        # Fetch students of the class
-        students = frappe.get_all("SIS Class Student", fields=["student_id"], filters={"class_id": class_id, "campus_id": campus_id})
+        # Fetch students of the class (include student_code for fallback mapping)
+        students = frappe.get_all("SIS Class Student", fields=["student_id", "student_code"], filters={"class_id": class_id, "campus_id": campus_id})
 
-        # Create student report cards if not exists
+        # Create student report cards if not exists (do not require SIS Student doc to exist)
         created = []
-        skipped_missing_students = []
         failed_students = []
         for row in students:
+            # Resolve SIS Student id: class_student may store CRM-STUDENT-xxxxx
+            resolved_student_id = row.get("student_id")
+            if not frappe.db.exists("SIS Student", resolved_student_id or ""):
+                # try map by student_code (best-effort)
+                code = row.get("student_code")
+                if code:
+                    mapped = frappe.db.get_value("SIS Student", {"student_code": code}, "name")
+                    if mapped:
+                        resolved_student_id = mapped
+
             exists = frappe.db.exists("SIS Student Report Card", {
                 "template_id": template_id,
                 "class_id": class_id,
-                "student_id": row["student_id"],
+                "student_id": resolved_student_id,
                 "school_year": template.school_year,
                 "semester_part": template.semester_part,
                 "campus_id": campus_id,
             })
             if exists:
                 continue
-            # Skip if student doc does not exist to avoid hard failure
-            if not frappe.db.exists("SIS Student", row["student_id"]):
-                skipped_missing_students.append(row["student_id"])
-                continue
             doc = frappe.get_doc({
                 "doctype": "SIS Student Report Card",
-                "title": f"{template.title} - {row['student_id']}",
+                "title": f"{template.title} - {resolved_student_id}",
                 "template_id": template.name,
                 "form_id": template.form_id,
                 "class_id": class_id,
-                "student_id": row["student_id"],
+                "student_id": resolved_student_id,
                 "school_year": template.school_year,
                 "semester_part": template.semester_part,
                 "status": "draft",
@@ -88,10 +93,10 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 doc.insert(ignore_permissions=True)
                 created.append(doc.name)
             except Exception as e:
-                failed_students.append({"student_id": row["student_id"], "error": str(e)})
-                frappe.log_error(f"Create report failed for student {row['student_id']}: {str(e)}")
+                failed_students.append({"student_id": resolved_student_id, "error": str(e)})
+                frappe.log_error(f"Create report failed for student {resolved_student_id}: {str(e)}")
         frappe.db.commit()
-        return success_response(data={"created": created, "skipped_missing_students": skipped_missing_students, "failed": failed_students}, message="Student report cards generated")
+        return success_response(data={"created": created, "failed": failed_students}, message="Student report cards generated")
     except Exception as e:
         frappe.log_error(f"Error create_reports_for_class: {str(e)}")
         return error_response("Error generating reports")
