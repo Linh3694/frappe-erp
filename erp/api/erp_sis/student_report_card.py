@@ -65,9 +65,9 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
             exists_in_student = False
             try:
                 if resolved_student_id:
-                    exists_in_student = bool(frappe.db.exists("SIS Student", resolved_student_id))
+                    exists_in_student = bool(frappe.db.exists("CRM Student", resolved_student_id))
             except Exception as e:
-                frappe.log_error(f"exists(SIS Student, {resolved_student_id}) error: {str(e)}")
+                frappe.log_error(f"exists(CRM Student, {resolved_student_id}) error: {str(e)}")
                 exists_in_student = False
 
             if not exists_in_student:
@@ -78,7 +78,7 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                     code_candidates.append(sid)
                 for code in code_candidates:
                     try:
-                        mapped = frappe.db.get_value("SIS Student", {"student_code": code}, "name")
+                        mapped = frappe.db.get_value("CRM Student", {"student_code": code}, "name")
                         if mapped:
                             resolved_student_id = mapped
                             exists_in_student = True
