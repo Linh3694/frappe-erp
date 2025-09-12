@@ -203,10 +203,26 @@ def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[s
         
         # Try the query with safe error handling
         try:
-            rows = frappe.get_all("SIS Student Report Card", fields=["name","title","student_id","status","modified"], filters=filters, order_by="modified desc", limit_start=offset, limit_page_length=limit)
-            total = frappe.db.count("SIS Student Report Card", filters=filters)
-            frappe.logger().info(f"get_reports_by_class: Found {len(rows)} reports, total={total}")
-            return paginated_response(data=rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
+            rows = frappe.get_all(
+                "SIS Student Report Card",
+                fields=["name","title","student_id","status","modified"],
+                filters=filters,
+                order_by="modified desc",
+                limit_start=offset,
+                limit_page_length=limit,
+            )
+
+            # Ensure unique by student_id, keep first occurrence (most recently modified)
+            uniq: Dict[str, Dict[str, Any]] = {}
+            for r in rows:
+                sid = r.get("student_id")
+                if sid and sid not in uniq:
+                    uniq[sid] = r
+            uniq_rows = list(uniq.values())
+            total = len(uniq_rows)
+
+            frappe.logger().info(f"get_reports_by_class: Found {len(rows)} reports, unique_by_student={total}")
+            return paginated_response(data=uniq_rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
         except Exception as db_error:
             frappe.logger().error(f"Database query failed: {str(db_error)}")
             # Try without campus filter as last resort
