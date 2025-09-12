@@ -834,3 +834,40 @@ def get_classes_for_education_grade():
     except Exception as e:
         frappe.log_error(f"Error fetching classes for education grade: {str(e)}")
         return error_response(f"Error fetching classes: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"]) 
+def get_my_subjects_for_class(class_id: str | None = None):
+    """Return subject_ids that the current logged-in teacher is assigned to for a given class.
+    If class_id is None, returns all subject_ids for the teacher across campus (deduped).
+    """
+    try:
+        campus_id = get_current_campus_from_context() or "campus-1"
+
+        # Resolve class_id from query if not passed
+        if not class_id:
+            class_id = frappe.request.args.get('class_id') or frappe.form_dict.get('class_id')
+
+        # Find teacher by current user and campus
+        teacher_rows = frappe.get_all(
+            "SIS Teacher", fields=["name"], filters={"user_id": frappe.session.user, "campus_id": campus_id}, limit=1
+        )
+        if not teacher_rows:
+            return list_response([], "No teacher profile for current user")
+        teacher_id = teacher_rows[0].name
+
+        filters = {"teacher_id": teacher_id, "campus_id": campus_id}
+        if class_id:
+            filters["class_id"] = class_id
+
+        rows = frappe.get_all(
+            "SIS Subject Assignment",
+            fields=["subject_id"],
+            filters=filters,
+            distinct=True,
+        )
+        subject_ids = [r["subject_id"] for r in rows if r.get("subject_id")]
+        return list_response(subject_ids, "Assigned subjects fetched")
+    except Exception as e:
+        frappe.log_error(f"Error get_my_subjects_for_class: {str(e)}")
+        return error_response("Error fetching assigned subjects")

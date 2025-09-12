@@ -422,6 +422,8 @@ def create_template():
                 "campus_id": campus_id,
                 "scores_enabled": 1 if data.get("scores_enabled") else 0,
                 "homeroom_enabled": 1 if data.get("homeroom_enabled") else 0,
+                "homeroom_conduct_enabled": 1 if data.get("homeroom_conduct_enabled") else 0,
+                "homeroom_conduct_year_enabled": 1 if data.get("homeroom_conduct_year_enabled") else 0,
                 "subject_eval_enabled": 1 if data.get("subject_eval_enabled") else 0,
             }
         )
