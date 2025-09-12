@@ -54,6 +54,8 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
 
         # Create student report cards if not exists
         created = []
+        skipped_missing_students = []
+        failed_students = []
         for row in students:
             exists = frappe.db.exists("SIS Student Report Card", {
                 "template_id": template_id,
@@ -64,6 +66,10 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 "campus_id": campus_id,
             })
             if exists:
+                continue
+            # Skip if student doc does not exist to avoid hard failure
+            if not frappe.db.exists("SIS Student", row["student_id"]):
+                skipped_missing_students.append(row["student_id"])
                 continue
             doc = frappe.get_doc({
                 "doctype": "SIS Student Report Card",
@@ -78,10 +84,14 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 "campus_id": campus_id,
                 "data_json": json.dumps({}),
             })
-            doc.insert(ignore_permissions=True)
-            created.append(doc.name)
+            try:
+                doc.insert(ignore_permissions=True)
+                created.append(doc.name)
+            except Exception as e:
+                failed_students.append({"student_id": row["student_id"], "error": str(e)})
+                frappe.log_error(f"Create report failed for student {row['student_id']}: {str(e)}")
         frappe.db.commit()
-        return success_response(data={"created": created}, message="Student report cards generated")
+        return success_response(data={"created": created, "skipped_missing_students": skipped_missing_students, "failed": failed_students}, message="Student report cards generated")
     except Exception as e:
         frappe.log_error(f"Error create_reports_for_class: {str(e)}")
         return error_response("Error generating reports")
