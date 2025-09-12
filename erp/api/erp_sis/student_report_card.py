@@ -297,7 +297,24 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         payload = data.get("payload") or {}
         # Merge section into data_json
         json_data = json.loads(doc.data_json or "{}")
-        json_data[section] = payload
+
+        # Special handling: subject_eval should be stored per subject_id
+        if section == "subject_eval":
+            subject_id = payload.get("subject_id")
+            existing = json_data.get("subject_eval")
+            if not isinstance(existing, dict):
+                existing = {}
+            if subject_id:
+                # Store only necessary fields; keep subject_id for clarity
+                existing[subject_id] = {
+                    "subject_id": subject_id,
+                    "criteria": payload.get("criteria") or {},
+                    "comments": payload.get("comments") or {},
+                }
+            json_data["subject_eval"] = existing
+        else:
+            # Overwrite the section with provided payload for other sections (e.g., homeroom)
+            json_data[section] = payload
         doc.data_json = json.dumps(json_data)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
