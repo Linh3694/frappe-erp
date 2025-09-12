@@ -101,6 +101,7 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 "campus_id": campus_id,
             })
             if exists:
+                frappe.logger().info(f"Report already exists for student {resolved_student_id}, skipping creation")
                 continue
 
             doc = frappe.get_doc({
@@ -139,14 +140,26 @@ def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[s
         page = int(page or 1)
         limit = int(limit or 50)
         offset = (page - 1) * limit
-        filters = {"class_id": class_id, "campus_id": campus_id}
+        filters = {"class_id": class_id}
+        
+        # Add campus filter if campus_id is valid, otherwise skip campus filtering
+        if campus_id and campus_id.strip():
+            filters["campus_id"] = campus_id
+            frappe.logger().info(f"get_reports_by_class: Using campus filter: {campus_id}")
+        else:
+            frappe.logger().warning(f"get_reports_by_class: No valid campus context, skipping campus filter")
+            
         if template_id:
             filters["template_id"] = template_id
+            
+        frappe.logger().info(f"get_reports_by_class: filters={filters}")
         rows = frappe.get_all("SIS Student Report Card", fields=["name","title","student_id","status","modified"], filters=filters, order_by="modified desc", limit_start=offset, limit_page_length=limit)
         total = frappe.db.count("SIS Student Report Card", filters=filters)
+        frappe.logger().info(f"get_reports_by_class: Found {len(rows)} reports, total={total}")
         return paginated_response(data=rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
     except Exception as e:
         frappe.log_error(f"Error get_reports_by_class: {str(e)}")
+        frappe.logger().error(f"get_reports_by_class exception: {str(e)}")
         return error_response("Error fetching reports")
 
 
