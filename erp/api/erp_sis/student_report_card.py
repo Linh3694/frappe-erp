@@ -236,7 +236,12 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         report_id = report_id or data.get("report_id")
         section = section or data.get("section")
         if not report_id or not section:
-            return validation_error_response(message="report_id and section are required")
+            errors = {}
+            if not report_id:
+                errors["report_id"] = ["Required"]
+            if not section:
+                errors["section"] = ["Required"]
+            return validation_error_response(message="report_id and section are required", errors=errors)
         doc = frappe.get_doc("SIS Student Report Card", report_id)
         if doc.campus_id != _campus():
             return forbidden_response("Access denied")
@@ -260,7 +265,7 @@ def lock_report(report_id: Optional[str] = None):
     try:
         report_id = report_id or (_payload().get("report_id"))
         if not report_id:
-            return validation_error_response(message="report_id is required")
+            return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
         doc = frappe.get_doc("SIS Student Report Card", report_id)
         if doc.campus_id != _campus():
             return forbidden_response("Access denied")
@@ -278,7 +283,7 @@ def publish_report(report_id: Optional[str] = None):
     try:
         report_id = report_id or (_payload().get("report_id"))
         if not report_id:
-            return validation_error_response(message="report_id is required")
+            return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
         doc = frappe.get_doc("SIS Student Report Card", report_id)
         if doc.campus_id != _campus():
             return forbidden_response("Access denied")
