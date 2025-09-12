@@ -146,7 +146,7 @@ def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[s
         frappe.logger().info(f"get_reports_by_class resolved params: class_id={class_id}, template_id={template_id}, page={page}, limit={limit}")
         
         if not class_id:
-            return validation_error_response(message="Class ID is required")
+            return validation_error_response(message="Class ID is required", errors={"class_id": ["Required"]})
         campus_id = _campus()
         page = int(page or 1)
         limit = int(limit or 50)
@@ -186,7 +186,8 @@ def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[s
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        frappe.log_error(f"Error get_reports_by_class: {str(e)}\n{error_details}")
+        # Log error với title ngắn để tránh length limit
+        frappe.log_error(error_details, title="get_reports_by_class_error")
         frappe.logger().error(f"get_reports_by_class exception: {str(e)}")
         frappe.logger().error(f"Full traceback: {error_details}")
         return error_response(f"Error fetching reports: {str(e)}")
