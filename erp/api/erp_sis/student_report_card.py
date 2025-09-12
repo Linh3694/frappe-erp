@@ -15,7 +15,11 @@ from erp.utils.api_response import (
 
 
 def _campus() -> str:
-    return get_current_campus_from_context() or "campus-1"
+    campus_id = get_current_campus_from_context()
+    if not campus_id:
+        campus_id = "campus-1"
+    frappe.logger().info(f"_campus() resolved to: {campus_id}")
+    return campus_id
 
 
 def _payload() -> Dict[str, Any]:
@@ -133,7 +137,14 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
 @frappe.whitelist(allow_guest=False)
 def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[str] = None, page: int = 1, limit: int = 50):
     try:
+        frappe.logger().info(f"get_reports_by_class called with: class_id={class_id}, template_id={template_id}, page={page}, limit={limit}")
         class_id = class_id or (frappe.local.form_dict or {}).get("class_id")
+        template_id = template_id or (frappe.local.form_dict or {}).get("template_id")
+        page = page or (frappe.local.form_dict or {}).get("page", 1)
+        limit = limit or (frappe.local.form_dict or {}).get("limit", 50)
+        
+        frappe.logger().info(f"get_reports_by_class resolved params: class_id={class_id}, template_id={template_id}, page={page}, limit={limit}")
+        
         if not class_id:
             return validation_error_response(message="Class ID is required")
         campus_id = _campus()
@@ -153,14 +164,32 @@ def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[s
             filters["template_id"] = template_id
             
         frappe.logger().info(f"get_reports_by_class: filters={filters}")
-        rows = frappe.get_all("SIS Student Report Card", fields=["name","title","student_id","status","modified"], filters=filters, order_by="modified desc", limit_start=offset, limit_page_length=limit)
-        total = frappe.db.count("SIS Student Report Card", filters=filters)
-        frappe.logger().info(f"get_reports_by_class: Found {len(rows)} reports, total={total}")
-        return paginated_response(data=rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
+        
+        # Try the query with safe error handling
+        try:
+            rows = frappe.get_all("SIS Student Report Card", fields=["name","title","student_id","status","modified"], filters=filters, order_by="modified desc", limit_start=offset, limit_page_length=limit)
+            total = frappe.db.count("SIS Student Report Card", filters=filters)
+            frappe.logger().info(f"get_reports_by_class: Found {len(rows)} reports, total={total}")
+            return paginated_response(data=rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
+        except Exception as db_error:
+            frappe.logger().error(f"Database query failed: {str(db_error)}")
+            # Try without campus filter as last resort
+            if "campus_id" in filters:
+                frappe.logger().warning("Retrying without campus filter...")
+                filters_no_campus = {k: v for k, v in filters.items() if k != "campus_id"}
+                rows = frappe.get_all("SIS Student Report Card", fields=["name","title","student_id","status","modified"], filters=filters_no_campus, order_by="modified desc", limit_start=offset, limit_page_length=limit)
+                total = frappe.db.count("SIS Student Report Card", filters=filters_no_campus)
+                frappe.logger().info(f"get_reports_by_class (no campus): Found {len(rows)} reports, total={total}")
+                return paginated_response(data=rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
+            else:
+                raise db_error
     except Exception as e:
-        frappe.log_error(f"Error get_reports_by_class: {str(e)}")
+        import traceback
+        error_details = traceback.format_exc()
+        frappe.log_error(f"Error get_reports_by_class: {str(e)}\n{error_details}")
         frappe.logger().error(f"get_reports_by_class exception: {str(e)}")
-        return error_response("Error fetching reports")
+        frappe.logger().error(f"Full traceback: {error_details}")
+        return error_response(f"Error fetching reports: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
