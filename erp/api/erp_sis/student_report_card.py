@@ -49,10 +49,10 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
         if template.campus_id != campus_id:
             return forbidden_response("Access denied: Template belongs to another campus")
 
-        # Fetch students of the class (include row name + student_code for fallback mapping)
+        # Fetch students of the class (Class Student không có student_code)
         students = frappe.get_all(
             "SIS Class Student",
-            fields=["name", "student_id", "student_code"],
+            fields=["name", "student_id"],
             filters={"class_id": class_id, "campus_id": campus_id}
         )
 
@@ -71,22 +71,26 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 exists_in_student = False
 
             if not exists_in_student:
-                # try map by student_code (best-effort)
-                code = row.get("student_code")
-                if code:
+                # Try map bằng student_code lấy từ chính giá trị student_id (nếu lớp đang lưu mã học sinh thay vì name)
+                code_candidates = []
+                sid = row.get("student_id")
+                if isinstance(sid, str) and sid:
+                    code_candidates.append(sid)
+                for code in code_candidates:
                     try:
                         mapped = frappe.db.get_value("SIS Student", {"student_code": code}, "name")
                         if mapped:
                             resolved_student_id = mapped
                             exists_in_student = True
-                            # Also reconcile Class Student link for future consistency
+                            # Đồng bộ lại link để các lần sau không phải map
                             try:
                                 if row.get("name"):
                                     frappe.db.set_value("SIS Class Student", row.get("name"), "student_id", mapped)
                             except Exception as e2:
                                 frappe.log_error(f"Failed to reconcile Class Student link {row.get('name')} -> {mapped}: {str(e2)}")
+                            break
                     except Exception as e:
-                        frappe.log_error(f"map by student_code error for {code}: {str(e)}")
+                        frappe.log_error(f"map by candidate student_code {code} error: {str(e)}")
 
             exists = frappe.db.exists("SIS Student Report Card", {
                 "template_id": template_id,
