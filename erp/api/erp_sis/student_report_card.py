@@ -49,8 +49,12 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
         if template.campus_id != campus_id:
             return forbidden_response("Access denied: Template belongs to another campus")
 
-        # Fetch students of the class (include student_code for fallback mapping)
-        students = frappe.get_all("SIS Class Student", fields=["student_id", "student_code"], filters={"class_id": class_id, "campus_id": campus_id})
+        # Fetch students of the class (include row name + student_code for fallback mapping)
+        students = frappe.get_all(
+            "SIS Class Student",
+            fields=["name", "student_id", "student_code"],
+            filters={"class_id": class_id, "campus_id": campus_id}
+        )
 
         # Create student report cards if not exists (best-effort, safely skip unmapped students)
         created = []
@@ -76,6 +80,12 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                         if mapped:
                             resolved_student_id = mapped
                             exists_in_student = True
+                            # Also reconcile Class Student link for future consistency
+                            try:
+                                if row.get("name"):
+                                    frappe.db.set_value("SIS Class Student", row.get("name"), "student_id", mapped)
+                            except Exception as e2:
+                                frappe.log_error(f"Failed to reconcile Class Student link {row.get('name')} -> {mapped}: {str(e2)}")
                     except Exception as e:
                         frappe.log_error(f"map by student_code error for {code}: {str(e)}")
 
