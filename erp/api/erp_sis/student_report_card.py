@@ -142,7 +142,9 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
 @frappe.whitelist(allow_guest=False)
 def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[str] = None, page: int = 1, limit: int = 50):
     try:
-        frappe.logger().info(f"get_reports_by_class called with: class_id={class_id}, template_id={template_id}, page={page}, limit={limit}")
+        frappe.logger().info(f"get_reports_by_class called with args: class_id={class_id}, template_id={template_id}, page={page}, limit={limit}")
+        frappe.logger().info(f"frappe.local.form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"frappe.request.args: {getattr(frappe.request, 'args', 'No args') if hasattr(frappe, 'request') else 'No request'}")
         class_id = class_id or (frappe.local.form_dict or {}).get("class_id")
         template_id = template_id or (frappe.local.form_dict or {}).get("template_id")
         page = page or (frappe.local.form_dict or {}).get("page", 1)
