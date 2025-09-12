@@ -46,7 +46,12 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
         template_id = template_id or data.get("template_id")
         class_id = class_id or data.get("class_id")
         if not template_id or not class_id:
-            return validation_error_response(message="template_id and class_id are required")
+            errors = {}
+            if not template_id:
+                errors["template_id"] = ["Required"]
+            if not class_id:
+                errors["class_id"] = ["Required"]
+            return validation_error_response(message="template_id and class_id are required", errors=errors)
 
         campus_id = _campus()
         template = frappe.get_doc("SIS Report Card Template", template_id)
@@ -201,7 +206,7 @@ def get_report_by_id(report_id: Optional[str] = None):
             payload = _payload()
             report_id = payload.get("report_id") or payload.get("name")
         if not report_id:
-            return validation_error_response(message="Report ID is required")
+            return validation_error_response(message="Report ID is required", errors={"report_id": ["Required"]})
         doc = frappe.get_doc("SIS Student Report Card", report_id)
         if doc.campus_id != _campus():
             return forbidden_response("Access denied")
