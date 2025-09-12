@@ -149,6 +149,26 @@ def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[s
         template_id = template_id or (frappe.local.form_dict or {}).get("template_id")
         page = page or (frappe.local.form_dict or {}).get("page", 1)
         limit = limit or (frappe.local.form_dict or {}).get("limit", 50)
+
+        # Also read from request.args for GET query string params (align behavior with get_class_reports)
+        if (not class_id) and getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
+            class_id = frappe.request.args.get("class_id")
+        if (not template_id) and getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
+            template_id = frappe.request.args.get("template_id")
+        if getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
+            page = page or frappe.request.args.get("page", 1)
+            limit = limit or frappe.request.args.get("limit", 50)
+
+        # Finally, fallback to JSON payload if provided (in case client POSTs accidentally)
+        if not class_id or not template_id or not page or not limit:
+            try:
+                payload = _payload()
+                class_id = class_id or payload.get("class_id") or payload.get("name")
+                template_id = template_id or payload.get("template_id")
+                page = page or payload.get("page", 1)
+                limit = limit or payload.get("limit", 50)
+            except Exception:
+                pass
         
         # Clean up template_id - handle 'undefined' string from frontend
         if template_id in ['undefined', 'null', '']:
