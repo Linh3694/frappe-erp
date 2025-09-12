@@ -148,9 +148,18 @@ def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[s
         page = page or (frappe.local.form_dict or {}).get("page", 1)
         limit = limit or (frappe.local.form_dict or {}).get("limit", 50)
         
-        frappe.logger().info(f"get_reports_by_class resolved params: class_id={class_id}, template_id={template_id}, page={page}, limit={limit}")
+        # Clean up template_id - handle 'undefined' string from frontend
+        if template_id in ['undefined', 'null', '']:
+            template_id = None
         
-        if not class_id:
+        # Clean up class_id
+        if class_id and isinstance(class_id, str):
+            class_id = class_id.strip()
+        
+        frappe.logger().info(f"get_reports_by_class resolved params: class_id='{class_id}', template_id='{template_id}', page={page}, limit={limit}")
+        
+        if not class_id or class_id in ['undefined', 'null']:
+            frappe.logger().error(f"Invalid class_id received: '{class_id}'")
             return validation_error_response(message="Class ID is required", errors={"class_id": ["Required"]})
         campus_id = _campus()
         page = int(page or 1)
