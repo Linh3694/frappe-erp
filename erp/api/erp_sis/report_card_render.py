@@ -1,6 +1,6 @@
 import frappe
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Union
 
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import success_response, error_response, validation_error_response, not_found_response, forbidden_response, single_item_response
@@ -41,6 +41,40 @@ def _load_report(report_id: str):
 
 
 def _build_html(form, report_data: Dict[str, Any]) -> str:
+    def _resolve_path(data: Any, path: Optional[str]) -> Any:
+        if not path:
+            return None
+        cur: Any = data
+        # Support dot path with numeric indexes, e.g. subjects.0.title_vn
+        for raw_key in str(path).split('.'):
+            key = raw_key.strip()
+            if key == '':
+                continue
+            try:
+                if isinstance(cur, list):
+                    # numeric index into list
+                    if key.isdigit():
+                        idx = int(key)
+                        cur = cur[idx] if 0 <= idx < len(cur) else None
+                    else:
+                        # cannot key into list with non-numeric key
+                        cur = None
+                elif isinstance(cur, dict):
+                    cur = cur.get(key)
+                else:
+                    return None
+            except Exception:
+                return None
+            if cur is None:
+                return None
+        return cur
+
+    def _pct(v: Optional[Union[int, float]]) -> str:
+        try:
+            return f"{float(v)}%"
+        except Exception:
+            return "auto"
+
     # Minimal SSR: render background pages with absolutely positioned containers; FE can evolve later
     pages_html = []
     base_styles = """
@@ -74,31 +108,105 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
         except Exception:
             layout = {}
 
-        overlay_items = []
+        overlay_items: List[str] = []
         for el in (layout.get("elements") or []):
-            if el.get("type") == "text":
+            etype = el.get("type")
+            if etype == "text":
                 x = el.get("x", 0)
                 y = el.get("y", 0)
                 w = el.get("w", None)
-                fs = el.get("style", {}).get("fontSize", 12)
-                fw = el.get("style", {}).get("fontWeight", 400)
-                ta = el.get("style", {}).get("textAlign", None)
-                content = report_data
-                for key in (el.get("binding") or "").split('.'):
-                    if not key:
-                        continue
-                    content = content.get(key, "") if isinstance(content, dict) else ""
+                style = el.get("style", {}) or {}
+                fs = style.get("fontSize", 12)
+                fw = style.get("fontWeight", 400)
+                ta = style.get("textAlign", None)
+                # Prefer explicit text, fallback to binding
+                content_val = el.get("text")
+                bound = _resolve_path(report_data, el.get("binding"))
+                if bound is not None and not isinstance(bound, (dict, list)):
+                    content_val = bound
                 classes = ["text"]
-                if fw and int(fw) >= 600:
-                    classes.append("bold")
+                try:
+                    if fw and int(fw) >= 600:
+                        classes.append("bold")
+                except Exception:
+                    pass
                 if ta == "center":
                     classes.append("center")
                 if ta == "right":
                     classes.append("right")
+                safe_text = frappe.utils.escape_html(str(content_val or ""))
+                width_str = f"{w}%" if w is not None else "auto"
                 overlay_items.append(
-                    f'<div class="{" ".join(classes)}" style="left:{x}%;top:{y}%;width:{(str(w)+"%") if w else "auto"};font-size:{fs}pt;">{frappe.utils.escape_html(content or "")}</div>'
+                    f'<div class="{" ".join(classes)}" style="left:{x}%;top:{y}%;width:{width_str};font-size:{fs}pt;">{safe_text}</div>'
                 )
-            # More types (table, matrix) can be added later
+            elif etype == "matrix":
+                # Position container by left/right/top in percent (like FE preview)
+                left = el.get("left", None)
+                right = el.get("right", None)
+                top = el.get("top", None)
+                criteria = el.get("criteria") or _resolve_path(report_data, el.get("criteriaPath")) or []
+                scales = el.get("scales") or _resolve_path(report_data, el.get("scalePath")) or []
+                selections = el.get("selections") or _resolve_path(report_data, el.get("selectionsPath")) or []
+                # Normalize
+                criteria_list = criteria if isinstance(criteria, list) else []
+                scales_list = scales if isinstance(scales, list) else []
+                sel_list = selections if isinstance(selections, list) else []
+                def _has(c: str, s: str) -> bool:
+                    try:
+                        return any(x.get('criteria') == c and x.get('scale') == s for x in sel_list if isinstance(x, dict))
+                    except Exception:
+                        return False
+                style_parts = ["position:absolute"]
+                if left is not None:
+                    style_parts.append(f"left:{_pct(left)}")
+                if right is not None:
+                    style_parts.append(f"right:{_pct(right)}")
+                if top is not None:
+                    style_parts.append(f"top:{_pct(top)}")
+                tbl_head = '<tr><th style="border:1px solid #999;padding:4px;width:28%">Nội dung</th>' + ''.join([f'<th style="border:1px solid #999;padding:4px">{frappe.utils.escape_html(str(sc))}</th>' for sc in scales_list]) + '</tr>'
+                rows = []
+                for cr in criteria_list:
+                    safe_cr = frappe.utils.escape_html(str(cr))
+                    cells = ''.join([f'<td style="border:1px solid #999;padding:4px;text-align:center">{"x" if _has(cr, sc) else ""}</td>' for sc in scales_list])
+                    rows.append(f'<tr><td style="border:1px solid #999;padding:4px">{safe_cr}</td>{cells}</tr>')
+                table_html = (
+                    '<table style="border-collapse:collapse;width:100%;font-size:11pt;border:1px solid #ccc">'
+                    f'<thead>{tbl_head}</thead>'
+                    f'<tbody>{"".join(rows)}</tbody>'
+                    '</table>'
+                )
+                overlay_items.append(f'<div style="{";".join(style_parts)}">{table_html}</div>')
+            elif etype == "comments":
+                left = el.get("left", None)
+                right = el.get("right", None)
+                top = el.get("top", None)
+                items = el.get("items") or _resolve_path(report_data, el.get("listPath")) or []
+                limit = el.get("limit", None)
+                items_list = items if isinstance(items, list) else []
+                if isinstance(limit, int) and limit >= 0:
+                    items_list = items_list[:limit]
+                style_parts = ["position:absolute"]
+                if left is not None:
+                    style_parts.append(f"left:{_pct(left)}")
+                if right is not None:
+                    style_parts.append(f"right:{_pct(right)}")
+                if top is not None:
+                    style_parts.append(f"top:{_pct(top)}")
+                blocks: List[str] = []
+                for it in items_list:
+                    if not isinstance(it, dict):
+                        continue
+                    title = frappe.utils.escape_html(str(it.get('title') or ''))
+                    value = frappe.utils.escape_html(str(it.get('value') or ''))
+                    block_html = (
+                        '<div style="margin-bottom:8px">'
+                        f'<div style="font-weight:600;font-size:12pt">{title}</div>'
+                        f'<div style="min-height:64px;padding:8px;border:1px solid #ccc;border-radius:4px;font-size:12pt;white-space:pre-wrap">{value}</div>'
+                        '</div>'
+                    )
+                    blocks.append(block_html)
+                overlay_items.append(f'<div style="{";".join(style_parts)}">{"".join(blocks)}</div>')
+            # else: unsupported type -> ignore
         # If form has no positioned elements, provide sensible defaults for page 1
         if not overlay_items and idx == 0:
             student = report_data.get("student", {}) if isinstance(report_data, dict) else {}
