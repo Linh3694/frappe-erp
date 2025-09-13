@@ -23,6 +23,7 @@
   "timetable_subject_id",
   "actual_subject_id",
   "subcurriculum_id",
+  "subcurriculum_evaluation_id",
   "room_id"
  ],
  "fields": [
@@ -70,6 +71,12 @@
    "fieldtype": "Link",
    "label": "Sub Curriculum",
    "options": "SIS Sub Curriculum"
+  },
+  {
+   "fieldname": "subcurriculum_evaluation_id",
+   "fieldtype": "Link",
+   "label": "Grading (Sub Curriculum Evaluation)",
+   "options": "SIS Sub Curriculum Evaluation"
   },
   {
    "fieldname": "room_id",
