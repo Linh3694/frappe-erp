@@ -46,16 +46,16 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
     base_styles = """
       <style>
         @page { size: A4; margin: 0; }
-        body { margin: 0; }
-        .page { position: relative; width: 210mm; height: 297mm; page-break-after: always; }
-        .bg { position: absolute; inset: 0; }
-        .overlay { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
-        .text { position: absolute; font-family: Arial, sans-serif; font-size: 12pt; color: #000; }
-        .text.bold { font-weight: 600; }
-        .text.center { text-align: center; }
-        .text.right { text-align: right; }
-        table { border-collapse: collapse; width: 100%; }
-        .hidden { display: none; }
+        .rc-root { display: flex; justify-content: center; }
+        .rc-root .page { position: relative; width: 210mm; max-width: 100%; height: 297mm; page-break-after: always; margin: 0 auto; }
+        .rc-root .bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+        .rc-root .overlay { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+        .rc-root .text { position: absolute; font-family: Arial, sans-serif; font-size: 12pt; color: #000; }
+        .rc-root .text.bold { font-weight: 600; }
+        .rc-root .text.center { text-align: center; }
+        .rc-root .text.right { text-align: right; }
+        .rc-root table { border-collapse: collapse; width: 100%; }
+        .rc-root .hidden { display: none; }
       </style>
     """
     for p in (getattr(form, "pages", None) or []):
@@ -109,7 +109,7 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
             '</div>'
         )
         pages_html.append(page_html)
-    html = f"<html><head><meta charset=\"utf-8\" />{base_styles}</head><body>{''.join(pages_html)}</body></html>"
+    html = f"<div class=\"rc-root\">{base_styles}{''.join(pages_html)}</div>"
     return html
 
 
@@ -125,6 +125,26 @@ def get_report_html(report_id: Optional[str] = None):
         report = _load_report(report_id)
         form = _load_form(report.form_id)
         data = json.loads(report.data_json or "{}")
+        # Enrich data with student & class info for bindings
+        try:
+            crm = frappe.get_doc("CRM Student", report.student_id)
+            data.setdefault("student", {})
+            data["student"].update({
+                "full_name": getattr(crm, "student_name", None) or getattr(crm, "full_name", None) or getattr(crm, "name", ""),
+                "code": getattr(crm, "student_code", ""),
+                "dob": getattr(crm, "dob", ""),
+                "gender": getattr(crm, "gender", ""),
+            })
+        except Exception:
+            pass
+        try:
+            klass = frappe.get_doc("SIS Class", report.class_id)
+            data.setdefault("class", {})
+            data["class"].update({
+                "short_title": getattr(klass, "short_title", None) or getattr(klass, "title", None) or report.class_id,
+            })
+        except Exception:
+            pass
         html = _build_html(form, data)
         return single_item_response({"html": html}, "HTML built")
     except frappe.DoesNotExistError:
