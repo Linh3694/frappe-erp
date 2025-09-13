@@ -204,3 +204,46 @@ def delete_form(form_id: str = None):
         return error_response("Error deleting form")
 
 
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def ensure_default_forms():
+    """Ensure default FE form codes exist as SIS Report Card Form docs for current campus.
+
+    Codes created if missing:
+    - PRIM_VN: Biểu mẫu Tiểu học - CTVN
+    - SEC_VN_MID: THCS - CTVN - Giữa kì
+    - SEC_VN_END1: THCS - CTVN - Cuối kì 1
+    - SEC_VN_END2: THCS - CTVN - Cuối kì 2
+    """
+    try:
+        campus_id = _current_campus_id()
+        defaults = [
+            {"code": "PRIM_VN", "title": "Biểu mẫu Tiểu học - CTVN"},
+            {"code": "SEC_VN_MID", "title": "THCS - CTVN - Giữa kì"},
+            {"code": "SEC_VN_END1", "title": "THCS - CTVN - Cuối kì 1"},
+            {"code": "SEC_VN_END2", "title": "THCS - CTVN - Cuối kì 2"},
+        ]
+        created: list[str] = []
+        for d in defaults:
+            exists = frappe.db.exists("SIS Report Card Form", {"code": d["code"], "campus_id": campus_id})
+            if exists:
+                continue
+            doc = frappe.get_doc({
+                "doctype": "SIS Report Card Form",
+                "code": d["code"],
+                "title": d["title"],
+                "program_type": "vn",
+                "scores_enabled": 1,
+                "homeroom_enabled": 1,
+                "subject_eval_enabled": 1,
+                "campus_id": campus_id,
+            })
+            doc.append("pages", {"page_no": 1, "background_image": None, "layout_json": "{}"})
+            doc.insert(ignore_permissions=True)
+            created.append(doc.name)
+        frappe.db.commit()
+        return success_response(data={"created": created}, message="Default forms ensured")
+    except Exception as e:
+        frappe.log_error(f"Error ensure_default_forms: {str(e)}")
+        return error_response("Error ensuring default forms")
+
