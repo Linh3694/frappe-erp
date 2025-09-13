@@ -119,7 +119,7 @@
    "fieldname": "class_type",
    "fieldtype": "Select",
    "label": "Class Type",
-   "options": "regular\nmixed",
+   "options": "regular\nmixed\nclub",
    "default": "regular"
   }
  ],
