@@ -240,6 +240,7 @@ whitelisted_methods = [
 	"erp.api.erp_sis.sub_curriculum.update_sub_curriculum",
 	"erp.api.erp_sis.sub_curriculum.delete_sub_curriculum",
 	"erp.api.erp_sis.sub_curriculum.get_sub_curriculums_for_selection",
+	"erp.api.erp_sis.sub_curriculum.get_sub_curriculums_with_criteria",
 	"erp.api.erp_sis.sub_curriculum_evaluation.get_sub_curriculum_evaluations",
 	"erp.api.erp_sis.sub_curriculum_evaluation.get_sub_curriculum_evaluation_by_id",
 	"erp.api.erp_sis.sub_curriculum_evaluation.create_sub_curriculum_evaluation",

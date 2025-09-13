@@ -282,3 +282,74 @@ def get_sub_curriculums_for_selection():
         return error_response(message="Error fetching sub curriculums", code="FETCH_SUB_CURRICULUMS_ERROR")
 
 
+@frappe.whitelist(allow_guest=False)
+def get_sub_curriculums_with_criteria():
+    """Return sub curriculums together with their evaluations and criteria for current campus.
+    Optional: curriculum_id to filter.
+    Response shape: [{ subcurriculum, evaluations: [{ name, title, criteria: [{ name, title, value, letter_grade, description }] }] }]
+    """
+    try:
+        campus_id = get_current_campus_from_context() or "campus-1"
+        curriculum_id = frappe.local.form_dict.get("curriculum_id")
+
+        sc_filters = {"campus_id": campus_id}
+        if curriculum_id:
+            sc_filters["curriculum_id"] = curriculum_id
+
+        subcurriculums = frappe.get_all(
+            DOCTYPE,
+            fields=["name", "title_vn", "title_en", "short_title", "curriculum_id", "campus_id"],
+            filters=sc_filters,
+            order_by="title_vn asc",
+        )
+
+        if not subcurriculums:
+            return list_response([], "No sub curriculums found")
+
+        sc_ids = [sc.name for sc in subcurriculums]
+
+        # Fetch evaluations in one go
+        evals = frappe.get_all(
+            "SIS Sub Curriculum Evaluation",
+            fields=["name", "title", "subcurriculum_id", "campus_id"],
+            filters={"subcurriculum_id": ["in", sc_ids], "campus_id": campus_id},
+        )
+
+        eval_ids = [e.name for e in evals]
+        criteria = []
+        if eval_ids:
+            criteria = frappe.get_all(
+                "SIS Curriculum Evaluation Criteria",
+                fields=["name", "title", "value", "letter_grade", "description", "subcurriculum_evaluation_id", "campus_id"],
+                filters={"subcurriculum_evaluation_id": ["in", eval_ids], "campus_id": campus_id},
+                order_by="value asc, letter_grade asc",
+            )
+
+        # Build maps
+        evals_by_sc = {}
+        for e in evals:
+            evals_by_sc.setdefault(e.subcurriculum_id, []).append({**e, "criteria": []})
+
+        crit_by_eval = {}
+        for c in criteria:
+            crit_by_eval.setdefault(c.subcurriculum_evaluation_id, []).append(c)
+
+        # Attach criteria to evaluations
+        for sc_id, eval_list in evals_by_sc.items():
+            for i, e in enumerate(eval_list):
+                eval_list[i]["criteria"] = crit_by_eval.get(e["name"], [])
+
+        result = []
+        for sc in subcurriculums:
+            result.append({
+                **sc,
+                "evaluations": evals_by_sc.get(sc.name, [])
+            })
+
+        return success_response(data=result, message="Sub curriculums with criteria fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching sub curriculums with criteria: {str(e)}")
+        return error_response(message="Error fetching sub curriculums with criteria", code="FETCH_SUB_CURR_WITH_CRIT_ERROR")
+
+
