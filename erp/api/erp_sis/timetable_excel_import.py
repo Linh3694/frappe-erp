@@ -23,28 +23,37 @@ class TimetableExcelImporter:
         self.mapping_cache = {}
 
     def validate_excel_structure(self, df: pd.DataFrame) -> bool:
-        """Validate Excel file structure"""
+        """Validate Excel file structure (supports old and new layouts)
+
+        Old layout (legacy): columns include: Day of Week, Period, Class, Subject, (optional) Teacher 1, Teacher 2
+        New layout: first two columns must be Day of Week, Period; subsequent columns are class headers
+        """
         # Normalize headers to canonical names first
         df = self.normalize_columns(df)
-        required_columns = ['Day of Week', 'Period', 'Class', 'Subject', 'Teacher 1']
-        missing_columns = []
 
-        # Check for required columns (case insensitive)
-        df_columns = [col.lower().strip() for col in df.columns]
-
-        for req_col in required_columns:
-            if req_col.lower() not in df_columns:
-                missing_columns.append(req_col)
-
-        if missing_columns:
-            self.errors.append(f"Missing required columns: {', '.join(missing_columns)}")
-            return False
-
-        # Check for data rows
         if len(df) == 0:
             self.errors.append("Excel file is empty or has no data rows")
             return False
 
+        cols_lower = [str(c).strip().lower() for c in df.columns]
+
+        has_day = 'day of week' in cols_lower
+        has_period = 'period' in cols_lower
+        has_class = 'class' in cols_lower
+        has_subject = 'subject' in cols_lower
+
+        # Detect new layout: Day of Week + Period present and at least one additional column that is not Subject/Class
+        if has_day and has_period and (len(cols_lower) >= 3) and not (has_class and has_subject):
+            # New layout requires Day of Week and Period specifically in first two logical positions,
+            # but allow loose order as long as they exist
+            return True
+
+        # Fallback to old layout (accept Teacher columns optional)
+        required_old = ['day of week', 'period', 'class', 'subject']
+        missing = [c for c in required_old if c not in cols_lower]
+        if missing:
+            self.errors.append(f"Missing required columns: {', '.join([m.title() for m in missing])}")
+            return False
         return True
 
     def normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -168,6 +177,143 @@ class TimetableExcelImporter:
                 self.errors.append(f"Subject '{subject_title}' not found")
 
         return subject_id
+
+    def validate_and_map_timetable_subject(self, ts_title: str) -> Optional[str]:
+        """Map title to SIS Timetable Subject (by VN/EN title within campus)"""
+        if not ts_title:
+            return None
+        title = str(ts_title).strip()
+        # Try Vietnamese title first
+        ts_id = self.get_or_cache_mapping(
+            "SIS Timetable Subject",
+            "title_vn",
+            title,
+            {"campus_id": self.campus_id}
+        )
+        if ts_id:
+            return ts_id
+        # Fallback to English title
+        ts_id = self.get_or_cache_mapping(
+            "SIS Timetable Subject",
+            "title_en",
+            title,
+            {"campus_id": self.campus_id}
+        )
+        if not ts_id:
+            self.errors.append(f"Timetable Subject '{title}' not found")
+        return ts_id
+
+    def derive_subject_from_timetable_subject(self, timetable_subject_id: str, education_stage_id: Optional[str]) -> Optional[str]:
+        """Choose a SIS Subject that links to the given Timetable Subject within campus (and stage if provided)."""
+        if not timetable_subject_id:
+            return None
+        try:
+            filters = {
+                "campus_id": self.campus_id,
+                "timetable_subject_id": timetable_subject_id,
+            }
+            if education_stage_id:
+                filters["education_stage"] = education_stage_id
+            subject_rows = frappe.get_all("SIS Subject", fields=["name"], filters=filters, limit=1)
+            if subject_rows:
+                return subject_rows[0].name
+        except Exception:
+            pass
+        self.warnings.append(f"No SIS Subject linked to Timetable Subject '{timetable_subject_id}' for given campus/stage")
+        return None
+
+    def get_teachers_for_class_subject(self, class_id: str, subject_id: str) -> Tuple[Optional[str], Optional[str], str]:
+        """Return up to 2 teacher IDs for the given class+subject (Subject Assignment). Also return display name string."""
+        teacher_1_id: Optional[str] = None
+        teacher_2_id: Optional[str] = None
+        display_names: List[str] = []
+        try:
+            rows = frappe.get_all(
+                "SIS Subject Assignment",
+                fields=["teacher_id"],
+                filters={
+                    "campus_id": self.campus_id,
+                    "class_id": class_id,
+                    "subject_id": subject_id,
+                },
+                order_by="creation asc",
+                limit_page_length=10,
+            )
+            teachers = [r["teacher_id"] for r in rows if r.get("teacher_id")]
+            if teachers:
+                teacher_1_id = teachers[0]
+                if len(teachers) > 1:
+                    teacher_2_id = teachers[1]
+            # Resolve display names via User
+            if teachers:
+                t_rows = frappe.get_all("SIS Teacher", fields=["name", "user_id"], filters={"name": ["in", teachers]})
+                user_ids = [tr.user_id for tr in t_rows if tr.get("user_id")]
+                user_map = {}
+                if user_ids:
+                    u_rows = frappe.get_all("User", fields=["name", "full_name", "first_name", "middle_name", "last_name"], filters={"name": ["in", user_ids]})
+                    for u in u_rows:
+                        dn = u.get("full_name") or " ".join([p for p in [u.get("first_name"), u.get("middle_name"), u.get("last_name")] if p]) or u.get("name")
+                        user_map[u.name] = dn
+                name_map = {tr.name: user_map.get(tr.user_id) or tr.user_id or tr.name for tr in t_rows}
+                for tid in [teacher_1_id, teacher_2_id]:
+                    if tid:
+                        display_names.append(name_map.get(tid) or tid)
+        except Exception:
+            pass
+        return teacher_1_id, teacher_2_id, ", ".join([n for n in display_names if n])
+
+    def upsert_student_subjects(self, class_id: str, subject_id: Optional[str], actual_subject_id: Optional[str]):
+        """Create or update SIS Student Subject for all students in class for the mapped subject.
+        If the new DocType is not yet available, skip silently.
+        """
+        if not subject_id and not actual_subject_id:
+            return
+        try:
+            # Ensure DocType exists
+            if not frappe.db.has_table("SIS Student Subject"):
+                return
+        except Exception:
+            return
+
+        try:
+            students = frappe.get_all(
+                "SIS Class Student",
+                fields=["student_id"],
+                filters={"class_id": class_id},
+                limit_page_length=100000,
+            )
+            for s in students:
+                sid = s.get("student_id")
+                if not sid:
+                    continue
+                exists_filters = {
+                    "campus_id": self.campus_id,
+                    "student_id": sid,
+                    "class_id": class_id,
+                }
+                if subject_id:
+                    exists_filters["subject_id"] = subject_id
+                if actual_subject_id:
+                    exists_filters["actual_subject_id"] = actual_subject_id
+                exists = frappe.db.exists("SIS Student Subject", exists_filters)
+                if exists:
+                    # Optionally update
+                    continue
+                doc = frappe.get_doc({
+                    "doctype": "SIS Student Subject",
+                    "campus_id": self.campus_id,
+                    "student_id": sid,
+                    "class_id": class_id,
+                    "subject_id": subject_id,
+                    "actual_subject_id": actual_subject_id,
+                })
+                try:
+                    doc.insert()
+                except Exception:
+                    # Skip individual failures
+                    continue
+        except Exception:
+            pass
 
     def validate_and_map_teacher(self, teacher_identifier: str, suppress_error: bool = False) -> Optional[str]:
         """Map teacher identifier to SIS Teacher via supported strategies.
@@ -293,7 +439,9 @@ class TimetableExcelImporter:
                 room_schedule[key] = True
 
     def process_excel_data(self, df: pd.DataFrame, education_stage_id: str) -> Tuple[List[Dict], bool]:
-        """Process Excel data and return validated schedule data"""
+        """Process Excel data and return validated schedule data.
+        Supports old and new layouts. New layout: header has classes as columns.
+        """
         self.errors = []
         self.warnings = []
         self.mapping_cache = {}
@@ -301,50 +449,118 @@ class TimetableExcelImporter:
         if not self.validate_excel_structure(df):
             return [], False
 
-        schedule_data = []
+        schedule_data: List[Dict] = []
 
-        for idx, row in df.iterrows():
-            try:
-                # Extract and normalize data
-                day_of_week_str = str(row.get('Day of Week', '')).strip()
-                period_str = str(row.get('Period', '')).strip()
-                class_str = str(row.get('Class', '')).strip()
-                subject_str = str(row.get('Subject', '')).strip()
-                teacher_1_str = str(row.get('Teacher 1', '')).strip()
-                teacher_2_str = str(row.get('Teacher 2', '')).strip() or None
+        cols = list(df.columns)
+        cols_lower = [str(c).strip().lower() for c in cols]
+        is_new_layout = ('day of week' in cols_lower and 'period' in cols_lower and not ('class' in cols_lower and 'subject' in cols_lower))
 
-                # Validate and map
-                day_of_week = self.normalize_day_of_week(day_of_week_str)
-                if not day_of_week:
-                    self.errors.append(f"Row {idx+2}: Invalid day of week '{day_of_week_str}'")
-                    continue
+        if is_new_layout:
+            # Map column indices
+            day_idx = cols_lower.index('day of week')
+            period_idx = cols_lower.index('period')
+            class_columns = [i for i in range(len(cols)) if i not in (day_idx, period_idx)]
 
-                class_id = self.validate_and_map_class(class_str)
-                subject_id = self.validate_and_map_subject(subject_str, education_stage_id)
-                teacher_1_id = self.validate_and_map_teacher(teacher_1_str)
-                teacher_2_id = self.validate_and_map_teacher(teacher_2_str, suppress_error=True) if teacher_2_str else None
-                timetable_column_id = self.validate_and_map_period(period_str, education_stage_id)
+            for idx, row in df.iterrows():
+                try:
+                    day_of_week_str = str(row.iloc[day_idx]).strip()
+                    period_str = str(row.iloc[period_idx]).strip()
+                    # Validate and map day/period once
+                    day_of_week = self.normalize_day_of_week(day_of_week_str)
+                    if not day_of_week:
+                        self.errors.append(f"Row {idx+2}: Invalid day of week '{day_of_week_str}'")
+                        continue
+                    timetable_column_id = self.validate_and_map_period(period_str, education_stage_id)
+                    if not timetable_column_id:
+                        continue
 
-                if not all([class_id, subject_id, teacher_1_id, timetable_column_id]):
-                    continue
+                    # Iterate class columns
+                    for ci in class_columns:
+                        class_header = str(cols[ci]).strip()
+                        if not class_header:
+                            continue
+                        class_id = self.validate_and_map_class(class_header)
+                        if not class_id:
+                            # Class not found -> warning and skip this cell
+                            continue
+                        cell_value = row.iloc[ci]
+                        subject_cell = str(cell_value).strip() if cell_value is not None else ''
+                        if not subject_cell:
+                            continue
 
-                schedule_row = {
-                    'day_of_week': day_of_week,
-                    'timetable_column_id': timetable_column_id,
-                    'class_id': class_id,
-                    'subject_id': subject_id,
-                    'teacher_1_id': teacher_1_id,
-                    'teacher_2_id': teacher_2_id,
-                    'period_priority': period_str,
-                    'subject_title': subject_str,
-                    'teacher_names': teacher_1_str + (f", {teacher_2_str}" if teacher_2_str else ""),
-                    'excel_row': idx + 2
-                }
+                        # The cell contains Timetable Subject title
+                        ts_id = self.validate_and_map_timetable_subject(subject_cell)
+                        if not ts_id:
+                            continue
+                        # Derive SIS Subject from Timetable Subject
+                        subject_id = self.derive_subject_from_timetable_subject(ts_id, education_stage_id)
+                        # Derive teachers by Subject Assignment
+                        teacher_1_id, teacher_2_id, teacher_names = (None, None, "")
+                        if subject_id:
+                            teacher_1_id, teacher_2_id, teacher_names = self.get_teachers_for_class_subject(class_id, subject_id)
 
-                schedule_data.append(schedule_row)
+                        schedule_row = {
+                            'day_of_week': day_of_week,
+                            'timetable_column_id': timetable_column_id,
+                            'class_id': class_id,
+                            'subject_id': subject_id,  # May be None if not derivable; row still stored for display
+                            'teacher_1_id': teacher_1_id,
+                            'teacher_2_id': teacher_2_id,
+                            'period_priority': period_str,
+                            # Display subject title should be Timetable Subject
+                            'subject_title': subject_cell,
+                            'teacher_names': teacher_names,
+                            'timetable_subject_id': ts_id,
+                            'excel_row': idx + 2
+                        }
+                        schedule_data.append(schedule_row)
+                except Exception as e:
+                    self.errors.append(f"Row {idx+2}: Error processing row - {str(e)}")
+        else:
+            # Old layout processing (backward compatible)
+            for idx, row in df.iterrows():
+                try:
+                    # Extract and normalize data
+                    day_of_week_str = str(row.get('Day of Week', '')).strip()
+                    period_str = str(row.get('Period', '')).strip()
+                    class_str = str(row.get('Class', '')).strip()
+                    subject_str = str(row.get('Subject', '')).strip()
+                    teacher_1_str = str(row.get('Teacher 1', '')).strip()
+                    teacher_2_str = str(row.get('Teacher 2', '')).strip() or None
 
-            except Exception as e:
-                self.errors.append(f"Row {idx+2}: Error processing row - {str(e)}")
+                    # Validate and map
+                    day_of_week = self.normalize_day_of_week(day_of_week_str)
+                    if not day_of_week:
+                        self.errors.append(f"Row {idx+2}: Invalid day of week '{day_of_week_str}'")
+                        continue
+
+                    class_id = self.validate_and_map_class(class_str)
+                    # Old layout: map Subject directly to SIS Subject
+                    subject_id = self.validate_and_map_subject(subject_str, education_stage_id)
+                    teacher_1_id = self.validate_and_map_teacher(teacher_1_str)
+                    teacher_2_id = self.validate_and_map_teacher(teacher_2_str, suppress_error=True) if teacher_2_str else None
+                    timetable_column_id = self.validate_and_map_period(period_str, education_stage_id)
+
+                    if not all([class_id, subject_id, teacher_1_id, timetable_column_id]):
+                        continue
+
+                    schedule_row = {
+                        'day_of_week': day_of_week,
+                        'timetable_column_id': timetable_column_id,
+                        'class_id': class_id,
+                        'subject_id': subject_id,
+                        'teacher_1_id': teacher_1_id,
+                        'teacher_2_id': teacher_2_id,
+                        'period_priority': period_str,
+                        'subject_title': subject_str,
+                        'teacher_names': teacher_1_str + (f", {teacher_2_str}" if teacher_2_str else ""),
+                        'excel_row': idx + 2
+                    }
+
+                    schedule_data.append(schedule_row)
+
+                except Exception as e:
+                    self.errors.append(f"Row {idx+2}: Error processing row - {str(e)}")
 
         # Validate schedule conflicts
         if schedule_data:
@@ -504,7 +720,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 }
                 return single_item_response(result, "Timetable import validation failed")
 
-            # Parse to schedule_data with mapping validations
+            # Parse to schedule_data with mapping validations (supports new layout)
             education_stage_id = import_data.get("education_stage_id")
             schedule_data, ok = importer.process_excel_data(df, education_stage_id)
             if not ok:
@@ -601,6 +817,16 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         # weekly_pattern is required; insert parent first ignoring mandatory,
                         # then append children and save
                         instance_doc.insert(ignore_mandatory=True)
+                        # Upsert SIS Student Subject for distinct subjects in this class
+                        try:
+                            distinct_subjects = list({r.get('subject_id') for r in class_rows if r.get('subject_id')})
+                            for subj in distinct_subjects:
+                                if subj:
+                                    actual_subj = frappe.db.get_value("SIS Subject", subj, "actual_subject_id")
+                                    importer.upsert_student_subjects(class_id, subj, actual_subj)
+                        except Exception:
+                            pass
+
                         for row in class_rows:
                             pp_str = str(row.get("period_priority") or "").strip()
                             try:

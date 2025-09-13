@@ -1,0 +1,121 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-STUDENT-SUBJECT-{#####}",
+ "beta": 0,
+ "creation": "2025-01-01 00:00:00.000000",
+ "custom": 0,
+ "description": "Materialized mapping of Student-Class-Subject for reporting and quick lookup",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "campus_id",
+  "student_id",
+  "class_id",
+  "subject_id",
+  "actual_subject_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "label": "Class",
+   "options": "SIS Class",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "subject_id",
+   "fieldtype": "Link",
+   "label": "Subject",
+   "options": "SIS Subject"
+  },
+  {
+   "fieldname": "actual_subject_id",
+   "fieldtype": "Link",
+   "label": "Actual Subject",
+   "options": "SIS Actual Subject"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Student Subject",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "name",
+ "track_changes": 1
+}
+

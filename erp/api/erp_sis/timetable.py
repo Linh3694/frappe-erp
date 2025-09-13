@@ -705,13 +705,28 @@ def get_teacher_week():
         try:
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
             subject_title_map = {}
+            timetable_subject_by_subject = {}
+            timetable_subject_title_map = {}
             if subject_ids:
-                for s in frappe.get_all(
+                subj_rows = frappe.get_all(
                     "SIS Subject",
-                    fields=["name", "title"],
+                    fields=["name", "title", "timetable_subject_id"],
                     filters={"name": ["in", subject_ids]},
-                ):
+                )
+                for s in subj_rows:
                     subject_title_map[s.name] = s.title
+                    if s.get("timetable_subject_id"):
+                        timetable_subject_by_subject[s.name] = s.get("timetable_subject_id")
+                # Load timetable subject titles for display preference
+                ts_ids = list({ts for ts in timetable_subject_by_subject.values() if ts})
+                if ts_ids:
+                    ts_rows = frappe.get_all(
+                        "SIS Timetable Subject",
+                        fields=["name", "title_vn", "title_en"],
+                        filters={"name": ["in", ts_ids]},
+                    )
+                    for ts in ts_rows:
+                        timetable_subject_title_map[ts.name] = ts.title_vn or ts.title_en or ""
 
             teacher_ids = list({tid for r in rows for tid in [r.get("teacher_1_id"), r.get("teacher_2_id")] if tid})
             teacher_user_map = {}
@@ -738,7 +753,12 @@ def get_teacher_week():
                     teacher_user_map[t.name] = user_display_map.get(t.get("user_id")) or t.get("user_id") or t.get("name")
 
             for r in rows:
-                r["subject_title"] = subject_title_map.get(r.get("subject_id")) or r.get("subject_title") or r.get("subject_name") or ""
+                # Prefer Timetable Subject title if linked via SIS Subject
+                subj_id = r.get("subject_id")
+                ts_id = timetable_subject_by_subject.get(subj_id)
+                ts_title = timetable_subject_title_map.get(ts_id) if ts_id else None
+                default_title = subject_title_map.get(subj_id) or r.get("subject_title") or r.get("subject_name") or ""
+                r["subject_title"] = ts_title or default_title
                 teacher_names_list = []
                 if r.get("teacher_1_id"):
                     teacher_names_list.append(teacher_user_map.get(r.get("teacher_1_id")) or "")
@@ -873,13 +893,27 @@ def get_class_week():
             teacher_ids = list({tid for r in rows for tid in [r.get("teacher_1_id"), r.get("teacher_2_id")] if tid})
 
             subject_title_map = {}
+            timetable_subject_by_subject = {}
+            timetable_subject_title_map = {}
             if subject_ids:
-                for s in frappe.get_all(
+                subj_rows = frappe.get_all(
                     "SIS Subject",
-                    fields=["name", "title"],
+                    fields=["name", "title", "timetable_subject_id"],
                     filters={"name": ["in", subject_ids]},
-                ):
+                )
+                for s in subj_rows:
                     subject_title_map[s.name] = s.title
+                    if s.get("timetable_subject_id"):
+                        timetable_subject_by_subject[s.name] = s.get("timetable_subject_id")
+                ts_ids = list({ts for ts in timetable_subject_by_subject.values() if ts})
+                if ts_ids:
+                    ts_rows = frappe.get_all(
+                        "SIS Timetable Subject",
+                        fields=["name", "title_vn", "title_en"],
+                        filters={"name": ["in", ts_ids]},
+                    )
+                    for ts in ts_rows:
+                        timetable_subject_title_map[ts.name] = ts.title_vn or ts.title_en or ""
 
             teacher_user_map = {}
             if teacher_ids:
@@ -905,7 +939,11 @@ def get_class_week():
                     teacher_user_map[t.name] = user_display_map.get(t.get("user_id")) or t.get("user_id") or t.get("name")
 
             for r in rows:
-                r["subject_title"] = subject_title_map.get(r.get("subject_id")) or r.get("subject_title") or r.get("subject_name") or ""
+                subj_id = r.get("subject_id")
+                ts_id = timetable_subject_by_subject.get(subj_id)
+                ts_title = timetable_subject_title_map.get(ts_id) if ts_id else None
+                default_title = subject_title_map.get(subj_id) or r.get("subject_title") or r.get("subject_name") or ""
+                r["subject_title"] = ts_title or default_title
                 teacher_names_list = []
                 if r.get("teacher_1_id"):
                     teacher_names_list.append(teacher_user_map.get(r.get("teacher_1_id")) or "")
