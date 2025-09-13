@@ -60,6 +60,13 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
     """
     for p in (getattr(form, "pages", None) or []):
         bg_url = p.background_image or ""
+        if bg_url and not str(bg_url).lower().startswith(("http://", "https://")):
+            try:
+                bg_url = frappe.utils.get_url(bg_url)
+            except Exception:
+                # fallback: ensure single leading slash
+                if not str(bg_url).startswith('/'):
+                    bg_url = f"/{bg_url}"
         # Placeholders: allow user to upload later; keep an empty background if not set
         layout = {}
         try:
