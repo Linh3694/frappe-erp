@@ -58,7 +58,7 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
         .rc-root .hidden { display: none; }
       </style>
     """
-    for p in (getattr(form, "pages", None) or []):
+    for idx, p in enumerate(getattr(form, "pages", None) or []):
         bg_url = p.background_image or ""
         if bg_url and not str(bg_url).lower().startswith(("http://", "https://")):
             try:
@@ -99,6 +99,30 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
                     f'<div class="{" ".join(classes)}" style="left:{x}%;top:{y}%;width:{(str(w)+"%") if w else "auto"};font-size:{fs}pt;">{frappe.utils.escape_html(content or "")}</div>'
                 )
             # More types (table, matrix) can be added later
+        # If form has no positioned elements, provide sensible defaults for page 1
+        if not overlay_items and idx == 0:
+            student = report_data.get("student", {}) if isinstance(report_data, dict) else {}
+            klass = report_data.get("class", {}) if isinstance(report_data, dict) else {}
+            subject_eval = report_data.get("subject_eval", {}) if isinstance(report_data, dict) else {}
+            # Subject title guess
+            subject_id = subject_eval.get("subject_id") if isinstance(subject_eval, dict) else None
+            default_subject_title = subject_id or ""
+            def _text(left, top, width, content, align=None, bold=False):
+                classes = ["text"]
+                if bold:
+                    classes.append("bold")
+                if align in ("center", "right"):
+                    classes.append(align)
+                overlay_items.append(
+                    f'<div class="{' '.join(classes)}" style="left:{left}%;top:{top}%;width:{width}%;">{frappe.utils.escape_html(content or "")}</div>'
+                )
+            _text(20, 20, 40, student.get("full_name", ""))
+            _text(25, 15, 18, student.get("code", ""), align="right")
+            _text(30, 15, 25, student.get("dob", ""))
+            _text(62, 20, 16, klass.get("short_title", ""))
+            _text(62, 26, 20, student.get("gender", ""))
+            _text(30, 32, 40, default_subject_title, bold=True)
+
         # Build small fragments first to avoid nested f-strings with escapes
         bg_tag = f'<img class="bg" src="{bg_url}" />' if bg_url else ''
         overlay_html = ''.join(overlay_items)
