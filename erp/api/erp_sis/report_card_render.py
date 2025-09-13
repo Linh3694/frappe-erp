@@ -92,12 +92,15 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
                     f'<div class="{" ".join(classes)}" style="left:{x}%;top:{y}%;width:{(str(w)+"%") if w else "auto"};font-size:{fs}pt;">{frappe.utils.escape_html(content or "")}</div>'
                 )
             # More types (table, matrix) can be added later
-        page_html = f"""
-          <div class=\"page\">
-            {f'<img class=\"bg\" src=\"{bg_url}\" />' if bg_url else ''}
-            <div class=\"overlay\">{''.join(overlay_items)}</div>
-          </div>
-        """
+        # Build small fragments first to avoid nested f-strings with escapes
+        bg_tag = f'<img class="bg" src="{bg_url}" />' if bg_url else ''
+        overlay_html = ''.join(overlay_items)
+        page_html = (
+            '<div class="page">'
+            f'{bg_tag}'
+            f'<div class="overlay">{overlay_html}</div>'
+            '</div>'
+        )
         pages_html.append(page_html)
     html = f"<html><head><meta charset=\"utf-8\" />{base_styles}</head><body>{''.join(pages_html)}</body></html>"
     return html
