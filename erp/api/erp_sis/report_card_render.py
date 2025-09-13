@@ -113,8 +113,10 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
                     classes.append("bold")
                 if align in ("center", "right"):
                     classes.append(align)
+                class_str = " ".join(classes)
+                safe_content = frappe.utils.escape_html(content or "")
                 overlay_items.append(
-                    f'<div class="{' '.join(classes)}" style="left:{left}%;top:{top}%;width:{width}%;">{frappe.utils.escape_html(content or "")}</div>'
+                    f'<div class="{class_str}" style="left:{left}%;top:{top}%;width:{width}%;">{safe_content}</div>'
                 )
             _text(20, 20, 40, student.get("full_name", ""))
             _text(25, 15, 18, student.get("code", ""), align="right")
