@@ -131,6 +131,39 @@ def create_sub_curriculum():
             }
         )
         doc.insert()
+
+        # Optional: create evaluation and criteria in one call
+        criteria_rows = data.get("criteria") or []
+        evaluation_title = data.get("evaluation_title") or f"{title_vn} - Evaluation"
+        created_eval_id = None
+        if isinstance(criteria_rows, list) and len(criteria_rows) > 0:
+            eval_doc = frappe.get_doc({
+                "doctype": "SIS Sub Curriculum Evaluation",
+                "title": evaluation_title,
+                "subcurriculum_id": doc.name,
+                "campus_id": campus_id,
+            })
+            eval_doc.insert()
+            created_eval_id = eval_doc.name
+
+            for row in criteria_rows:
+                try:
+                    title = (row.get("title") or row.get("letter_grade") or str(row.get("value") or "")).strip()
+                    value = row.get("value")
+                    letter_grade = row.get("letter_grade")
+                    description = row.get("description")
+                    frappe.get_doc({
+                        "doctype": "SIS Curriculum Evaluation Criteria",
+                        "title": title,
+                        "value": value,
+                        "letter_grade": letter_grade,
+                        "description": description,
+                        "subcurriculum_evaluation_id": eval_doc.name,
+                        "campus_id": campus_id,
+                    }).insert()
+                except Exception as crit_err:
+                    frappe.logger().warning(f"Skip invalid criteria row: {crit_err}")
+
         frappe.db.commit()
 
         return single_item_response(
@@ -141,6 +174,7 @@ def create_sub_curriculum():
                 "short_title": doc.short_title,
                 "curriculum_id": doc.curriculum_id,
                 "campus_id": doc.campus_id,
+                "evaluation_id": created_eval_id,
             },
             "Sub curriculum created successfully",
         )
