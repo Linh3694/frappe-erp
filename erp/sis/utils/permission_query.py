@@ -109,6 +109,21 @@ def sis_subject_query(user):
     return get_campus_permission_query("SIS Subject", user)
 
 
+def sis_sub_curriculum_query(user):
+    """Permission query for SIS Sub Curriculum"""
+    return get_campus_permission_query("SIS Sub Curriculum", user)
+
+
+def sis_sub_curriculum_evaluation_query(user):
+    """Permission query for SIS Sub Curriculum Evaluation"""
+    return get_campus_permission_query("SIS Sub Curriculum Evaluation", user)
+
+
+def sis_curriculum_evaluation_criteria_query(user):
+    """Permission query for SIS Curriculum Evaluation Criteria"""
+    return get_campus_permission_query("SIS Curriculum Evaluation Criteria", user)
+
+
 def sis_timetable_column_query(user):
     """Permission query for SIS Timetable Column"""
     return get_campus_permission_query("SIS Timetable Column", user)

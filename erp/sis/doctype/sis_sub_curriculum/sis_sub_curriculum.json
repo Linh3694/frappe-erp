@@ -5,11 +5,11 @@
  "allow_guest_to_view": 0,
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:SIS_ACTUAL_SUBJECT-{#####}",
+ "autoname": "format:SIS_SUB_CURR-{#####}",
  "beta": 0,
- "creation": "2024-08-20 09:00:00.000000",
+ "creation": "2025-09-12 00:00:00.000000",
  "custom": 0,
- "description": "SIS Actual Subject Management",
+ "description": "SIS Sub Curriculum Management",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -18,8 +18,10 @@
  "field_order": [
   "basic_information",
   "campus_id",
+  "curriculum_id",
   "title_vn",
-  "title_en"
+  "title_en",
+  "short_title"
  ],
  "fields": [
   {
@@ -36,36 +38,40 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "curriculum_id",
+   "fieldtype": "Link",
+   "label": "Curriculum",
+   "options": "SIS Curriculum",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
    "fieldname": "title_vn",
    "fieldtype": "Data",
-   "label": "Actual Subject Name (VN)",
+   "label": "Sub Curriculum Name (VN)",
    "reqd": 1,
-   "unique": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "title_en",
    "fieldtype": "Data",
-   "label": "Actual Subject Name (EN)",
-   "reqd": 1,
-   "in_list_view": 1
+   "label": "Sub Curriculum Name (EN)",
+   "reqd": 1
   },
   {
-   "fieldname": "curriculum_id",
-   "fieldtype": "Link",
-   "label": "Curriculum",
-   "options": "SIS Curriculum",
-   "reqd": 0,
-   "hidden": 1
+   "fieldname": "short_title",
+   "fieldtype": "Data",
+   "label": "Short Title",
+   "reqd": 0
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-08-20 09:00:00.000000",
+ "modified": "2025-09-12 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
- "name": "SIS Actual Subject",
+ "name": "SIS Sub Curriculum",
  "owner": "Administrator",
  "permissions": [
   {
@@ -111,3 +117,4 @@
  "title_field": "title_vn",
  "track_changes": 1
 }
+

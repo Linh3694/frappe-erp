@@ -22,6 +22,7 @@
   "education_stage",
   "timetable_subject_id",
   "actual_subject_id",
+  "subcurriculum_id",
   "room_id"
  ],
  "fields": [
@@ -63,6 +64,12 @@
    "fieldtype": "Link",
    "label": "Actual Subject",
    "options": "SIS Actual Subject"
+  },
+  {
+   "fieldname": "subcurriculum_id",
+   "fieldtype": "Link",
+   "label": "Sub Curriculum",
+   "options": "SIS Sub Curriculum"
   },
   {
    "fieldname": "room_id",

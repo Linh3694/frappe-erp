@@ -522,15 +522,10 @@ def delete_curriculum():
         # Check for linked documents before deletion
         linked_docs = []
         try:
-            # Check Actual Subject links
-            actual_subject_count = frappe.db.count("SIS Actual Subject", {"curriculum_id": curriculum_id})
-            if actual_subject_count > 0:
-                linked_docs.append(f"{actual_subject_count} môn học thực tế")
-
-            # Check Subject links
-            subject_count = frappe.db.count("SIS Subject", {"curriculum_id": curriculum_id})
-            if subject_count > 0:
-                linked_docs.append(f"{subject_count} môn học")
+            # Check Sub Curriculum links instead of Actual Subject/Subject
+            subcurriculum_count = frappe.db.count("SIS Sub Curriculum", {"curriculum_id": curriculum_id})
+            if subcurriculum_count > 0:
+                linked_docs.append(f"{subcurriculum_count} chương trình con")
 
             if linked_docs:
                 return error_response(

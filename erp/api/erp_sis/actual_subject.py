@@ -36,7 +36,6 @@ def get_all_actual_subjects():
                 "name",
                 "title_vn",
                 "title_en",
-                "curriculum_id",
                 "campus_id",
                 "creation",
                 "modified"
@@ -123,7 +122,6 @@ def get_actual_subject_by_id():
                 "name": actual_subject.name,
                 "title_vn": actual_subject.title_vn,
                 "title_en": actual_subject.title_en,
-                "curriculum_id": actual_subject.curriculum_id,
                 "campus_id": actual_subject.campus_id,
                 "creation": actual_subject.creation,
                 "modified": actual_subject.modified
@@ -161,15 +159,14 @@ def create_actual_subject():
         # Extract values from data
         title_vn = data.get("title_vn")
         title_en = data.get("title_en")
-        curriculum_id = data.get("curriculum_id")
+        # curriculum_id no longer required/used
         
         # Input validation
-        if not title_vn or not curriculum_id:
+        if not title_vn:
             return validation_error_response(
-                message="Title VN and Curriculum are required",
+                message="Title VN is required",
                 errors={
-                    "title_vn": ["Required"] if not title_vn else [],
-                    "curriculum_id": ["Required"] if not curriculum_id else []
+                    "title_vn": ["Required"] if not title_vn else []
                 }
             )
         
@@ -195,27 +192,11 @@ def create_actual_subject():
                 code="ACTUAL_SUBJECT_EXISTS"
             )
         
-        # Verify curriculum exists and belongs to same campus
-        curriculum_exists = frappe.db.exists(
-            "SIS Curriculum",
-            {
-                "name": curriculum_id,
-                "campus_id": campus_id
-            }
-        )
-        
-        if not curriculum_exists:
-            return error_response(
-                message="Selected curriculum does not exist or access denied",
-                code="CURRICULUM_ACCESS_DENIED"
-            )
-        
         # Create new actual subject
         actual_subject_doc = frappe.get_doc({
             "doctype": "SIS Actual Subject",
             "title_vn": title_vn,
             "title_en": title_en,
-            "curriculum_id": curriculum_id,
             "campus_id": campus_id
         })
         
@@ -229,7 +210,6 @@ def create_actual_subject():
                 "name": actual_subject_doc.name,
                 "title_vn": actual_subject_doc.title_vn,
                 "title_en": actual_subject_doc.title_en,
-                "curriculum_id": actual_subject_doc.curriculum_id,
                 "campus_id": actual_subject_doc.campus_id
             },
             message="Actual subject created successfully"
@@ -298,7 +278,7 @@ def update_actual_subject():
         # Update fields if provided
         title_vn = data.get('title_vn')
         title_en = data.get('title_en')
-        curriculum_id = data.get('curriculum_id')
+        # curriculum_id is deprecated
 
 
         if title_vn and title_vn != actual_subject_doc.title_vn:
@@ -321,22 +301,7 @@ def update_actual_subject():
         if title_en and title_en != actual_subject_doc.title_en:
             actual_subject_doc.title_en = title_en
             
-        if curriculum_id and curriculum_id != actual_subject_doc.curriculum_id:
-            # Verify curriculum exists and belongs to same campus
-            curriculum_exists = frappe.db.exists(
-                "SIS Curriculum",
-                {
-                    "name": curriculum_id,
-                    "campus_id": campus_id
-                }
-            )
-            
-            if not curriculum_exists:
-                return error_response(
-                    message="Selected curriculum does not exist or access denied",
-                    code="CURRICULUM_ACCESS_DENIED"
-                )
-            actual_subject_doc.curriculum_id = curriculum_id
+        # ignore curriculum_id updates
         
         actual_subject_doc.save()
         frappe.db.commit()
@@ -346,7 +311,6 @@ def update_actual_subject():
                 "name": actual_subject_doc.name,
                 "title_vn": actual_subject_doc.title_vn,
                 "title_en": actual_subject_doc.title_en,
-                "curriculum_id": actual_subject_doc.curriculum_id,
                 "campus_id": actual_subject_doc.campus_id
             },
             message="Actual subject updated successfully"

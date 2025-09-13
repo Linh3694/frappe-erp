@@ -41,9 +41,10 @@ def get_all_subjects():
                     '' as short_title,
                     s.education_stage,
                     s.academic_program_id,
-                    s.curriculum_id,
+                    NULL as curriculum_id,
                     s.timetable_subject_id,
                     s.actual_subject_id,
+                    s.subcurriculum_id,
                     s.room_id,
                     s.campus_id,
                     s.creation,
@@ -56,6 +57,7 @@ def get_all_subjects():
                 LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
                 LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
                 LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Sub Curriculum` sc ON s.subcurriculum_id = sc.name AND sc.campus_id = s.campus_id
                 LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
                 WHERE s.campus_id = %s
                 ORDER BY s.title ASC
@@ -185,6 +187,7 @@ def get_subject_by_id():
             "education_stage": subject.education_stage,
             "timetable_subject_id": subject.timetable_subject_id,
             "actual_subject_id": subject.actual_subject_id,
+            "subcurriculum_id": subject.subcurriculum_id,
             "room_id": subject.room_id,
             "campus_id": subject.campus_id,
             # Display names for UI
@@ -236,6 +239,7 @@ def create_subject():
         education_stage = data.get("education_stage")
         timetable_subject_id = data.get("timetable_subject_id")
         actual_subject_id = data.get("actual_subject_id")
+        subcurriculum_id = data.get("subcurriculum_id")
         room_id = data.get("room_id")  # Can be None if not provided
 
         
@@ -289,6 +293,8 @@ def create_subject():
             subject_data["actual_subject_id"] = actual_subject_id
         if room_id:
             subject_data["room_id"] = room_id
+        if subcurriculum_id:
+            subject_data["subcurriculum_id"] = subcurriculum_id
 
 
 
@@ -323,10 +329,17 @@ def create_subject():
                 pass
 
         room_name = None
+        subcurriculum_name = None
         if subject_doc.room_id:
             try:
                 room_doc = frappe.get_doc("ERP Administrative Room", subject_doc.room_id)
                 room_name = room_doc.title_vn
+            except:
+                pass
+        if subject_doc.subcurriculum_id:
+            try:
+                sc_doc = frappe.get_doc("SIS Sub Curriculum", subject_doc.subcurriculum_id)
+                subcurriculum_name = sc_doc.title_vn
             except:
                 pass
 
@@ -342,6 +355,7 @@ def create_subject():
             "education_stage_name": education_stage_name,
             "timetable_subject_name": timetable_subject_name,
             "actual_subject_name": actual_subject_name,
+            "subcurriculum_name": subcurriculum_name,
             "room_name": room_name
         }
         return single_item_response(subject_data, "Subject created successfully")
@@ -415,6 +429,7 @@ def update_subject():
         education_stage = data.get('education_stage')
         timetable_subject_id = data.get('timetable_subject_id')
         actual_subject_id = data.get('actual_subject_id')
+        subcurriculum_id = data.get('subcurriculum_id')
         room_id = data.get('room_id')
 
 
@@ -464,6 +479,8 @@ def update_subject():
 
         if 'room_id' in data and room_id != subject_doc.room_id:
             subject_doc.room_id = room_id
+        if 'subcurriculum_id' in data and subcurriculum_id != subject_doc.subcurriculum_id:
+            subject_doc.subcurriculum_id = subcurriculum_id
         
         subject_doc.save()
         frappe.db.commit()
@@ -508,6 +525,7 @@ def update_subject():
                 "education_stage": subject_doc.education_stage,
                 "timetable_subject_id": subject_doc.timetable_subject_id,
                 "actual_subject_id": subject_doc.actual_subject_id,
+                "subcurriculum_id": subject_doc.subcurriculum_id,
                 "room_id": subject_doc.room_id,
                 "campus_id": subject_doc.campus_id,
                 "education_stage_name": education_stage_name,
@@ -891,8 +909,7 @@ def get_actual_subjects_for_selection():
 
         # Get actual subjects for this campus
         filters = {
-            "campus_id": campus_id,
-            "curriculum_id": ["!=", ""]  # Ensure it has a curriculum
+            "campus_id": campus_id
         }
 
         # First, check total count
@@ -906,8 +923,7 @@ def get_actual_subjects_for_selection():
                 "name",
                 "title_vn",
                 "title_en",
-                "campus_id",
-                "curriculum_id"
+                "campus_id"
             ],
             filters=filters,
             order_by="title_vn asc"
@@ -917,10 +933,10 @@ def get_actual_subjects_for_selection():
             pass
         else:
 
-            # Try without curriculum filter
+            # Try fetch again without extra filters
             all_subjects = frappe.get_all(
                 "SIS Actual Subject",
-                fields=["name", "title_vn", "title_en", "campus_id", "curriculum_id"],
+                fields=["name", "title_vn", "title_en", "campus_id"],
                 filters={"campus_id": campus_id},
                 limit=5
             )
@@ -930,11 +946,11 @@ def get_actual_subjects_for_selection():
                 print("No actual subjects found in database at all")
                 actual_subjects = []
             else:
-                print("Actual subjects exist but curriculum filter doesn't match")
-                # Temporarily return all subjects for testing
+                print("Actual subjects exist but filter doesn't match")
+                # Return all subjects for this campus
                 actual_subjects = frappe.get_all(
                     "SIS Actual Subject",
-                    fields=["name", "title_vn", "title_en", "campus_id", "curriculum_id"],
+                    fields=["name", "title_vn", "title_en", "campus_id"],
                     filters={"campus_id": campus_id},
                     order_by="title_vn asc"
                 )
