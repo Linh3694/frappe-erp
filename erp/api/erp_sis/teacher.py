@@ -883,7 +883,7 @@ def get_education_stages_for_teacher():
         )
 
 
-@frappe.whitelist(allow_guest=False, methods=['GET'])
+@frappe.whitelist(allow_guest=True, methods=['GET'])
 def get_teacher_class_assignments(user_id: str = None):
     """Return homeroom/vice_homeroom/teaching class ids for given user (or current user).
 
@@ -891,9 +891,28 @@ def get_teacher_class_assignments(user_id: str = None):
     - teaching from `SIS Timetable Instance Row` via `teacher_1_id`/`teacher_2_id` → parent `SIS Timetable Instance` → `class_id`
     """
     try:
-        # Resolve user
-        current_user = user_id or frappe.session.user
-        if not current_user or current_user == "Guest":
+        # Resolve user from JWT (Authorization: Bearer <token>) or session
+        current_user = user_id
+        if not current_user:
+            # Try JWT first
+            try:
+                auth_header = frappe.get_request_header("Authorization") or ""
+                token_candidate = None
+                if auth_header.lower().startswith("bearer "):
+                    token_candidate = auth_header.split(" ", 1)[1].strip()
+                if token_candidate:
+                    from erp.api.erp_common_user.auth import verify_jwt_token
+                    payload = verify_jwt_token(token_candidate)
+                    jwt_user_email = payload.get("email") or payload.get("user") or payload.get("sub") if payload else None
+                    if jwt_user_email:
+                        current_user = jwt_user_email
+            except Exception:
+                pass
+        if not current_user:
+            # Fallback to session user
+            if frappe.session.user and frappe.session.user != "Guest":
+                current_user = frappe.session.user
+        if not current_user:
             return forbidden_response("Access denied: not authenticated")
 
         # Find SIS Teacher record names for this user
