@@ -37,8 +37,9 @@ def get_campuses(only_user: bool = True):
             user = jwt_user
 
         filters = {}
+        campus_ids = []
         if only_user:
-            campus_ids = get_all_campus_ids_from_user_roles(user)
+            campus_ids = get_all_campus_ids_from_user_roles(user) or []
             if campus_ids:
                 filters = {"name": ["in", campus_ids]}
 
@@ -49,7 +50,36 @@ def get_campuses(only_user: bool = True):
             order_by="title_vn asc",
         )
 
-        return list_response(rows, "Campuses fetched successfully")
+        # Fallback: build from roles if campus docs not found
+        if only_user and (not rows or len(rows) == 0):
+            try:
+                # Collect campus titles from roles that start with "Campus "
+                try:
+                    role_list = frappe.get_roles(user) or []
+                except Exception:
+                    role_list = []
+                campus_titles = [r.replace("Campus ", "").strip() for r in role_list if isinstance(r, str) and r.startswith("Campus ")]
+
+                # Ensure we have ids to pair with titles
+                if not campus_ids:
+                    campus_ids = [f"campus-{i+1}" for i in range(len(campus_titles))]
+
+                n = max(len(campus_ids), len(campus_titles))
+                fallback_rows = []
+                for i in range(n):
+                    cid = campus_ids[i] if i < len(campus_ids) else f"campus-{i+1}"
+                    title = campus_titles[i] if i < len(campus_titles) else cid
+                    fallback_rows.append({
+                        "name": cid,
+                        "title_vn": title,
+                        "title_en": title,
+                    })
+                if fallback_rows:
+                    rows = fallback_rows
+            except Exception:
+                pass
+
+        return list_response(rows or [], "Campuses fetched successfully")
     except Exception as e:
         return error_response(f"Error fetching campuses: {str(e)}")
 
