@@ -28,7 +28,7 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
         # Allow showing classes across campuses to avoid returning empty lists on mobile
 
         # Apply campus filtering for data isolation
-        filters = {"campus_id": campus_id} if campus_id else {}
+        filters = {"campus_id": (campus_id or "campus-1")}
         # accept school_year_id from query/form/body
         if not school_year_id:
             # Check query parameters first

@@ -273,7 +273,8 @@ def get_current_campus_from_context():
         frappe.logger().info(f"No campus_id in context, falling back to user roles for user: {user}")
         role_based_campus = get_campus_id_from_user_roles(user)
         frappe.logger().info(f"Role-based campus for user {user}: '{role_based_campus}'")
-        return role_based_campus
+        # Final fallback: default active campus for mobile
+        return role_based_campus or "campus-1"
 
     except Exception as e:
         frappe.logger().error(f"Error getting current campus from context: {str(e)}")

@@ -86,7 +86,7 @@ def update_timetable_column():
             return validation_error_response("Validation failed", {"timetable_column_id": ["Timetable Column ID is required"]})
 
         # Get campus from user context
-        campus_id = get_current_campus_from_context()
+        campus_id = get_current_campus_from_context() or "campus-1"
 
         if not campus_id:
             campus_id = "campus-1"

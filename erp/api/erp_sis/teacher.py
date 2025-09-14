@@ -29,8 +29,8 @@ def get_all_teachers():
         #     campus_id = "campus-1"
         #     frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
-        # Prefer filtering by campus if resolved; otherwise, show all to avoid empty FE state
-        filters = {"campus_id": campus_id} if campus_id else {}
+        # Prefer filtering by campus; fallback to campus-1 if missing
+        filters = {"campus_id": (campus_id or "campus-1")}
         frappe.logger().info(f"👨‍🏫 Using filters (DISABLED CAMPUS): {filters}")
 
         teachers = frappe.get_all(
