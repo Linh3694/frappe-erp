@@ -19,7 +19,7 @@ def get_all_teachers():
     frappe.logger().info(f"👨‍🏫 ===== get_all_teachers API called =====")
 
     try:
-        # Get current user's campus information from roles
+        # Get current user's campus information from roles or JWT
         campus_id = get_current_campus_from_context()
         frappe.logger().info(f"👨‍🏫 get_all_teachers called by user: {frappe.session.user}")
 
@@ -29,8 +29,8 @@ def get_all_teachers():
         #     campus_id = "campus-1"
         #     frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
-        # filters = {"campus_id": campus_id}
-        filters = {}  # No filtering temporarily
+        # Prefer filtering by campus if resolved; otherwise, show all to avoid empty FE state
+        filters = {"campus_id": campus_id} if campus_id else {}
         frappe.logger().info(f"👨‍🏫 Using filters (DISABLED CAMPUS): {filters}")
 
         teachers = frappe.get_all(

@@ -193,6 +193,26 @@ def get_current_campus_from_context():
     """
     try:
         user = frappe.session.user
+        # Try to resolve user from JWT Bearer token (mobile apps)
+        try:
+            auth_header = frappe.get_request_header("Authorization") or ""
+            token_candidate = None
+            if auth_header.lower().startswith("bearer "):
+                token_candidate = auth_header.split(" ", 1)[1].strip()
+            if token_candidate:
+                from erp.api.erp_common_user.auth import verify_jwt_token  # Lazy import to avoid cycles
+                payload = verify_jwt_token(token_candidate)
+                jwt_user_email = (
+                    payload.get("email")
+                    or payload.get("user")
+                    or payload.get("sub")
+                    if payload
+                    else None
+                )
+                if jwt_user_email and frappe.db.exists("User", jwt_user_email):
+                    user = jwt_user_email
+        except Exception:
+            pass
         frappe.logger().info(f"get_current_campus_from_context called for user: {user}")
 
         # First try to get from request context (if passed from frontend)
