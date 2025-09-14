@@ -881,3 +881,101 @@ def get_education_stages_for_teacher():
             message="Error fetching education stages",
             code="FETCH_EDUCATION_STAGES_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False, methods=['GET'])
+def get_teacher_class_assignments(user_id: str = None):
+    """Return homeroom/vice_homeroom/teaching class ids for given user (or current user).
+
+    - homeroom/vice_homeroom from `SIS Class` (fields `homeroom_teacher`, `vice_homeroom_teacher`)
+    - teaching from `SIS Timetable Instance Row` via `teacher_1_id`/`teacher_2_id` → parent `SIS Timetable Instance` → `class_id`
+    """
+    try:
+        # Resolve user
+        current_user = user_id or frappe.session.user
+        if not current_user or current_user == "Guest":
+            return forbidden_response("Access denied: not authenticated")
+
+        # Find SIS Teacher record names for this user
+        try:
+            teacher_ids = [t.name for t in frappe.get_all(
+                "SIS Teacher",
+                fields=["name"],
+                filters={"user_id": current_user},
+            )]
+        except Exception:
+            teacher_ids = []
+
+        homeroom_classes = []
+        vice_homeroom_classes = []
+        teaching_class_ids = []
+
+        if teacher_ids:
+            try:
+                homeroom_classes = [c.name for c in frappe.get_all(
+                    "SIS Class",
+                    fields=["name"],
+                    filters={"homeroom_teacher": ["in", teacher_ids]},
+                )] or []
+            except Exception:
+                homeroom_classes = []
+
+            try:
+                vice_homeroom_classes = [c.name for c in frappe.get_all(
+                    "SIS Class",
+                    fields=["name"],
+                    filters={"vice_homeroom_teacher": ["in", teacher_ids]},
+                )] or []
+            except Exception:
+                vice_homeroom_classes = []
+
+            # Teaching classes via timetable rows → parent instance → class_id
+            try:
+                rows_1 = frappe.get_all(
+                    "SIS Timetable Instance Row",
+                    fields=["parent"],
+                    filters={"teacher_1_id": ["in", teacher_ids]},
+                    limit=5000,
+                ) or []
+                rows_2 = frappe.get_all(
+                    "SIS Timetable Instance Row",
+                    fields=["parent"],
+                    filters={"teacher_2_id": ["in", teacher_ids]},
+                    limit=5000,
+                ) or []
+                parent_ids = list({r.get("parent") for r in rows_1 + rows_2 if r.get("parent")})
+                if parent_ids:
+                    instances = frappe.get_all(
+                        "SIS Timetable Instance",
+                        fields=["name", "class_id"],
+                        filters={"name": ["in", parent_ids]},
+                    ) or []
+                    class_ids = [i.get("class_id") for i in instances if i.get("class_id")]
+                    teaching_class_ids = list(sorted(set(class_ids)))
+                else:
+                    teaching_class_ids = []
+            except Exception:
+                teaching_class_ids = []
+
+        data = {
+            "homeroom_class_ids": homeroom_classes,
+            "vice_homeroom_class_ids": vice_homeroom_classes,
+            "teaching_class_ids": teaching_class_ids,
+            "debug": {
+                "teacher_ids": teacher_ids,
+                "homeroom_count": len(homeroom_classes),
+                "vice_homeroom_count": len(vice_homeroom_classes),
+                "teaching_count": len(teaching_class_ids),
+                "user": current_user,
+            }
+        }
+
+        return success_response(data=data, message="Teacher class assignments fetched")
+
+    except Exception as e:
+        frappe.log_error(f"get_teacher_class_assignments error: {str(e)}")
+        return error_response(
+            message="Error fetching teacher class assignments",
+            code="TEACHER_ASSIGN_FETCH_ERROR",
+            debug_info={"error": str(e)}
+        )
