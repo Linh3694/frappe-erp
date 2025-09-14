@@ -925,16 +925,19 @@ def get_teacher_class_assignments(user_id: str = None):
         except Exception:
             teacher_ids = []
 
+        # Build matching keys for queries: include both SIS Teacher IDs and the user identifier (email)
+        teacher_keys = list(sorted({*(teacher_ids or []), current_user}))
+
         homeroom_classes = []
         vice_homeroom_classes = []
         teaching_class_ids = []
 
-        if teacher_ids:
+        if teacher_keys:
             try:
                 homeroom_classes = [c.name for c in frappe.get_all(
                     "SIS Class",
                     fields=["name"],
-                    filters={"homeroom_teacher": ["in", teacher_ids]},
+                    filters={"homeroom_teacher": ["in", teacher_keys]},
                 )] or []
             except Exception:
                 homeroom_classes = []
@@ -943,7 +946,7 @@ def get_teacher_class_assignments(user_id: str = None):
                 vice_homeroom_classes = [c.name for c in frappe.get_all(
                     "SIS Class",
                     fields=["name"],
-                    filters={"vice_homeroom_teacher": ["in", teacher_ids]},
+                    filters={"vice_homeroom_teacher": ["in", teacher_keys]},
                 )] or []
             except Exception:
                 vice_homeroom_classes = []
@@ -953,13 +956,13 @@ def get_teacher_class_assignments(user_id: str = None):
                 rows_1 = frappe.get_all(
                     "SIS Timetable Instance Row",
                     fields=["parent"],
-                    filters={"teacher_1_id": ["in", teacher_ids]},
+                    filters={"teacher_1_id": ["in", teacher_keys]},
                     limit=5000,
                 ) or []
                 rows_2 = frappe.get_all(
                     "SIS Timetable Instance Row",
                     fields=["parent"],
-                    filters={"teacher_2_id": ["in", teacher_ids]},
+                    filters={"teacher_2_id": ["in", teacher_keys]},
                     limit=5000,
                 ) or []
                 parent_ids = list({r.get("parent") for r in rows_1 + rows_2 if r.get("parent")})
@@ -982,6 +985,7 @@ def get_teacher_class_assignments(user_id: str = None):
             "teaching_class_ids": teaching_class_ids,
             "debug": {
                 "teacher_ids": teacher_ids,
+                "teacher_keys": teacher_keys,
                 "homeroom_count": len(homeroom_classes),
                 "vice_homeroom_count": len(vice_homeroom_classes),
                 "teaching_count": len(teaching_class_ids),
