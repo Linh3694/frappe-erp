@@ -99,10 +99,26 @@ def mobile_microsoft_callback(code, state=None):
         
         # Exchange code for access token (with mobile redirect URI)
         try:
-            # Get redirect URI from request parameters (sent by mobile app)
-            mobile_redirect_uri = frappe.request.args.get('redirect_uri')
-            frappe.logger().info(f"DEBUG: mobile_redirect_uri parameter = {mobile_redirect_uri}")
-            frappe.logger().info(f"DEBUG: All request args = {dict(frappe.request.args)}")
+            # Get redirect URI from request in a robust way (args, form_dict, JSON body)
+            mobile_redirect_uri = None
+            try:
+                mobile_redirect_uri = frappe.request.args.get('redirect_uri') if hasattr(frappe.request, 'args') else None
+            except Exception:
+                mobile_redirect_uri = None
+            if not mobile_redirect_uri:
+                try:
+                    mobile_redirect_uri = frappe.form_dict.get('redirect_uri') if hasattr(frappe, 'form_dict') and frappe.form_dict else None
+                except Exception:
+                    mobile_redirect_uri = None
+            if not mobile_redirect_uri and getattr(frappe.request, 'data', None):
+                try:
+                    raw = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, (bytes, bytearray)) else frappe.request.data
+                    parsed = frappe.parse_json(raw) if raw else {}
+                    if isinstance(parsed, dict):
+                        mobile_redirect_uri = parsed.get('redirect_uri')
+                except Exception:
+                    pass
+            frappe.logger().info(f"DEBUG: mobile_redirect_uri resolved = {mobile_redirect_uri}")
             
             # For mobile app, use public client authentication with provided redirect URI
             # Mobile app ALWAYS sends redirect_uri parameter, so use it directly
@@ -201,7 +217,7 @@ def mobile_microsoft_callback(code, state=None):
         return success_response(
             data={
                 "token": jwt_token,
-                "expires_in": 24 * 60 * 60,  # 24 hours in seconds
+                "expires_in": 365 * 24 * 60 * 60,
                 "user": user_data
             },
             message="Microsoft authentication successful"
@@ -315,7 +331,7 @@ def mobile_direct_token_auth(microsoft_token):
         return success_response(
             data={
                 "token": jwt_token,
-                "expires_in": 24 * 60 * 60,
+                "expires_in": 365 * 24 * 60 * 60,
                 "user": user_data
             },
             message="Direct token authentication successful"

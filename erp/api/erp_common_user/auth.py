@@ -145,7 +145,7 @@ def login(email=None, username=None, password=None, provider="local"):
             "message": _("Login successful"),
             "user": user_data,
             "token": token,
-            "expires_in": 24 * 60 * 60  # 24 hours
+            "expires_in": 365 * 24 * 60 * 60  # 365 days
         }
         
     except Exception as e:
@@ -372,6 +372,79 @@ def build_user_data_response(user_doc):
     except Exception:
         user_data["user_roles"] = []
     
+    # Enrich with teacher-related information (homeroom and teaching classes)
+    try:
+        teacher_names = [t.name for t in frappe.get_all(
+            "SIS Teacher",
+            fields=["name"],
+            filters={"user_id": user_doc.name},
+        )]
+
+        homeroom_classes = []
+        vice_homeroom_classes = []
+        teaching_class_ids = []
+
+        if teacher_names:
+            try:
+                homeroom_classes = [c.name for c in frappe.get_all(
+                    "SIS Class",
+                    fields=["name"],
+                    filters={"homeroom_teacher": ["in", teacher_names]},
+                )] or []
+            except Exception:
+                homeroom_classes = []
+
+            try:
+                vice_homeroom_classes = [c.name for c in frappe.get_all(
+                    "SIS Class",
+                    fields=["name"],
+                    filters={"vice_homeroom_teacher": ["in", teacher_names]},
+                )] or []
+            except Exception:
+                vice_homeroom_classes = []
+
+            try:
+                # Collect timetable rows for teacher_1 and teacher_2
+                rows_1 = frappe.get_all(
+                    "SIS Timetable Instance Row",
+                    fields=["parent"],
+                    filters={"teacher_1_id": ["in", teacher_names]},
+                    limit=5000,
+                ) or []
+                rows_2 = frappe.get_all(
+                    "SIS Timetable Instance Row",
+                    fields=["parent"],
+                    filters={"teacher_2_id": ["in", teacher_names]},
+                    limit=5000,
+                ) or []
+
+                parent_ids = list({r.get("parent") for r in rows_1 + rows_2 if r.get("parent")})
+                if parent_ids:
+                    instances = frappe.get_all(
+                        "SIS Timetable Instance",
+                        fields=["name", "class_id"],
+                        filters={"name": ["in", parent_ids]},
+                    ) or []
+                    class_ids = [i.get("class_id") for i in instances if i.get("class_id")]
+                    teaching_class_ids = list(sorted(set(class_ids)))
+                else:
+                    teaching_class_ids = []
+            except Exception:
+                teaching_class_ids = []
+
+        user_data["teacher_info"] = {
+            "homeroom_class_ids": homeroom_classes,
+            "vice_homeroom_class_ids": vice_homeroom_classes,
+            "teaching_class_ids": teaching_class_ids,
+        }
+    except Exception:
+        # Do not fail the whole response if enrichment fails
+        user_data["teacher_info"] = {
+            "homeroom_class_ids": [],
+            "vice_homeroom_class_ids": [],
+            "teaching_class_ids": [],
+        }
+    
     return user_data
 
 
@@ -391,7 +464,7 @@ def generate_jwt_token(user_email):
             "iss": frappe.utils.get_url(),
             "ver": 1,
             "iat": int(now.timestamp()),
-            "exp": int((now + timedelta(hours=24)).timestamp()),
+            "exp": int((now + timedelta(days=365)).timestamp()),
         }
 
         secret = (
@@ -480,7 +553,7 @@ def refresh_token():
         return {
             "status": "success",
             "token": token,
-            "expires_in": 24 * 60 * 60
+            "expires_in": 365 * 24 * 60 * 60
         }
         
     except Exception as e:
