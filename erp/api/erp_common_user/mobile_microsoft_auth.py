@@ -71,20 +71,64 @@ def get_microsoft_access_token_public_client(code, redirect_uri):
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
-def mobile_microsoft_callback(code, state=None):
+def mobile_microsoft_callback(code=None, state=None):
     """
     Handle Microsoft authentication callback specifically for mobile apps
     Returns JSON response instead of redirect
     """
     try:
+        # Try to get code from args/form/body when not passed positionally
+        if not code:
+            try:
+                if hasattr(frappe.request, 'args'):
+                    code = frappe.request.args.get('code') or code
+            except Exception:
+                pass
+            if not code:
+                try:
+                    code = frappe.form_dict.get('code') if hasattr(frappe, 'form_dict') and frappe.form_dict else None
+                except Exception:
+                    code = None
+            if not code and getattr(frappe.request, 'data', None):
+                try:
+                    raw = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, (bytes, bytearray)) else frappe.request.data
+                    parsed = frappe.parse_json(raw) if raw else {}
+                    if isinstance(parsed, dict):
+                        code = parsed.get('code') or code
+                        state = parsed.get('state') or state
+                except Exception:
+                    pass
+
         frappe.logger().info(f"Mobile Microsoft callback received - Code length: {len(code) if code else 0}")
-        
+
         if not code:
             return {
                 "success": False,
                 "error": "No authorization code provided",
                 "error_code": "NO_CODE"
             }
+
+        # Idempotency guard: avoid double redemption for the same code
+        try:
+            cache_key = f"ms_mobile_code_redeemed:{code}"
+            cached = frappe.cache().get_value(cache_key)
+            if cached:
+                # If we cached a successful result, return it; if error, return cached error
+                try:
+                    result = frappe.parse_json(cached)
+                    if isinstance(result, dict):
+                        return result
+                except Exception:
+                    pass
+                return {
+                    "success": False,
+                    "error": "Authorization code already processed",
+                    "error_code": "CODE_REUSED"
+                }
+            # Mark as in-progress (short TTL)
+            frappe.cache().set_value(cache_key, json.dumps({"success": False, "error": "IN_PROGRESS"}), expires_in_sec=180)
+        except Exception:
+            pass
         
         # State is optional for mobile apps (relaxed security for better UX)
         if state:
@@ -136,12 +180,17 @@ def mobile_microsoft_callback(code, state=None):
         except Exception as e:
             frappe.logger().error(f"Failed to get Microsoft access token: {str(e)}")
             frappe.logger().error(f"Exception type: {type(e).__name__}")
-            return {
+            result = {
                 "success": False,
                 "error": "Failed to exchange authorization code for access token",
                 "error_code": "TOKEN_EXCHANGE_FAILED",
                 "details": str(e)
             }
+            try:
+                frappe.cache().set_value(cache_key, json.dumps(result), expires_in_sec=300)
+            except Exception:
+                pass
+            return result
         
         # Get user info from Microsoft Graph
         try:
@@ -150,12 +199,17 @@ def mobile_microsoft_callback(code, state=None):
             frappe.logger().info(f"Got Microsoft user info for: {user_email}")
         except Exception as e:
             frappe.logger().error(f"Failed to get Microsoft user info: {str(e)}")
-            return {
+            result = {
                 "success": False,
                 "error": "Failed to get user information from Microsoft",
                 "error_code": "USER_INFO_FAILED",
                 "details": str(e)
             }
+            try:
+                frappe.cache().set_value(cache_key, json.dumps(result), expires_in_sec=300)
+            except Exception:
+                pass
+            return result
         
         if not user_email:
             return {
@@ -214,7 +268,7 @@ def mobile_microsoft_callback(code, state=None):
         }
         
         # Return success response
-        return success_response(
+        result = success_response(
             data={
                 "token": jwt_token,
                 "expires_in": 365 * 24 * 60 * 60,
@@ -222,6 +276,11 @@ def mobile_microsoft_callback(code, state=None):
             },
             message="Microsoft authentication successful"
         )
+        try:
+            frappe.cache().set_value(cache_key, json.dumps(result), expires_in_sec=600)
+        except Exception:
+            pass
+        return result
         
     except Exception as e:
         frappe.logger().error(f"Unexpected error in mobile Microsoft callback: {str(e)}")
@@ -229,12 +288,18 @@ def mobile_microsoft_callback(code, state=None):
         # Log the full error for debugging
         frappe.log_error(f"Mobile Microsoft callback error: {str(e)}", "Mobile Microsoft Auth")
         
-        return {
+        result = {
             "success": False,
             "error": "An unexpected error occurred during authentication",
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }
+        try:
+            if 'cache_key' in locals():
+                frappe.cache().set_value(cache_key, json.dumps(result), expires_in_sec=300)
+        except Exception:
+            pass
+        return result
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
