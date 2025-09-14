@@ -21,15 +21,14 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
         limit = int(limit or 20)
         offset = (page - 1) * limit
 
-        # Get current user's campus information from roles
+        # Get current user's campus information from roles/JWT
         campus_id = get_current_campus_from_context()
 
-        if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
+        # If campus cannot be resolved, don't hard-fallback to a fixed campus
+        # Allow showing classes across campuses to avoid returning empty lists on mobile
 
         # Apply campus filtering for data isolation
-        filters = {"campus_id": campus_id}
+        filters = {"campus_id": campus_id} if campus_id else {}
         # accept school_year_id from query/form/body
         if not school_year_id:
             # Check query parameters first

@@ -589,7 +589,7 @@ def get_teacher_week():
         if not resolved_teacher_ids:
             resolved_teacher_ids.add(teacher_id)
         # Query timetable rows
-        campus_id = get_current_campus_from_context() or "campus-1"
+        campus_id = get_current_campus_from_context()
 
         # Test if campus_id field exists, if not, use empty filters
         filters = {}
@@ -597,10 +597,10 @@ def get_teacher_week():
             test_rows = frappe.get_all(
                 "SIS Timetable Instance Row",
                 fields=["name"],
-                filters={"campus_id": campus_id},
+                filters={"campus_id": campus_id} if campus_id else {},
                 limit=1
             )
-            filters = {"campus_id": campus_id}
+            filters = {"campus_id": campus_id} if campus_id else {}
         except Exception as filter_error:
             pass
             filters = {}  # Use no filters if campus_id doesn't exist
