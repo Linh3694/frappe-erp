@@ -80,6 +80,9 @@ def get_all_students(page=1, limit=20, include_all_campuses=0, fetch_all=0):
             fetch_all = int(fetch_all)
         except Exception:
             fetch_all = 0
+            
+        # Debug log to check fetch_all parameter
+        frappe.logger().info(f"get_all_students called with: page={page}, limit={limit}, include_all_campuses={include_all_campuses}, fetch_all={fetch_all}")
 
         if include_all_campuses:
             # Get filter for all user's campuses
