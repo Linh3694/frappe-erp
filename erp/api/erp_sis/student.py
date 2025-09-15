@@ -93,39 +93,48 @@ def get_all_students(page=1, limit=20, include_all_campuses=0, fetch_all=0):
                 # Fallback to default if no campus found
                 campus_id = "campus-1"
 
-
             # Apply campus filtering for data isolation
             filters = {"campus_id": campus_id}
-        # Calculate offset for pagination
-        offset = (page - 1) * limit
-
         
-        # If fetch_all is requested, override window to return all rows
+        # If fetch_all is requested, return all data without pagination
         if fetch_all:
-            limit_start = 0
-            limit_length = 0 if limit <= 0 else None
+            students = frappe.get_all(
+                "CRM Student",
+                fields=[
+                    "name",
+                    "student_name",
+                    "student_code",
+                    "dob",
+                    "gender",
+                    "campus_id",
+                    "family_code",
+                    "creation",
+                    "modified"
+                ],
+                filters=filters,
+                order_by="student_name asc"
+            )
         else:
-            limit_start = offset
-            limit_length = limit
-
-        students = frappe.get_all(
-            "CRM Student",
-            fields=[
-                "name",
-                "student_name",
-                "student_code",
-                "dob",
-                "gender",
-                "campus_id",
-                "family_code",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="student_name asc",
-            limit_start=limit_start,
-            limit_page_length=(limit if not fetch_all else None)
-        )
+            # Regular pagination
+            offset = (page - 1) * limit
+            students = frappe.get_all(
+                "CRM Student",
+                fields=[
+                    "name",
+                    "student_name",
+                    "student_code",
+                    "dob",
+                    "gender",
+                    "campus_id",
+                    "family_code",
+                    "creation",
+                    "modified"
+                ],
+                filters=filters,
+                order_by="student_name asc",
+                limit_start=offset,
+                limit_page_length=limit
+            )
 
 
         # Ensure all students have name field and log sample data
@@ -167,13 +176,20 @@ def get_all_students(page=1, limit=20, include_all_campuses=0, fetch_all=0):
         total_count = frappe.db.count("CRM Student", filters=filters)
 
 
-        return paginated_response(
-            data=students,
-            current_page=1 if fetch_all else page,
-            total_count=total_count,
-            per_page=total_count if fetch_all else limit,
-            message="Students fetched successfully"
-        )
+        # Return response based on fetch_all parameter
+        if fetch_all:
+            return success_response(
+                data=students,
+                message=f"Fetched all {len(students)} students successfully"
+            )
+        else:
+            return paginated_response(
+                data=students,
+                current_page=page,
+                total_count=total_count,
+                per_page=limit,
+                message="Students fetched successfully"
+            )
         
     except Exception as e:
         frappe.log_error(f"Error fetching students: {str(e)}")
