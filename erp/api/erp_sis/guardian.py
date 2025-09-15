@@ -789,8 +789,13 @@ def validate_vietnamese_phone_number(phone):
     if not phone or str(phone).strip() == '':
         return None
     
+    # Convert to string and handle potential float values from Excel
+    phone_str = str(phone).strip()
+    if phone_str.lower() in ['nan', 'none', 'null']:
+        return None
+    
     # Remove spaces, dashes, dots, and parentheses
-    clean_phone = str(phone).replace(' ', '').replace('-', '').replace('.', '').replace('(', '').replace(')', '')
+    clean_phone = phone_str.replace(' ', '').replace('-', '').replace('.', '').replace('(', '').replace(')', '')
     
     # Pattern: +84 followed by 9-10 digits
     import re
@@ -810,7 +815,12 @@ def validate_vietnamese_phone_number(phone):
     if re.match(r'^84[0-9]{9,10}$', clean_phone):
         return f"+{clean_phone}"
     
-    # Invalid format
+    # Handle pure numbers (9-10 digits) - assume Vietnam mobile
+    if re.match(r'^[0-9]{9,10}$', clean_phone):
+        return f"+84{clean_phone}"
+    
+    # Invalid format - log the problematic input for debugging
+    frappe.logger().error(f"Invalid phone format - Original: '{phone}', Cleaned: '{clean_phone}'")
     raise ValueError(f"Invalid phone number format. Expected: +84 followed by 9-10 digits. Got: {phone}")
 
 
@@ -880,11 +890,24 @@ def bulk_import_guardians():
         
         for index, row in df.iterrows():
             try:
-                # Extract data from row
-                guardian_name = str(row.get('guardian_name', '')).strip()
-                phone_number = str(row.get('phone_number', '')).strip() if pd.notna(row.get('phone_number')) else ''
+                # Extract data from row with better handling of Excel formats
+                guardian_name = str(row.get('guardian_name', '')).strip() if pd.notna(row.get('guardian_name')) else ''
+                
+                # Handle phone number - could be in various Excel columns
+                phone_number = ''
+                for phone_col in ['phone_number', 'Phone Number', 'phone', 'Phone']:
+                    if phone_col in row and pd.notna(row.get(phone_col)):
+                        phone_number = str(row.get(phone_col, '')).strip()
+                        break
+                
+                # Handle email with better Excel compatibility
                 email = str(row.get('email', '')).strip() if pd.notna(row.get('email')) else ''
+                if email.lower() in ['nan', 'none', 'null']:
+                    email = ''
+                
                 guardian_id = str(row.get('guardian_id', '')).strip() if pd.notna(row.get('guardian_id')) else ''
+                
+                frappe.logger().info(f"Processing row {index + 2}: Name='{guardian_name}', Phone='{phone_number}', Email='{email}'")
                 
                 # Validation
                 if not guardian_name:
@@ -955,6 +978,15 @@ def bulk_import_guardians():
                 guardian_doc.flags.ignore_validate = True
                 guardian_doc.flags.ignore_permissions = True
                 guardian_doc.insert(ignore_permissions=True)
+                
+                # Force update phone number using direct DB call to ensure it's saved
+                if formatted_phone:
+                    frappe.db.set_value("CRM Guardian", guardian_doc.name, "phone_number", formatted_phone)
+                    frappe.logger().info(f"Force updated phone number for {guardian_doc.name}: {formatted_phone}")
+                
+                # Log what was actually saved
+                guardian_doc.reload()
+                frappe.logger().info(f"Guardian {guardian_doc.name} saved with phone: '{guardian_doc.phone_number}'")
                 
                 # Track this creation for uniqueness checking in subsequent rows
                 existing_names.add(guardian_name.lower())
