@@ -26,9 +26,6 @@
   "homeroom_teacher",
   "vice_homeroom_teacher",
   "room",
-  "academic_level",
-  "start_date",
-  "end_date",
   "class_type"
  ],
  "fields": [
@@ -97,23 +94,6 @@
    "fieldtype": "Link",
    "label": "Room",
    "options": "ERP Administrative Room"
-  },
-  {
-   "fieldname": "academic_level",
-   "fieldtype": "Select",
-   "label": "Academic Level",
-   "options": "Level 1\nLevel 2\nLevel 3\nLevel 4"
-  }
-  ,
-  {
-   "fieldname": "start_date",
-   "fieldtype": "Date",
-   "label": "Start Date"
-  },
-  {
-   "fieldname": "end_date",
-   "fieldtype": "Date",
-   "label": "End Date"
   },
   {
    "fieldname": "class_type",

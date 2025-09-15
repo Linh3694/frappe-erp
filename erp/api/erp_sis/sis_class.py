@@ -63,7 +63,6 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                 "name",
                 "title",
                 "short_title",
-                "short_title",
                 "campus_id",
                 "school_year_id",
                 "education_grade",
@@ -71,9 +70,6 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                 "homeroom_teacher",
                 "vice_homeroom_teacher",
                 "room",
-                "academic_level",
-                "start_date",
-                "end_date",
                 "class_type",
                 "creation",
                 "modified",
@@ -502,13 +498,8 @@ def create_class():
             return not_found_response("Campus not found")
 
         # Sanitize select-type fields to avoid validation edge-cases
-        raw_academic_level = (data.get("academic_level") or "").strip()
         raw_class_type = (data.get("class_type") or "").strip()
 
-        print(f"Received academic_level from frontend: '{raw_academic_level}'")
-        print(f"Academic_level type: {type(raw_academic_level)}")
-        print(f"Academic_level length: {len(raw_academic_level) if raw_academic_level else 0}")
-        # Only set academic_level in payload if it's a valid single value
         payload = {
             "doctype": "SIS Class",
             "title": data.get("title"),
@@ -520,25 +511,14 @@ def create_class():
             "homeroom_teacher": data.get("homeroom_teacher"),
             "vice_homeroom_teacher": data.get("vice_homeroom_teacher"),
             "room": data.get("room"),
-            "start_date": data.get("start_date"),
-            "end_date": data.get("end_date"),
         }
-
-        # Set academic_level in payload only if it's a valid single value
-        if raw_academic_level and raw_academic_level in ["Level 1", "Level 2", "Level 3", "Level 4"]:
-            payload["academic_level"] = raw_academic_level
-            print(f"Including academic_level in payload: '{raw_academic_level}'")
-        else:
-            print(f"Not including academic_level in payload: '{raw_academic_level}'")
         doc = frappe.get_doc(payload)
         doc.flags.ignore_validate = True
         doc.insert(ignore_permissions=True)
 
-        print(f"Document created with academic_level in payload: '{payload.get('academic_level')}'")
-        print(f"Document after insert has academic_level: '{doc.academic_level}'")
         try:
             if raw_class_type:
-                allowed_ct = ["regular", "mixed"]
+                allowed_ct = ["regular", "mixed", "club"]
                 if raw_class_type not in allowed_ct:
                     for opt in allowed_ct:
                         if opt.lower() == raw_class_type.lower():
@@ -644,7 +624,6 @@ def create_class():
                     except Exception:
                             pass
 
-        print(f"Final response academic_level: '{response_data.get('academic_level')}'")
         return single_item_response(response_data, "Class created successfully")
     except Exception as e:
         frappe.log_error(f"Error creating class: {str(e)}")
@@ -674,32 +653,20 @@ def update_class(class_id: str = None):
         
         # Prepare update data
         update_data = {}
-        for key in ["title", "short_title", "campus_id", "school_year_id", "education_grade", "academic_program", "homeroom_teacher", "vice_homeroom_teacher", "room", "start_date", "end_date"]:
+        for key in ["title", "short_title", "campus_id", "school_year_id", "education_grade", "academic_program", "homeroom_teacher", "vice_homeroom_teacher", "room"]:
             if data.get(key) is not None:
                 update_data[key] = data.get(key)
         
-        # Handle academic_level and class_type separately to avoid validation issues
-        raw_academic_level = (data.get("academic_level") or "").strip()
+        # Handle class_type separately to avoid validation issues
         raw_class_type = (data.get("class_type") or "").strip()
         
         # Update basic fields first
         if update_data:
             frappe.db.set_value("SIS Class", class_id, update_data)
         
-        # Handle academic_level
-        if raw_academic_level:
-            allowed = ["Level 1", "Level 2", "Level 3", "Level 4"]
-            normalized = raw_academic_level
-            if raw_academic_level not in allowed:
-                for opt in allowed:
-                    if opt.lower() == raw_academic_level.lower():
-                        normalized = opt
-                        break
-            frappe.db.set_value("SIS Class", class_id, "academic_level", normalized)
-        
         # Handle class_type
         if raw_class_type:
-            allowed_ct = ["regular", "mixed"]
+            allowed_ct = ["regular", "mixed", "club"]
             normalized_ct = raw_class_type
             if raw_class_type not in allowed_ct:
                 for opt in allowed_ct:
