@@ -779,3 +779,227 @@ def get_guardians_for_selection():
             message="Error fetching guardians",
             code="FETCH_GUARDIANS_SELECTION_ERROR"
         )
+
+
+def validate_vietnamese_phone_number(phone):
+    """
+    Validates and formats Vietnamese phone number
+    Format: +84 followed by 9-10 digits
+    """
+    if not phone or str(phone).strip() == '':
+        return None
+    
+    # Remove spaces, dashes, dots, and parentheses
+    clean_phone = str(phone).replace(' ', '').replace('-', '').replace('.', '').replace('(', '').replace(')', '')
+    
+    # Pattern: +84 followed by 9-10 digits
+    import re
+    vietnamese_phone_regex = re.compile(r'^\+84[0-9]{9,10}$')
+    
+    # Check if already in correct format
+    if vietnamese_phone_regex.match(clean_phone):
+        return clean_phone
+    
+    # Try to auto-format common Vietnamese phone patterns
+    
+    # Handle 0XXX... format by converting to +84XXX...
+    if re.match(r'^0[0-9]{9,10}$', clean_phone):
+        return f"+84{clean_phone[1:]}"
+    
+    # Handle 84XXX... format by adding +
+    if re.match(r'^84[0-9]{9,10}$', clean_phone):
+        return f"+{clean_phone}"
+    
+    # Invalid format
+    raise ValueError(f"Invalid phone number format. Expected: +84 followed by 9-10 digits. Got: {phone}")
+
+
+@frappe.whitelist(allow_guest=False)
+def bulk_import_guardians():
+    """Bulk import guardians from Excel file with phone number validation and uniqueness check"""
+    try:
+        # Get file from request
+        import io
+        import pandas as pd
+        from werkzeug.datastructures import FileStorage
+        
+        # Get uploaded file
+        uploaded_file = frappe.request.files.get('file')
+        if not uploaded_file:
+            return error_response(
+                message="No file uploaded",
+                code="NO_FILE_UPLOADED"
+            )
+        
+        frappe.logger().info(f"Bulk import file received: {uploaded_file.filename}")
+        
+        # Read Excel file
+        try:
+            df = pd.read_excel(uploaded_file, sheet_name=0)
+            frappe.logger().info(f"Excel file read successfully. Shape: {df.shape}")
+        except Exception as e:
+            return error_response(
+                message=f"Error reading Excel file: {str(e)}",
+                code="EXCEL_READ_ERROR"
+            )
+        
+        # Validate required columns
+        required_columns = ['guardian_name']
+        optional_columns = ['phone_number', 'email', 'guardian_id']
+        
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return error_response(
+                message=f"Missing required columns: {', '.join(missing_columns)}",
+                code="MISSING_COLUMNS"
+            )
+        
+        # Get existing guardians to check for uniqueness
+        existing_guardians = frappe.get_all(
+            "CRM Guardian",
+            fields=["name", "guardian_name", "phone_number"],
+            order_by="creation asc"
+        )
+        
+        existing_names = {g['guardian_name'].lower() for g in existing_guardians if g.get('guardian_name')}
+        existing_phones = {}
+        for g in existing_guardians:
+            if g.get('phone_number'):
+                try:
+                    normalized_phone = validate_vietnamese_phone_number(g['phone_number'])
+                    if normalized_phone:
+                        existing_phones[normalized_phone] = g['name']
+                except:
+                    pass
+        
+        # Process each row
+        success_count = 0
+        error_count = 0
+        errors = []
+        logs = []
+        
+        for index, row in df.iterrows():
+            try:
+                # Extract data from row
+                guardian_name = str(row.get('guardian_name', '')).strip()
+                phone_number = str(row.get('phone_number', '')).strip() if pd.notna(row.get('phone_number')) else ''
+                email = str(row.get('email', '')).strip() if pd.notna(row.get('email')) else ''
+                guardian_id = str(row.get('guardian_id', '')).strip() if pd.notna(row.get('guardian_id')) else ''
+                
+                # Validation
+                if not guardian_name:
+                    error_count += 1
+                    error_msg = f"Row {index + 2}: Guardian name is required"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+                
+                # Check name uniqueness
+                if guardian_name.lower() in existing_names:
+                    error_count += 1
+                    error_msg = f"Row {index + 2}: Guardian name '{guardian_name}' already exists"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+                
+                # Validate and format phone number
+                formatted_phone = None
+                if phone_number:
+                    try:
+                        formatted_phone = validate_vietnamese_phone_number(phone_number)
+                        # Check phone uniqueness
+                        if formatted_phone and formatted_phone in existing_phones:
+                            error_count += 1
+                            error_msg = f"Row {index + 2}: Phone number '{phone_number}' already exists (record: {existing_phones[formatted_phone]})"
+                            errors.append(error_msg)
+                            logs.append(error_msg)
+                            continue
+                    except ValueError as ve:
+                        error_count += 1
+                        error_msg = f"Row {index + 2}: {str(ve)}"
+                        errors.append(error_msg)
+                        logs.append(error_msg)
+                        continue
+                
+                # Validate email format
+                if email:
+                    import re
+                    email_regex = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+                    if not email_regex.match(email):
+                        # Email is optional, just log warning but don't fail
+                        logs.append(f"Row {index + 2}: Warning - Invalid email format: {email}")
+                        email = ''  # Clear invalid email
+                
+                # Generate guardian_id if not provided
+                if not guardian_id and guardian_name:
+                    import re
+                    guardian_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
+                    guardian_id = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', guardian_id)
+                    guardian_id = re.sub(r'[ìíịỉĩ]', 'i', guardian_id)
+                    guardian_id = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', guardian_id)
+                    guardian_id = re.sub(r'[ùúụủũưừứựửữ]', 'u', guardian_id)
+                    guardian_id = re.sub(r'[ỳýỵỷỹ]', 'y', guardian_id)
+                    guardian_id = guardian_id.replace('đ', 'd')
+                    guardian_id = re.sub(r'[^a-z0-9]', '-', guardian_id)
+                    guardian_id = re.sub(r'-+', '-', guardian_id).strip('-') + '-' + str(nowdate().replace('-', ''))[-4:]
+                
+                # Create guardian
+                guardian_doc = frappe.get_doc({
+                    "doctype": "CRM Guardian",
+                    "guardian_id": guardian_id,
+                    "guardian_name": guardian_name,
+                    "phone_number": formatted_phone or '',
+                    "email": email or ''
+                })
+                
+                guardian_doc.flags.ignore_validate = True
+                guardian_doc.flags.ignore_permissions = True
+                guardian_doc.insert(ignore_permissions=True)
+                
+                # Track this creation for uniqueness checking in subsequent rows
+                existing_names.add(guardian_name.lower())
+                if formatted_phone:
+                    existing_phones[formatted_phone] = guardian_doc.name
+                
+                success_count += 1
+                logs.append(f"Row {index + 2}: Successfully created guardian '{guardian_name}'")
+                
+            except Exception as e:
+                error_count += 1
+                error_msg = f"Row {index + 2}: Error creating guardian: {str(e)}"
+                errors.append(error_msg)
+                logs.append(error_msg)
+        
+        # Commit all changes
+        frappe.db.commit()
+        
+        # Prepare response
+        total_rows = len(df)
+        is_success = success_count > 0
+        
+        response_data = {
+            "total_rows": total_rows,
+            "success_count": success_count,
+            "error_count": error_count,
+            "errors": errors[:10],  # Limit errors in response
+            "logs": logs[-20:],  # Last 20 logs
+        }
+        
+        if is_success:
+            return success_response(
+                data=response_data,
+                message=f"Bulk import completed. {success_count} guardians created, {error_count} errors."
+            )
+        else:
+            return error_response(
+                data=response_data,
+                message=f"Bulk import failed. {error_count} errors occurred.",
+                code="BULK_IMPORT_FAILED"
+            )
+            
+    except Exception as e:
+        frappe.log_error(f"Error in bulk import guardians: {str(e)}", "Guardian Bulk Import Error")
+        return error_response(
+            message=f"Error in bulk import guardians: {str(e)}",
+            code="BULK_IMPORT_ERROR"
+        )
