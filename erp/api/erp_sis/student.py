@@ -69,21 +69,22 @@ def check_student_code_availability():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_students(page=1, limit=20, include_all_campuses=0):
+def get_all_students(page=1, limit=20, include_all_campuses=0, fetch_all=0):
     """Get all students with basic information and pagination"""
     try:
         # Get parameters with defaults
         page = int(page)
         limit = int(limit)
         include_all_campuses = int(include_all_campuses)
-
-        frappe.logger().info(f"get_all_students called with page: {page}, limit: {limit}, include_all_campuses: {include_all_campuses}")
+        try:
+            fetch_all = int(fetch_all)
+        except Exception:
+            fetch_all = 0
 
         if include_all_campuses:
             # Get filter for all user's campuses
             from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
             filters = get_campus_filter_for_all_user_campuses()
-            frappe.logger().info(f"Using all user campuses filter: {filters}")
         else:
             # Get current user's campus information from roles
             campus_id = get_current_campus_from_context()
@@ -91,25 +92,22 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
             if not campus_id:
                 # Fallback to default if no campus found
                 campus_id = "campus-1"
-                frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
-            frappe.logger().info(f"Using campus_id: {campus_id}")
 
             # Apply campus filtering for data isolation
             filters = {"campus_id": campus_id}
-
-        frappe.logger().info(f"Final filters applied: {filters}")
-        frappe.logger().info(f"Current user: {frappe.session.user}")
-        frappe.logger().info(f"User roles: {frappe.get_roles(frappe.session.user)}")
-
         # Calculate offset for pagination
         offset = (page - 1) * limit
 
-        frappe.logger().info(f"DEBUG: About to execute query with filters: {filters}")
-            
-        frappe.logger().info(f"Query filters: {filters}")
-        frappe.logger().info(f"Query pagination: offset={offset}, limit={limit}")
         
+        # If fetch_all is requested, override window to return all rows
+        if fetch_all:
+            limit_start = 0
+            limit_length = 0 if limit <= 0 else None
+        else:
+            limit_start = offset
+            limit_length = limit
+
         students = frappe.get_all(
             "CRM Student",
             fields=[
@@ -125,21 +123,18 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
             ],
             filters=filters,
             order_by="student_name asc",
-            limit_start=offset,
-            limit_page_length=limit
+            limit_start=limit_start,
+            limit_page_length=(limit if not fetch_all else None)
         )
 
-        frappe.logger().info(f"Found {len(students)} students from database")
 
         # Ensure all students have name field and log sample data
         if students:
             sample = students[0]
-            frappe.logger().info(f"Sample student data: name={sample.get('name')}, student_name={sample.get('student_name')}, student_code={sample.get('student_code')}")
 
             # Verify all students have name
             students_without_name = [s for s in students if not s.get('name')]
             if students_without_name:
-                frappe.logger().warning(f"Found {len(students_without_name)} students without name field")
                 for s in students_without_name[:3]:  # Log first 3
                     frappe.logger().warning(f"Student without name: {s}")
 
@@ -171,13 +166,12 @@ def get_all_students(page=1, limit=20, include_all_campuses=0):
         # Get total count
         total_count = frappe.db.count("CRM Student", filters=filters)
 
-        frappe.logger().info(f"Total count: {total_count}")
 
         return paginated_response(
             data=students,
-            current_page=page,
+            current_page=1 if fetch_all else page,
             total_count=total_count,
-            per_page=limit,
+            per_page=total_count if fetch_all else limit,
             message="Students fetched successfully"
         )
         
