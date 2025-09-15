@@ -173,7 +173,11 @@ def create_room():
         
         # Input validation
         if not title_vn or not short_title or not room_type or not building_id:
-            frappe.throw(_("Title VN, short title, room type, and building are required"))
+            return {
+                "success": False,
+                "data": {},
+                "message": "Title VN, short title, room type, and building are required"
+            }
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -192,7 +196,11 @@ def create_room():
         )
         
         if not building_exists:
-            frappe.throw(_("Selected building does not exist or access denied"))
+            return {
+                "success": False,
+                "data": {},
+                "message": "Selected building does not exist or access denied"
+            }
         
         # Check if room title already exists in this building
         existing = frappe.db.exists(
@@ -204,7 +212,11 @@ def create_room():
         )
         
         if existing:
-            frappe.throw(_(f"Room with title '{title_vn}' already exists in this building"))
+            return {
+                "success": False,
+                "data": {},
+                "message": f"Room with title '{title_vn}' already exists in this building"
+            }
         
         # Create new room
         room_doc = frappe.get_doc({
@@ -220,34 +232,48 @@ def create_room():
         room_doc.insert()
         frappe.db.commit()
         
-        # Return the created data - follow Education Stage pattern
-        frappe.msgprint(_("Room created successfully"))
-        return {
-            "name": room_doc.name,
-            "title_vn": room_doc.title_vn,
-            "title_en": room_doc.title_en,
-            "short_title": room_doc.short_title,
-            "capacity": room_doc.capacity,
-            "room_type": room_doc.room_type,
-            "building_id": room_doc.building_id,
-            "campus_id": room_doc.campus_id
-        }
+        # Return the created data - follow StandardApiResponse pattern
+        return success_response(
+            data={
+                "name": room_doc.name,
+                "title_vn": room_doc.title_vn,
+                "title_en": room_doc.title_en,
+                "short_title": room_doc.short_title,
+                "capacity": room_doc.capacity,
+                "room_type": room_doc.room_type,
+                "building_id": room_doc.building_id
+            },
+            message="Room created successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error creating room: {str(e)}")
-        frappe.throw(_(f"Error creating room: {str(e)}"))
+        return error_response(f"Error creating room: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
-def update_room(room_id, title_vn=None, title_en=None, short_title=None, capacity=None, room_type=None, building_id=None):
-    """Update an existing room"""
+def update_room():
+    """Update an existing room - SIMPLE VERSION with JSON payload support"""
     try:
+        # Get data from request - follow Building pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+        
+        room_id = data.get('room_id')
         if not room_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room ID is required"
-            }
+            return error_response("Room ID is required")
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -269,20 +295,19 @@ def update_room(room_id, title_vn=None, title_en=None, short_title=None, capacit
             )
             
             if not building_exists:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to modify this room"
-                }
+                return error_response("Access denied: You don't have permission to modify this room")
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room not found"
-            }
+            return error_response("Room not found")
         
         # Update fields if provided
+        title_vn = data.get('title_vn')
+        title_en = data.get('title_en')
+        short_title = data.get('short_title')
+        capacity = data.get('capacity')
+        room_type = data.get('room_type')
+        building_id = data.get('building_id')
+        
         if title_vn and title_vn != room_doc.title_vn:
             # Check for duplicate room title in the same building
             existing = frappe.db.exists(
@@ -294,11 +319,7 @@ def update_room(room_id, title_vn=None, title_en=None, short_title=None, capacit
                 }
             )
             if existing:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Room with title '{title_vn}' already exists in this building"
-                }
+                return error_response(f"Room with title '{title_vn}' already exists in this building")
             room_doc.title_vn = title_vn
         
         if title_en and title_en != room_doc.title_en:
@@ -324,11 +345,7 @@ def update_room(room_id, title_vn=None, title_en=None, short_title=None, capacit
             )
             
             if not building_exists:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Selected building does not exist or access denied"
-                }
+                return error_response("Selected building does not exist or access denied")
             room_doc.building_id = building_id
         
         room_doc.save()
@@ -348,24 +365,35 @@ def update_room(room_id, title_vn=None, title_en=None, short_title=None, capacit
         )
         
     except Exception as e:
-        frappe.log_error(f"Error updating room {room_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error updating room: {str(e)}"
-        }
+        frappe.log_error(f"Error updating room: {str(e)}")
+        return error_response(f"Error updating room: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False) 
-def delete_room(room_id):
+def delete_room():
     """Delete a room"""
     try:
+        # Get data from request - follow Building pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    room_id = data.get('room_id')
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                room_id = data.get('room_id')
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            room_id = data.get('room_id')
+        
         if not room_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room ID is required"
-            }
+            return error_response("Room ID is required")
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -387,35 +415,20 @@ def delete_room(room_id):
             )
             
             if not building_exists:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": "Access denied: You don't have permission to delete this room"
-                }
+                return error_response("Access denied: You don't have permission to delete this room")
                 
         except frappe.DoesNotExistError:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room not found"
-            }
+            return error_response("Room not found")
         
         # Delete the document
         frappe.delete_doc("ERP Administrative Room", room_id)
         frappe.db.commit()
         
-        return success_response(
-            data={},
-            message="Room deleted successfully"
-        )
+        return success_response(message="Room deleted successfully")
         
     except Exception as e:
-        frappe.log_error(f"Error deleting room {room_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error deleting room: {str(e)}"
-        }
+        frappe.log_error(f"Error deleting room: {str(e)}")
+        return error_response(f"Error deleting room: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)

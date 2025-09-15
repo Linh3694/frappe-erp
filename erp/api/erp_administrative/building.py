@@ -183,67 +183,6 @@ def create_building():
         return error_response(f"Error creating building: {str(e)}")
 
 
-@frappe.whitelist(allow_guest=False)
-def update_building(building_id, title_vn=None, title_en=None, short_title=None):
-    """Update an existing building"""
-    try:
-        if not building_id:
-            return validation_error_response({"building_id": ["Building ID is required"]})
-        
-        # Get existing document
-        try:
-            building_doc = frappe.get_doc("ERP Administrative Building", building_id)
-                
-        except frappe.DoesNotExistError:
-            return not_found_response("Building not found")
-        
-        # Update fields if provided
-        if title_vn and title_vn != building_doc.title_vn:
-            # Check for duplicate building title
-            existing = frappe.db.exists(
-                "ERP Administrative Building",
-                {
-                    "title_vn": title_vn,
-                    "name": ["!=", building_id]
-                }
-            )
-            if existing:
-                return validation_error_response({"title_vn": [f"Building with title '{title_vn}' already exists"]})
-            building_doc.title_vn = title_vn
-        
-        if title_en and title_en != building_doc.title_en:
-            building_doc.title_en = title_en
-            
-        if short_title and short_title != building_doc.short_title:
-            # Check for duplicate short title
-            existing_code = frappe.db.exists(
-                "ERP Administrative Building",
-                {
-                    "short_title": short_title,
-                    "name": ["!=", building_id]
-                }
-            )
-            if existing_code:
-                return validation_error_response({"short_title": [f"Building with short title '{short_title}' already exists"]})
-            building_doc.short_title = short_title
-        
-        building_doc.save()
-        frappe.db.commit()
-        
-        building_data = {
-            "name": building_doc.name,
-            "title_vn": building_doc.title_vn,
-            "title_en": building_doc.title_en,
-            "short_title": building_doc.short_title,
-            "campus_id": building_doc.campus_id
-        }
-        return single_item_response(building_data, "Building updated successfully")
-        
-    except Exception as e:
-        frappe.log_error(f"Error updating building {building_id}: {str(e)}")
-        return error_response(f"Error updating building: {str(e)}")
-
-
 @frappe.whitelist(allow_guest=False) 
 def delete_building(building_id):
     """Delete a building"""
