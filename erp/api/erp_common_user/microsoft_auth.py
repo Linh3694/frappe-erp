@@ -23,13 +23,36 @@ def _extract_origin(url: str | None) -> str | None:
     try:
         if not url:
             return None
+        # Nếu là list, lấy phần tử đầu
+        if isinstance(url, (list, tuple)):
+            for item in url:
+                o = _extract_origin(str(item))
+                if o:
+                    return o
+            return None
+        url = str(url).strip()
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme and parsed.netloc:
             origin = f"{parsed.scheme}://{parsed.netloc}"
             return origin.rstrip('/')
-        # Trường hợp được truyền thẳng origin (không path)
-        if '://' in url:
-            return url.split('://', 1)[0] + '://' + url.split('://', 1)[1].split('/', 1)[0]
+        # Nếu thiếu scheme nhưng có dạng host hoặc host:port → mặc định https
+        # urlparse("example.com:3000").netloc == '' và path == 'example.com:3000'
+        candidate = url
+        if '://' in candidate:
+            # Trường hợp origin không có path: scheme://host[:port]
+            try:
+                scheme = candidate.split('://', 1)[0]
+                hostport = candidate.split('://', 1)[1].split('/', 1)[0]
+                if scheme and hostport:
+                    return f"{scheme}://{hostport}".rstrip('/')
+            except Exception:
+                pass
+        else:
+            # Không có scheme → thêm https làm mặc định
+            # Hỗ trợ cả 'localhost:3000' hoặc 'example.com'
+            hostport = candidate.split('/', 1)[0]
+            if hostport:
+                return f"https://{hostport}".rstrip('/')
         return None
     except Exception:
         return None
@@ -38,11 +61,18 @@ def _extract_origin(url: str | None) -> str | None:
 def _get_default_frontend_origin() -> str | None:
     """Lấy origin mặc định từ cấu hình `frontend_url`."""
     try:
-        default_frontend = (
-            frappe.conf.get("frontend_url")
-            or frappe.get_site_config().get("frontend_url")
+        cfg_val = (
+            (frappe.conf and frappe.conf.get("frontend_url"))
+            or (frappe.get_site_config() and frappe.get_site_config().get("frontend_url"))
         )
-        origin = _extract_origin(default_frontend) or (default_frontend.rstrip('/') if default_frontend else None)
+        # Có thể là string hoặc list
+        if isinstance(cfg_val, (list, tuple)):
+            for item in cfg_val:
+                origin = _extract_origin(str(item))
+                if origin:
+                    return origin
+            return None
+        origin = _extract_origin(cfg_val)
         return origin
     except Exception:
         return None
@@ -63,7 +93,7 @@ def _get_allowed_frontend_origins() -> list[str]:
         for source in (frappe.conf, frappe.get_site_config()):
             if not source:
                 continue
-            for key in ("frontend_allowed_origins", "frontend_allowlist", "frontend_urls"):
+            for key in ("frontend_allowed_origins", "frontend_allowlist", "frontend_urls", "allow_cors", "frontend_url"):
                 raw = source.get(key)
                 if raw:
                     if isinstance(raw, list):
