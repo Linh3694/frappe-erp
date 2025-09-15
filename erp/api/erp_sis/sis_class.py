@@ -14,21 +14,19 @@ from erp.utils.api_response import (
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
-    """List classes with optional filter by school_year_id."""
+def get_all_classes(school_year_id: str = None, campus_id: str = None):
+    """List all classes with optional filter by school_year_id and campus_id."""
     try:
-        page = int(page or 1)
-        limit = int(limit or 20)
-        offset = (page - 1) * limit
-
         # Get current user's campus information from roles/JWT
-        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = get_current_campus_from_context()
 
         # If campus cannot be resolved, don't hard-fallback to a fixed campus
         # Allow showing classes across campuses to avoid returning empty lists on mobile
 
         # Apply campus filtering for data isolation
         filters = {"campus_id": (campus_id or "campus-1")}
+        
         # accept school_year_id from query/form/body
         if not school_year_id:
             # Check query parameters first
@@ -75,9 +73,7 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
                 "modified",
             ],
             filters=filters,
-            order_by="title asc",
-            limit_start=offset,
-            limit_page_length=limit,
+            order_by="title asc"
         )
 
         frappe.logger().info(f"Found {len(classes)} classes with filters: {filters}")
@@ -207,14 +203,8 @@ def get_all_classes(page: int = 1, limit: int = 20, school_year_id: str = None):
 
             enhanced_classes.append(enhanced_class)
 
-        total_count = frappe.db.count("SIS Class", filters=filters)
-        total_pages = (total_count + limit - 1) // limit
-
-        return paginated_response(
+        return success_response(
             data=enhanced_classes,
-            current_page=page,
-            total_count=total_count,
-            per_page=limit,
             message="Classes fetched successfully"
         )
     except Exception as e:
