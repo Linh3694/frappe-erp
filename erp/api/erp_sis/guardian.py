@@ -783,8 +783,10 @@ def get_guardians_for_selection():
 
 def validate_vietnamese_phone_number(phone):
     """
-    Validates and formats Vietnamese phone number
-    Format: +84 followed by 9-10 digits
+    Validates and formats Vietnamese phone number according to specific rules:
+    1. If starts with (+84) -> keep as is
+    2. If starts with 0 (e.g., 0987627212) -> replace 0 with (+84)
+    3. Otherwise -> add (+84) at the beginning
     """
     if not phone or str(phone).strip() == '':
         return None
@@ -794,34 +796,47 @@ def validate_vietnamese_phone_number(phone):
     if phone_str.lower() in ['nan', 'none', 'null']:
         return None
     
-    # Remove spaces, dashes, dots, and parentheses
-    clean_phone = phone_str.replace(' ', '').replace('-', '').replace('.', '').replace('(', '').replace(')', '')
+    # Remove only spaces, dashes, and dots, but keep parentheses for (+84) detection
+    clean_phone = phone_str.replace(' ', '').replace('-', '').replace('.', '')
     
-    # Pattern: +84 followed by 9-10 digits
+    frappe.logger().info(f"Processing phone: Original='{phone}', Cleaned='{clean_phone}'")
+    
     import re
-    vietnamese_phone_regex = re.compile(r'^\+84[0-9]{9,10}$')
     
-    # Check if already in correct format
-    if vietnamese_phone_regex.match(clean_phone):
-        return clean_phone
+    # Rule 1: If starts with (+84) -> keep as is (remove parentheses around +84)
+    if clean_phone.startswith('(+84)'):
+        result = clean_phone.replace('(+84)', '+84')
+        frappe.logger().info(f"Rule 1 applied: {clean_phone} -> {result}")
+        # Validate final format
+        if re.match(r'^\+84[0-9]{9,10}$', result):
+            return result
+        else:
+            frappe.logger().error(f"Invalid format after Rule 1: {result}")
+            raise ValueError(f"Invalid phone number format after processing. Got: {result}")
     
-    # Try to auto-format common Vietnamese phone patterns
+    # Rule 2: If starts with 0 -> replace 0 with (+84)
+    if clean_phone.startswith('0') and re.match(r'^0[0-9]{9,10}$', clean_phone):
+        result = f"+84{clean_phone[1:]}"
+        frappe.logger().info(f"Rule 2 applied: {clean_phone} -> {result}")
+        return result
     
-    # Handle 0XXX... format by converting to +84XXX...
-    if re.match(r'^0[0-9]{9,10}$', clean_phone):
-        return f"+84{clean_phone[1:]}"
+    # Rule 3: Otherwise -> add (+84) at the beginning
+    # First remove any existing +84 or 84 prefix to avoid duplication
+    if clean_phone.startswith('+84'):
+        clean_phone = clean_phone[3:]
+    elif clean_phone.startswith('84'):
+        clean_phone = clean_phone[2:]
     
-    # Handle 84XXX... format by adding +
-    if re.match(r'^84[0-9]{9,10}$', clean_phone):
-        return f"+{clean_phone}"
+    # Add +84 prefix
+    result = f"+84{clean_phone}"
+    frappe.logger().info(f"Rule 3 applied: {phone_str} -> {result}")
     
-    # Handle pure numbers (9-10 digits) - assume Vietnam mobile
-    if re.match(r'^[0-9]{9,10}$', clean_phone):
-        return f"+84{clean_phone}"
-    
-    # Invalid format - log the problematic input for debugging
-    frappe.logger().error(f"Invalid phone format - Original: '{phone}', Cleaned: '{clean_phone}'")
-    raise ValueError(f"Invalid phone number format. Expected: +84 followed by 9-10 digits. Got: {phone}")
+    # Final validation - must be +84 followed by 9-10 digits
+    if re.match(r'^\+84[0-9]{9,10}$', result):
+        return result
+    else:
+        frappe.logger().error(f"Invalid final format: Original='{phone}', Result='{result}'")
+        raise ValueError(f"Invalid phone number format. Expected Vietnamese mobile format. Got: {phone}")
 
 
 @frappe.whitelist(allow_guest=False)
