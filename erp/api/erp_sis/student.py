@@ -69,20 +69,12 @@ def check_student_code_availability():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_students(page=1, limit=20, include_all_campuses=0, fetch_all=0):
-    """Get all students with basic information and pagination"""
+def get_all_students(include_all_campuses=0):
+    """Get all students without pagination - always returns full dataset"""
     try:
-        # Get parameters with defaults
-        page = int(page)
-        limit = int(limit)
         include_all_campuses = int(include_all_campuses)
-        try:
-            fetch_all = int(fetch_all)
-        except Exception:
-            fetch_all = 0
             
-        # Debug log to check fetch_all parameter
-        frappe.logger().info(f"get_all_students called with: page={page}, limit={limit}, include_all_campuses={include_all_campuses}, fetch_all={fetch_all}")
+        frappe.logger().info(f"get_all_students called with: include_all_campuses={include_all_campuses}")
 
         if include_all_campuses:
             # Get filter for all user's campuses
@@ -99,45 +91,23 @@ def get_all_students(page=1, limit=20, include_all_campuses=0, fetch_all=0):
             # Apply campus filtering for data isolation
             filters = {"campus_id": campus_id}
         
-        # If fetch_all is requested, return all data without pagination
-        if fetch_all:
-            students = frappe.get_all(
-                "CRM Student",
-                fields=[
-                    "name",
-                    "student_name",
-                    "student_code",
-                    "dob",
-                    "gender",
-                    "campus_id",
-                    "family_code",
-                    "creation",
-                    "modified"
-                ],
-                filters=filters,
-                order_by="student_name asc"
-            )
-        else:
-            # Regular pagination
-            offset = (page - 1) * limit
-            students = frappe.get_all(
-                "CRM Student",
-                fields=[
-                    "name",
-                    "student_name",
-                    "student_code",
-                    "dob",
-                    "gender",
-                    "campus_id",
-                    "family_code",
-                    "creation",
-                    "modified"
-                ],
-                filters=filters,
-                order_by="student_name asc",
-                limit_start=offset,
-                limit_page_length=limit
-            )
+        # Always fetch all students - no pagination
+        students = frappe.get_all(
+            "CRM Student",
+            fields=[
+                "name",
+                "student_name",
+                "student_code",
+                "dob",
+                "gender",
+                "campus_id",
+                "family_code",
+                "creation",
+                "modified"
+            ],
+            filters=filters,
+            order_by="student_name asc"
+        )
 
 
         # Ensure all students have name field and log sample data
@@ -175,24 +145,11 @@ def get_all_students(page=1, limit=20, include_all_campuses=0, fetch_all=0):
         except Exception as e:
             frappe.logger().error(f"Failed to enrich students with family codes: {str(e)}")
         
-        # Get total count
-        total_count = frappe.db.count("CRM Student", filters=filters)
-
-
-        # Return response based on fetch_all parameter
-        if fetch_all:
-            return success_response(
-                data=students,
-                message=f"Fetched all {len(students)} students successfully"
-            )
-        else:
-            return paginated_response(
-                data=students,
-                current_page=page,
-                total_count=total_count,
-                per_page=limit,
-                message="Students fetched successfully"
-            )
+        # Always return all students without pagination info
+        return success_response(
+            data=students,
+            message=f"Fetched all {len(students)} students successfully"
+        )
         
     except Exception as e:
         frappe.log_error(f"Error fetching students: {str(e)}")
