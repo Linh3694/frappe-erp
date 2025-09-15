@@ -15,9 +15,146 @@ import urllib.parse
 from erp.utils.api_response import success_response, error_response
 
 
+def _extract_origin(url: str | None) -> str | None:
+    """Trả về origin ở dạng scheme://host[:port] từ 1 URL/Origin bất kỳ.
+
+    Ví dụ: https://a.example.com:5173/path?q=1 -> https://a.example.com:5173
+    """
+    try:
+        if not url:
+            return None
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme and parsed.netloc:
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            return origin.rstrip('/')
+        # Trường hợp được truyền thẳng origin (không path)
+        if '://' in url:
+            return url.split('://', 1)[0] + '://' + url.split('://', 1)[1].split('/', 1)[0]
+        return None
+    except Exception:
+        return None
+
+
+def _get_default_frontend_origin() -> str | None:
+    """Lấy origin mặc định từ cấu hình `frontend_url`."""
+    try:
+        default_frontend = (
+            frappe.conf.get("frontend_url")
+            or frappe.get_site_config().get("frontend_url")
+        )
+        origin = _extract_origin(default_frontend) or (default_frontend.rstrip('/') if default_frontend else None)
+        return origin
+    except Exception:
+        return None
+
+
+def _get_allowed_frontend_origins() -> list[str]:
+    """Đọc allowlist origins cho frontend từ site_config/frappe.conf.
+
+    Hỗ trợ các key:
+    - frontend_allowed_origins (list hoặc chuỗi CSV)
+    - frontend_allowlist (list hoặc chuỗi CSV)
+    - frontend_urls (list hoặc chuỗi CSV)
+    Ngoài ra luôn bao gồm `frontend_url` làm mặc định nếu có.
+    """
+    origins: list[str] = []
+    try:
+        candidates = []
+        for source in (frappe.conf, frappe.get_site_config()):
+            if not source:
+                continue
+            for key in ("frontend_allowed_origins", "frontend_allowlist", "frontend_urls"):
+                raw = source.get(key)
+                if raw:
+                    if isinstance(raw, list):
+                        candidates.extend([str(x) for x in raw])
+                    else:
+                        candidates.extend([s.strip() for s in str(raw).split(',') if s.strip()])
+        # Luôn thêm default frontend
+        default_origin = _get_default_frontend_origin()
+        if default_origin:
+            candidates.append(default_origin)
+        # Chuẩn hóa và loại trùng
+        normalized = []
+        seen = set()
+        for c in candidates:
+            o = _extract_origin(c)
+            if o and o not in seen:
+                seen.add(o)
+                normalized.append(o)
+        origins = normalized
+    except Exception:
+        pass
+    return origins
+
+
+def _is_allowed_origin(origin: str | None, allowlist: list[str]) -> bool:
+    """Kiểm tra origin có nằm trong allowlist không. Nếu allowlist rỗng, chỉ cho phép default."""
+    if not origin:
+        return False
+    if allowlist:
+        return origin.rstrip('/') in {o.rstrip('/') for o in allowlist}
+    default_origin = _get_default_frontend_origin()
+    return origin.rstrip('/') == (default_origin.rstrip('/') if default_origin else None)
+
+
+def _pick_frontend_origin(frontend_param: str | None) -> str | None:
+    """Chọn origin frontend hợp lệ theo thứ tự ưu tiên: param -> Origin header -> Referer -> default.
+
+    Chỉ trả về origin nếu nằm trong allowlist, nếu không sẽ fallback về default.
+    """
+    allowlist = _get_allowed_frontend_origins()
+
+    # 1) Tham số truyền vào
+    cand = _extract_origin(frontend_param)
+    if _is_allowed_origin(cand, allowlist):
+        return cand
+
+    # 2) Header Origin
+    try:
+        origin_hdr = None
+        try:
+            origin_hdr = frappe.get_request_header('Origin')
+        except Exception:
+            origin_hdr = None
+        if not origin_hdr and getattr(frappe, 'request', None):
+            origin_hdr = getattr(frappe.request, 'headers', {}).get('Origin') if hasattr(frappe.request, 'headers') else None
+        cand = _extract_origin(origin_hdr)
+        if _is_allowed_origin(cand, allowlist):
+            return cand
+    except Exception:
+        pass
+
+    # 3) Header Referer
+    try:
+        referer = None
+        try:
+            referer = frappe.get_request_header('Referer')
+        except Exception:
+            referer = None
+        if not referer and getattr(frappe, 'request', None):
+            referer = getattr(frappe.request, 'headers', {}).get('Referer') if hasattr(frappe.request, 'headers') else None
+        cand = _extract_origin(referer)
+        if _is_allowed_origin(cand, allowlist):
+            return cand
+    except Exception:
+        pass
+
+    # 4) Fallback default
+    return _get_default_frontend_origin()
+
+
 @frappe.whitelist(allow_guest=True)
-def microsoft_login_redirect():
-    """Get Microsoft login redirect URL"""
+def microsoft_login_redirect(frontend: str | None = None):
+    """Get Microsoft login redirect URL.
+
+    Hỗ trợ đa frontend bằng cách xác định origin frontend từ:
+    - Tham số `frontend` (nếu truyền vào)
+    - Header `Origin` hoặc `Referer` của request khởi tạo
+    - Fallback cấu hình `frontend_url`
+
+    Origin đã chọn sẽ được lưu theo `state` để callback sử dụng redirect phù hợp.
+    """
     try:
         # Get Microsoft auth config
         config = get_microsoft_config()
@@ -25,6 +162,14 @@ def microsoft_login_redirect():
         # Generate state parameter for security
         state = secrets.token_urlsafe(32)
         frappe.cache().set_value(f"ms_auth_state_{state}", True, expires_in_sec=600)  # 10 minutes
+        
+        # Xác định origin frontend và lưu theo state để callback dùng lại
+        try:
+            chosen_origin = _pick_frontend_origin(frontend)
+            if chosen_origin:
+                frappe.cache().set_value(f"ms_auth_frontend_{state}", chosen_origin, expires_in_sec=600)
+        except Exception:
+            pass
         
         # Build authorization URL
         auth_url = "https://login.microsoftonline.com/{}/oauth2/v2.0/authorize".format(config["tenant_id"])
@@ -58,7 +203,7 @@ def microsoft_login_redirect():
 
 @frappe.whitelist(allow_guest=True)
 def microsoft_callback(code, state):
-    """Handle Microsoft authentication callback"""
+    """Handle Microsoft authentication callback với redirect động theo frontend origin đã lưu."""
     try:
         # Verify state parameter
         if not frappe.cache().get_value(f"ms_auth_state_{state}"):
@@ -66,6 +211,13 @@ def microsoft_callback(code, state):
         
         # Clear state
         frappe.cache().delete_value(f"ms_auth_state_{state}")
+        # Lấy origin frontend đã lưu (nếu có) để dùng cho redirect
+        frontend_origin_cached = frappe.cache().get_value(f"ms_auth_frontend_{state}")
+        if frontend_origin_cached:
+            try:
+                frappe.cache().delete_value(f"ms_auth_frontend_{state}")
+            except Exception:
+                pass
         
         # Get access token
         token_data = get_microsoft_access_token(code)
@@ -151,7 +303,6 @@ def microsoft_callback(code, state):
             "last_name": frappe_user.last_name or "",
             "provider": "microsoft",
             "microsoft_id": ms_user.microsoft_id if ms_user else None,
-            # Use Microsoft Graph data directly
             "job_title": user_info.get("jobTitle", ""),
             "department": user_info.get("department", ""),
             "employee_code": user_info.get("employeeId", ""),
@@ -168,11 +319,16 @@ def microsoft_callback(code, state):
         user_json = json.dumps(user_data)
         user_encoded = base64.b64encode(user_json.encode()).decode()
         
-        # Get frontend URL (adjust this based on your frontend URL)
-        frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
-        
-        # Redirect to frontend callback with token and user data in URL query params
-        callback_url = f"{frontend_url}/auth/microsoft/callback?success=true&token={jwt_token}"
+        # Chọn frontend origin để redirect ưu tiên theo cache; fallback về cấu hình, luôn kiểm tra allowlist
+        allowlist = _get_allowed_frontend_origins()
+        if frontend_origin_cached and _is_allowed_origin(frontend_origin_cached, allowlist):
+            frontend_origin = frontend_origin_cached
+        else:
+            default_frontend = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
+            frontend_origin = _extract_origin(default_frontend) or default_frontend.rstrip('/')
+
+        # Redirect tới callback path chuẩn trên frontend
+        callback_url = f"{frontend_origin}/auth/microsoft/callback?success=true&token={jwt_token}"
         
         # Set redirect response
         frappe.local.response["type"] = "redirect"
@@ -184,11 +340,25 @@ def microsoft_callback(code, state):
         frappe.log_error("Microsoft Auth", f"Microsoft callback error: {str(e)}")
         
         # Get frontend URL for error redirect
-        frontend_url = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
+        try:
+            # Ưu tiên origin đã lưu theo state nếu còn
+            frontend_origin_cached = None
+            try:
+                frontend_origin_cached = frappe.cache().get_value(f"ms_auth_frontend_{state}") if state else None
+            except Exception:
+                frontend_origin_cached = None
+            if frontend_origin_cached:
+                allowlist = _get_allowed_frontend_origins()
+                frontend_origin = frontend_origin_cached if _is_allowed_origin(frontend_origin_cached, allowlist) else (_get_default_frontend_origin() or "http://localhost:3000")
+            else:
+                default_frontend = frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "http://localhost:3000"
+                frontend_origin = _extract_origin(default_frontend) or default_frontend.rstrip('/')
+        except Exception:
+            frontend_origin = "http://localhost:3000"
         
         # Redirect to frontend with error
         error_message = urllib.parse.quote(str(e))
-        callback_url = f"{frontend_url}/auth/microsoft/callback?success=false&error={error_message}"
+        callback_url = f"{frontend_origin}/auth/microsoft/callback?success=false&error={error_message}"
         
         # Set redirect response
         frappe.local.response["type"] = "redirect"
