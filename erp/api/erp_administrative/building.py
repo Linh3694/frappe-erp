@@ -184,9 +184,26 @@ def create_building():
 
 
 @frappe.whitelist(allow_guest=False) 
-def delete_building(building_id):
+def delete_building():
     """Delete a building"""
     try:
+        # Get data from request - follow update_building pattern
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+        
+        building_id = data.get('building_id')
         if not building_id:
             return validation_error_response({"building_id": ["Building ID is required"]})
         
@@ -204,7 +221,7 @@ def delete_building(building_id):
         return success_response(message="Building deleted successfully")
         
     except Exception as e:
-        frappe.log_error(f"Error deleting building {building_id}: {str(e)}")
+        frappe.log_error(f"Error deleting building: {str(e)}")
         return error_response(f"Error deleting building: {str(e)}")
 
 

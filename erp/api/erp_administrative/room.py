@@ -73,15 +73,25 @@ def get_all_rooms():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_room_by_id(room_id):
+def get_room_by_id():
     """Get a specific room by ID"""
     try:
+        # Get room_id from JSON payload or form_dict  
+        room_id = None
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data and 'room_id' in json_data:
+                    room_id = json_data['room_id']
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Fallback to form_dict
         if not room_id:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room ID is required"
-            }
+            room_id = frappe.local.form_dict.get('room_id')
+            
+        if not room_id:
+            return error_response("Room ID is required")
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -93,11 +103,7 @@ def get_room_by_id(room_id):
         room = frappe.get_doc("ERP Administrative Room", room_id)
         
         if not room:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room not found"
-            }
+            return error_response("Room not found")
         
         # Check if the room's building belongs to this campus
         building_exists = frappe.db.exists(
@@ -109,11 +115,7 @@ def get_room_by_id(room_id):
         )
         
         if not building_exists:
-            return {
-                "success": False,
-                "data": {},
-                "message": "Room not found or access denied"
-            }
+            return error_response("Room not found or access denied")
         
         return success_response(
             data={
@@ -129,12 +131,8 @@ def get_room_by_id(room_id):
         )
         
     except Exception as e:
-        frappe.log_error(f"Error fetching room {room_id}: {str(e)}")
-        return {
-            "success": False,
-            "data": {},
-            "message": f"Error fetching room: {str(e)}"
-        }
+        frappe.log_error(f"Error fetching room: {str(e)}")
+        return error_response(f"Error fetching room: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
