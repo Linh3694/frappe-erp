@@ -868,14 +868,23 @@ def bulk_import_guardians():
                 code="EXCEL_READ_ERROR"
             )
         
+        # Log available columns for debugging
+        frappe.logger().info(f"Excel columns found: {list(df.columns)}")
+        
         # Validate required columns
         required_columns = ['guardian_name']
-        optional_columns = ['phone_number', 'email', 'guardian_id']
+        optional_columns = ['phone_number', 'Phone Number', 'email', 'guardian_id']
         
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
+        # Check for guardian_name column (case insensitive)
+        guardian_name_col = None
+        for col in df.columns:
+            if col.lower().replace(' ', '').replace('_', '') in ['guardianname', 'name']:
+                guardian_name_col = col
+                break
+        
+        if guardian_name_col is None and 'guardian_name' not in df.columns:
             return error_response(
-                message=f"Missing required columns: {', '.join(missing_columns)}",
+                message=f"Missing required column: guardian_name or similar. Found columns: {', '.join(df.columns)}",
                 code="MISSING_COLUMNS"
             )
         
@@ -906,14 +915,28 @@ def bulk_import_guardians():
         for index, row in df.iterrows():
             try:
                 # Extract data from row with better handling of Excel formats
-                guardian_name = str(row.get('guardian_name', '')).strip() if pd.notna(row.get('guardian_name')) else ''
+                guardian_name = ''
+                for name_col in ['guardian_name', 'Guardian Name', 'name', 'Name']:
+                    if name_col in row and pd.notna(row.get(name_col)):
+                        guardian_name = str(row.get(name_col, '')).strip()
+                        frappe.logger().info(f"Found name in column '{name_col}': '{guardian_name}'")
+                        break
                 
                 # Handle phone number - could be in various Excel columns
                 phone_number = ''
-                for phone_col in ['phone_number', 'Phone Number', 'phone', 'Phone']:
+                for phone_col in ['Phone Number', 'phone_number', 'phone', 'Phone']:
                     if phone_col in row and pd.notna(row.get(phone_col)):
                         phone_number = str(row.get(phone_col, '')).strip()
+                        frappe.logger().info(f"Found phone in column '{phone_col}': '{phone_number}'")
                         break
+                
+                # Also check if there are any columns with 'phone' in name (case insensitive)
+                if not phone_number:
+                    for col_name in df.columns:
+                        if 'phone' in col_name.lower() and pd.notna(row.get(col_name)):
+                            phone_number = str(row.get(col_name, '')).strip()
+                            frappe.logger().info(f"Found phone in fuzzy column '{col_name}': '{phone_number}'")
+                            break
                 
                 # Handle email with better Excel compatibility
                 email = str(row.get('email', '')).strip() if pd.notna(row.get('email')) else ''
@@ -944,7 +967,10 @@ def bulk_import_guardians():
                 formatted_phone = None
                 if phone_number:
                     try:
+                        frappe.logger().info(f"Row {index + 2}: Processing phone '{phone_number}'")
                         formatted_phone = validate_vietnamese_phone_number(phone_number)
+                        frappe.logger().info(f"Row {index + 2}: Formatted phone result: '{formatted_phone}'")
+                        
                         # Check phone uniqueness
                         if formatted_phone and formatted_phone in existing_phones:
                             error_count += 1
@@ -954,10 +980,13 @@ def bulk_import_guardians():
                             continue
                     except ValueError as ve:
                         error_count += 1
-                        error_msg = f"Row {index + 2}: {str(ve)}"
+                        error_msg = f"Row {index + 2}: Phone validation error: {str(ve)}"
                         errors.append(error_msg)
                         logs.append(error_msg)
+                        frappe.logger().error(f"Row {index + 2}: Phone validation failed for '{phone_number}': {str(ve)}")
                         continue
+                else:
+                    frappe.logger().info(f"Row {index + 2}: No phone number provided")
                 
                 # Validate email format
                 if email:
@@ -996,12 +1025,17 @@ def bulk_import_guardians():
                 
                 # Force update phone number using direct DB call to ensure it's saved
                 if formatted_phone:
+                    frappe.logger().info(f"About to force update phone for {guardian_doc.name}: '{formatted_phone}'")
                     frappe.db.set_value("CRM Guardian", guardian_doc.name, "phone_number", formatted_phone)
-                    frappe.logger().info(f"Force updated phone number for {guardian_doc.name}: {formatted_phone}")
+                    frappe.db.commit()  # Force commit immediately
+                    frappe.logger().info(f"Force updated and committed phone number for {guardian_doc.name}: {formatted_phone}")
+                else:
+                    frappe.logger().info(f"No phone number to update for {guardian_doc.name}")
                 
                 # Log what was actually saved
                 guardian_doc.reload()
-                frappe.logger().info(f"Guardian {guardian_doc.name} saved with phone: '{guardian_doc.phone_number}'")
+                final_phone = guardian_doc.phone_number or ''
+                frappe.logger().info(f"Guardian {guardian_doc.name} final saved state - phone: '{final_phone}'")
                 
                 # Track this creation for uniqueness checking in subsequent rows
                 existing_names.add(guardian_name.lower())
