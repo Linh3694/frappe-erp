@@ -123,6 +123,8 @@ def get_actual_subject_by_id():
                 "title_vn": actual_subject.title_vn,
                 "title_en": actual_subject.title_en,
                 "campus_id": actual_subject.campus_id,
+                "education_stage_id": getattr(actual_subject, "education_stage_id", None),
+                "curriculum_id": getattr(actual_subject, "curriculum_id", None),
                 "creation": actual_subject.creation,
                 "modified": actual_subject.modified
             },
@@ -159,7 +161,8 @@ def create_actual_subject():
         # Extract values from data
         title_vn = data.get("title_vn")
         title_en = data.get("title_en")
-        # curriculum_id no longer required/used
+        education_stage_id = data.get("education_stage_id")
+        curriculum_id = data.get("curriculum_id")
         
         # Input validation
         if not title_vn:
@@ -197,7 +200,9 @@ def create_actual_subject():
             "doctype": "SIS Actual Subject",
             "title_vn": title_vn,
             "title_en": title_en,
-            "campus_id": campus_id
+            "campus_id": campus_id,
+            "education_stage_id": education_stage_id,
+            "curriculum_id": curriculum_id
         })
         
         actual_subject_doc.insert()
@@ -210,7 +215,9 @@ def create_actual_subject():
                 "name": actual_subject_doc.name,
                 "title_vn": actual_subject_doc.title_vn,
                 "title_en": actual_subject_doc.title_en,
-                "campus_id": actual_subject_doc.campus_id
+                "campus_id": actual_subject_doc.campus_id,
+                "education_stage_id": getattr(actual_subject_doc, "education_stage_id", None),
+                "curriculum_id": getattr(actual_subject_doc, "curriculum_id", None)
             },
             message="Actual subject created successfully"
         )
@@ -278,7 +285,8 @@ def update_actual_subject():
         # Update fields if provided
         title_vn = data.get('title_vn')
         title_en = data.get('title_en')
-        # curriculum_id is deprecated
+        education_stage_id = data.get('education_stage_id')
+        curriculum_id = data.get('curriculum_id')
 
 
         if title_vn and title_vn != actual_subject_doc.title_vn:
@@ -301,7 +309,10 @@ def update_actual_subject():
         if title_en and title_en != actual_subject_doc.title_en:
             actual_subject_doc.title_en = title_en
             
-        # ignore curriculum_id updates
+        if education_stage_id is not None:
+            actual_subject_doc.education_stage_id = education_stage_id
+        if curriculum_id is not None:
+            actual_subject_doc.curriculum_id = curriculum_id
         
         actual_subject_doc.save()
         frappe.db.commit()
@@ -311,7 +322,9 @@ def update_actual_subject():
                 "name": actual_subject_doc.name,
                 "title_vn": actual_subject_doc.title_vn,
                 "title_en": actual_subject_doc.title_en,
-                "campus_id": actual_subject_doc.campus_id
+                "campus_id": actual_subject_doc.campus_id,
+                "education_stage_id": getattr(actual_subject_doc, "education_stage_id", None),
+                "curriculum_id": getattr(actual_subject_doc, "curriculum_id", None)
             },
             message="Actual subject updated successfully"
         )

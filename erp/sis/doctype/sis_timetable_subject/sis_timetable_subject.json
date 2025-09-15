@@ -19,7 +19,9 @@
   "basic_information",
   "title_vn",
   "title_en",
-  "campus_id"
+  "campus_id",
+  "education_stage_id",
+  "curriculum_id"
  ],
  "fields": [
   {
@@ -48,6 +50,20 @@
    "label": "Campus",
    "options": "SIS Campus",
    "reqd": 1
+  },
+  {
+   "fieldname": "education_stage_id",
+   "fieldtype": "Link",
+   "label": "Education Stage",
+   "options": "SIS Education Stage",
+   "reqd": 0
+  },
+  {
+   "fieldname": "curriculum_id",
+   "fieldtype": "Link",
+   "label": "Curriculum",
+   "options": "SIS Curriculum",
+   "reqd": 0
   }
  ],
  "index_web_pages_for_search": 1,

@@ -38,6 +38,8 @@ def get_all_timetable_subjects():
                 "title_vn",
                 "title_en",
                 "campus_id",
+                "education_stage_id",
+                "curriculum_id",
                 "creation",
                 "modified"
             ],
@@ -95,7 +97,9 @@ def get_timetable_subject_by_id():
             "name": timetable_subject.name,
             "title_vn": timetable_subject.title_vn,
             "title_en": timetable_subject.title_en,
-            "campus_id": timetable_subject.campus_id
+            "campus_id": timetable_subject.campus_id,
+            "education_stage_id": getattr(timetable_subject, "education_stage_id", None),
+            "curriculum_id": getattr(timetable_subject, "curriculum_id", None)
         }
         return single_item_response(subject_data, "Timetable subject fetched successfully")
         
@@ -133,6 +137,8 @@ def create_timetable_subject():
         # Extract values from data
         title_vn = data.get("title_vn")
         title_en = data.get("title_en")
+        education_stage_id = data.get("education_stage_id")
+        curriculum_id = data.get("curriculum_id")
         
         # Input validation
         if not title_vn:
@@ -166,7 +172,9 @@ def create_timetable_subject():
             "doctype": "SIS Timetable Subject",
             "title_vn": title_vn,
             "title_en": title_en,
-            "campus_id": campus_id
+            "campus_id": campus_id,
+            "education_stage_id": education_stage_id,
+            "curriculum_id": curriculum_id
         })
         
         timetable_subject_doc.insert()
@@ -177,7 +185,9 @@ def create_timetable_subject():
             "name": timetable_subject_doc.name,
             "title_vn": timetable_subject_doc.title_vn,
             "title_en": timetable_subject_doc.title_en,
-            "campus_id": timetable_subject_doc.campus_id
+            "campus_id": timetable_subject_doc.campus_id,
+            "education_stage_id": getattr(timetable_subject_doc, "education_stage_id", None),
+            "curriculum_id": getattr(timetable_subject_doc, "curriculum_id", None)
         }
         return single_item_response(subject_data, "Timetable subject created successfully")
         
@@ -240,6 +250,8 @@ def update_timetable_subject():
         # Update fields if provided
         title_vn = data.get('title_vn')
         title_en = data.get('title_en')
+        education_stage_id = data.get('education_stage_id')
+        curriculum_id = data.get('curriculum_id')
 
 
         if title_vn and title_vn != timetable_subject_doc.title_vn:
@@ -259,6 +271,11 @@ def update_timetable_subject():
         if title_en and title_en != timetable_subject_doc.title_en:
             timetable_subject_doc.title_en = title_en
         
+        if education_stage_id is not None:
+            timetable_subject_doc.education_stage_id = education_stage_id
+        if curriculum_id is not None:
+            timetable_subject_doc.curriculum_id = curriculum_id
+
         timetable_subject_doc.save()
         frappe.db.commit()
         
@@ -266,7 +283,9 @@ def update_timetable_subject():
             "name": timetable_subject_doc.name,
             "title_vn": timetable_subject_doc.title_vn,
             "title_en": timetable_subject_doc.title_en,
-            "campus_id": timetable_subject_doc.campus_id
+            "campus_id": timetable_subject_doc.campus_id,
+            "education_stage_id": getattr(timetable_subject_doc, "education_stage_id", None),
+            "curriculum_id": getattr(timetable_subject_doc, "curriculum_id", None)
         }
         return single_item_response(subject_data, "Timetable subject updated successfully")
         
