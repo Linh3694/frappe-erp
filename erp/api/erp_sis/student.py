@@ -693,18 +693,15 @@ def get_students_for_selection():
 
 
 @frappe.whitelist(allow_guest=False)
-def search_students(search_term=None, page=1, limit=20):
-    """Search students with pagination"""
+def search_students(search_term=None):
+    """Search students - returns all matching results without pagination"""
     try:
         # Normalize parameters: prefer form_dict values if provided
         form = frappe.local.form_dict or {}
         if 'search_term' in form and (search_term is None or str(search_term).strip() == ''):
             search_term = form.get('search_term')
-        # Coerce page/limit from form if present
-        page = int(form.get('page', page))
-        limit = int(form.get('limit', limit))
 
-        frappe.logger().info(f"search_students called with search_term: '{search_term}', page: {page}, limit: {limit}")
+        frappe.logger().info(f"search_students called with search_term: '{search_term}'")
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -722,10 +719,7 @@ def search_students(search_term=None, page=1, limit=20):
         conditions = " AND ".join(where_clauses)
         frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
         
-        # Calculate offset
-        offset = (page - 1) * limit
-        
-        # Get students with search (parameterized)
+        # Get all matching students without pagination
         sql_query = (
             """
             SELECT 
@@ -740,13 +734,12 @@ def search_students(search_term=None, page=1, limit=20):
             FROM `tabCRM Student`
             WHERE {where}
             ORDER BY student_name ASC
-            LIMIT %s OFFSET %s
             """
         ).format(where=conditions)
 
-        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params + [limit, offset]}")
+        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params}")
 
-        students = frappe.db.sql(sql_query, params + [limit, offset], as_dict=True)
+        students = frappe.db.sql(sql_query, params, as_dict=True)
 
         frappe.logger().info(f"SQL QUERY RETURNED {len(students)} students")
 
@@ -800,29 +793,10 @@ def search_students(search_term=None, page=1, limit=20):
         except Exception as e:
             frappe.logger().error(f"Failed to enrich search students with family codes: {str(e)}")
         
-        # Get total count (parameterized)
-        count_query = (
-            """
-            SELECT COUNT(*) as count
-            FROM `tabCRM Student`
-            WHERE {where}
-            """
-        ).format(where=conditions)
-        
-        frappe.logger().info(f"EXECUTING COUNT QUERY: {count_query} | params={params}")
-        
-        total_count = frappe.db.sql(count_query, params, as_dict=True)[0]['count']
-        
-        frappe.logger().info(f"COUNT QUERY RETURNED: {total_count}")
-        
-        total_pages = (total_count + limit - 1) // limit
-        
-        return paginated_response(
+        # Return all search results without pagination
+        return success_response(
             data=students,
-            current_page=page,
-            total_count=total_count,
-            per_page=limit,
-            message="Students search completed successfully"
+            message=f"Search completed successfully - found {len(students)} students"
         )
         
     except Exception as e:
