@@ -40,6 +40,74 @@ def _load_report(report_id: str):
     return report
 
 
+def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Transform report data to match frontend layout binding expectations.
+    Converts subject_eval structure to subjects array for binding paths like subjects.0.*
+    """
+    if not isinstance(data, dict):
+        return data
+    
+    transformed = data.copy()
+    
+    # Transform subject_eval to subjects array
+    if "subject_eval" in data and isinstance(data["subject_eval"], dict):
+        subject_eval = data["subject_eval"]
+        frappe.logger().info(f"Found subject_eval: {json.dumps(subject_eval, indent=2, default=str)[:500]}...")
+        
+        # Create subjects array from subject_eval
+        subjects = []
+        
+        # Method 1: If subject_eval has subject_id key
+        subject_id = subject_eval.get("subject_id")
+        if subject_id and subject_id in subject_eval:
+            subject_data = subject_eval[subject_id]
+            if isinstance(subject_data, dict):
+                subjects.append({
+                    "subject_id": subject_id,
+                    "title_vn": subject_data.get("title_vn", subject_id),
+                    "teacher_name": subject_data.get("teacher_name", ""),
+                    "rubric": subject_data.get("rubric", {}),
+                    "comments": subject_data.get("comments", []),
+                    **subject_data
+                })
+        
+        # Method 2: If subject_eval itself is the subject data
+        elif subject_eval.get("title_vn") or subject_eval.get("rubric") or subject_eval.get("comments"):
+            subjects.append({
+                "subject_id": subject_id or "unknown",
+                "title_vn": subject_eval.get("title_vn", subject_id or ""),
+                "teacher_name": subject_eval.get("teacher_name", ""),
+                "rubric": subject_eval.get("rubric", {}),
+                "comments": subject_eval.get("comments", []),
+                **subject_eval
+            })
+        
+        # Method 3: Look for object keys that might be subject IDs
+        else:
+            for key, value in subject_eval.items():
+                if key != "subject_id" and isinstance(value, dict):
+                    if value.get("title_vn") or value.get("rubric") or value.get("comments"):
+                        subjects.append({
+                            "subject_id": key,
+                            "title_vn": value.get("title_vn", key),
+                            "teacher_name": value.get("teacher_name", ""),
+                            "rubric": value.get("rubric", {}),
+                            "comments": value.get("comments", []),
+                            **value
+                        })
+        
+        # If we found subjects, add to transformed data
+        if subjects:
+            transformed["subjects"] = subjects
+            frappe.logger().info(f"Created subjects array with {len(subjects)} subjects")
+            frappe.logger().info(f"First subject: {json.dumps(subjects[0], indent=2, default=str)[:500]}...")
+        else:
+            frappe.logger().warning("Could not create subjects array from subject_eval")
+    
+    return transformed
+
+
 def _build_html(form, report_data: Dict[str, Any]) -> str:
     def _resolve_path(data: Any, path: Optional[str]) -> Any:
         if not path:
@@ -292,7 +360,12 @@ def get_report_html(report_id: Optional[str] = None):
         except Exception:
             pass
         frappe.logger().info(f"Report data structure: {json.dumps(data, indent=2, default=str)[:1000]}...")
-        html = _build_html(form, data)
+        
+        # Transform data to match frontend layout binding expectations
+        transformed_data = _transform_data_for_bindings(data)
+        frappe.logger().info(f"Transformed data structure: {json.dumps(transformed_data, indent=2, default=str)[:1000]}...")
+        
+        html = _build_html(form, transformed_data)
         return single_item_response({"html": html}, "HTML built")
     except frappe.DoesNotExistError:
         return not_found_response("Report not found")
