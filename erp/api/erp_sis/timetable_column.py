@@ -68,8 +68,10 @@ def get_all_timetable_columns():
         
         # Add education_stage filter if provided
         education_stage = frappe.local.form_dict.get("education_stage") or frappe.request.args.get("education_stage")
+        print(f"🎯 BACKEND: education_stage parameter received: {education_stage}")
         if education_stage:
             filters["education_stage_id"] = education_stage
+            print(f"🎯 BACKEND: filters after adding education_stage: {filters}")
             
         timetables = frappe.get_all(
             "SIS Timetable Column",
@@ -94,6 +96,7 @@ def get_all_timetable_columns():
             timetable["start_time"] = format_time_for_html(timetable.get("start_time"))
             timetable["end_time"] = format_time_for_html(timetable.get("end_time"))
 
+        print(f"🎯 BACKEND: Returning {len(timetables)} timetable columns")
         return list_response(timetables, "Timetable columns fetched successfully")
         
     except Exception as e:
