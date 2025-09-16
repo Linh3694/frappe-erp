@@ -160,6 +160,9 @@ def _build_prim_vn_html(form, report_data: Dict[str, Any]) -> str:
 
 # Commented out for simplified testing - can be restored later
 """
+Temporarily commented out for simplified testing
+"""
+
 def _build_prim_vn_subject_page(bg_url: str, report: dict, student: dict, klass: dict, page_subjects: list, page_index: int) -> str:
     """Build a subject page for PRIM_VN (same as PrimaryVN.tsx A4Page for subjects)"""
     
@@ -378,7 +381,6 @@ def _build_matrix_html(criteria: list, scales: list, selections: list) -> str:
     """
     
     return matrix_html
-"""
 
 
 def _build_html(form, report_data: Dict[str, Any]) -> str:
