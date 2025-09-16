@@ -38,7 +38,9 @@ def get_all_teachers():
             fields=[
                 "name",
                 "user_id",
+                "gender",
                 "education_stage_id",
+                "subject_department_id",
                 "campus_id",
                 "creation",
                 "modified"
@@ -260,6 +262,7 @@ def get_teacher_by_id(teacher_id=None):
         enriched_data = {
             "name": teacher.name,
             "user_id": teacher.user_id,
+            "gender": getattr(teacher, 'gender', None),
             "education_stage_id": teacher.education_stage_id,
             "subject_department_id": getattr(teacher, 'subject_department_id', None),
             "campus_id": teacher.campus_id
@@ -362,18 +365,21 @@ def create_teacher():
     try:
         # Try multiple ways to get the parameters
         user_id = None
+        gender = None
         education_stage_id = None
         subject_department_id = None
 
         # Method 1: Try frappe.form_dict (for form data)
         if frappe.form_dict:
             user_id = frappe.form_dict.get('user_id')
+            gender = frappe.form_dict.get('gender')
             education_stage_id = frappe.form_dict.get('education_stage_id')
             subject_department_id = frappe.form_dict.get('subject_department_id')
 
         # Method 2: Try frappe.local.form_dict
         if not user_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
             user_id = frappe.local.form_dict.get('user_id')
+            gender = gender or frappe.local.form_dict.get('gender')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
             subject_department_id = frappe.local.form_dict.get('subject_department_id')
 
@@ -389,6 +395,7 @@ def create_teacher():
                 if data_str.strip():
                     parsed_data = parse_qs(data_str)
                     user_id = parsed_data.get('user_id', [None])[0]
+                    gender = gender or parsed_data.get('gender', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
                     subject_department_id = parsed_data.get('subject_department_id', [None])[0]
             except Exception:
@@ -405,6 +412,7 @@ def create_teacher():
                 if json_str.strip():
                     json_data = json.loads(json_str)
                     user_id = json_data.get('user_id')
+                    gender = gender or json_data.get('gender')
                     education_stage_id = json_data.get('education_stage_id')
                     subject_department_id = json_data.get('subject_department_id')
             except Exception:
@@ -468,6 +476,7 @@ def create_teacher():
         teacher_doc = frappe.get_doc({
             "doctype": "SIS Teacher",
             "user_id": user_id,
+            "gender": gender,
             "education_stage_id": education_stage_id,
             "subject_department_id": subject_department_id,
             "campus_id": campus_id
@@ -482,6 +491,7 @@ def create_teacher():
             data={
                 "name": teacher_doc.name,
                 "user_id": teacher_doc.user_id,
+                "gender": getattr(teacher_doc, 'gender', None),
                 "education_stage_id": teacher_doc.education_stage_id,
                 "subject_department_id": getattr(teacher_doc, 'subject_department_id', None),
                 "campus_id": teacher_doc.campus_id
@@ -504,6 +514,7 @@ def update_teacher():
         # Try multiple ways to get the parameters
         teacher_id = None
         user_id = None
+        gender = None
         education_stage_id = None
         subject_department_id = None
 
@@ -511,6 +522,7 @@ def update_teacher():
         if frappe.form_dict:
             teacher_id = frappe.form_dict.get('teacher_id')
             user_id = frappe.form_dict.get('user_id')
+            gender = frappe.form_dict.get('gender')
             education_stage_id = frappe.form_dict.get('education_stage_id')
             subject_department_id = frappe.form_dict.get('subject_department_id')
 
@@ -518,6 +530,7 @@ def update_teacher():
         if not teacher_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
             teacher_id = frappe.local.form_dict.get('teacher_id')
             user_id = frappe.local.form_dict.get('user_id')
+            gender = gender or frappe.local.form_dict.get('gender')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
             subject_department_id = frappe.local.form_dict.get('subject_department_id')
 
@@ -534,6 +547,7 @@ def update_teacher():
                     parsed_data = parse_qs(data_str)
                     teacher_id = parsed_data.get('teacher_id', [None])[0]
                     user_id = parsed_data.get('user_id', [None])[0]
+                    gender = gender or parsed_data.get('gender', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
                     subject_department_id = parsed_data.get('subject_department_id', [None])[0]
             except Exception:
@@ -552,6 +566,7 @@ def update_teacher():
                     json_data = json.loads(json_str)
                     teacher_id = json_data.get('teacher_id')
                     user_id = json_data.get('user_id')
+                    gender = gender or json_data.get('gender')
                     education_stage_id = json_data.get('education_stage_id')
                     subject_department_id = json_data.get('subject_department_id')
             except Exception:
@@ -657,6 +672,10 @@ def update_teacher():
 
             teacher_doc.education_stage_id = education_stage_id
         
+        # Update gender if provided
+        if gender is not None:
+            teacher_doc.gender = gender
+        
         # Update subject department if provided
         current_sd = getattr(teacher_doc, 'subject_department_id', None)
         if subject_department_id is not None and subject_department_id != current_sd:
@@ -677,6 +696,7 @@ def update_teacher():
             data={
                 "name": teacher_doc.name,
                 "user_id": teacher_doc.user_id,
+                "gender": getattr(teacher_doc, 'gender', None),
                 "education_stage_id": teacher_doc.education_stage_id,
                 "subject_department_id": getattr(teacher_doc, 'subject_department_id', None),
                 "campus_id": teacher_doc.campus_id

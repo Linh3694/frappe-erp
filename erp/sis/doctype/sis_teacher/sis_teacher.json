@@ -19,6 +19,7 @@
   "basic_information",
   "campus_id",
   "user_id",
+  "gender",
   "education_stage_id",
   "subject_department_id"
  ],
@@ -43,6 +44,14 @@
    "options": "User",
    "reqd": 1,
    "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "gender",
+   "fieldtype": "Select",
+   "label": "Gender",
+   "options": "Male\nFemale\nOther",
+   "reqd": 0,
    "in_list_view": 1
   },
   {
