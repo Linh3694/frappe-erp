@@ -110,99 +110,56 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _build_prim_vn_html(form, report_data: Dict[str, Any]) -> str:
     """
-    Build HTML for PRIM_VN form using same logic as PrimaryVN.tsx component.
-    This renders dynamic multiple subjects per page like the frontend.
+    Simplified PRIM_VN HTML builder for testing
     """
-    frappe.logger().info("Building PRIM_VN HTML with dedicated renderer")
-    
-    # Extract data (same as PrimaryVN.tsx lines 30-32)
-    student = report_data.get("student", {})
-    klass = report_data.get("class", {})
-    report = report_data.get("report", {})
-    
-    # Handle subjects - prioritize subjects array, fallback to subject_eval mapping
-    subjects = report_data.get("subjects", [])
-    if not subjects and "subject_eval" in report_data:
-        # Transform subject_eval to subjects array (already done in _transform_data_for_bindings)
-        subjects = report_data.get("subjects", [])
-    
-    # Homeroom data  
-    homeroom_list = report_data.get("homeroom", [])
-    
-    frappe.logger().info(f"PRIM_VN render: {len(subjects)} subjects, {len(homeroom_list)} homeroom items")
-    
-    # Constants (same as PrimaryVN.tsx lines 87-88)
-    SUBJECTS_PER_PAGE = 2
-    HOMEROOM_PER_PAGE = 2
-    
-    # Base styles (same as PrimaryVN.tsx lines 143)
-    base_styles = """
-      <style>
-        @page { size: A4; margin: 0; }
-        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .page { position: relative; width: 210mm; height: 297mm; background: white; page-break-after: always; }
-        .page-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-        .positioned-text { position: absolute; font-family: Arial, sans-serif; font-size: 12pt; color: #000; }
-        .bold { font-weight: 600; }
-        .center { text-align: center; }
-        .subject-block { page-break-inside: avoid; margin-bottom: 16px; }
-        .matrix-grid { width: 100%; border-collapse: collapse; font-size: 11pt; border: 1px solid #ccc; }
-        .matrix-grid th, .matrix-grid td { border: 1px solid #999; padding: 4px; }
-        .comment-block { margin-bottom: 8px; }
-        .comment-title { font-weight: 600; font-size: 12pt; }
-        .comment-value { min-height: 64px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12pt; white-space: pre-wrap; }
-      </style>
-    """
-    
-    # Get background image
-    bg_url = ""
-    if form and hasattr(form, 'pages') and form.pages:
-        bg_url = getattr(form.pages[0], 'background_image', '') or ""
-        if bg_url and not bg_url.startswith(("http://", "https://")):
-            try:
-                bg_url = frappe.utils.get_url(bg_url)
-            except Exception:
-                if not bg_url.startswith('/'):
-                    bg_url = f"/{bg_url}"
-    
-    # Paginate subjects (same as PrimaryVN.tsx lines 91-95)
-    def paginate_subjects():
-        pages = []
-        for i in range(0, len(subjects), SUBJECTS_PER_PAGE):
-            pages.append(subjects[i:i + SUBJECTS_PER_PAGE])
-        return pages
-    
-    # Build subject pages
-    pages_html = []
-    subject_pages = paginate_subjects()
-    
-    for page_index, page_subjects in enumerate(subject_pages):
-        page_html = _build_prim_vn_subject_page(bg_url, report, student, klass, page_subjects, page_index)
-        pages_html.append(page_html)
-    
-    # Build homeroom pages if any homeroom data
-    if homeroom_list:
-        homeroom_pages = []
-        for i in range(0, len(homeroom_list), HOMEROOM_PER_PAGE):
-            homeroom_pages.append(homeroom_list[i:i + HOMEROOM_PER_PAGE])
+    try:
+        frappe.logger().info("Building simplified PRIM_VN HTML")
         
-        # Get teachers list for homeroom pages
-        teachers_set = set()
-        for subj in subjects:
-            if subj.get("teacher_name"):
-                teachers_set.add(subj.get("teacher_name"))
-        teachers_joined = ", ".join(teachers_set)
+        # Basic data extraction with safety checks
+        student = report_data.get("student", {}) if isinstance(report_data, dict) else {}
+        klass = report_data.get("class", {}) if isinstance(report_data, dict) else {} 
+        report = report_data.get("report", {}) if isinstance(report_data, dict) else {}
         
-        for page_index, page_homeroom in enumerate(homeroom_pages):
-            page_html = _build_prim_vn_homeroom_page(bg_url, report, student, klass, teachers_joined, page_homeroom, page_index)
-            pages_html.append(page_html)
-    
-    final_html = f"<div>{base_styles}{''.join(pages_html)}</div>"
-    frappe.logger().info(f"PRIM_VN HTML generated: {len(pages_html)} pages, {len(final_html)} chars")
-    
-    return final_html
+        student_name = student.get("full_name", "") if isinstance(student, dict) else ""
+        class_name = klass.get("short_title", "") if isinstance(klass, dict) else ""
+        
+        # Simple HTML output for testing
+        base_styles = """
+        <style>
+            @page { size: A4; margin: 0; }
+            .page { position: relative; width: 210mm; height: 297mm; background: white; }
+            .header { text-align: center; font-weight: bold; margin: 20px 0; }
+            .content { margin: 40px; }
+        </style>
+        """
+        
+        html_content = f"""
+        <div>
+            {base_styles}
+            <div class="page">
+                <div class="header">TRƯỜNG TIỂU HỌC WELLSPRING / WELLSPRING PRIMARY SCHOOL</div>
+                <div class="content">
+                    <p><strong>Học sinh/Student:</strong> {frappe.utils.escape_html(student_name)}</p>
+                    <p><strong>Lớp/Class:</strong> {frappe.utils.escape_html(class_name)}</p>
+                    <p><strong>Report Title:</strong> {frappe.utils.escape_html(str(report.get('title_vn', '')) if isinstance(report, dict) else '')}</p>
+                    <p><strong>Debug:</strong> PRIM_VN renderer working - {len(str(report_data))} chars data</p>
+                </div>
+            </div>
+        </div>
+        """
+        
+        frappe.logger().info("PRIM_VN HTML built successfully with simplified version")
+        return html_content
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in simplified PRIM_VN renderer: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+        raise
 
 
+# Commented out for simplified testing - can be restored later
+"""
 def _build_prim_vn_subject_page(bg_url: str, report: dict, student: dict, klass: dict, page_subjects: list, page_index: int) -> str:
     """Build a subject page for PRIM_VN (same as PrimaryVN.tsx A4Page for subjects)"""
     
@@ -421,6 +378,7 @@ def _build_matrix_html(criteria: list, scales: list, selections: list) -> str:
     """
     
     return matrix_html
+"""
 
 
 def _build_html(form, report_data: Dict[str, Any]) -> str:
@@ -683,7 +641,15 @@ def get_report_html(report_id: Optional[str] = None):
         # Special handling for PRIM_VN - use dedicated renderer instead of layout_json
         if form.code == 'PRIM_VN':
             frappe.logger().info("Using dedicated PRIM_VN renderer")
-            html = _build_prim_vn_html(form, transformed_data)
+            try:
+                html = _build_prim_vn_html(form, transformed_data)
+                frappe.logger().info("PRIM_VN HTML built successfully")
+            except Exception as prim_error:
+                frappe.logger().error(f"Error in PRIM_VN renderer: {str(prim_error)}")
+                frappe.log_error(f"PRIM_VN renderer error: {str(prim_error)}")
+                # Fallback to regular renderer
+                frappe.logger().info("Falling back to regular HTML renderer")
+                html = _build_html(form, transformed_data)
         else:
             html = _build_html(form, transformed_data)
         return single_item_response({"html": html}, "HTML built")
@@ -693,7 +659,10 @@ def get_report_html(report_id: Optional[str] = None):
         return forbidden_response("Access denied")
     except Exception as e:
         frappe.log_error(f"Error get_report_html: {str(e)}")
-        return error_response("Error building html")
+        frappe.logger().error(f"Full error details: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+        return error_response(f"Error building html: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
