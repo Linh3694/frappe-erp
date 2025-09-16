@@ -1341,8 +1341,17 @@ def delete_event():
         if not teacher:
             return forbidden_response("Only teachers can delete events")
 
-        # Get event
-        event = frappe.get_doc("SIS Event", event_id)
+        # Get event details using SQL to avoid child table loading issues
+        event_data = frappe.db.sql("""
+            SELECT campus_id, create_by, status 
+            FROM `tabSIS Event` 
+            WHERE name = %s
+        """, (event_id,), as_dict=True)
+        
+        if not event_data:
+            return not_found_response("Event not found")
+        
+        event = event_data[0]
 
         # Check campus permission
         campus_id = get_current_campus_from_context()
@@ -1365,56 +1374,40 @@ def delete_event():
             frappe.db.sql("""DELETE FROM `tabSIS Event Student` WHERE event_id = %s""", (event_id,))
         except Exception as e:
             frappe.log_error(f"Error deleting event students: {str(e)}", "Delete Event")
-            # Fallback to individual deletion if SQL fails
-            try:
-                event_students = frappe.get_all("SIS Event Student", filters={"event_id": event_id}, fields=["name"])
-                for es in event_students:
-                    frappe.delete_doc("SIS Event Student", es.name, ignore_permissions=True)
-            except Exception as e2:
-                frappe.log_error(f"Fallback deletion of event students also failed: {str(e2)}", "Delete Event")
+            # No fallback needed - if SQL fails, continue with other deletions
+            pass
         
         try:
             # Delete event teachers - use direct SQL to avoid parent column issues  
             frappe.db.sql("""DELETE FROM `tabSIS Event Teacher` WHERE event_id = %s""", (event_id,))
         except Exception as e:
             frappe.log_error(f"Error deleting event teachers: {str(e)}", "Delete Event")
-            # Fallback to individual deletion if SQL fails
-            try:
-                event_teachers = frappe.get_all("SIS Event Teacher", filters={"event_id": event_id}, fields=["name"])
-                for et in event_teachers:
-                    frappe.delete_doc("SIS Event Teacher", et.name, ignore_permissions=True)
-            except Exception as e2:
-                frappe.log_error(f"Fallback deletion of event teachers also failed: {str(e2)}", "Delete Event")
+            # No fallback needed - if SQL fails, continue with other deletions
+            pass
         
         try:
             # Delete event date schedules - use direct SQL to avoid parent column issues
             frappe.db.sql("""DELETE FROM `tabSIS Event Date Schedule` WHERE event_id = %s""", (event_id,))
         except Exception as e:
             frappe.log_error(f"Error deleting event date schedules: {str(e)}", "Delete Event")
-            # Fallback to individual deletion if SQL fails
-            try:
-                date_schedules = frappe.get_all("SIS Event Date Schedule", filters={"event_id": event_id}, fields=["name"])
-                for ds in date_schedules:
-                    frappe.delete_doc("SIS Event Date Schedule", ds.name, ignore_permissions=True)
-            except Exception as e2:
-                frappe.log_error(f"Fallback deletion of event date schedules also failed: {str(e2)}", "Delete Event")
+            # No fallback needed - if SQL fails, continue with other deletions
+            pass
         
         try:
             # Delete timetable overrides if any - use direct SQL to avoid parent column issues
             frappe.db.sql("""DELETE FROM `tabSIS Timetable Override` WHERE event_id = %s""", (event_id,))
         except Exception as e:
             frappe.log_error(f"Error deleting timetable overrides: {str(e)}", "Delete Event")
-            # Fallback to individual deletion if SQL fails
-            try:
-                overrides = frappe.get_all("SIS Timetable Override", filters={"event_id": event_id}, fields=["name"])
-                for override in overrides:
-                    frappe.delete_doc("SIS Timetable Override", override.name, ignore_permissions=True)
-            except Exception as e2:
-                frappe.log_error(f"Fallback deletion of timetable overrides also failed: {str(e2)}", "Delete Event")
+            # No fallback needed - if SQL fails, continue with other deletions
+            pass
 
-        # Delete the event
-        frappe.delete_doc("SIS Event", event_id, ignore_permissions=True)
-        frappe.db.commit()
+        # Delete the event using SQL to avoid child table issues
+        try:
+            frappe.db.sql("""DELETE FROM `tabSIS Event` WHERE name = %s""", (event_id,))
+            frappe.db.commit()
+        except Exception as e:
+            frappe.log_error(f"Error deleting main event record: {str(e)}", "Delete Event")
+            return error_response(f"Error deleting event: {str(e)}")
 
         return single_item_response({
             "name": event_id,
