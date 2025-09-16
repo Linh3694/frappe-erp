@@ -594,11 +594,72 @@ def delete_template(template_id: Optional[str] = None):
         if doc.campus_id != campus_id:
             return forbidden_response("Access denied: Template belongs to another campus")
 
-        frappe.delete_doc("SIS Report Card Template", template_id)
+        # Get force_delete parameter to confirm cascade deletion
+        payload = _get_request_payload()
+        force_delete = payload.get("force_delete", False)
+
+        # Check for linked Student Report Cards
+        linked_reports = frappe.get_all(
+            "SIS Student Report Card",
+            fields=["name", "title", "student_id"],
+            filters={"template_id": template_id},
+            limit=100
+        )
+
+        if linked_reports and not force_delete:
+            # Return info about linked reports and ask for confirmation
+            return {
+                "success": False,
+                "requires_confirmation": True,
+                "message": f"Template có {len(linked_reports)} báo cáo học sinh liên kết. Xác nhận xóa tất cả?",
+                "data": {
+                    "linked_reports_count": len(linked_reports),
+                    "sample_reports": linked_reports[:5],  # Show first 5 as sample
+                    "template_title": doc.title
+                }
+            }
+
+        # Cascade delete: Delete all linked Student Report Cards first
+        deleted_reports = []
+        failed_reports = []
+        
+        if linked_reports:
+            frappe.logger().info(f"Deleting {len(linked_reports)} linked student reports for template {template_id}")
+            
+            for report in linked_reports:
+                try:
+                    frappe.delete_doc("SIS Student Report Card", report["name"], ignore_permissions=True)
+                    deleted_reports.append(report["name"])
+                except Exception as report_error:
+                    failed_reports.append({
+                        "report_id": report["name"],
+                        "error": str(report_error)[:100]  # Truncate error message
+                    })
+                    frappe.logger().error(f"Failed to delete student report {report['name']}: {str(report_error)}")
+
+        # Now delete the template
+        frappe.delete_doc("SIS Report Card Template", template_id, ignore_permissions=True)
         frappe.db.commit()
-        return success_response(message="Template deleted successfully")
+        
+        result_message = f"Template deleted successfully"
+        if deleted_reports:
+            result_message += f". Đã xóa {len(deleted_reports)} báo cáo học sinh liên kết"
+        if failed_reports:
+            result_message += f". {len(failed_reports)} báo cáo không thể xóa"
+
+        return success_response(
+            message=result_message,
+            data={
+                "deleted_reports_count": len(deleted_reports),
+                "failed_reports_count": len(failed_reports),
+                "failed_reports": failed_reports if failed_reports else None
+            }
+        )
+
     except Exception as e:
-        frappe.log_error(f"Error deleting report card template {template_id}: {str(e)}")
+        # Shorten error message to avoid 140 char limit
+        error_msg = str(e)[:80] + "..." if len(str(e)) > 80 else str(e)
+        frappe.log_error(f"Delete template {template_id[:10]}...: {error_msg}")
         return error_response("Error deleting report card template")
 
 
