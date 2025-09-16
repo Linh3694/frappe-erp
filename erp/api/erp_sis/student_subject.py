@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import nowdate, get_datetime
+from frappe.utils import nowdate, get_datetime, now
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.api_response import (
@@ -190,6 +190,195 @@ def get_students_by_classes():
         return error_response(f"Error fetching students by classes: {str(e)}")
 
 
+def _initialize_report_data_from_template(template, student_id: str, class_id: str) -> dict:
+    """
+    Initialize full data structure for Student Report Card based on template configuration
+    This ensures Final View always shows all required fields (filled or empty)
+    """
+    data = {}
+    
+    try:
+        # Get all subjects for this student from SIS Student Subject
+        campus_id = template.campus_id
+        student_subjects = frappe.get_all(
+            "SIS Student Subject",
+            fields=["subject_id"],
+            filters={
+                "campus_id": campus_id,
+                "class_id": class_id,
+                "student_id": student_id
+            },
+            distinct=True
+        )
+        
+        # Get subject details and filter by template subjects config if available
+        subject_ids = [s["subject_id"] for s in student_subjects if s.get("subject_id")]
+        
+        # If template has specific subjects config, only include those
+        template_subject_ids = []
+        if hasattr(template, 'subjects') and template.subjects:
+            template_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
+            # Filter subject_ids to only include those configured in template
+            subject_ids = [sid for sid in subject_ids if sid in template_subject_ids]
+        
+        # Get subject names/titles for reference
+        subjects_info = {}
+        if subject_ids:
+            subjects_data = frappe.get_all(
+                "SIS Subject",
+                fields=["name", "title"],
+                filters={"name": ["in", subject_ids]}
+            )
+            subjects_info = {s["name"]: s["title"] for s in subjects_data}
+        
+        # 1. Initialize Scores section (VN program)
+        if getattr(template, 'scores_enabled', False):
+            scores = {}
+            
+            # If template has scores config, use that structure
+            if hasattr(template, 'scores') and template.scores:
+                for score_config in template.scores:
+                    subject_id = score_config.subject_id
+                    if subject_id in subject_ids:
+                        scores[subject_id] = {
+                            "subject_title": subjects_info.get(subject_id, subject_id),
+                            "display_name": score_config.display_name or subjects_info.get(subject_id, subject_id),
+                            "subject_type": score_config.subject_type or "Môn tính điểm",
+                            "hs1_scores": [],  # List of individual scores
+                            "hs2_scores": [],
+                            "hs3_scores": [],
+                            "hs1_average": None,  # Calculated average
+                            "hs2_average": None,
+                            "hs3_average": None,
+                            "final_average": None
+                        }
+            
+            data["scores"] = scores
+        
+        # 2. Initialize Homeroom section
+        if getattr(template, 'homeroom_enabled', False):
+            homeroom = {
+                "conduct": "",
+                "conduct_year": "" if getattr(template, 'homeroom_conduct_year_enabled', False) else None,
+                "comments": {}
+            }
+            
+            # Initialize homeroom comments structure based on template
+            if hasattr(template, 'homeroom_titles') and template.homeroom_titles:
+                for title_config in template.homeroom_titles:
+                    if title_config.title:
+                        homeroom["comments"][title_config.title] = ""
+            
+            data["homeroom"] = homeroom
+        
+        # 3. Initialize Subject Evaluation section (VN program)
+        if getattr(template, 'subject_eval_enabled', False):
+            subject_eval = {}
+            
+            # Initialize for each subject configured in template
+            if hasattr(template, 'subjects') and template.subjects:
+                for subject_config in template.subjects:
+                    subject_id = subject_config.subject_id
+                    if subject_id in subject_ids:
+                        subject_data = {
+                            "subject_title": subjects_info.get(subject_id, subject_id),
+                            "test_points": {},
+                            "criteria_scores": {},
+                            "scale_scores": {},
+                            "comments": {}
+                        }
+                        
+                        # Initialize test points if enabled
+                        if subject_config.test_point_enabled and hasattr(subject_config, 'test_point_titles'):
+                            for title_config in subject_config.test_point_titles:
+                                if title_config.title:
+                                    subject_data["test_points"][title_config.title] = ""
+                        
+                        # Initialize criteria scores (rubric evaluation)
+                        if subject_config.rubric_enabled:
+                            subject_data["criteria_scores"] = {}  # Will be populated based on criteria_id
+                            subject_data["scale_scores"] = {}     # Will be populated based on scale_id
+                        
+                        # Initialize comment titles
+                        if subject_config.comment_title_enabled:
+                            subject_data["comments"] = {}  # Will be populated based on comment_title_id
+                        
+                        subject_eval[subject_id] = subject_data
+            
+            data["subject_eval"] = subject_eval
+        
+        # 4. Initialize INTL program sections
+        if template.program_type == 'intl':
+            # Initialize INTL scoreboard structure
+            intl_scoreboard = {}
+            
+            if hasattr(template, 'subjects') and template.subjects:
+                for subject_config in template.subjects:
+                    subject_id = subject_config.subject_id
+                    if subject_id in subject_ids and hasattr(subject_config, 'scoreboard'):
+                        scoreboard_data = {
+                            "subject_title": subjects_info.get(subject_id, subject_id),
+                            "main_scores": {}
+                        }
+                        
+                        # Initialize main scores structure
+                        if subject_config.scoreboard and hasattr(subject_config.scoreboard, 'main_scores'):
+                            for main_score in subject_config.scoreboard.main_scores:
+                                main_title = main_score.title
+                                scoreboard_data["main_scores"][main_title] = {
+                                    "weight": main_score.weight,
+                                    "components": {},
+                                    "final_score": None
+                                }
+                                
+                                # Initialize components
+                                if hasattr(main_score, 'components'):
+                                    for component in main_score.components:
+                                        scoreboard_data["main_scores"][main_title]["components"][component.title] = {
+                                            "weight": component.weight,
+                                            "score": None
+                                        }
+                        
+                        intl_scoreboard[subject_id] = scoreboard_data
+            
+            data["intl_scoreboard"] = intl_scoreboard
+            
+            # Initialize INTL overall marks and comments
+            if getattr(template, 'intl_overall_mark_enabled', False):
+                data["intl_overall_mark"] = None
+            
+            if getattr(template, 'intl_overall_grade_enabled', False):
+                data["intl_overall_grade"] = ""
+            
+            if getattr(template, 'intl_comment_enabled', False):
+                data["intl_comment"] = ""
+        
+        # 5. Add metadata
+        data["_metadata"] = {
+            "initialized_at": now(),
+            "template_id": template.name,
+            "student_id": student_id,
+            "class_id": class_id,
+            "total_subjects": len(subject_ids),
+            "program_type": template.program_type
+        }
+        
+        return data
+        
+    except Exception as e:
+        frappe.log_error(f"Error initializing report data: {str(e)}")
+        # Fallback to minimal structure
+        return {
+            "_metadata": {
+                "initialized_at": now(),
+                "template_id": template.name,
+                "student_id": student_id,
+                "class_id": class_id,
+                "error": str(e)
+            }
+        }
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def create_student_reports_for_template():
     """
@@ -312,6 +501,9 @@ def create_student_reports_for_template():
                     except:
                         student_name = student_id
                     
+                    # Initialize full data structure based on template
+                    initial_data = _initialize_report_data_from_template(template, student_id, class_id)
+                    
                     # Create new report card
                     report_doc = frappe.get_doc({
                         "doctype": "SIS Student Report Card",
@@ -324,7 +516,7 @@ def create_student_reports_for_template():
                         "semester_part": template.semester_part,
                         "status": "draft",
                         "campus_id": campus_id,
-                        "data_json": json.dumps({}),
+                        "data_json": json.dumps(initial_data),
                     })
                     
                     report_doc.insert(ignore_permissions=True)
