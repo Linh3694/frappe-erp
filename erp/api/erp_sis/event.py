@@ -1307,8 +1307,21 @@ def delete_event():
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 event_id = json_data.get('event_id')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
-                # If JSON fails, request data might be FormData - ignore
-                pass
+                # If JSON fails, try parsing as form-encoded data
+                try:
+                    from urllib.parse import parse_qs
+                    # Handle bytes data
+                    if isinstance(frappe.request.data, bytes):
+                        data_str = frappe.request.data.decode('utf-8')
+                    else:
+                        data_str = str(frappe.request.data)
+                    
+                    # Parse form-encoded data
+                    parsed_data = parse_qs(data_str)
+                    if 'event_id' in parsed_data:
+                        event_id = parsed_data['event_id'][0]  # parse_qs returns lists
+                except Exception:
+                    pass
 
         if not event_id:
             return validation_error_response(
