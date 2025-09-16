@@ -699,3 +699,72 @@ def get_report_pdf(report_id: Optional[str] = None, filename: Optional[str] = No
         return error_response("Error rendering pdf")
 
 
+@frappe.whitelist(allow_guest=False)
+def get_report_data(report_id: Optional[str] = None):
+    """New API: Get structured report data for frontend React rendering"""
+    try:
+        report_id = report_id or (frappe.local.form_dict or {}).get("report_id") or ((frappe.request.args.get("report_id") if getattr(frappe, "request", None) and getattr(frappe.request, "args", None) else None))
+        if not report_id:
+            payload = _payload()
+            report_id = payload.get("report_id")
+        if not report_id:
+            return validation_error_response(message="report_id is required")
+        
+        report = _load_report(report_id)
+        form = _load_form(report.form_id)
+        data = json.loads(report.data_json or "{}")
+        
+        # Enrich data with student & class info for bindings
+        try:
+            crm = frappe.get_doc("CRM Student", report.student_id)
+            data.setdefault("student", {})
+            data["student"].update({
+                "full_name": getattr(crm, "student_name", None) or getattr(crm, "full_name", None) or getattr(crm, "name", ""),
+                "code": getattr(crm, "student_code", ""),
+                "dob": getattr(crm, "dob", ""),
+                "gender": getattr(crm, "gender", ""),
+            })
+        except Exception:
+            pass
+        
+        try:
+            klass = frappe.get_doc("SIS Class", report.class_id)
+            data.setdefault("class", {})
+            data["class"].update({
+                "short_title": getattr(klass, "short_title", None) or getattr(klass, "title", None) or report.class_id,
+            })
+        except Exception:
+            pass
+        
+        frappe.logger().info(f"Report data structure: {json.dumps(data, indent=2, default=str)[:1000]}...")
+        
+        # Transform data to match frontend layout binding expectations
+        transformed_data = _transform_data_for_bindings(data)
+        frappe.logger().info(f"Transformed data structure: {json.dumps(transformed_data, indent=2, default=str)[:1000]}...")
+        
+        # Return structured data for frontend React rendering
+        response_data = {
+            "form_code": form.code or "PRIM_VN",
+            "data": transformed_data,
+            "student": transformed_data.get("student", {}),
+            "class": transformed_data.get("class", {}),
+            "report": transformed_data.get("report", {}),
+            "subjects": transformed_data.get("subjects", []),
+            "homeroom": transformed_data.get("homeroom", []),
+        }
+        
+        frappe.logger().info("Returning structured data for frontend rendering")
+        return single_item_response(response_data, "Report data retrieved for frontend rendering")
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Report not found")
+    except frappe.PermissionError:
+        return forbidden_response("Access denied")
+    except Exception as e:
+        frappe.log_error(f"Error get_report_data: {str(e)}")
+        frappe.logger().error(f"Full error details: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+        return error_response(f"Error getting report data: {str(e)}")
+
+
