@@ -761,12 +761,12 @@ def get_report_data(report_id: Optional[str] = None):
         transformed_data = _transform_data_for_bindings(data)
         frappe.logger().info(f"Transformed data structure: {json.dumps(transformed_data, indent=2, default=str)[:1000]}...")
 
-        # Create report object with title from form
+        # Create report object with title from report card document
         report_obj = transformed_data.get("report", {})
         if not report_obj.get("title_vn") and not report_obj.get("title_en"):
             report_obj = {
-                "title_vn": getattr(form, "title_vn", None) or getattr(form, "title", None),
-                "title_en": getattr(form, "title_en", None),
+                "title_vn": getattr(report, "title", None),
+                "title_en": getattr(report, "title", None),  # Use same title for both languages
                 **report_obj
             }
 
