@@ -543,6 +543,7 @@ def get_teacher_week():
         teacher_id = frappe.local.form_dict.get("teacher_id") or frappe.request.args.get("teacher_id")
         week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
         week_end = frappe.local.form_dict.get("week_end") or frappe.request.args.get("week_end")
+        education_stage = frappe.local.form_dict.get("education_stage") or frappe.request.args.get("education_stage")
 
         if not teacher_id:
             return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
@@ -604,6 +605,30 @@ def get_teacher_week():
         except Exception as filter_error:
             pass
             filters = {}  # Use no filters if campus_id doesn't exist
+        
+        # Add education_stage filter by getting valid timetable_column_ids
+        if education_stage:
+            try:
+                # Get timetable columns for this education stage
+                column_filters = {"education_stage_id": education_stage}
+                if campus_id:
+                    column_filters["campus_id"] = campus_id
+                    
+                valid_columns = frappe.get_all(
+                    "SIS Timetable Column",
+                    fields=["name"],
+                    filters=column_filters
+                )
+                
+                if valid_columns:
+                    valid_column_ids = [col.name for col in valid_columns]
+                    filters["timetable_column_id"] = ["in", valid_column_ids]
+                else:
+                    # If no columns found for this education stage, return empty
+                    return list_response([], "No timetable columns found for this education stage")
+                    
+            except Exception as education_filter_error:
+                pass  # Continue without education stage filter if there's an error
 
         # Debug: Try without class_id field first to test table
 

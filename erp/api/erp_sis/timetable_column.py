@@ -65,6 +65,11 @@ def get_all_timetable_columns():
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         filters = {"campus_id": campus_id}
+        
+        # Add education_stage filter if provided
+        education_stage = frappe.local.form_dict.get("education_stage") or frappe.request.args.get("education_stage")
+        if education_stage:
+            filters["education_stage_id"] = education_stage
             
         timetables = frappe.get_all(
             "SIS Timetable Column",
