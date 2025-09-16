@@ -1280,7 +1280,14 @@ def delete_event():
     """Delete an event (only creator can delete)"""
     try:
         data = frappe.local.form_dict
+        
+        # Debug logging
+        frappe.log_error(f"Delete event called with data: {dict(data)}", "Delete Event Debug")
+        
         event_id = data.get("event_id")
+        
+        # Debug logging
+        frappe.log_error(f"Extracted event_id: '{event_id}' (type: {type(event_id)})", "Delete Event Debug")
 
         if not event_id:
             return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]})
