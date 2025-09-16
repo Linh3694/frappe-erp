@@ -413,11 +413,13 @@ class TimetableExcelImporter:
         return None
 
     def validate_and_map_period(self, period_str: str, education_stage_id: str) -> Optional[str]:
-        """Map period to SIS Timetable Column"""
+        """Map period to SIS Timetable Column - Cải thiện logic mapping với format 'Tiết X'"""
         if not period_str:
             return None
 
-        # Try period_name first
+        period_str = str(period_str).strip()
+        
+        # Cách 1: Thử tìm trực tiếp theo period_name (trường hợp Excel đã có format đúng)
         column_id = frappe.db.get_value(
             "SIS Timetable Column",
             {
@@ -427,13 +429,27 @@ class TimetableExcelImporter:
             },
             "name"
         )
-
         if column_id:
             return column_id
 
-        # Try period_priority as number
+        # Cách 2: Nếu period_str là số, thử format "Tiết {số}"
         try:
             period_num = int(period_str)
+            formatted_period_name = f"Tiết {period_num}"
+            
+            column_id = frappe.db.get_value(
+                "SIS Timetable Column",
+                {
+                    "period_name": formatted_period_name,
+                    "education_stage_id": education_stage_id,
+                    "campus_id": self.campus_id
+                },
+                "name"
+            )
+            if column_id:
+                return column_id
+                
+            # Cách 3: Thử tìm theo period_priority
             column_id = frappe.db.get_value(
                 "SIS Timetable Column",
                 {
@@ -443,13 +459,43 @@ class TimetableExcelImporter:
                 },
                 "name"
             )
+            if column_id:
+                return column_id
+                
         except ValueError:
+            # period_str không phải là số
             pass
 
-        if not column_id:
-            self.errors.append(f"Period '{period_str}' not found for education stage")
+        # Cách 4: Thử các format khác có thể có
+        # Nếu period_str có dạng "Period 1", "P1", v.v., thử extract số
+        period_variations = [
+            period_str.lower().replace("period", "").strip(),
+            period_str.lower().replace("p", "").strip(),
+            period_str.lower().replace("tiết", "").strip(),
+            period_str.lower().replace("tiet", "").strip(),
+        ]
+        
+        for variation in period_variations:
+            try:
+                period_num = int(variation)
+                formatted_period_name = f"Tiết {period_num}"
+                
+                column_id = frappe.db.get_value(
+                    "SIS Timetable Column",
+                    {
+                        "period_name": formatted_period_name,
+                        "education_stage_id": education_stage_id,
+                        "campus_id": self.campus_id
+                    },
+                    "name"
+                )
+                if column_id:
+                    return column_id
+            except ValueError:
+                continue
 
-        return column_id
+        self.errors.append(f"Period '{period_str}' not found for education stage (tried formats: '{period_str}', 'Tiết {period_str}', priority lookup)")
+        return None
 
     def validate_schedule_conflicts(self, schedule_data: List[Dict]) -> None:
         """Check for teacher and room conflicts"""
