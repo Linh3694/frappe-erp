@@ -1294,22 +1294,34 @@ def _get_request_arg(name: str, fallback: Optional[str] = None) -> Optional[str]
 def delete_event():
     """Delete an event (only creator can delete)"""
     try:
-        # Debug logging similar to teacher.py
-        frappe.log_error(f"delete_event called", "Delete Event Debug")
-        frappe.log_error(f"form_dict: {dict(frappe.local.form_dict)}", "Delete Event Debug")
-        frappe.log_error(f"request.data exists: {bool(frappe.request.data)}", "Delete Event Debug")
-        if frappe.request.data:
-            frappe.log_error(f"request.data type: {type(frappe.request.data)}", "Delete Event Debug")
-            frappe.log_error(f"request.data content: {frappe.request.data}", "Delete Event Debug")
-        
-        # Use exact same pattern as approve_event
-        data = frappe.local.form_dict
-        event_id = data.get("event_id")
-        
-        frappe.log_error(f"Extracted event_id: '{event_id}' (type: {type(event_id)})", "Delete Event Debug")
+        # Get event_id from multiple sources (form data or JSON) - following education_stage.py pattern
+        event_id = None
+
+        # Try from form_dict first (for FormData/URLSearchParams)
+        event_id = frappe.form_dict.get('event_id')  # Note: frappe.form_dict NOT frappe.local.form_dict
+
+        # If not found, try from JSON payload
+        if not event_id and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                event_id = json_data.get('event_id')
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
+                # If JSON fails, request data might be FormData - ignore
+                pass
 
         if not event_id:
-            return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]})
+            return validation_error_response(
+                message="Validation failed",
+                errors={
+                    "event_id": ["Event ID is required"],
+                    "debug_info": {
+                        "form_dict": dict(frappe.form_dict),
+                        "request_data": str(frappe.request.data)[:500] if frappe.request.data else None,
+                        "event_id_value": repr(event_id)
+                    }
+                }
+            )
 
         # Get current user as teacher
         current_user = frappe.session.user
