@@ -760,14 +760,23 @@ def get_report_data(report_id: Optional[str] = None):
         # Transform data to match frontend layout binding expectations
         transformed_data = _transform_data_for_bindings(data)
         frappe.logger().info(f"Transformed data structure: {json.dumps(transformed_data, indent=2, default=str)[:1000]}...")
-        
+
+        # Create report object with title from form
+        report_obj = transformed_data.get("report", {})
+        if not report_obj.get("title_vn") and not report_obj.get("title_en"):
+            report_obj = {
+                "title_vn": getattr(form, "title_vn", None) or getattr(form, "title", None),
+                "title_en": getattr(form, "title_en", None),
+                **report_obj
+            }
+
         # Return structured data for frontend React rendering
         response_data = {
             "form_code": form.code or "PRIM_VN",
             "data": transformed_data,
             "student": transformed_data.get("student", {}),
             "class": transformed_data.get("class", {}),
-            "report": transformed_data.get("report", {}),
+            "report": report_obj,
             "subjects": transformed_data.get("subjects", []),
             "homeroom": transformed_data.get("homeroom", []),
         }
