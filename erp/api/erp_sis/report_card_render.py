@@ -108,6 +108,321 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
     return transformed
 
 
+def _build_prim_vn_html(form, report_data: Dict[str, Any]) -> str:
+    """
+    Build HTML for PRIM_VN form using same logic as PrimaryVN.tsx component.
+    This renders dynamic multiple subjects per page like the frontend.
+    """
+    frappe.logger().info("Building PRIM_VN HTML with dedicated renderer")
+    
+    # Extract data (same as PrimaryVN.tsx lines 30-32)
+    student = report_data.get("student", {})
+    klass = report_data.get("class", {})
+    report = report_data.get("report", {})
+    
+    # Handle subjects - prioritize subjects array, fallback to subject_eval mapping
+    subjects = report_data.get("subjects", [])
+    if not subjects and "subject_eval" in report_data:
+        # Transform subject_eval to subjects array (already done in _transform_data_for_bindings)
+        subjects = report_data.get("subjects", [])
+    
+    # Homeroom data  
+    homeroom_list = report_data.get("homeroom", [])
+    
+    frappe.logger().info(f"PRIM_VN render: {len(subjects)} subjects, {len(homeroom_list)} homeroom items")
+    
+    # Constants (same as PrimaryVN.tsx lines 87-88)
+    SUBJECTS_PER_PAGE = 2
+    HOMEROOM_PER_PAGE = 2
+    
+    # Base styles (same as PrimaryVN.tsx lines 143)
+    base_styles = """
+      <style>
+        @page { size: A4; margin: 0; }
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .page { position: relative; width: 210mm; height: 297mm; background: white; page-break-after: always; }
+        .page-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+        .positioned-text { position: absolute; font-family: Arial, sans-serif; font-size: 12pt; color: #000; }
+        .bold { font-weight: 600; }
+        .center { text-align: center; }
+        .subject-block { page-break-inside: avoid; margin-bottom: 16px; }
+        .matrix-grid { width: 100%; border-collapse: collapse; font-size: 11pt; border: 1px solid #ccc; }
+        .matrix-grid th, .matrix-grid td { border: 1px solid #999; padding: 4px; }
+        .comment-block { margin-bottom: 8px; }
+        .comment-title { font-weight: 600; font-size: 12pt; }
+        .comment-value { min-height: 64px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12pt; white-space: pre-wrap; }
+      </style>
+    """
+    
+    # Get background image
+    bg_url = ""
+    if form and hasattr(form, 'pages') and form.pages:
+        bg_url = getattr(form.pages[0], 'background_image', '') or ""
+        if bg_url and not bg_url.startswith(("http://", "https://")):
+            try:
+                bg_url = frappe.utils.get_url(bg_url)
+            except Exception:
+                if not bg_url.startswith('/'):
+                    bg_url = f"/{bg_url}"
+    
+    # Paginate subjects (same as PrimaryVN.tsx lines 91-95)
+    def paginate_subjects():
+        pages = []
+        for i in range(0, len(subjects), SUBJECTS_PER_PAGE):
+            pages.append(subjects[i:i + SUBJECTS_PER_PAGE])
+        return pages
+    
+    # Build subject pages
+    pages_html = []
+    subject_pages = paginate_subjects()
+    
+    for page_index, page_subjects in enumerate(subject_pages):
+        page_html = _build_prim_vn_subject_page(bg_url, report, student, klass, page_subjects, page_index)
+        pages_html.append(page_html)
+    
+    # Build homeroom pages if any homeroom data
+    if homeroom_list:
+        homeroom_pages = []
+        for i in range(0, len(homeroom_list), HOMEROOM_PER_PAGE):
+            homeroom_pages.append(homeroom_list[i:i + HOMEROOM_PER_PAGE])
+        
+        # Get teachers list for homeroom pages
+        teachers_set = set()
+        for subj in subjects:
+            if subj.get("teacher_name"):
+                teachers_set.add(subj.get("teacher_name"))
+        teachers_joined = ", ".join(teachers_set)
+        
+        for page_index, page_homeroom in enumerate(homeroom_pages):
+            page_html = _build_prim_vn_homeroom_page(bg_url, report, student, klass, teachers_joined, page_homeroom, page_index)
+            pages_html.append(page_html)
+    
+    final_html = f"<div>{base_styles}{''.join(pages_html)}</div>"
+    frappe.logger().info(f"PRIM_VN HTML generated: {len(pages_html)} pages, {len(final_html)} chars")
+    
+    return final_html
+
+
+def _build_prim_vn_subject_page(bg_url: str, report: dict, student: dict, klass: dict, page_subjects: list, page_index: int) -> str:
+    """Build a subject page for PRIM_VN (same as PrimaryVN.tsx A4Page for subjects)"""
+    
+    # Header (same as PrimaryVN.tsx lines 147-148)
+    header_html = f"""
+        <div class="positioned-text bold center" style="left:0%;top:10%;width:100%;">TRƯỜNG TIỂU HỌC WELLSPRING / WELLSPRING PRIMARY SCHOOL</div>
+        <div class="positioned-text bold center" style="left:0%;top:12%;width:100%;">{report.get('title_vn', '') or report.get('title_en', '')}</div>
+    """
+    
+    # Student info (same as PrimaryVN.tsx lines 151-162)
+    student_info_html = f"""
+        <div class="positioned-text" style="left:2%;top:15%;width:25%;">Học sinh/Student:</div>
+        <div class="positioned-text bold" style="left:19%;top:15%;width:25%;">{student.get('full_name', '')}</div>
+        <div class="positioned-text" style="left:2%;top:18%;width:25%;">Ngày sinh/DOB:</div>
+        <div class="positioned-text bold" style="left:19%;top:18%;width:25%;">{student.get('dob', '')}</div>
+        
+        <div class="positioned-text" style="left:40%;top:15%;width:25%;">Lớp/Class:</div>
+        <div class="positioned-text bold" style="left:50%;top:15%;width:25%;">{klass.get('short_title', '')}</div>
+        <div class="positioned-text" style="left:40%;top:18%;width:25%;">Giới tính/Gender:</div>
+        <div class="positioned-text bold" style="left:56%;top:18%;width:25%;">{student.get('gender', '')}</div>
+        
+        <div class="positioned-text" style="left:70%;top:15%;width:25%;">Mã học sinh/ID:</div>
+        <div class="positioned-text bold" style="left:85%;top:15%;width:25%;">{student.get('code', '')}</div>
+    """
+    
+    # Subject blocks content area (same as PrimaryVN.tsx lines 165-169)
+    subjects_html = ""
+    for i, subject in enumerate(page_subjects):
+        subject_html = _build_prim_vn_subject_block(subject, i)
+        subjects_html += subject_html
+    
+    # Background image
+    bg_tag = f'<img class="page-bg" src="{bg_url}" />' if bg_url else ''
+    
+    page_html = f"""
+        <div class="page">
+            {bg_tag}
+            {header_html}
+            {student_info_html}
+            <div style="position:absolute;left:12%;right:12%;top:24%;bottom:8%;display:flex;flex-direction:column;gap:16px;">
+                {subjects_html}
+            </div>
+        </div>
+    """
+    
+    return page_html
+
+
+def _build_prim_vn_subject_block(subject: dict, index: int) -> str:
+    """Build subject block HTML (same as PrimaryVN.tsx SubjectBlock component lines 97-129)"""
+    
+    # Subject header (same as PrimaryVN.tsx lines 112-115)
+    subject_title = subject.get("title_vn", "")
+    teacher_name = subject.get("teacher_name", "")
+    
+    # Test points (same as PrimaryVN.tsx lines 98-103)  
+    test_titles = subject.get("test_point_titles", [])
+    test_values = subject.get("test_point_inputs", [])
+    
+    test_pairs = []
+    for i, title in enumerate(test_titles):
+        value = test_values[i] if i < len(test_values) else ""
+        if value:
+            test_pairs.append(f"{title}: {value}")
+        else:
+            test_pairs.append(title)
+    
+    test_display = " / ".join(test_pairs) if test_pairs else (" / ".join(test_values) if test_values else "")
+    
+    # Matrix grid (same as PrimaryVN.tsx line 119)
+    matrix_html = ""
+    rubric = subject.get("rubric", {})
+    if rubric:
+        criteria = rubric.get("criteria_options", [])
+        scales = rubric.get("scale_options", []) 
+        selections = rubric.get("selections", [])
+        matrix_html = _build_matrix_html(criteria, scales, selections)
+    
+    # Comments (same as PrimaryVN.tsx lines 121-127)
+    comments_html = ""
+    comments = subject.get("comments", [])[:2]  # Limit 2 comments
+    for comment in comments:
+        if isinstance(comment, dict):
+            title = comment.get("title", "")
+            value = comment.get("value", "")
+            comments_html += f"""
+                <div class="comment-block">
+                    <div class="comment-title">{frappe.utils.escape_html(title)}</div>
+                    <div class="comment-value">{frappe.utils.escape_html(value)}</div>
+                </div>
+            """
+    
+    # Test scores section
+    test_html = ""
+    if test_display:
+        test_html = f'<div style="margin-bottom:6px;font-size:12pt;">Điểm bài kiểm tra/ Test score(s)/Level: {frappe.utils.escape_html(test_display)}</div>'
+    
+    subject_block_html = f"""
+        <div class="subject-block">
+            <div style="display:flex;justify-content:space-between;align-items:end;margin-bottom:6px;">
+                <div style="font-weight:600;font-size:12pt;">Môn học/Subject: {frappe.utils.escape_html(subject_title)}</div>
+                <div style="font-size:12pt;">Giáo viên/Teacher: {frappe.utils.escape_html(teacher_name)}</div>
+            </div>
+            {test_html}
+            {matrix_html}
+            <div style="margin-top:8px;">
+                {comments_html}
+            </div>
+        </div>
+    """
+    
+    return subject_block_html
+
+
+def _build_prim_vn_homeroom_page(bg_url: str, report: dict, student: dict, klass: dict, teachers: str, homeroom_items: list, page_index: int) -> str:
+    """Build homeroom page for PRIM_VN (same as PrimaryVN.tsx homeroom pages lines 173-209)"""
+    
+    # Same header and student info as subject pages
+    header_html = f"""
+        <div class="positioned-text bold center" style="left:0%;top:10%;width:100%;">TRƯỜNG TIỂU HỌC WELLSPRING / WELLSPRING PRIMARY SCHOOL</div>
+        <div class="positioned-text bold center" style="left:0%;top:12%;width:100%;">{report.get('title_vn', '') or report.get('title_en', '')}</div>
+    """
+    
+    student_info_html = f"""
+        <div class="positioned-text" style="left:2%;top:15%;width:25%;">Học sinh/Student:</div>
+        <div class="positioned-text bold" style="left:19%;top:15%;width:25%;">{student.get('full_name', '')}</div>
+        <div class="positioned-text" style="left:2%;top:18%;width:25%;">Ngày sinh/DOB:</div>
+        <div class="positioned-text bold" style="left:19%;top:18%;width:25%;">{student.get('dob', '')}</div>
+        
+        <div class="positioned-text" style="left:40%;top:15%;width:25%;">Lớp/Class:</div>
+        <div class="positioned-text bold" style="left:50%;top:15%;width:25%;">{klass.get('short_title', '')}</div>
+        <div class="positioned-text" style="left:40%;top:18%;width:25%;">Giới tính/Gender:</div>
+        <div class="positioned-text bold" style="left:56%;top:18%;width:25%;">{student.get('gender', '')}</div>
+        
+        <div class="positioned-text" style="left:70%;top:15%;width:25%;">Mã học sinh/ID:</div>
+        <div class="positioned-text bold" style="left:85%;top:15%;width:25%;">{student.get('code', '')}</div>
+    """
+    
+    # Homeroom section titles (same as PrimaryVN.tsx lines 194-199)
+    homeroom_header_html = f"""
+        <div class="positioned-text bold" style="left:2%;top:22%;width:96%;">Giáo viên/Teachers: {frappe.utils.escape_html(teachers)}</div>
+        <div class="positioned-text bold" style="left:2%;top:25%;width:96%;">Nhận xét của giáo viên chủ nhiệm/Homeroom Teacher's Comments</div>
+    """
+    
+    # Homeroom comments (same as PrimaryVN.tsx lines 202-207)
+    homeroom_html = ""
+    for item in homeroom_items:
+        if isinstance(item, dict):
+            title = item.get("title", "")
+            value = item.get("value", "")
+            homeroom_html += f"""
+                <div class="comment-block">
+                    <div class="comment-title">{frappe.utils.escape_html(title)}</div>
+                    <div class="comment-value">{frappe.utils.escape_html(value)}</div>
+                </div>
+            """
+    
+    # Background image
+    bg_tag = f'<img class="page-bg" src="{bg_url}" />' if bg_url else ''
+    
+    page_html = f"""
+        <div class="page">
+            {bg_tag}
+            {header_html}
+            {student_info_html}
+            {homeroom_header_html}
+            <div style="position:absolute;left:12%;right:12%;top:30%;bottom:8%;display:flex;flex-direction:column;gap:16px;">
+                {homeroom_html}
+            </div>
+        </div>
+    """
+    
+    return page_html
+
+
+def _build_matrix_html(criteria: list, scales: list, selections: list) -> str:
+    """Build matrix grid HTML (same as PrimaryVN.tsx MatrixGrid component)"""
+    if not criteria or not scales:
+        return ""
+    
+    # Check if criteria/scale combination is selected
+    def has_selection(c: str, s: str) -> bool:
+        if not selections:
+            return False
+        for sel in selections:
+            if isinstance(sel, dict) and sel.get("criteria") == c and sel.get("scale") == s:
+                return True
+        return False
+    
+    # Table header
+    header_cells = '<th style="border:1px solid #999;padding:4px;width:28%;">Nội dung/Contents</th>'
+    for scale in scales:
+        header_cells += f'<th style="border:1px solid #999;padding:4px;">{frappe.utils.escape_html(str(scale))}</th>'
+    
+    # Table rows
+    rows_html = ""
+    for i, criterion in enumerate(criteria):
+        cells = f'<td style="border:1px solid #999;padding:4px;">{i+1}. {frappe.utils.escape_html(str(criterion))}</td>'
+        for scale in scales:
+            mark = "x" if has_selection(criterion, scale) else ""
+            cells += f'<td style="border:1px solid #999;padding:4px;text-align:center;">{mark}</td>'
+        rows_html += f'<tr>{cells}</tr>'
+    
+    matrix_html = f"""
+        <table class="matrix-grid">
+            <thead>
+                <tr style="background:#f6f6f6;">
+                    <th style="border:1px solid #999;padding:4px;">STT/No</th>
+                    {header_cells}
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+    """
+    
+    return matrix_html
+
+
 def _build_html(form, report_data: Dict[str, Any]) -> str:
     def _resolve_path(data: Any, path: Optional[str]) -> Any:
         if not path:
@@ -365,7 +680,12 @@ def get_report_html(report_id: Optional[str] = None):
         transformed_data = _transform_data_for_bindings(data)
         frappe.logger().info(f"Transformed data structure: {json.dumps(transformed_data, indent=2, default=str)[:1000]}...")
         
-        html = _build_html(form, transformed_data)
+        # Special handling for PRIM_VN - use dedicated renderer instead of layout_json
+        if form.code == 'PRIM_VN':
+            frappe.logger().info("Using dedicated PRIM_VN renderer")
+            html = _build_prim_vn_html(form, transformed_data)
+        else:
+            html = _build_html(form, transformed_data)
         return single_item_response({"html": html}, "HTML built")
     except frappe.DoesNotExistError:
         return not_found_response("Report not found")

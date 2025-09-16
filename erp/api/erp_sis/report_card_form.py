@@ -157,6 +157,11 @@ def update_form(form_id: str = None):
     try:
         data = _get_payload()
         form_id = form_id or data.get("form_id") or data.get("name")
+        
+        # Debug logging
+        frappe.logger().info(f"update_form called with form_id: {form_id}")
+        frappe.logger().info(f"update_form payload keys: {list(data.keys())}")
+        
         if not form_id:
             return validation_error_response(message="Form ID is required", errors={"form_id": ["Required"]})
         doc = frappe.get_doc("SIS Report Card Form", form_id)
@@ -169,19 +174,44 @@ def update_form(form_id: str = None):
                     val = 1 if val else 0
                 doc.set(f, val)
         if "pages" in data:
+            pages_data = data.get("pages") or []
+            frappe.logger().info(f"Updating pages count: {len(pages_data)}")
+            
             doc.pages = []
-            for p in (data.get("pages") or []):
+            for i, p in enumerate(pages_data):
+                page_no = int(p.get("page_no") or 1)
+                bg_image = p.get("background_image")
+                layout_json = p.get("layout_json")
+                
+                frappe.logger().info(f"Page {i+1}: page_no={page_no}, bg_image={bg_image}")
+                frappe.logger().info(f"Page {i+1} layout_json type: {type(layout_json)}")
+                frappe.logger().info(f"Page {i+1} layout_json preview: {str(layout_json)[:200]}...")
+                
+                # Ensure layout_json is stored as string
+                if layout_json and not isinstance(layout_json, str):
+                    layout_json = json.dumps(layout_json)
+                    frappe.logger().info(f"Converted layout_json to string for page {i+1}")
+                
                 doc.append("pages", {
-                    "page_no": int(p.get("page_no") or 1),
-                    "background_image": p.get("background_image"),
-                    "layout_json": p.get("layout_json"),
+                    "page_no": page_no,
+                    "background_image": bg_image,
+                    "layout_json": layout_json,
                 })
         doc.save(ignore_permissions=True)
         frappe.db.commit()
         doc.reload()
+        
+        # Debug: Verify what was actually saved
+        frappe.logger().info(f"Form updated successfully, pages count: {len(doc.pages)}")
+        for i, p in enumerate(doc.pages):
+            frappe.logger().info(f"Saved page {i+1}: page_no={p.page_no}, has_layout_json={bool(p.layout_json)}")
+            if p.layout_json:
+                frappe.logger().info(f"Saved page {i+1} layout_json preview: {str(p.layout_json)[:200]}...")
+        
         return single_item_response(_doc_to_dict(doc), "Form updated")
     except Exception as e:
         frappe.log_error(f"Error update_form: {str(e)}")
+        frappe.logger().error(f"update_form error details: {str(e)}")
         return error_response("Error updating form")
 
 
@@ -203,6 +233,86 @@ def delete_form(form_id: str = None):
         frappe.log_error(f"Error delete_form: {str(e)}")
         return error_response("Error deleting form")
 
+
+
+@frappe.whitelist(allow_guest=False)
+def debug_form_data(form_id: str = None):
+    """Debug endpoint to check form layout_json vs report data structure"""
+    try:
+        form_id = form_id or (frappe.local.form_dict or {}).get("form_id") or (_get_payload().get("form_id"))
+        if not form_id:
+            return validation_error_response(message="Form ID is required")
+            
+        doc = frappe.get_doc("SIS Report Card Form", form_id)
+        if doc.campus_id != _current_campus_id():
+            return forbidden_response("Access denied")
+            
+        # Get form data
+        form_data = _doc_to_dict(doc)
+        
+        # Find a sample report using this form
+        sample_report = frappe.db.get_value("SIS Student Report Card", {"form_id": form_id}, ["name", "data_json"], as_dict=True)
+        
+        debug_info = {
+            "form_id": form_id,
+            "form_code": doc.code,
+            "form_title": doc.title,
+            "pages_count": len(form_data.get("pages", [])),
+            "sample_report_id": sample_report.get("name") if sample_report else None,
+            "pages_detail": []
+        }
+        
+        for i, page in enumerate(form_data.get("pages", [])):
+            page_info = {
+                "page_no": page.get("page_no"),
+                "has_background": bool(page.get("background_image")),
+                "background_url": page.get("background_image"),
+                "has_layout_json": bool(page.get("layout_json")),
+                "layout_json_type": type(page.get("layout_json")).__name__,
+                "layout_json_length": len(str(page.get("layout_json", ""))) 
+            }
+            
+            # Parse and analyze layout_json
+            if page.get("layout_json"):
+                try:
+                    layout = json.loads(page.get("layout_json")) if isinstance(page.get("layout_json"), str) else page.get("layout_json")
+                    elements = layout.get("elements", []) if isinstance(layout, dict) else []
+                    
+                    page_info.update({
+                        "layout_parsed": True,
+                        "elements_count": len(elements),
+                        "element_types": list(set([e.get("type") for e in elements if isinstance(e, dict)])),
+                        "binding_paths": [e.get("binding") for e in elements if isinstance(e, dict) and e.get("binding")],
+                        "sample_elements": elements[:3] if elements else []
+                    })
+                except Exception as e:
+                    page_info.update({
+                        "layout_parsed": False,
+                        "parse_error": str(e),
+                        "layout_json_preview": str(page.get("layout_json"))[:300]
+                    })
+            
+            debug_info["pages_detail"].append(page_info)
+        
+        # Sample report data structure if available
+        if sample_report and sample_report.get("data_json"):
+            try:
+                report_data = json.loads(sample_report.get("data_json"))
+                debug_info["sample_report_data"] = {
+                    "keys": list(report_data.keys()) if isinstance(report_data, dict) else [],
+                    "has_student": "student" in report_data,
+                    "has_class": "class" in report_data, 
+                    "has_subjects": "subjects" in report_data,
+                    "has_subject_eval": "subject_eval" in report_data,
+                    "preview": json.dumps(report_data, indent=2, default=str)[:500] + "..."
+                }
+            except Exception as e:
+                debug_info["sample_report_data"] = {"error": str(e)}
+        
+        return single_item_response(debug_info, "Debug data fetched")
+    except Exception as e:
+        frappe.log_error(f"Error debug_form_data: {str(e)}")
+        return error_response("Error fetching debug data")
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
