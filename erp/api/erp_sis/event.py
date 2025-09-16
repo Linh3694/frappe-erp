@@ -3,6 +3,7 @@
 
 import frappe
 from frappe import _
+from typing import Optional
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
     success_response,
@@ -1275,14 +1276,27 @@ def update_event_student_status():
         return error_response(f"Error updating event student: {str(e)}")
 
 
+def _get_request_arg(name: str, fallback: Optional[str] = None) -> Optional[str]:
+    """Helper function to get request argument from multiple sources"""
+    # Try both form_dict and request.args to be robust
+    if hasattr(frappe, "local") and getattr(frappe.local, "form_dict", None):
+        val = frappe.local.form_dict.get(name)
+        if val is not None:
+            return val
+    if hasattr(frappe, "request") and getattr(frappe.request, "args", None):
+        val = frappe.request.args.get(name)
+        if val is not None:
+            return val
+    return fallback
+
+
 @frappe.whitelist(allow_guest=False)
-def delete_event():
+def delete_event(event_id: Optional[str] = None):
     """Delete an event (only creator can delete)"""
     try:
-        # Get data using the same approach as approve_event for consistency
-        data = frappe.local.form_dict
-        event_id = data.get("event_id")
-
+        # Get event_id using robust approach similar to calendar.py
+        event_id = event_id or _get_request_arg("event_id")
+        
         if not event_id:
             return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]})
 
