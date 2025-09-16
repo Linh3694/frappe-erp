@@ -54,12 +54,14 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
     if "subject_eval" in data and isinstance(data["subject_eval"], dict):
         subject_eval = data["subject_eval"]
         frappe.logger().info(f"Found subject_eval: {json.dumps(subject_eval, indent=2, default=str)[:500]}...")
+        frappe.logger().info(f"subject_eval keys: {list(subject_eval.keys())}")
         
         # Create subjects array from subject_eval
         subjects = []
         
         # Method 1: If subject_eval has subject_id key
         subject_id = subject_eval.get("subject_id")
+        frappe.logger().info(f"Method 1: subject_id = {subject_id}")
         if subject_id and subject_id in subject_eval:
             subject_data = subject_eval[subject_id]
             if isinstance(subject_data, dict):
@@ -74,6 +76,7 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Method 2: If subject_eval itself is the subject data
         elif subject_eval.get("title_vn") or subject_eval.get("rubric") or subject_eval.get("comments"):
+            frappe.logger().info("Method 2: subject_eval is the subject data itself")
             subjects.append({
                 "subject_id": subject_id or "unknown",
                 "title_vn": subject_eval.get("title_vn", subject_id or ""),
@@ -85,25 +88,41 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Method 3: Look for object keys that might be subject IDs
         else:
+            frappe.logger().info("Method 3: Looking for subject IDs as keys")
             for key, value in subject_eval.items():
+                frappe.logger().info(f"Checking key {key}, value type: {type(value)}")
                 if key != "subject_id" and isinstance(value, dict):
-                    if value.get("title_vn") or value.get("rubric") or value.get("comments"):
-                        subjects.append({
+                    frappe.logger().info(f"Key {key} has dict value: {json.dumps(value, default=str)[:200]}")
+                    has_title = value.get("title_vn") is not None
+                    has_rubric = value.get("rubric") is not None
+                    has_comments = value.get("comments") is not None
+                    frappe.logger().info(f"Key {key}: has_title={has_title}, has_rubric={has_rubric}, has_comments={has_comments}")
+                    
+                    if has_title or has_rubric or has_comments:
+                        frappe.logger().info(f"Adding subject {key} to subjects array")
+                        subject_obj = {
                             "subject_id": key,
                             "title_vn": value.get("title_vn", key),
                             "teacher_name": value.get("teacher_name", ""),
                             "rubric": value.get("rubric", {}),
                             "comments": value.get("comments", []),
                             **value
-                        })
+                        }
+                        subjects.append(subject_obj)
+                        frappe.logger().info(f"Added subject: {json.dumps(subject_obj, default=str)[:300]}")
+                    else:
+                        frappe.logger().info(f"Key {key} did not meet criteria - skipping")
+        
+        frappe.logger().info(f"Total subjects found: {len(subjects)}")
         
         # If we found subjects, add to transformed data
         if subjects:
             transformed["subjects"] = subjects
-            frappe.logger().info(f"Created subjects array with {len(subjects)} subjects")
+            frappe.logger().info(f"✅ Created subjects array with {len(subjects)} subjects")
             frappe.logger().info(f"First subject: {json.dumps(subjects[0], indent=2, default=str)[:500]}...")
         else:
-            frappe.logger().warning("Could not create subjects array from subject_eval")
+            frappe.logger().warning("❌ Could not create subjects array from subject_eval")
+            frappe.logger().warning(f"subject_eval structure was: {json.dumps(subject_eval, default=str)[:300]}")
     
     return transformed
 
