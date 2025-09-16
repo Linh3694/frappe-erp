@@ -375,7 +375,52 @@ def update():
 @frappe.whitelist(allow_guest=False)
 def delete():
     try:
-        id = frappe.form_dict.get("id")
+        # Accept multiple sources and keys for robustness (align with get_by_id and update)
+        id = None
+        
+        # Try from form_dict first
+        if frappe.form_dict:
+            id = (
+                frappe.form_dict.get("id")
+                or frappe.form_dict.get("name")
+                or frappe.form_dict.get("subject_department_id")
+            )
+
+        # If not found, try from request args
+        if not id and hasattr(frappe.request, 'args') and frappe.request.args:
+            for key in ["id", "name", "subject_department_id"]:
+                if key in frappe.request.args and frappe.request.args[key]:
+                    id = frappe.request.args[key]
+                    break
+
+        # If not found, try from request data (urlencoded)
+        if not id and frappe.request.data:
+            try:
+                from urllib.parse import parse_qs
+                data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                if data_str.strip():
+                    parsed = parse_qs(data_str, keep_blank_values=True)
+                    for key in ["id", "name", "subject_department_id"]:
+                        if key in parsed and parsed[key]:
+                            id = parsed[key][0]
+                            break
+            except Exception:
+                pass
+
+        # If not found, try from request data (JSON)
+        if not id and frappe.request.data:
+            try:
+                import json
+                json_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                if json_str.strip():
+                    data = json.loads(json_str)
+                    for key in ["id", "name", "subject_department_id"]:
+                        if key in data and data[key]:
+                            id = data[key]
+                            break
+            except Exception:
+                pass
+
         if not id:
             return validation_error_response(message="ID is required", errors={"id": ["Required"]})
 
