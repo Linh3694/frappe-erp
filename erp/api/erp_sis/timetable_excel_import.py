@@ -309,7 +309,7 @@ class TimetableExcelImporter:
 
     def upsert_student_subjects(self, class_id: str, subject_id: Optional[str], actual_subject_id: Optional[str]):
         """Create or update SIS Student Subject for all students in class for the mapped subject.
-        If the new DocType is not yet available, skip silently.
+        Đảm bảo 100% học sinh được cập nhật actual subject pool.
         """
         if not subject_id and not actual_subject_id:
             return
@@ -327,38 +327,68 @@ class TimetableExcelImporter:
                 filters={"class_id": class_id},
                 limit_page_length=100000,
             )
+            
+            students_processed = 0
+            students_created = 0
+            students_updated = 0
+            
             for s in students:
                 sid = s.get("student_id")
                 if not sid:
                     continue
-                exists_filters = {
+                    
+                students_processed += 1
+                
+                # Tìm record existing với student + class + subject combination
+                base_filters = {
                     "campus_id": self.campus_id,
                     "student_id": sid,
                     "class_id": class_id,
                 }
+                
                 if subject_id:
-                    exists_filters["subject_id"] = subject_id
-                if actual_subject_id:
-                    exists_filters["actual_subject_id"] = actual_subject_id
-                exists = frappe.db.exists("SIS Student Subject", exists_filters)
-                if exists:
-                    # Optionally update
-                    continue
-                doc = frappe.get_doc({
-                    "doctype": "SIS Student Subject",
-                    "campus_id": self.campus_id,
-                    "student_id": sid,
-                    "class_id": class_id,
-                    "subject_id": subject_id,
-                    "actual_subject_id": actual_subject_id,
-                })
-                try:
-                    doc.insert()
-                except Exception:
-                    # Skip individual failures
-                    continue
-        except Exception:
-            pass
+                    base_filters["subject_id"] = subject_id
+                    
+                existing_record = frappe.db.get_value(
+                    "SIS Student Subject", 
+                    base_filters, 
+                    ["name", "actual_subject_id"], 
+                    as_dict=True
+                )
+                
+                if existing_record:
+                    # Update nếu actual_subject_id khác
+                    if actual_subject_id and existing_record.get("actual_subject_id") != actual_subject_id:
+                        frappe.db.set_value(
+                            "SIS Student Subject", 
+                            existing_record["name"], 
+                            "actual_subject_id", 
+                            actual_subject_id
+                        )
+                        students_updated += 1
+                else:
+                    # Tạo record mới
+                    doc = frappe.get_doc({
+                        "doctype": "SIS Student Subject",
+                        "campus_id": self.campus_id,
+                        "student_id": sid,
+                        "class_id": class_id,
+                        "subject_id": subject_id,
+                        "actual_subject_id": actual_subject_id,
+                    })
+                    try:
+                        doc.insert()
+                        students_created += 1
+                    except Exception as e:
+                        frappe.log_error(f"Failed to create SIS Student Subject for student {sid}: {str(e)}")
+                        continue
+                        
+            # Log thống kê để debug
+            self.warnings.append(f"SIS Student Subject: Processed {students_processed} students in class {class_id} - Created: {students_created}, Updated: {students_updated}")
+            
+        except Exception as e:
+            frappe.log_error(f"Error in upsert_student_subjects for class {class_id}: {str(e)}")
+            self.warnings.append(f"Lỗi khi cập nhật SIS Student Subject cho lớp {class_id}: {str(e)}")
 
     def validate_and_map_teacher(self, teacher_identifier: str, suppress_error: bool = False) -> Optional[str]:
         """Map teacher identifier to SIS Teacher via supported strategies.
