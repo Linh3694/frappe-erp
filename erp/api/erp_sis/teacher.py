@@ -41,6 +41,7 @@ def get_all_teachers():
                 "gender",
                 "education_stage_id",
                 "subject_department_id",
+                "is_manager",
                 "campus_id",
                 "creation",
                 "modified"
@@ -265,6 +266,7 @@ def get_teacher_by_id(teacher_id=None):
             "gender": getattr(teacher, 'gender', None),
             "education_stage_id": teacher.education_stage_id,
             "subject_department_id": getattr(teacher, 'subject_department_id', None),
+            "is_manager": getattr(teacher, 'is_manager', False),
             "campus_id": teacher.campus_id
         }
 
@@ -368,6 +370,7 @@ def create_teacher():
         gender = None
         education_stage_id = None
         subject_department_id = None
+        is_manager = None
 
         # Method 1: Try frappe.form_dict (for form data)
         if frappe.form_dict:
@@ -375,6 +378,7 @@ def create_teacher():
             gender = frappe.form_dict.get('gender')
             education_stage_id = frappe.form_dict.get('education_stage_id')
             subject_department_id = frappe.form_dict.get('subject_department_id')
+            is_manager = frappe.form_dict.get('is_manager')
 
         # Method 2: Try frappe.local.form_dict
         if not user_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
@@ -382,6 +386,7 @@ def create_teacher():
             gender = gender or frappe.local.form_dict.get('gender')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
             subject_department_id = frappe.local.form_dict.get('subject_department_id')
+            is_manager = is_manager or frappe.local.form_dict.get('is_manager')
 
         # Method 3: Parse raw request data (for application/x-www-form-urlencoded)
         if not user_id and frappe.request.data:
@@ -398,6 +403,7 @@ def create_teacher():
                     gender = gender or parsed_data.get('gender', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
                     subject_department_id = parsed_data.get('subject_department_id', [None])[0]
+                    is_manager = is_manager or parsed_data.get('is_manager', [None])[0]
             except Exception:
                 pass
 
@@ -415,6 +421,7 @@ def create_teacher():
                     gender = gender or json_data.get('gender')
                     education_stage_id = json_data.get('education_stage_id')
                     subject_department_id = json_data.get('subject_department_id')
+                    is_manager = is_manager or json_data.get('is_manager')
             except Exception:
                 pass
 
@@ -424,6 +431,15 @@ def create_teacher():
                 message="User ID is required",
                 errors={"user_id": ["Required"]}
             )
+        
+        # Convert is_manager to boolean
+        if is_manager is not None:
+            if isinstance(is_manager, str):
+                is_manager = is_manager.lower() in ['true', '1', 'yes', 'on']
+            else:
+                is_manager = bool(is_manager)
+        else:
+            is_manager = False
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
@@ -479,6 +495,7 @@ def create_teacher():
             "gender": gender,
             "education_stage_id": education_stage_id,
             "subject_department_id": subject_department_id,
+            "is_manager": is_manager,
             "campus_id": campus_id
         })
         
@@ -494,6 +511,7 @@ def create_teacher():
                 "gender": getattr(teacher_doc, 'gender', None),
                 "education_stage_id": teacher_doc.education_stage_id,
                 "subject_department_id": getattr(teacher_doc, 'subject_department_id', None),
+                "is_manager": getattr(teacher_doc, 'is_manager', False),
                 "campus_id": teacher_doc.campus_id
             },
             message="Teacher created successfully"
@@ -517,6 +535,7 @@ def update_teacher():
         gender = None
         education_stage_id = None
         subject_department_id = None
+        is_manager = None
 
         # Method 1: Try frappe.form_dict (for form data)
         if frappe.form_dict:
@@ -525,6 +544,7 @@ def update_teacher():
             gender = frappe.form_dict.get('gender')
             education_stage_id = frappe.form_dict.get('education_stage_id')
             subject_department_id = frappe.form_dict.get('subject_department_id')
+            is_manager = frappe.form_dict.get('is_manager')
 
         # Method 2: Try frappe.local.form_dict
         if not teacher_id and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
@@ -533,6 +553,7 @@ def update_teacher():
             gender = gender or frappe.local.form_dict.get('gender')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
             subject_department_id = frappe.local.form_dict.get('subject_department_id')
+            is_manager = is_manager or frappe.local.form_dict.get('is_manager')
 
         # Method 3: Parse raw request data (for application/x-www-form-urlencoded)
         if not teacher_id and frappe.request.data:
@@ -550,6 +571,7 @@ def update_teacher():
                     gender = gender or parsed_data.get('gender', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
                     subject_department_id = parsed_data.get('subject_department_id', [None])[0]
+                    is_manager = is_manager or parsed_data.get('is_manager', [None])[0]
             except Exception:
                 pass
 
@@ -569,6 +591,7 @@ def update_teacher():
                     gender = gender or json_data.get('gender')
                     education_stage_id = json_data.get('education_stage_id')
                     subject_department_id = json_data.get('subject_department_id')
+                    is_manager = is_manager or json_data.get('is_manager')
             except Exception:
                 pass
 
@@ -676,6 +699,14 @@ def update_teacher():
         if gender is not None:
             teacher_doc.gender = gender
         
+        # Update is_manager if provided
+        if is_manager is not None:
+            if isinstance(is_manager, str):
+                is_manager = is_manager.lower() in ['true', '1', 'yes', 'on']
+            else:
+                is_manager = bool(is_manager)
+            teacher_doc.is_manager = is_manager
+        
         # Update subject department if provided
         current_sd = getattr(teacher_doc, 'subject_department_id', None)
         if subject_department_id is not None and subject_department_id != current_sd:
@@ -699,6 +730,7 @@ def update_teacher():
                 "gender": getattr(teacher_doc, 'gender', None),
                 "education_stage_id": teacher_doc.education_stage_id,
                 "subject_department_id": getattr(teacher_doc, 'subject_department_id', None),
+                "is_manager": getattr(teacher_doc, 'is_manager', False),
                 "campus_id": teacher_doc.campus_id
             },
             message="Teacher updated successfully"

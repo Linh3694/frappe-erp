@@ -75,7 +75,6 @@ def get_by_id(id=None):
                 "title_en": doc.title_en,
                 "campus_id": doc.campus_id,
                 "education_stage_id": getattr(doc, "education_stage_id", None),
-                "is_manager": getattr(doc, "is_manager", False),
             },
             message="Fetched successfully",
         )
@@ -92,21 +91,18 @@ def create():
         title_vn = None
         title_en = None
         education_stage_id = None
-        is_manager = None
 
         # Method 1: form_dict
         if frappe.form_dict:
             title_vn = frappe.form_dict.get("title_vn")
             title_en = frappe.form_dict.get("title_en")
             education_stage_id = frappe.form_dict.get("education_stage_id")
-            is_manager = frappe.form_dict.get("is_manager")
 
         # Method 2: local.form_dict
         if (not title_vn or not title_en) and hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
             title_vn = title_vn or frappe.local.form_dict.get("title_vn")
             title_en = title_en or frappe.local.form_dict.get("title_en")
             education_stage_id = education_stage_id or frappe.local.form_dict.get("education_stage_id")
-            is_manager = is_manager or frappe.local.form_dict.get("is_manager")
 
         # Method 3: parse raw request data (urlencoded)
         if (not title_vn or not title_en) and frappe.request.data:
@@ -118,7 +114,6 @@ def create():
                     title_vn = title_vn or parsed.get('title_vn', [None])[0]
                     title_en = title_en or parsed.get('title_en', [None])[0]
                     education_stage_id = education_stage_id or parsed.get('education_stage_id', [None])[0]
-                    is_manager = is_manager or parsed.get('is_manager', [None])[0]
             except Exception:
                 pass
 
@@ -132,22 +127,12 @@ def create():
                     title_vn = title_vn or data.get('title_vn')
                     title_en = title_en or data.get('title_en')
                     education_stage_id = education_stage_id or data.get('education_stage_id')
-                    is_manager = is_manager or data.get('is_manager')
             except Exception:
                 pass
 
         # Normalize 'none' to None
         if isinstance(education_stage_id, str) and education_stage_id.lower() == 'none':
             education_stage_id = None
-        
-        # Convert is_manager to boolean
-        if is_manager is not None:
-            if isinstance(is_manager, str):
-                is_manager = is_manager.lower() in ['true', '1', 'yes', 'on']
-            else:
-                is_manager = bool(is_manager)
-        else:
-            is_manager = False
 
         if not title_vn or not title_en:
             return validation_error_response(
@@ -162,7 +147,6 @@ def create():
                 "title_vn": title_vn,
                 "title_en": title_en,
                 "education_stage_id": education_stage_id,
-                "is_manager": is_manager,
                 "campus_id": campus_id,
             }
         )
@@ -175,7 +159,6 @@ def create():
                 "title_en": doc.title_en,
                 "campus_id": doc.campus_id,
                 "education_stage_id": getattr(doc, "education_stage_id", None),
-                "is_manager": getattr(doc, "is_manager", False),
             },
             message="Created successfully",
         )
@@ -345,17 +328,9 @@ def update():
         title_vn = read_field('title_vn')
         title_en = read_field('title_en')
         education_stage_id = read_field('education_stage_id')
-        is_manager = read_field('is_manager')
 
         if isinstance(education_stage_id, str) and education_stage_id.lower() == 'none':
             education_stage_id = None
-        
-        # Convert is_manager to boolean
-        if is_manager is not None:
-            if isinstance(is_manager, str):
-                is_manager = is_manager.lower() in ['true', '1', 'yes', 'on']
-            else:
-                is_manager = bool(is_manager)
 
         changed = False
         if title_vn is not None:
@@ -366,9 +341,6 @@ def update():
             changed = True
         if education_stage_id is not None:
             doc.education_stage_id = education_stage_id
-            changed = True
-        if is_manager is not None:
-            doc.is_manager = is_manager
             changed = True
 
         if changed:
@@ -382,7 +354,6 @@ def update():
             "title_en": doc.title_en,
             "campus_id": doc.campus_id,
             "education_stage_id": getattr(doc, "education_stage_id", None),
-            "is_manager": getattr(doc, "is_manager", False),
             "_debug_info": debug_info  # Include debug info for troubleshooting
         }
 

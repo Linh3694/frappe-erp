@@ -55,12 +55,6 @@
    "fieldtype": "Link",
    "label": "Education Stage",
    "options": "SIS Education Stage"
-  },
-  {
-   "fieldname": "is_manager",
-   "fieldtype": "Check",
-   "label": "Is Manager",
-   "default": 0
   }
  ],
  "index_web_pages_for_search": 1,

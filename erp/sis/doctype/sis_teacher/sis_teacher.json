@@ -21,7 +21,8 @@
   "user_id",
   "gender",
   "education_stage_id",
-  "subject_department_id"
+  "subject_department_id",
+  "is_manager"
  ],
  "fields": [
   {
@@ -65,6 +66,12 @@
    "fieldtype": "Link",
    "label": "Subject Department",
    "options": "SIS Subject Department"
+  },
+  {
+   "fieldname": "is_manager",
+   "fieldtype": "Check",
+   "label": "Is Manager",
+   "default": 0
   }
  ],
  "index_web_pages_for_search": 1,
