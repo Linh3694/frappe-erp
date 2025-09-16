@@ -207,19 +207,64 @@ class TimetableExcelImporter:
         """Choose a SIS Subject that links to the given Timetable Subject within campus (and stage if provided)."""
         if not timetable_subject_id:
             return None
+        
         try:
-            filters = {
-                "campus_id": self.campus_id,
-                "timetable_subject_id": timetable_subject_id,
-            }
+            # Cách 1: Tìm SIS Subject có education_stage trùng khớp (logic cũ)
             if education_stage_id:
-                filters["education_stage"] = education_stage_id
-            subject_rows = frappe.get_all("SIS Subject", fields=["name"], filters=filters, limit=1)
-            if subject_rows:
-                return subject_rows[0].name
-        except Exception:
-            pass
-        self.warnings.append(f"No SIS Subject linked to Timetable Subject '{timetable_subject_id}' for given campus/stage")
+                filters = {
+                    "campus_id": self.campus_id,
+                    "timetable_subject_id": timetable_subject_id,
+                    "education_stage": education_stage_id
+                }
+                subject_rows = frappe.get_all("SIS Subject", fields=["name"], filters=filters, limit=1)
+                if subject_rows:
+                    return subject_rows[0].name
+            
+            # Cách 2: Nếu không tìm thấy, tự động tạo SIS Subject cho education_stage được chọn
+            if education_stage_id:
+                try:
+                    # Lấy thông tin Timetable Subject
+                    timetable_subject = frappe.get_doc("SIS Timetable Subject", timetable_subject_id)
+                    
+                    # Kiểm tra xem đã có SIS Subject nào với title tương tự chưa
+                    existing_subject = frappe.db.get_value(
+                        "SIS Subject",
+                        {
+                            "title": timetable_subject.title_vn,
+                            "campus_id": self.campus_id,
+                            "education_stage": education_stage_id
+                        },
+                        "name"
+                    )
+                    
+                    if existing_subject:
+                        # Update existing subject to link with timetable subject
+                        frappe.db.set_value("SIS Subject", existing_subject, "timetable_subject_id", timetable_subject_id)
+                        frappe.db.commit()
+                        self.warnings.append(f"Đã liên kết SIS Subject '{timetable_subject.title_vn}' với Timetable Subject")
+                        return existing_subject
+                    else:
+                        # Tạo SIS Subject mới
+                        subject_doc = frappe.get_doc({
+                            "doctype": "SIS Subject",
+                            "title": timetable_subject.title_vn,
+                            "campus_id": self.campus_id,
+                            "education_stage": education_stage_id,
+                            "timetable_subject_id": timetable_subject_id
+                        })
+                        subject_doc.insert()
+                        frappe.db.commit()
+                        
+                        self.warnings.append(f"Đã tự động tạo SIS Subject '{timetable_subject.title_vn}' cho cấp học được chọn")
+                        return subject_doc.name
+                        
+                except Exception as create_error:
+                    frappe.log_error(f"Error creating SIS Subject from Timetable Subject {timetable_subject_id}: {str(create_error)}")
+                    
+        except Exception as e:
+            frappe.log_error(f"Error deriving subject from timetable subject: {str(e)}")
+            
+        self.warnings.append(f"Không thể mapping SIS Subject cho Timetable Subject '{timetable_subject_id}'")
         return None
 
     def get_teachers_for_class_subject(self, class_id: str, subject_id: str) -> Tuple[Optional[str], Optional[str], str]:
