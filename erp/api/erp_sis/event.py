@@ -1361,21 +1361,41 @@ def delete_event():
                 "status": ["Cannot delete approved events"]
             })
 
-        # Delete related records first
-        # Delete event students
-        frappe.db.delete("SIS Event Student", {"event_id": event_id})
+        # Delete related records first using safer approach
+        try:
+            # Delete event students
+            event_students = frappe.get_all("SIS Event Student", filters={"event_id": event_id}, fields=["name"])
+            for es in event_students:
+                frappe.delete_doc("SIS Event Student", es.name, ignore_permissions=True)
+        except Exception as e:
+            frappe.log_error(f"Error deleting event students: {str(e)}", "Delete Event")
         
-        # Delete event teachers
-        frappe.db.delete("SIS Event Teacher", {"event_id": event_id})
+        try:
+            # Delete event teachers
+            event_teachers = frappe.get_all("SIS Event Teacher", filters={"event_id": event_id}, fields=["name"])
+            for et in event_teachers:
+                frappe.delete_doc("SIS Event Teacher", et.name, ignore_permissions=True)
+        except Exception as e:
+            frappe.log_error(f"Error deleting event teachers: {str(e)}", "Delete Event")
         
-        # Delete event date schedules
-        frappe.db.delete("SIS Event Date Schedule", {"event_id": event_id})
+        try:
+            # Delete event date schedules
+            date_schedules = frappe.get_all("SIS Event Date Schedule", filters={"event_id": event_id}, fields=["name"])
+            for ds in date_schedules:
+                frappe.delete_doc("SIS Event Date Schedule", ds.name, ignore_permissions=True)
+        except Exception as e:
+            frappe.log_error(f"Error deleting event date schedules: {str(e)}", "Delete Event")
         
-        # Delete timetable overrides if any
-        frappe.db.delete("SIS Timetable Override", {"event_id": event_id})
+        try:
+            # Delete timetable overrides if any
+            overrides = frappe.get_all("SIS Timetable Override", filters={"event_id": event_id}, fields=["name"])
+            for override in overrides:
+                frappe.delete_doc("SIS Timetable Override", override.name, ignore_permissions=True)
+        except Exception as e:
+            frappe.log_error(f"Error deleting timetable overrides: {str(e)}", "Delete Event")
 
         # Delete the event
-        event.delete()
+        frappe.delete_doc("SIS Event", event_id, ignore_permissions=True)
         frappe.db.commit()
 
         return single_item_response({
