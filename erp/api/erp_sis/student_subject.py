@@ -507,7 +507,7 @@ def create_student_reports_for_template():
                     # Create new report card
                     report_doc = frappe.get_doc({
                         "doctype": "SIS Student Report Card",
-                        "title": f"{template.title} - {student_name}",
+                        "title": template.title,
                         "template_id": template.name,
                         "form_id": template.form_id or "",
                         "class_id": class_id,
