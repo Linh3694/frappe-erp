@@ -1291,12 +1291,23 @@ def _get_request_arg(name: str, fallback: Optional[str] = None) -> Optional[str]
 
 
 @frappe.whitelist(allow_guest=False)
-def delete_event(event_id: Optional[str] = None):
+def delete_event():
     """Delete an event (only creator can delete)"""
     try:
-        # Get event_id using robust approach similar to calendar.py
-        event_id = event_id or _get_request_arg("event_id")
+        # Debug logging similar to teacher.py
+        frappe.log_error(f"delete_event called", "Delete Event Debug")
+        frappe.log_error(f"form_dict: {dict(frappe.local.form_dict)}", "Delete Event Debug")
+        frappe.log_error(f"request.data exists: {bool(frappe.request.data)}", "Delete Event Debug")
+        if frappe.request.data:
+            frappe.log_error(f"request.data type: {type(frappe.request.data)}", "Delete Event Debug")
+            frappe.log_error(f"request.data content: {frappe.request.data}", "Delete Event Debug")
         
+        # Use exact same pattern as approve_event
+        data = frappe.local.form_dict
+        event_id = data.get("event_id")
+        
+        frappe.log_error(f"Extracted event_id: '{event_id}' (type: {type(event_id)})", "Delete Event Debug")
+
         if not event_id:
             return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]})
 
