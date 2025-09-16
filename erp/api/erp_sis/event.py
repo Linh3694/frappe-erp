@@ -1273,3 +1273,67 @@ def update_event_student_status():
     except Exception as e:
         frappe.log_error(f"Error updating event student: {str(e)}")
         return error_response(f"Error updating event student: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_event():
+    """Delete an event (only creator can delete)"""
+    try:
+        data = frappe.local.form_dict
+        event_id = data.get("event_id")
+
+        if not event_id:
+            return validation_error_response("Validation failed", {"event_id": ["Event ID is required"]})
+
+        # Get current user as teacher
+        current_user = frappe.session.user
+        teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+
+        if not teacher:
+            return forbidden_response("Only teachers can delete events")
+
+        # Get event
+        event = frappe.get_doc("SIS Event", event_id)
+
+        # Check campus permission
+        campus_id = get_current_campus_from_context()
+        if campus_id and event.campus_id != campus_id:
+            return forbidden_response("Access denied: Campus mismatch")
+
+        # Check if user is the creator
+        if event.create_by != teacher:
+            return forbidden_response("Only event creator can delete this event")
+
+        # Check if event can be deleted (not approved/in progress)
+        if event.status == "approved":
+            return validation_error_response("Validation failed", {
+                "status": ["Cannot delete approved events"]
+            })
+
+        # Delete related records first
+        # Delete event students
+        frappe.db.delete("SIS Event Student", {"event_id": event_id})
+        
+        # Delete event teachers
+        frappe.db.delete("SIS Event Teacher", {"event_id": event_id})
+        
+        # Delete event date schedules
+        frappe.db.delete("SIS Event Date Schedule", {"event_id": event_id})
+        
+        # Delete timetable overrides if any
+        frappe.db.delete("SIS Timetable Override", {"event_id": event_id})
+
+        # Delete the event
+        event.delete()
+        frappe.db.commit()
+
+        return single_item_response({
+            "name": event_id,
+            "deleted": True
+        }, "Event deleted successfully")
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Event not found")
+    except Exception as e:
+        frappe.log_error(f"Error deleting event: {str(e)}")
+        return error_response(f"Error deleting event: {str(e)}")
