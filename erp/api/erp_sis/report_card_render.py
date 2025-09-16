@@ -105,12 +105,18 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
         layout = {}
         try:
             layout = json.loads(p.layout_json or "{}") if isinstance(p.layout_json, (str, bytes)) else (p.layout_json or {})
-        except Exception:
+            # Debug logging
+            frappe.logger().info(f"Page {idx} layout parsed: {layout}")
+            frappe.logger().info(f"Elements count: {len(layout.get('elements', []))}")
+        except Exception as e:
+            frappe.logger().error(f"Error parsing layout_json: {e}")
+            frappe.logger().info(f"Raw layout_json: {p.layout_json}")
             layout = {}
 
         overlay_items: List[str] = []
         for el in (layout.get("elements") or []):
             etype = el.get("type")
+            frappe.logger().info(f"Processing element: type={etype}, data={el}")
             if etype == "text":
                 x = el.get("x", 0)
                 y = el.get("y", 0)
@@ -121,9 +127,14 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
                 ta = style.get("textAlign", None)
                 # Prefer explicit text, fallback to binding
                 content_val = el.get("text")
-                bound = _resolve_path(report_data, el.get("binding"))
-                if bound is not None and not isinstance(bound, (dict, list)):
-                    content_val = bound
+                binding_path = el.get("binding")
+                if binding_path:
+                    bound = _resolve_path(report_data, binding_path)
+                    frappe.logger().info(f"Binding {binding_path} resolved to: {bound}")
+                    if bound is not None and not isinstance(bound, (dict, list)):
+                        content_val = bound
+                else:
+                    frappe.logger().info(f"No binding for element, using text: {content_val}")
                 classes = ["text"]
                 try:
                     if fw and int(fw) >= 600:
@@ -209,6 +220,7 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
             # else: unsupported type -> ignore
         # If form has no positioned elements, provide sensible defaults for page 1
         if not overlay_items and idx == 0:
+            frappe.logger().warning(f"No overlay items found for page {idx}, using fallback defaults")
             student = report_data.get("student", {}) if isinstance(report_data, dict) else {}
             klass = report_data.get("class", {}) if isinstance(report_data, dict) else {}
             subject_eval = report_data.get("subject_eval", {}) if isinstance(report_data, dict) else {}
@@ -279,6 +291,7 @@ def get_report_html(report_id: Optional[str] = None):
             })
         except Exception:
             pass
+        frappe.logger().info(f"Report data structure: {json.dumps(data, indent=2, default=str)[:1000]}...")
         html = _build_html(form, data)
         return single_item_response({"html": html}, "HTML built")
     except frappe.DoesNotExistError:
