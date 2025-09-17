@@ -295,6 +295,20 @@ def create_subject_assignment():
                 })
                 assignment_doc.insert()
                 created_names.append(assignment_doc.name)
+                
+                # Auto-sync timetable sau khi tạo Subject Assignment
+                try:
+                    sync_data = {
+                        "assignment_id": assignment_doc.name,
+                        "old_teacher_id": None,  # Tạo mới nên không có teacher cũ
+                        "new_teacher_id": teacher_id,
+                        "class_id": cid,
+                        "actual_subject_id": sid
+                    }
+                    _sync_timetable_from_date(sync_data, assignment_doc.creation)
+                except Exception as sync_error:
+                    frappe.log_error(f"Auto-sync timetable failed for new assignment {assignment_doc.name}: {str(sync_error)}")
+                    # Không fail chính, chỉ log error
 
         frappe.db.commit()
 
@@ -535,25 +549,24 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
             debug_info['saved_class_id'] = saved_class_id
             debug_info['save_successful'] = True
             
-            # If teacher was changed, trigger bulk timetable update
-            if teacher_id and old_teacher_id != teacher_id:
-                try:
-                    bulk_data = {
-                        "assignment_id": assignment_doc.name,
-                        "old_teacher_id": old_teacher_id,
-                        "new_teacher_id": teacher_id,
-                        "class_id": assignment_doc.class_id,
-                        "actual_subject_id": assignment_doc.actual_subject_id
-                    }
-                    
-                    # Call internal bulk update function
-                    bulk_result = _bulk_update_timetable_internal(bulk_data)
-                    debug_info['bulk_update_result'] = bulk_result.get('summary', {})
-                    
-                except Exception as bulk_error:
-                    frappe.log_error(f"Bulk timetable update failed for assignment {assignment_id}: {str(bulk_error)}")
-                    debug_info['bulk_update_error'] = str(bulk_error)
-                    # Don't fail the main update if bulk update fails
+            # Auto-sync timetable sau khi update Subject Assignment (luôn chạy, không chỉ khi teacher thay đổi)
+            try:
+                sync_data = {
+                    "assignment_id": assignment_doc.name,
+                    "old_teacher_id": old_teacher_id,
+                    "new_teacher_id": teacher_id or assignment_doc.teacher_id,
+                    "class_id": assignment_doc.class_id,
+                    "actual_subject_id": assignment_doc.actual_subject_id
+                }
+                
+                # Sync từ ngày modified của assignment
+                sync_result = _sync_timetable_from_date(sync_data, assignment_doc.modified)
+                debug_info['sync_result'] = sync_result.get('summary', {}) if sync_result else {}
+                
+            except Exception as sync_error:
+                frappe.log_error(f"Auto-sync timetable failed for updated assignment {assignment_id}: {str(sync_error)}")
+                debug_info['sync_error'] = str(sync_error)
+                # Don't fail the main update if sync fails
 
         except Exception as save_error:
             frappe.logger().error(f"UPDATE DEBUG - Error saving assignment: {str(save_error)}")
@@ -1102,3 +1115,153 @@ def bulk_update_timetable_from_assignment():
     except Exception as e:
         frappe.log_error(f"Error in bulk_update_timetable_from_assignment: {str(e)}")
         return error_response(f"Error updating timetables: {str(e)}")
+
+
+def _sync_timetable_from_date(data: dict, from_date):
+    """
+    Sync timetable instances từ một ngày cụ thể.
+    Dùng cho auto-sync khi Subject Assignment được tạo/cập nhật.
+    """
+    campus_id = get_current_campus_from_context() or "campus-1"
+    
+    assignment_id = data.get("assignment_id")
+    old_teacher_id = data.get("old_teacher_id")  # Có thể None khi tạo mới
+    new_teacher_id = data.get("new_teacher_id")
+    class_id = data.get("class_id")
+    actual_subject_id = data.get("actual_subject_id")
+    
+    # Convert from_date to string if it's datetime
+    if hasattr(from_date, 'date'):
+        sync_from_date = from_date.date()
+    elif hasattr(from_date, 'strftime'):
+        sync_from_date = from_date.strftime('%Y-%m-%d')
+    else:
+        sync_from_date = str(from_date).split(' ')[0]  # Take date part if datetime string
+    
+    # Find timetable instances từ ngày sync trở đi
+    instance_filters = {
+        "campus_id": campus_id,
+        "start_date": [">=", sync_from_date]
+    }
+    
+    if class_id:
+        instance_filters["class_id"] = class_id
+        
+    instances = frappe.get_all(
+        "SIS Timetable Instance", 
+        fields=["name", "class_id", "start_date", "end_date"],
+        filters=instance_filters
+    )
+    
+    if not instances:
+        return {
+            "updated_rows": [],
+            "skipped_rows": [],
+            "summary": {
+                "instances_checked": 0,
+                "rows_updated": 0,
+                "rows_skipped": 0,
+                "sync_from_date": sync_from_date
+            }
+        }
+        
+    updated_rows = []
+    skipped_rows = []
+    
+    for instance in instances:
+        try:
+            # Find SIS Subjects that link to this actual_subject_id
+            subject_ids = frappe.get_all(
+                "SIS Subject",
+                fields=["name"],
+                filters={
+                    "actual_subject_id": actual_subject_id,
+                    "campus_id": campus_id
+                }
+            )
+            
+            if not subject_ids:
+                continue
+                
+            subject_id_list = [s.name for s in subject_ids]
+            
+            # Find instance rows với các subjects này
+            rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name", "subject_id", "teacher_1_id", "teacher_2_id", "day_of_week", "timetable_column_id"],
+                filters={
+                    "parent": instance.name,
+                    "subject_id": ["in", subject_id_list]
+                }
+            )
+            
+            for row in rows:
+                try:
+                    # Determine if this row should be updated
+                    should_update = False
+                    
+                    if old_teacher_id:
+                        # UPDATE case: check if row has old teacher
+                        should_update = (row.get("teacher_1_id") == old_teacher_id or row.get("teacher_2_id") == old_teacher_id)
+                    else:
+                        # CREATE case: update rows that don't have teacher assigned yet
+                        should_update = not row.get("teacher_1_id") and not row.get("teacher_2_id")
+                    
+                    if not should_update:
+                        skipped_rows.append({
+                            "row_id": row.name,
+                            "reason": "Teacher not matching or already assigned",
+                            "instance_id": instance.name
+                        })
+                        continue
+                        
+                    # Update the row
+                    row_doc = frappe.get_doc("SIS Timetable Instance Row", row.name)
+                    updated_fields = []
+                    
+                    if old_teacher_id:
+                        # Replace old teacher with new teacher
+                        if row_doc.teacher_1_id == old_teacher_id:
+                            row_doc.teacher_1_id = new_teacher_id
+                            updated_fields.append("teacher_1_id")
+                        if row_doc.teacher_2_id == old_teacher_id:
+                            row_doc.teacher_2_id = new_teacher_id
+                            updated_fields.append("teacher_2_id")
+                    else:
+                        # No old teacher (CREATE case), assign new teacher to teacher_1_id
+                        row_doc.teacher_1_id = new_teacher_id
+                        updated_fields.append("teacher_1_id")
+                    
+                    if updated_fields:
+                        row_doc.save(ignore_permissions=True)
+                        updated_rows.append({
+                            "row_id": row.name,
+                            "updated_fields": updated_fields,
+                            "instance_id": instance.name,
+                            "day_of_week": row.get("day_of_week"),
+                            "period": row.get("timetable_column_id")
+                        })
+                        
+                except Exception as row_error:
+                    skipped_rows.append({
+                        "row_id": row.name,
+                        "reason": f"Update error: {str(row_error)}",
+                        "instance_id": instance.name
+                    })
+                    continue
+                    
+        except Exception as instance_error:
+            continue
+    
+    frappe.db.commit()
+    
+    return {
+        "updated_rows": updated_rows,
+        "skipped_rows": skipped_rows,
+        "summary": {
+            "instances_checked": len(instances),
+            "rows_updated": len(updated_rows),
+            "rows_skipped": len(skipped_rows),
+            "sync_from_date": sync_from_date
+        }
+    }
