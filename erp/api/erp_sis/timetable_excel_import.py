@@ -468,8 +468,26 @@ class TimetableExcelImporter:
         if column_id:
             return column_id
             
-        # Không match được - báo lỗi và bỏ qua
-        self.errors.append(f"Period '{period_str}' not found or is not a study period for education stage {education_stage_id}")
+        # Không match được - báo lỗi chi tiết và bỏ qua
+        # Kiểm tra xem period có tồn tại nhưng không phải study period không
+        non_study_period = frappe.db.get_value(
+            "SIS Timetable Column",
+            {
+                "period_name": period_str,
+                "education_stage_id": education_stage_id,
+                "campus_id": self.campus_id
+            },
+            "period_type"
+        )
+        
+        if non_study_period:
+            if non_study_period == "non-study":
+                self.errors.append(f"Period '{period_str}' exists but is a non-study period (break/lunch) - skipped")
+            else:
+                self.errors.append(f"Period '{period_str}' exists but has unexpected type '{non_study_period}' - skipped")
+        else:
+            self.errors.append(f"Period '{period_str}' not found for education stage {education_stage_id}")
+            
         return None
 
     def validate_schedule_conflicts(self, schedule_data: List[Dict]) -> None:
