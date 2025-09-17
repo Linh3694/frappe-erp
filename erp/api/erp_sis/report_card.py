@@ -567,6 +567,51 @@ def create_template():
             pre_insert_debug = {"error": str(e)}
 
         doc.insert(ignore_permissions=True)
+        
+        # MANUAL SAVE: Child tables of child tables need manual saving
+        manual_save_debug = []
+        try:
+            for subject_row in doc.subjects:
+                if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
+                    subject_debug = {
+                        "subject_config_name": subject_row.name,
+                        "subject_id": getattr(subject_row, 'subject_id', 'NO_ID'),
+                        "test_titles_to_save": [],
+                        "saved_titles": []
+                    }
+                    
+                    for test_title_data in subject_row.test_point_titles:
+                        try:
+                            # Get title from either dict or object
+                            title = ""
+                            if isinstance(test_title_data, dict):
+                                title = test_title_data.get('title', '')
+                            elif hasattr(test_title_data, 'title'):
+                                title = test_title_data.title
+                            
+                            subject_debug["test_titles_to_save"].append({
+                                "title": title,
+                                "type": str(type(test_title_data))
+                            })
+                            
+                            if title:
+                                # Create and save child doc manually
+                                child_doc = frappe.get_doc({
+                                    "doctype": "SIS Report Card Test Point Title",
+                                    "title": title,
+                                    "parent": subject_row.name,
+                                    "parenttype": "SIS Report Card Subject Config",
+                                    "parentfield": "test_point_titles"
+                                })
+                                child_doc.insert(ignore_permissions=True)
+                                subject_debug["saved_titles"].append(title)
+                        except Exception as save_error:
+                            subject_debug["save_error"] = str(save_error)
+                    
+                    manual_save_debug.append(subject_debug)
+        except Exception as manual_error:
+            manual_save_debug = {"error": str(manual_error)}
+        
         frappe.db.commit()
 
         # DEBUG: Check if test_point_titles were actually saved to database
@@ -610,6 +655,7 @@ def create_template():
             response_data["_debug_function_calls"] = created._debug_function_calls
         response_data["_debug_db_check"] = db_check_debug
         response_data["_debug_pre_insert"] = pre_insert_debug
+        response_data["_debug_manual_save"] = manual_save_debug
         
         return single_item_response(response_data, "Template created successfully")
     except frappe.LinkValidationError as e:
