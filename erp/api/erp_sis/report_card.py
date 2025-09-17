@@ -323,15 +323,36 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
                 else:
                     debug_test_points["processed"].append({"index": i, "title": t.get("title", ""), "action": "skipped_empty"})
             
-            debug_test_points["saved_count"] = len(row.test_point_titles)
             debug_test_points["child_table_type"] = str(type(row.test_point_titles))
             debug_test_points["child_items_details"] = []
-            for child in row.test_point_titles:
-                debug_test_points["child_items_details"].append({
-                    "type": str(type(child)),
-                    "title": getattr(child, 'title', 'NO_TITLE_ATTR'),
-                    "dict_repr": dict(child) if hasattr(child, 'as_dict') else str(child)
-                })
+            
+            # Handle both list and single object cases
+            try:
+                if hasattr(row.test_point_titles, '__iter__') and not isinstance(row.test_point_titles, str):
+                    # It's iterable (list/tuple)
+                    debug_test_points["saved_count"] = len(row.test_point_titles)
+                    for i, child in enumerate(row.test_point_titles):
+                        debug_test_points["child_items_details"].append({
+                            "index": i,
+                            "type": str(type(child)),
+                            "title": getattr(child, 'title', 'NO_TITLE_ATTR'),
+                            "has_as_dict": hasattr(child, 'as_dict'),
+                            "str_repr": str(child)
+                        })
+                else:
+                    # It's a single object
+                    debug_test_points["saved_count"] = 1 if row.test_point_titles else 0
+                    if row.test_point_titles:
+                        debug_test_points["child_items_details"].append({
+                            "index": 0,
+                            "type": str(type(row.test_point_titles)),
+                            "title": getattr(row.test_point_titles, 'title', 'NO_TITLE_ATTR'),
+                            "has_as_dict": hasattr(row.test_point_titles, 'as_dict'),
+                            "str_repr": str(row.test_point_titles),
+                            "is_single_object": True
+                        })
+            except Exception as iter_error:
+                debug_test_points["iteration_error"] = str(iter_error)
         except Exception as e:
             debug_test_points["error"] = str(e)
         
@@ -516,6 +537,31 @@ def create_template():
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
 
+        # DEBUG: Check if test_point_titles were actually saved to database
+        db_check_debug = []
+        try:
+            db_subjects = frappe.db.sql("""
+                SELECT name, subject_id 
+                FROM `tabSIS Report Card Subject Config` 
+                WHERE parent = %s
+            """, (doc.name,), as_dict=True)
+            
+            for db_subject in db_subjects:
+                db_test_points = frappe.db.sql("""
+                    SELECT title 
+                    FROM `tabSIS Report Card Test Point Title` 
+                    WHERE parent = %s
+                """, (db_subject.name,), as_dict=True)
+                
+                db_check_debug.append({
+                    "subject_config_name": db_subject.name,
+                    "subject_id": db_subject.subject_id,
+                    "test_point_count": len(db_test_points),
+                    "test_point_titles": [tp.title for tp in db_test_points]
+                })
+        except Exception as e:
+            db_check_debug = {"error": str(e)}
+
         created = frappe.get_doc("SIS Report Card Template", doc.name)
         
         # Copy debug info from original doc to created doc
@@ -526,6 +572,7 @@ def create_template():
         response_data = _doc_to_template_dict(created)
         if hasattr(created, '_debug_test_points'):
             response_data["_debug_test_points"] = created._debug_test_points
+        response_data["_debug_db_check"] = db_check_debug
         
         return single_item_response(response_data, "Template created successfully")
     except frappe.LinkValidationError as e:
