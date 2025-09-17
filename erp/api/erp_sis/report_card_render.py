@@ -150,18 +150,27 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
             for subject_config in template_doc.subjects:
                 if getattr(subject_config, 'subject_id', None) == subject_id:
                     # Extract test point titles properly
-                    test_point_titles = getattr(subject_config, 'test_point_titles', [])                    
-                    # Process test point titles extraction
+                    test_point_titles = getattr(subject_config, 'test_point_titles', [])
                     
-                    # If test_point_titles is a child table, extract the actual titles
+                    # Debug: temporarily log what we have
+                    print(f"DEBUG template {template_id} subject {subject_id}:")
+                    print(f"  test_point_titles raw: {test_point_titles}")
+                    print(f"  test_point_titles type: {type(test_point_titles)}")
+                    print(f"  test_point_titles len: {len(test_point_titles) if hasattr(test_point_titles, '__len__') else 'no len'}")
+                    
+                    # Process test point titles extraction
                     if test_point_titles and hasattr(test_point_titles, '__iter__'):
                         titles_list = []
-                        for title_item in test_point_titles:
+                        for i, title_item in enumerate(test_point_titles):
+                            print(f"    item {i}: type={type(title_item)}, has_title={hasattr(title_item, 'title')}")
+                            if hasattr(title_item, 'title'):
+                                print(f"      title value: '{title_item.title}'")
                             if hasattr(title_item, 'title') and title_item.title:
                                 titles_list.append({"title": title_item.title})
                             elif hasattr(title_item, 'name') and title_item.name:
                                 titles_list.append({"title": title_item.name})
                         
+                        print(f"  final titles_list: {titles_list}")
                         if titles_list:
                             test_point_titles = titles_list
                         else:
@@ -177,7 +186,8 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         'comment_title_id': getattr(subject_config, 'comment_title_id', '')
                     }
         return {}
-    except Exception:
+    except Exception as e:
+        print(f"Exception in _get_template_config_for_subject: {e}")
         return {}
 
 
