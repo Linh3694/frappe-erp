@@ -939,23 +939,35 @@ def bulk_import_guardians():
                 
                 # Handle email - could be in various Excel columns
                 email = ''
+                frappe.logger().info(f"Row {index + 2}: Available columns: {list(df.columns)}")
+                frappe.logger().info(f"Row {index + 2}: Looking for email in row data: {dict(row)}")
+                
+                # First try exact column name matches
                 for email_col in ['email', 'Email', 'E-mail', 'e-mail', 'EMAIL']:
-                    if email_col in row and pd.notna(row.get(email_col)):
-                        email = str(row.get(email_col, '')).strip()
-                        frappe.logger().info(f"Found email in column '{email_col}': '{email}'")
-                        break
+                    if email_col in row:
+                        frappe.logger().info(f"Row {index + 2}: Found email column '{email_col}', value: {row.get(email_col)}, notna: {pd.notna(row.get(email_col))}")
+                        if pd.notna(row.get(email_col)):
+                            email = str(row.get(email_col, '')).strip()
+                            frappe.logger().info(f"Row {index + 2}: Extracted email from column '{email_col}': '{email}'")
+                            break
                 
                 # Also check if there are any columns with 'email' in name (case insensitive)
                 if not email:
+                    frappe.logger().info(f"Row {index + 2}: No email found in exact columns, trying fuzzy search")
                     for col_name in df.columns:
-                        if 'email' in col_name.lower() and pd.notna(row.get(col_name)):
-                            email = str(row.get(col_name, '')).strip()
-                            frappe.logger().info(f"Found email in fuzzy column '{col_name}': '{email}'")
-                            break
+                        if 'email' in col_name.lower():
+                            frappe.logger().info(f"Row {index + 2}: Checking fuzzy column '{col_name}', value: {row.get(col_name)}, notna: {pd.notna(row.get(col_name))}")
+                            if pd.notna(row.get(col_name)):
+                                email = str(row.get(col_name, '')).strip()
+                                frappe.logger().info(f"Row {index + 2}: Found email in fuzzy column '{col_name}': '{email}'")
+                                break
                 
                 # Handle special Excel values
                 if email and email.lower() in ['nan', 'none', 'null']:
+                    frappe.logger().info(f"Row {index + 2}: Email contained special value '{email}', clearing")
                     email = ''
+                
+                frappe.logger().info(f"Row {index + 2}: Final email value: '{email}'")
                 
                 guardian_id = str(row.get('guardian_id', '')).strip() if pd.notna(row.get('guardian_id')) else ''
                 
