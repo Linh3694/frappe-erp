@@ -20,7 +20,7 @@
   "campus_id",
   "teacher_id",
   "class_id",
-  "subject_id"
+  "actual_subject_id"
  ],
  "fields": [
   {
@@ -53,10 +53,10 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "subject_id",
+   "fieldname": "actual_subject_id",
    "fieldtype": "Link",
-   "label": "Subject",
-   "options": "SIS Subject",
+   "label": "Actual Subject",
+   "options": "SIS Actual Subject",
    "reqd": 1,
    "in_list_view": 1
   }
@@ -64,7 +64,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-08-20 09:00:00.000000",
+ "modified": "2025-09-17 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Subject Assignment",

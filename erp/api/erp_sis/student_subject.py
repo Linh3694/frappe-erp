@@ -64,51 +64,44 @@ def get_subjects_by_classes():
             "class_id": ["in", class_ids]
         }
         
-        # Get unique subject_id and actual_subject_id combinations
+        # Get unique actual_subject_id only for report card consistency
         student_subjects = frappe.get_all(
             "SIS Student Subject",
-            fields=["subject_id", "actual_subject_id"],
+            fields=["actual_subject_id"],
             filters=filters,
             distinct=True
         )
         
-        # Collect all unique subject IDs (both subject_id and actual_subject_id)
-        subject_ids = set()
+        # Collect all unique actual subject IDs only
+        actual_subject_ids = set()
         for record in student_subjects:
-            if record.get("subject_id"):
-                subject_ids.add(record["subject_id"])
             if record.get("actual_subject_id"):
-                subject_ids.add(record["actual_subject_id"])
+                actual_subject_ids.add(record["actual_subject_id"])
         
-        if not subject_ids:
-            return list_response([], "No subjects found for the selected classes")
+        if not actual_subject_ids:
+            return list_response([], "No actual subjects found for the selected classes")
         
-        # Get subject details from SIS Subject table
+        # Get actual subject details from SIS Actual Subject table
         subjects_query = """
             SELECT DISTINCT
                 s.name,
-                s.title as title_vn,
-                '' as title_en,
-                s.education_stage,
-                s.timetable_subject_id,
-                s.actual_subject_id,
-                s.campus_id,
-                COALESCE(ts.title_vn, '') as timetable_subject_name,
-                COALESCE(act.title_vn, '') as actual_subject_name
-            FROM `tabSIS Subject` s
-            LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
-            LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
+                s.title_vn,
+                s.title_en,
+                s.education_stage_id,
+                s.curriculum_id,
+                s.campus_id
+            FROM `tabSIS Actual Subject` s
             WHERE s.campus_id = %s AND s.name IN ({})
-            ORDER BY s.title ASC
-        """.format(','.join(['%s'] * len(subject_ids)))
+            ORDER BY s.title_vn ASC
+        """.format(','.join(['%s'] * len(actual_subject_ids)))
         
         subjects = frappe.db.sql(
             subjects_query, 
-            (campus_id,) + tuple(subject_ids), 
+            (campus_id,) + tuple(actual_subject_ids), 
             as_dict=True
         )
         
-        # Format the response to include both title variations
+        # Format the response for actual subjects only
         formatted_subjects = []
         for subject in subjects:
             formatted_subjects.append({
@@ -116,11 +109,8 @@ def get_subjects_by_classes():
                 "title": subject["title_vn"] or subject["name"],
                 "title_vn": subject["title_vn"] or subject["name"],
                 "title_en": subject["title_en"] or subject["title_vn"] or subject["name"],
-                "education_stage": subject["education_stage"],
-                "timetable_subject_id": subject["timetable_subject_id"],
-                "actual_subject_id": subject["actual_subject_id"],
-                "timetable_subject_name": subject["timetable_subject_name"],
-                "actual_subject_name": subject["actual_subject_name"],
+                "education_stage_id": subject["education_stage_id"],
+                "curriculum_id": subject["curriculum_id"],
                 "campus_id": subject["campus_id"]
             })
         
@@ -198,11 +188,11 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
     data = {}
     
     try:
-        # Get all subjects for this student from SIS Student Subject
+        # Get all actual subjects for this student from SIS Student Subject
         campus_id = template.campus_id
         student_subjects = frappe.get_all(
             "SIS Student Subject",
-            fields=["subject_id"],
+            fields=["actual_subject_id"],
             filters={
                 "campus_id": campus_id,
                 "class_id": class_id,
@@ -211,23 +201,23 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             distinct=True
         )
         
-        # Get subject details and filter by template subjects config if available
-        subject_ids = [s["subject_id"] for s in student_subjects if s.get("subject_id")]
+        # Get actual subject details and filter by template subjects config if available
+        actual_subject_ids = [s["actual_subject_id"] for s in student_subjects if s.get("actual_subject_id")]
         
-        # If template has specific subjects config, only include those
-        template_subject_ids = []
+        # If template has specific subjects config, only include those (assume template now uses actual_subject_id)
+        template_actual_subject_ids = []
         if hasattr(template, 'subjects') and template.subjects:
-            template_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
-            # Filter subject_ids to only include those configured in template
-            subject_ids = [sid for sid in subject_ids if sid in template_subject_ids]
+            template_actual_subject_ids = [s.actual_subject_id for s in template.subjects if s.actual_subject_id]
+            # Filter actual_subject_ids to only include those configured in template
+            actual_subject_ids = [sid for sid in actual_subject_ids if sid in template_actual_subject_ids]
         
-        # Get subject names/titles for reference
+        # Get actual subject names/titles for reference
         subjects_info = {}
-        if subject_ids:
+        if actual_subject_ids:
             subjects_data = frappe.get_all(
-                "SIS Subject",
-                fields=["name", "title"],
-                filters={"name": ["in", subject_ids]}
+                "SIS Actual Subject",
+                fields=["name", "title_vn as title"],
+                filters={"name": ["in", actual_subject_ids]}
             )
             subjects_info = {s["name"]: s["title"] for s in subjects_data}
         
@@ -235,14 +225,14 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         if getattr(template, 'scores_enabled', False):
             scores = {}
             
-            # If template has scores config, use that structure
+            # If template has scores config, use that structure with actual subjects
             if hasattr(template, 'scores') and template.scores:
                 for score_config in template.scores:
-                    subject_id = score_config.subject_id
-                    if subject_id in subject_ids:
-                        scores[subject_id] = {
-                            "subject_title": subjects_info.get(subject_id, subject_id),
-                            "display_name": score_config.display_name or subjects_info.get(subject_id, subject_id),
+                    actual_subject_id = score_config.actual_subject_id
+                    if actual_subject_id in actual_subject_ids:
+                        scores[actual_subject_id] = {
+                            "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
+                            "display_name": score_config.display_name or subjects_info.get(actual_subject_id, actual_subject_id),
                             "subject_type": score_config.subject_type or "Môn tính điểm",
                             "hs1_scores": [],  # List of individual scores
                             "hs2_scores": [],
@@ -275,13 +265,13 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         if getattr(template, 'subject_eval_enabled', False):
             subject_eval = {}
             
-            # Initialize for each subject configured in template
+            # Initialize for each actual subject configured in template
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
-                    subject_id = subject_config.subject_id
-                    if subject_id in subject_ids:
+                    actual_subject_id = subject_config.actual_subject_id
+                    if actual_subject_id in actual_subject_ids:
                         subject_data = {
-                            "subject_title": subjects_info.get(subject_id, subject_id),
+                            "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
                             "test_points": {},
                             "criteria_scores": {},
                             "scale_scores": {},
@@ -303,7 +293,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                         if subject_config.comment_title_enabled:
                             subject_data["comments"] = {}  # Will be populated based on comment_title_id
                         
-                        subject_eval[subject_id] = subject_data
+                        subject_eval[actual_subject_id] = subject_data
             
             data["subject_eval"] = subject_eval
         
@@ -314,10 +304,10 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
-                    subject_id = subject_config.subject_id
-                    if subject_id in subject_ids and hasattr(subject_config, 'scoreboard'):
+                    actual_subject_id = subject_config.actual_subject_id
+                    if actual_subject_id in actual_subject_ids and hasattr(subject_config, 'scoreboard'):
                         scoreboard_data = {
-                            "subject_title": subjects_info.get(subject_id, subject_id),
+                            "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
                             "main_scores": {}
                         }
                         
@@ -339,7 +329,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                                             "score": None
                                         }
                         
-                        intl_scoreboard[subject_id] = scoreboard_data
+                        intl_scoreboard[actual_subject_id] = scoreboard_data
             
             data["intl_scoreboard"] = intl_scoreboard
             
@@ -359,7 +349,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             "template_id": template.name,
             "student_id": student_id,
             "class_id": class_id,
-            "total_subjects": len(subject_ids),
+            "total_subjects": len(actual_subject_ids),
             "program_type": template.program_type
         }
         

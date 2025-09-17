@@ -267,19 +267,23 @@ class TimetableExcelImporter:
         self.warnings.append(f"Không thể mapping SIS Subject cho Timetable Subject '{timetable_subject_id}'")
         return None
 
-    def get_teachers_for_class_subject(self, class_id: str, subject_id: str) -> Tuple[Optional[str], Optional[str], str]:
+    def get_teachers_for_class_subject(self, class_id: str, subject_id: str, actual_subject_id: str = None) -> Tuple[Optional[str], Optional[str], str]:
         """Return up to 2 teacher IDs for the given class+subject (Subject Assignment). Also return display name string."""
         teacher_1_id: Optional[str] = None
         teacher_2_id: Optional[str] = None
         display_names: List[str] = []
         try:
+            # Use actual_subject_id if available, fallback to subject_id for backward compatibility
+            filter_subject_id = actual_subject_id if actual_subject_id else subject_id
+            filter_field = "actual_subject_id" if actual_subject_id else "subject_id"
+            
             rows = frappe.get_all(
                 "SIS Subject Assignment",
                 fields=["teacher_id"],
                 filters={
                     "campus_id": self.campus_id,
                     "class_id": class_id,
-                    "subject_id": subject_id,
+                    filter_field: filter_subject_id,
                 },
                 order_by="creation asc",
                 limit_page_length=10,
@@ -615,10 +619,12 @@ class TimetableExcelImporter:
                             continue
                         # Derive SIS Subject from Timetable Subject
                         subject_id = self.derive_subject_from_timetable_subject(ts_id, education_stage_id)
-                        # Derive teachers by Subject Assignment
+                        # Derive teachers by Subject Assignment using actual_subject_id
                         teacher_1_id, teacher_2_id, teacher_names = (None, None, "")
                         if subject_id:
-                            teacher_1_id, teacher_2_id, teacher_names = self.get_teachers_for_class_subject(class_id, subject_id)
+                            # Get actual_subject_id from subject
+                            actual_subject_id = frappe.db.get_value("SIS Subject", subject_id, "actual_subject_id")
+                            teacher_1_id, teacher_2_id, teacher_names = self.get_teachers_for_class_subject(class_id, subject_id, actual_subject_id)
 
                         schedule_row = {
                             'day_of_week': day_of_week,
