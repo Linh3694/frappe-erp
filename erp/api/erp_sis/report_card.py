@@ -260,6 +260,15 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
     parent_doc.subjects = []
 
     frappe.logger().info(f"Applying {len(subjects_payload or [])} subjects for campus {campus_id}")
+    
+    # TOP LEVEL DEBUG MARKER
+    if not hasattr(parent_doc, '_debug_function_calls'):
+        parent_doc._debug_function_calls = []
+    parent_doc._debug_function_calls.append({
+        "function": "_apply_subjects",
+        "subjects_count": len(subjects_payload or []),
+        "timestamp": "NEW_CODE_V2_FUNCTION_CALLED"
+    })
 
     for i, sub in enumerate(subjects_payload or []):
         subject_id = sub.get("subject_id")
@@ -595,6 +604,8 @@ def create_template():
         response_data = _doc_to_template_dict(created)
         if hasattr(created, '_debug_test_points'):
             response_data["_debug_test_points"] = created._debug_test_points
+        if hasattr(created, '_debug_function_calls'):
+            response_data["_debug_function_calls"] = created._debug_function_calls
         response_data["_debug_db_check"] = db_check_debug
         response_data["_debug_pre_insert"] = pre_insert_debug
         
