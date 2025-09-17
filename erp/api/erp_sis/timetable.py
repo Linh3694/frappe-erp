@@ -495,6 +495,125 @@ def _day_of_week_to_index(dow: str) -> int:
         return -1
     return mapping[key]
 
+def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id: str, 
+                              week_start: datetime, week_end: datetime) -> list[dict]:
+    """Apply date-specific timetable overrides to entries"""
+    try:
+        # Convert datetime to date string for database query
+        start_date_str = week_start.strftime("%Y-%m-%d")
+        end_date_str = week_end.strftime("%Y-%m-%d")
+        
+        # Get all overrides for this target and date range
+        overrides = frappe.get_all(
+            "SIS Timetable Override",
+            fields=[
+                "name", 
+                "date", 
+                "timetable_column_id", 
+                "subject_id", 
+                "teacher_1_id", 
+                "teacher_2_id", 
+                "room_id",
+                "override_type"
+            ],
+            filters={
+                "target_type": target_type,
+                "target_id": target_id,
+                "date": ["between", [start_date_str, end_date_str]]
+            }
+        )
+        
+        if not overrides:
+            return entries
+            
+        # Build override map: {date: {timetable_column_id: override_data}}
+        override_map = {}
+        for override in overrides:
+            date = override["date"]
+            column_id = override["timetable_column_id"]
+            
+            if date not in override_map:
+                override_map[date] = {}
+            
+            # Enrich override with display data
+            subject_title = ""
+            if override.get("subject_id"):
+                subject = frappe.get_doc("SIS Subject", override["subject_id"])
+                subject_title = subject.title
+                
+            teacher_names = []
+            if override.get("teacher_1_id"):
+                teacher1 = frappe.get_doc("SIS Teacher", override["teacher_1_id"])
+                if teacher1.user_id:
+                    user1 = frappe.get_doc("User", teacher1.user_id)
+                    display_name1 = user1.full_name or f"{user1.first_name or ''} {user1.last_name or ''}".strip()
+                    teacher_names.append(display_name1)
+                    
+            if override.get("teacher_2_id"):
+                teacher2 = frappe.get_doc("SIS Teacher", override["teacher_2_id"])
+                if teacher2.user_id:
+                    user2 = frappe.get_doc("User", teacher2.user_id)
+                    display_name2 = user2.full_name or f"{user2.first_name or ''} {user2.last_name or ''}".strip()
+                    teacher_names.append(display_name2)
+                    
+            override_map[date][column_id] = {
+                "name": f"override-{override['name']}",  # Mark as override entry
+                "subject_title": subject_title,
+                "teacher_names": ", ".join(teacher_names),
+                "override_type": override.get("override_type", "replace"),
+                "override_id": override["name"]
+            }
+            
+        # Apply overrides to entries
+        enhanced_entries = []
+        for entry in entries:
+            entry_date = entry.get("date")
+            entry_column = entry.get("timetable_column_id")
+            
+            # Check if there's an override for this date/column combination
+            if (entry_date in override_map and 
+                entry_column in override_map[entry_date]):
+                
+                override_data = override_map[entry_date][entry_column]
+                
+                if override_data["override_type"] == "replace":
+                    # Replace entry with override data
+                    enhanced_entry = {**entry}  # Copy original entry
+                    enhanced_entry.update({
+                        "name": override_data["name"],
+                        "subject_title": override_data["subject_title"],
+                        "teacher_names": override_data["teacher_names"],
+                        "is_override": True,
+                        "override_id": override_data["override_id"]
+                    })
+                    enhanced_entries.append(enhanced_entry)
+                elif override_data["override_type"] == "remove":
+                    # Skip this entry (effectively removing it)
+                    continue
+                else:  # "add" type
+                    # Keep original entry and also add override
+                    enhanced_entries.append(entry)
+                    override_entry = {**entry}
+                    override_entry.update({
+                        "name": override_data["name"],
+                        "subject_title": override_data["subject_title"], 
+                        "teacher_names": override_data["teacher_names"],
+                        "is_override": True,
+                        "override_id": override_data["override_id"]
+                    })
+                    enhanced_entries.append(override_entry)
+            else:
+                # No override, keep original entry
+                enhanced_entries.append(entry)
+                
+        return enhanced_entries
+        
+    except Exception as e:
+        frappe.log_error(f"Error applying timetable overrides: {str(e)}")
+        # Return original entries if override processing fails
+        return entries
+
+
 def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
     # Load timetable columns map for period info
     column_ids = list({r.get("timetable_column_id") for r in rows if r.get("timetable_column_id")})
@@ -796,7 +915,11 @@ def get_teacher_week():
             pass
 
         entries = _build_entries(rows, ws)
-        return list_response(entries, "Teacher week fetched successfully")
+        
+        # Apply date-specific overrides for teacher
+        entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, we)
+        
+        return list_response(entries_with_overrides, "Teacher week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching teacher week: {str(e)}")
@@ -981,7 +1104,11 @@ def get_class_week():
             pass
 
         entries = _build_entries(rows, ws)
-        return list_response(entries, "Class week fetched successfully")
+        
+        # Apply date-specific overrides 
+        entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
+        
+        return list_response(entries_with_overrides, "Class week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching class week: {str(e)}")
@@ -1687,3 +1814,208 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
 
     except Exception as e:
         pass
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST", "PUT"])
+def create_or_update_timetable_override(date: str = None, timetable_column_id: str = None,
+                                       target_type: str = None, target_id: str = None,
+                                       subject_id: str = None, teacher_1_id: str = None,
+                                       teacher_2_id: str = None, room_id: str = None,
+                                       override_id: str = None):
+    """Create or update a date-specific timetable override for individual cell edits"""
+    try:
+        # Get parameters from request
+        date = date or _get_request_arg("date")
+        timetable_column_id = timetable_column_id or _get_request_arg("timetable_column_id")
+        target_type = target_type or _get_request_arg("target_type")
+        target_id = target_id or _get_request_arg("target_id")
+        subject_id = subject_id or _get_request_arg("subject_id")
+        teacher_1_id = teacher_1_id or _get_request_arg("teacher_1_id")
+        teacher_2_id = teacher_2_id or _get_request_arg("teacher_2_id")
+        room_id = room_id or _get_request_arg("room_id")
+        override_id = override_id or _get_request_arg("override_id")
+
+        # Validate required fields
+        if not all([date, timetable_column_id, target_type, target_id]):
+            return validation_error_response("Validation failed", {
+                "required_fields": ["date", "timetable_column_id", "target_type", "target_id"]
+            })
+
+        # Validate target_type
+        if target_type not in ["Student", "Teacher", "Class"]:
+            return validation_error_response("Validation failed", {
+                "target_type": ["Target type must be Student, Teacher, or Class"]
+            })
+
+        # Get campus from user context for permission checking
+        campus_id = get_current_campus_from_context()
+
+        # Create a virtual event for this override if it doesn't exist
+        # We'll use a convention: "Manual Edit {date} {target_type} {target_id}"
+        event_title = f"Manual Edit {date} {target_type} {target_id}"
+        
+        # Check if virtual event exists
+        virtual_event = frappe.db.exists("SIS Event", {"title": event_title})
+        if not virtual_event:
+            # Create virtual event for this override
+            try:
+                virtual_event_doc = frappe.get_doc({
+                    "doctype": "SIS Event",
+                    "title": event_title,
+                    "start_date": date,
+                    "end_date": date,
+                    "status": "approved",
+                    "create_by": frappe.session.user,
+                    "event_type": "manual_edit",
+                    "campus_id": campus_id
+                })
+                virtual_event_doc.insert(ignore_permissions=True)
+                virtual_event = virtual_event_doc.name
+            except Exception as e:
+                # If event creation fails, continue without it
+                frappe.log_error(f"Failed to create virtual event: {str(e)}")
+                virtual_event = None
+
+        # Check if override already exists for this date/column/target combination
+        existing_override = frappe.db.exists(
+            "SIS Timetable Override",
+            {
+                "date": date,
+                "timetable_column_id": timetable_column_id,
+                "target_type": target_type,
+                "target_id": target_id
+            }
+        )
+
+        if existing_override:
+            # Update existing override
+            override_doc = frappe.get_doc("SIS Timetable Override", existing_override)
+            
+            # Update fields if provided
+            update_fields = {}
+            if subject_id is not None:
+                update_fields["subject_id"] = subject_id
+            if teacher_1_id is not None:
+                update_fields["teacher_1_id"] = teacher_1_id
+            if teacher_2_id is not None:
+                update_fields["teacher_2_id"] = teacher_2_id if teacher_2_id != 'none' else None
+            if room_id is not None:
+                update_fields["room_id"] = room_id
+
+            if update_fields:
+                for field, value in update_fields.items():
+                    setattr(override_doc, field, value)
+                
+                override_doc.save(ignore_permissions=True)
+                frappe.db.commit()
+
+        else:
+            # Create new override
+            override_doc = frappe.get_doc({
+                "doctype": "SIS Timetable Override",
+                "event_id": virtual_event,
+                "date": date,
+                "timetable_column_id": timetable_column_id,
+                "target_type": target_type,
+                "target_id": target_id,
+                "subject_id": subject_id,
+                "teacher_1_id": teacher_1_id,
+                "teacher_2_id": teacher_2_id if teacher_2_id != 'none' else None,
+                "room_id": room_id,
+                "override_type": "replace"
+            })
+
+            override_doc.insert(ignore_permissions=True)
+            frappe.db.commit()
+
+        result_data = {
+            "override_id": override_doc.name,
+            "date": date,
+            "timetable_column_id": timetable_column_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "updated_fields": ["subject_id", "teacher_1_id", "teacher_2_id", "room_id"]
+        }
+
+        return single_item_response(result_data, "Timetable override created/updated successfully")
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Record not found")
+    except frappe.PermissionError as e:
+        return forbidden_response(f"Permission denied: {str(e)}")
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(f"Error in create_or_update_timetable_override: {str(e)}")
+        return error_response(f"Error creating/updating timetable override: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_timetable_overrides_for_date_range(start_date: str = None, end_date: str = None,
+                                          target_type: str = None, target_id: str = None):
+    """Get all timetable overrides for a specific date range and target"""
+    try:
+        # Get parameters
+        start_date = start_date or _get_request_arg("start_date")
+        end_date = end_date or _get_request_arg("end_date")
+        target_type = target_type or _get_request_arg("target_type")
+        target_id = target_id or _get_request_arg("target_id")
+
+        if not all([start_date, end_date, target_type, target_id]):
+            return validation_error_response("Validation failed", {
+                "required_fields": ["start_date", "end_date", "target_type", "target_id"]
+            })
+
+        # Build filters
+        filters = {
+            "date": ["between", [start_date, end_date]],
+            "target_type": target_type,
+            "target_id": target_id
+        }
+
+        # Get overrides
+        overrides = frappe.get_all(
+            "SIS Timetable Override",
+            fields=[
+                "name",
+                "date",
+                "timetable_column_id",
+                "subject_id",
+                "teacher_1_id",
+                "teacher_2_id",
+                "room_id",
+                "override_type"
+            ],
+            filters=filters,
+            order_by="date asc, timetable_column_id asc"
+        )
+
+        # Enrich with display data similar to get_class_week
+        for override in overrides:
+            # Get subject title
+            if override.get("subject_id"):
+                subject_title = frappe.db.get_value("SIS Subject", override["subject_id"], "title")
+                override["subject_title"] = subject_title
+
+            # Get teacher names
+            teacher_names = []
+            if override.get("teacher_1_id"):
+                teacher1 = frappe.get_doc("SIS Teacher", override["teacher_1_id"])
+                if teacher1.user_id:
+                    user1 = frappe.get_doc("User", teacher1.user_id)
+                    display_name1 = user1.full_name or f"{user1.first_name or ''} {user1.last_name or ''}".strip()
+                    teacher_names.append(display_name1)
+                    
+            if override.get("teacher_2_id"):
+                teacher2 = frappe.get_doc("SIS Teacher", override["teacher_2_id"])
+                if teacher2.user_id:
+                    user2 = frappe.get_doc("User", teacher2.user_id)
+                    display_name2 = user2.full_name or f"{user2.first_name or ''} {user2.last_name or ''}".strip()
+                    teacher_names.append(display_name2)
+                    
+            override["teacher_names"] = ", ".join(teacher_names)
+
+        return list_response(overrides, "Timetable overrides fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error in get_timetable_overrides_for_date_range: {str(e)}")
+        return error_response(f"Error fetching timetable overrides: {str(e)}")
