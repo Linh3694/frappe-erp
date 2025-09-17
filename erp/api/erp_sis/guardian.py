@@ -937,9 +937,24 @@ def bulk_import_guardians():
                             frappe.logger().info(f"Found phone in fuzzy column '{col_name}': '{phone_number}'")
                             break
                 
-                # Handle email with better Excel compatibility
-                email = str(row.get('email', '')).strip() if pd.notna(row.get('email')) else ''
-                if email.lower() in ['nan', 'none', 'null']:
+                # Handle email - could be in various Excel columns
+                email = ''
+                for email_col in ['email', 'Email', 'E-mail', 'e-mail', 'EMAIL']:
+                    if email_col in row and pd.notna(row.get(email_col)):
+                        email = str(row.get(email_col, '')).strip()
+                        frappe.logger().info(f"Found email in column '{email_col}': '{email}'")
+                        break
+                
+                # Also check if there are any columns with 'email' in name (case insensitive)
+                if not email:
+                    for col_name in df.columns:
+                        if 'email' in col_name.lower() and pd.notna(row.get(col_name)):
+                            email = str(row.get(col_name, '')).strip()
+                            frappe.logger().info(f"Found email in fuzzy column '{col_name}': '{email}'")
+                            break
+                
+                # Handle special Excel values
+                if email and email.lower() in ['nan', 'none', 'null']:
                     email = ''
                 
                 guardian_id = str(row.get('guardian_id', '')).strip() if pd.notna(row.get('guardian_id')) else ''

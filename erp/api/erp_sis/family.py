@@ -208,24 +208,17 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
             code="UPDATE_FAMILY_ERROR"
         )
 @frappe.whitelist(allow_guest=False)
-def get_all_families(page=1, limit=20):
-    """Get all families with basic information and pagination - NEW STRUCTURE"""
+def get_all_families():
+    """Get all families without pagination - always returns full dataset"""
     try:
-        # Get parameters with defaults
-        page = int(page)
-        limit = int(limit)
-        
-        frappe.logger().info(f"get_all_families called with page: {page}, limit: {limit}")
-        
-        # Calculate offset for pagination
-        offset = (page - 1) * limit
+        frappe.logger().info("get_all_families called - fetching all families (no backend pagination)")
         
         filters = {}
         
         frappe.logger().info(f"Query filters: {filters}")
-        frappe.logger().info(f"Query pagination: offset={offset}, limit={limit}")
+        frappe.logger().info("Fetching all families from database")
         
-        # Get families with relationships and student/guardian details
+        # Get all families with relationships and student/guardian details (no pagination)
         families = frappe.db.sql("""
             SELECT 
                 f.name,
@@ -242,22 +235,14 @@ def get_all_families(page=1, limit=20):
             LEFT JOIN `tabCRM Guardian` g ON fr.guardian = g.name
             GROUP BY f.name, f.family_code, f.creation, f.modified
             ORDER BY f.family_code ASC
-            LIMIT %s OFFSET %s
-        """, (limit, offset), as_dict=True)
+        """, as_dict=True)
         
-        frappe.logger().info(f"Found {len(families)} families")
+        frappe.logger().info(f"Total families fetched: {len(families)}")
         
-        total_count = frappe.db.sql("SELECT COUNT(*) as cnt FROM `tabCRM Family`", as_dict=True)[0]["cnt"]
-        total_pages = (total_count + limit - 1) // limit
-        
-        frappe.logger().info(f"Total count: {total_count}, Total pages: {total_pages}")
-        
-        return paginated_response(
+        # Always return all families without pagination
+        return success_response(
             data=families,
-            current_page=page,
-            total_count=total_count,
-            per_page=limit,
-            message="Families fetched successfully"
+            message=f"Successfully fetched {len(families)} families"
         )
         
     except Exception as e:
