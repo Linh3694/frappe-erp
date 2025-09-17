@@ -78,10 +78,33 @@ def _load_evaluation_criteria_options(criteria_id: str) -> List[Dict[str, str]]:
         return []
     try:
         criteria_doc = frappe.get_doc("SIS Evaluation Criteria", criteria_id)
+        
+        # Debug: check what fields the document has
+        debug_info = {
+            "has_options": hasattr(criteria_doc, 'options'),
+            "options_count": len(getattr(criteria_doc, 'options', [])),
+            "all_fields": [field for field in dir(criteria_doc) if not field.startswith('_')],
+            "options_sample": getattr(criteria_doc, 'options', [])[:2] if hasattr(criteria_doc, 'options') else None
+        }
+        
+        # Temporary debug - add to error log to see structure
+        frappe.log_error(f"Criteria doc debug for {criteria_id}: {debug_info}", "DEBUG_CRITERIA_DOC")
+        
         if hasattr(criteria_doc, 'options') and criteria_doc.options:
-            return [{"id": opt.get("name", ""), "label": opt.get("title", "")} for opt in criteria_doc.options]
+            # Try different field names for options
+            result = []
+            for opt in criteria_doc.options:
+                # Check various field combinations
+                opt_id = opt.get("name", "") or opt.get("option_name", "") or opt.get("id", "")
+                opt_label = opt.get("title", "") or opt.get("option_title", "") or opt.get("label", "") or opt_id
+                
+                if opt_label:  # Only add if we have a label
+                    result.append({"id": opt_id, "label": opt_label})
+            
+            return result
         return []
-    except Exception:
+    except Exception as e:
+        frappe.log_error(f"Error loading criteria {criteria_id}: {str(e)}", "DEBUG_CRITERIA_ERROR")
         return []
 
 
@@ -91,10 +114,26 @@ def _load_evaluation_scale_options(scale_id: str) -> List[str]:
         return []
     try:
         scale_doc = frappe.get_doc("SIS Evaluation Scale", scale_id)
+        
+        # Debug info
+        debug_info = {
+            "has_options": hasattr(scale_doc, 'options'),
+            "options_count": len(getattr(scale_doc, 'options', [])),
+            "options_sample": getattr(scale_doc, 'options', [])[:2] if hasattr(scale_doc, 'options') else None
+        }
+        frappe.log_error(f"Scale doc debug for {scale_id}: {debug_info}", "DEBUG_SCALE_DOC")
+        
         if hasattr(scale_doc, 'options') and scale_doc.options:
-            return [opt.get("title", "") for opt in scale_doc.options if opt.get("title")]
+            # Try different field names for scale options
+            result = []
+            for opt in scale_doc.options:
+                opt_title = opt.get("title", "") or opt.get("option_title", "") or opt.get("label", "") or opt.get("name", "")
+                if opt_title:
+                    result.append(opt_title)
+            return result
         return []
-    except Exception:
+    except Exception as e:
+        frappe.log_error(f"Error loading scale {scale_id}: {str(e)}", "DEBUG_SCALE_ERROR")
         return []
 
 
@@ -104,10 +143,29 @@ def _load_comment_title_options(comment_title_id: str) -> List[Dict[str, str]]:
         return []
     try:
         comment_doc = frappe.get_doc("SIS Comment Title", comment_title_id)
+        
+        # Debug info
+        debug_info = {
+            "has_options": hasattr(comment_doc, 'options'),
+            "options_count": len(getattr(comment_doc, 'options', [])),
+            "options_sample": getattr(comment_doc, 'options', [])[:2] if hasattr(comment_doc, 'options') else None
+        }
+        frappe.log_error(f"Comment doc debug for {comment_title_id}: {debug_info}", "DEBUG_COMMENT_DOC")
+        
         if hasattr(comment_doc, 'options') and comment_doc.options:
-            return [{"id": opt.get("name", ""), "label": opt.get("title", "")} for opt in comment_doc.options]
+            result = []
+            for opt in comment_doc.options:
+                # Try different field combinations  
+                opt_id = opt.get("name", "") or opt.get("option_name", "") or opt.get("id", "")
+                opt_label = opt.get("title", "") or opt.get("option_title", "") or opt.get("label", "") or opt_id
+                
+                if opt_label:  # Only add if we have a label
+                    result.append({"id": opt_id, "label": opt_label})
+            
+            return result
         return []
-    except Exception:
+    except Exception as e:
+        frappe.log_error(f"Error loading comment title {comment_title_id}: {str(e)}", "DEBUG_COMMENT_ERROR")
         return []
 
 
