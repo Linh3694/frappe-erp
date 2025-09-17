@@ -78,23 +78,10 @@ def _load_evaluation_criteria_options(criteria_id: str) -> List[Dict[str, str]]:
         return []
     try:
         criteria_doc = frappe.get_doc("SIS Evaluation Criteria", criteria_id)
-        
-        # Debug: check what fields the document has
-        debug_info = {
-            "has_options": hasattr(criteria_doc, 'options'),
-            "options_count": len(getattr(criteria_doc, 'options', [])),
-            "all_fields": [field for field in dir(criteria_doc) if not field.startswith('_')],
-            "options_sample": getattr(criteria_doc, 'options', [])[:2] if hasattr(criteria_doc, 'options') else None
-        }
-        
-        # Temporary debug - add to error log to see structure
-        frappe.log_error(f"Criteria doc debug for {criteria_id}: {debug_info}", "DEBUG_CRITERIA_DOC")
-        
         if hasattr(criteria_doc, 'options') and criteria_doc.options:
-            # Try different field names for options
             result = []
             for opt in criteria_doc.options:
-                # Check various field combinations
+                # Try different field names for options
                 opt_id = opt.get("name", "") or opt.get("option_name", "") or opt.get("id", "")
                 opt_label = opt.get("title", "") or opt.get("option_title", "") or opt.get("label", "") or opt_id
                 
@@ -103,8 +90,7 @@ def _load_evaluation_criteria_options(criteria_id: str) -> List[Dict[str, str]]:
             
             return result
         return []
-    except Exception as e:
-        frappe.log_error(f"Error loading criteria {criteria_id}: {str(e)}", "DEBUG_CRITERIA_ERROR")
+    except Exception:
         return []
 
 
@@ -114,15 +100,7 @@ def _load_evaluation_scale_options(scale_id: str) -> List[str]:
         return []
     try:
         scale_doc = frappe.get_doc("SIS Evaluation Scale", scale_id)
-        
-        # Debug info
-        debug_info = {
-            "has_options": hasattr(scale_doc, 'options'),
-            "options_count": len(getattr(scale_doc, 'options', [])),
-            "options_sample": getattr(scale_doc, 'options', [])[:2] if hasattr(scale_doc, 'options') else None
-        }
-        frappe.log_error(f"Scale doc debug for {scale_id}: {debug_info}", "DEBUG_SCALE_DOC")
-        
+                
         if hasattr(scale_doc, 'options') and scale_doc.options:
             # Try different field names for scale options
             result = []
@@ -132,8 +110,7 @@ def _load_evaluation_scale_options(scale_id: str) -> List[str]:
                     result.append(opt_title)
             return result
         return []
-    except Exception as e:
-        frappe.log_error(f"Error loading scale {scale_id}: {str(e)}", "DEBUG_SCALE_ERROR")
+    except Exception:
         return []
 
 
@@ -143,15 +120,7 @@ def _load_comment_title_options(comment_title_id: str) -> List[Dict[str, str]]:
         return []
     try:
         comment_doc = frappe.get_doc("SIS Comment Title", comment_title_id)
-        
-        # Debug info
-        debug_info = {
-            "has_options": hasattr(comment_doc, 'options'),
-            "options_count": len(getattr(comment_doc, 'options', [])),
-            "options_sample": getattr(comment_doc, 'options', [])[:2] if hasattr(comment_doc, 'options') else None
-        }
-        frappe.log_error(f"Comment doc debug for {comment_title_id}: {debug_info}", "DEBUG_COMMENT_DOC")
-        
+          
         if hasattr(comment_doc, 'options') and comment_doc.options:
             result = []
             for opt in comment_doc.options:
@@ -164,8 +133,7 @@ def _load_comment_title_options(comment_title_id: str) -> List[Dict[str, str]]:
             
             return result
         return []
-    except Exception as e:
-        frappe.log_error(f"Error loading comment title {comment_title_id}: {str(e)}", "DEBUG_COMMENT_ERROR")
+    except Exception:
         return []
 
 
@@ -173,44 +141,25 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
     """Get template configuration for a specific subject"""
     try:
         template_doc = frappe.get_doc("SIS Report Card Template", template_id)
-        
-        # Debug template structure
-        template_debug = {
-            "has_subjects": hasattr(template_doc, 'subjects'),
-            "subjects_count": len(getattr(template_doc, 'subjects', [])),
-            "subjects_sample": []
-        }
-        
-        if hasattr(template_doc, 'subjects') and template_doc.subjects:
-            # Sample first few subjects for debug
-            for i, subj in enumerate(list(template_doc.subjects)[:2]):
-                sample = {
-                    "index": i,
-                    "subject_id": getattr(subj, 'subject_id', None),
-                    "has_test_point_titles": hasattr(subj, 'test_point_titles'),
-                    "test_point_titles_count": len(getattr(subj, 'test_point_titles', [])),
-                    "test_point_titles_sample": list(getattr(subj, 'test_point_titles', []))[:3],
-                    "all_fields": [field for field in dir(subj) if not field.startswith('_')]
-                }
-                template_debug["subjects_sample"].append(sample)
-        
-        frappe.log_error(f"Template debug for {template_id}: {template_debug}", "DEBUG_TEMPLATE_STRUCTURE")
-        
         if hasattr(template_doc, 'subjects') and template_doc.subjects:
             for subject_config in template_doc.subjects:
                 if getattr(subject_config, 'subject_id', None) == subject_id:
-                    # Debug this specific subject config
-                    subject_debug = {
-                        "subject_id": subject_id,
-                        "has_test_point_titles": hasattr(subject_config, 'test_point_titles'),
-                        "test_point_titles_raw": getattr(subject_config, 'test_point_titles', []),
-                        "test_point_titles_type": type(getattr(subject_config, 'test_point_titles', []))
-                    }
-                    frappe.log_error(f"Subject config debug for {subject_id}: {subject_debug}", "DEBUG_SUBJECT_CONFIG")
+                    # Extract test point titles properly
+                    test_point_titles = getattr(subject_config, 'test_point_titles', [])
+                    
+                    # If test_point_titles is a child table, extract the actual titles
+                    if test_point_titles and hasattr(test_point_titles, '__iter__'):
+                        titles_list = []
+                        for title_item in test_point_titles:
+                            if hasattr(title_item, 'title') and title_item.title:
+                                titles_list.append({"title": title_item.title})
+                            elif hasattr(title_item, 'name') and title_item.name:
+                                titles_list.append({"title": title_item.name})
+                        test_point_titles = titles_list
                     
                     return {
                         'test_point_enabled': getattr(subject_config, 'test_point_enabled', 0),
-                        'test_point_titles': getattr(subject_config, 'test_point_titles', []),
+                        'test_point_titles': test_point_titles,
                         'rubric_enabled': getattr(subject_config, 'rubric_enabled', 0),
                         'criteria_id': getattr(subject_config, 'criteria_id', ''),
                         'scale_id': getattr(subject_config, 'scale_id', ''),
@@ -218,8 +167,7 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         'comment_title_id': getattr(subject_config, 'comment_title_id', '')
                     }
         return {}
-    except Exception as e:
-        frappe.log_error(f"Error getting template config for {template_id}/{subject_id}: {str(e)}", "DEBUG_TEMPLATE_ERROR")
+    except Exception:
         return {}
 
 
@@ -273,7 +221,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         template_config = _get_template_config_for_subject(template_id, subject_id)
         
         # Temporary debug: add to response
-        standardized_subject["_debug_template_config"] = template_config
+        # Template config loaded for processing
         
         # === TEST SCORES - Load from template structure ===
         test_titles = []
@@ -307,17 +255,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             
             # Load criteria from template
             template_criteria = _load_evaluation_criteria_options(criteria_id)
-            standardized_subject["_debug_criteria_load"] = {
-                "criteria_id": criteria_id,
-                "template_criteria": template_criteria
-            }
-            
-            # Load and debug scale options
+            # Load scale options
             scale_options = _load_evaluation_scale_options(scale_id)
-            standardized_subject["_debug_scale_load"] = {
-                "scale_id": scale_id, 
-                "scale_options": scale_options
-            }
             if template_criteria:
                 # Map existing data to template criteria
                 existing_criteria = subject.get("criteria", {})
@@ -361,11 +300,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             comment_title_id = template_config.get('comment_title_id', '')
             template_comments = _load_comment_title_options(comment_title_id)
             
-            # Debug comments load
-            standardized_subject["_debug_comments_load"] = {
-                "comment_title_id": comment_title_id,
-                "template_comments": template_comments
-            }
+            # Load comments from template
             
             if template_comments:
                 # Map existing data to template comments
@@ -1172,7 +1107,7 @@ def get_report_data(report_id: Optional[str] = None):
     except frappe.PermissionError:
         return forbidden_response("Access denied")
     except Exception as e:
-        frappe.log_error(f"Error get_report_data: {str(e)}")
+        # Error in get_report_data - return fallback error response
         return error_response(f"Error getting report data: {str(e)}")
 
 
