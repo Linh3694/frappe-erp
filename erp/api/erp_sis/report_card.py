@@ -801,10 +801,8 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                 order_by="title asc",
             )
 
-        # 2) Teaching classes through subject assignments → timetable/subject mapping may be complex.
-        # Use a conservative approach: join Subject Assignment to find subjects the teacher teaches,
-        # then find classes that include those subjects in timetable_subject (if available),
-        # otherwise fallback to all classes in campus/school_year.
+        # 2) Teaching classes through subject assignments
+        # Use direct join from Subject Assignment to Class since assignment has class_id
         teaching_classes = []
         if teacher_id:
             try:
@@ -812,9 +810,7 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                     """
                     SELECT DISTINCT c.name, c.title, c.short_title, c.education_grade, c.school_year_id
                     FROM `tabSIS Subject Assignment` sa
-                    INNER JOIN `tabSIS Subject` s ON sa.subject_id = s.name
-                    INNER JOIN `tabSIS Timetable Subject` ts ON ts.subject_id = s.name
-                    INNER JOIN `tabSIS Class` c ON c.name = ts.class_id
+                    INNER JOIN `tabSIS Class` c ON c.name = sa.class_id
                     WHERE sa.teacher_id = %s AND sa.campus_id = %s
                     {school_year_filter}
                     ORDER BY c.title asc
@@ -825,7 +821,7 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                     as_dict=True,
                 )
             except Exception:
-                # Fallback: no timetable_subject table or mapping → none
+                # Fallback in case of any issues
                 teaching_classes = []
 
         # Merge & uniq by class name
