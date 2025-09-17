@@ -316,9 +316,9 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
             debug_test_points["error"] = str(e)
         
         # Store debug info for response
-        if not hasattr(template_doc, '_debug_test_points'):
-            template_doc._debug_test_points = []
-        template_doc._debug_test_points.append(debug_test_points)
+        if not hasattr(doc, '_debug_test_points'):
+            doc._debug_test_points = []
+        doc._debug_test_points.append(debug_test_points)
 
         # Save scoreboard JSON if provided
         try:
