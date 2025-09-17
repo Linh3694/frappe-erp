@@ -1193,6 +1193,24 @@ def _sync_timetable_from_date(data: dict, from_date):
                 }
             )
             
+            # Also try to find by title matching if direct mapping fails
+            if not subject_ids and actual_subject_id:
+                try:
+                    actual_subject = frappe.get_doc("SIS Actual Subject", actual_subject_id)
+                    subject_ids = frappe.get_all(
+                        "SIS Subject",
+                        fields=["name"],
+                        filters={
+                            "title": actual_subject.title_vn,
+                            "campus_id": campus_id
+                        }
+                    )
+                    # Update found subjects to have proper actual_subject_id link
+                    for subj in subject_ids:
+                        frappe.db.set_value("SIS Subject", subj.name, "actual_subject_id", actual_subject_id)
+                except Exception:
+                    pass
+            
             if not subject_ids:
                 continue
                 

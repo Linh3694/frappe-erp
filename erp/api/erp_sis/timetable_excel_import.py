@@ -244,7 +244,7 @@ class TimetableExcelImporter:
                         self.warnings.append(f"Đã liên kết SIS Subject '{timetable_subject.title_vn}' với Timetable Subject")
                         return existing_subject
                     else:
-                        # Tạo SIS Subject mới
+                        # Tạo SIS Subject mới (không tự động tạo Actual Subject)
                         subject_doc = frappe.get_doc({
                             "doctype": "SIS Subject",
                             "title": timetable_subject.title_vn,
