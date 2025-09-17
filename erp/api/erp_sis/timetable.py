@@ -1910,6 +1910,9 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
             # Table might already exist, which is fine
             pass
 
+        frappe.log_error(f"🎯 DEBUG create_override: Creating override for date={date}, column={timetable_column_id}, target={target_type}:{target_id}")
+        frappe.log_error(f"🎯 DEBUG create_override: Data = subject_id={subject_id}, teacher_1_id={teacher_1_id}, teacher_2_id={teacher_2_id}")
+        
         # Check if override already exists in custom table
         existing_override = frappe.db.sql("""
             SELECT name FROM `tabTimetable_Date_Override`
