@@ -1196,10 +1196,10 @@ def _sync_timetable_from_date(data: dict, from_date):
     
     sync_debug["sync_from_date"] = str(sync_from_date)
     
-    # Find timetable instances từ ngày sync trở đi
+    # Find timetable instances có chứa ngày sync trở đi (instance đang active hoặc trong tương lai)
     instance_filters = {
         "campus_id": campus_id,
-        "start_date": [">=", sync_from_date]
+        "end_date": [">=", sync_from_date]  # Tìm instances mà end_date >= sync_date
     }
     
     if class_id:
