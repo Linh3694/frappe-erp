@@ -316,9 +316,9 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
             debug_test_points["error"] = str(e)
         
         # Store debug info for response
-        if not hasattr(doc, '_debug_test_points'):
-            doc._debug_test_points = []
-        doc._debug_test_points.append(debug_test_points)
+        if not hasattr(parent_doc, '_debug_test_points'):
+            parent_doc._debug_test_points = []
+        parent_doc._debug_test_points.append(debug_test_points)
 
         # Save scoreboard JSON if provided
         try:
@@ -498,10 +498,14 @@ def create_template():
 
         created = frappe.get_doc("SIS Report Card Template", doc.name)
         
+        # Copy debug info from original doc to created doc
+        if hasattr(doc, '_debug_test_points'):
+            created._debug_test_points = doc._debug_test_points
+        
         # Add debug info to response  
         response_data = _doc_to_template_dict(created)
-        if hasattr(doc, '_debug_test_points'):
-            response_data["_debug_test_points"] = doc._debug_test_points
+        if hasattr(created, '_debug_test_points'):
+            response_data["_debug_test_points"] = created._debug_test_points
         
         return single_item_response(response_data, "Template created successfully")
     except frappe.LinkValidationError as e:
