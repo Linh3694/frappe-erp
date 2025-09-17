@@ -773,6 +773,18 @@ def process_excel_import_with_metadata_v2(import_data: dict):
             df = importer.normalize_columns(df)
             # Initialize logs collector
             logs = []
+            
+            # Auto-calculate end_date from school_year_id if not provided
+            if not import_data.get("end_date") and import_data.get("school_year_id"):
+                try:
+                    school_year = frappe.get_doc("SIS School Year", import_data.get("school_year_id"))
+                    if school_year.campus_id == campus_id:
+                        import_data["end_date"] = school_year.end_date
+                        logs.append(f"Auto-calculated end_date from school year: {school_year.end_date}")
+                    else:
+                        logs.append(f"Warning: School year campus mismatch - using original end_date")
+                except Exception as e:
+                    logs.append(f"Warning: Could not auto-calculate end_date: {str(e)}")
 
             # Validate Excel structure
             try:
@@ -858,7 +870,41 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
             # If not dry run, create the actual records (only if validation passed)
             if not dry_run and ok:
-                # Create SIS Timetable record
+                # Delete existing timetables that overlap with upload date range (from start_date onwards)
+                try:
+                    upload_start_date = import_data.get("start_date")
+                    
+                    # Find existing timetables that overlap with the new timetable period
+                    existing_timetables = frappe.get_all(
+                        "SIS Timetable",
+                        fields=["name", "start_date", "end_date", "title_vn"],
+                        filters={
+                            "campus_id": campus_id,
+                            "school_year_id": import_data.get("school_year_id"),
+                            "education_stage_id": import_data.get("education_stage_id"),
+                            "start_date": [">=", upload_start_date]  # Only delete timetables from upload date onwards
+                        }
+                    )
+                    
+                    deleted_count = 0
+                    for existing in existing_timetables:
+                        try:
+                            frappe.delete_doc("SIS Timetable", existing.name)
+                            logs.append(f"Deleted existing timetable: {existing.name} ({existing.title_vn}) - Start: {existing.start_date}")
+                            deleted_count += 1
+                        except Exception as single_delete_error:
+                            logs.append(f"Warning: Could not delete timetable {existing.name}: {str(single_delete_error)}")
+                            
+                    if deleted_count > 0:
+                        logs.append(f"Total deleted timetables: {deleted_count}")
+                        frappe.db.commit()
+                    else:
+                        logs.append(f"No existing timetables found to delete from {upload_start_date} onwards")
+                    
+                except Exception as delete_error:
+                    logs.append(f"Warning: Could not delete existing timetables: {str(delete_error)}")
+                    
+                # Create new SIS Timetable record
                 timetable_doc = frappe.get_doc({
                     "doctype": "SIS Timetable",
                     "title_vn": title_vn,
