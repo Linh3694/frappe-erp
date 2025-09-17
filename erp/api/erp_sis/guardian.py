@@ -95,17 +95,10 @@ def get_all_guardians(page=1, limit=20):
         page = int(page)
         limit = int(limit)
         
-        frappe.logger().info(f"get_all_guardians called with page: {page}, limit: {limit}")
-        
-        # Calculate offset for pagination
-        offset = (page - 1) * limit
-        
         # Temporarily disable campus filtering for guardians 
         filters = {}
         
-        frappe.logger().info(f"Query filters: {filters}")
-        frappe.logger().info(f"Query pagination: offset={offset}, limit={limit}")
-        
+        # Fetch all guardians (không chia trang ở backend nữa)
         guardians = frappe.get_all(
             "CRM Guardian",
             fields=[
@@ -119,9 +112,8 @@ def get_all_guardians(page=1, limit=20):
                 "modified"
             ],
             filters=filters,
-            order_by="guardian_name asc",
-            limit_start=offset,
-            limit_page_length=limit
+            order_by="guardian_name asc"
+            # Bỏ limit_start và limit_page_length để fetch all
         )
         # Normalize nullable fields for FE
         for g in guardians:
@@ -153,18 +145,15 @@ def get_all_guardians(page=1, limit=20):
         
         frappe.logger().info(f"Found {len(guardians)} guardians")
         
-        # Get total count
-        total_count = frappe.db.count("CRM Guardian", filters=filters)
-        total_pages = (total_count + limit - 1) // limit
+        # Get total count (chỉ để log, không dùng cho pagination)
+        total_count = len(guardians)
         
-        frappe.logger().info(f"Total count: {total_count}, Total pages: {total_pages}")
+        frappe.logger().info(f"Total guardians fetched: {total_count}")
         
-        return paginated_response(
+        # Return all data without pagination
+        return success_response(
             data=guardians,
-            current_page=page,
-            total_count=total_count,
-            per_page=limit,
-            message="Guardians fetched successfully"
+            message=f"Successfully fetched {total_count} guardians"
         )
         
     except Exception as e:
