@@ -294,11 +294,20 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
 
         # Apply nested test_point_titles for the just-appended child row
         try:
+            print(f"DEBUG create_template subject {subject_id}:")
+            print(f"  test_point_titles received: {sub.get('test_point_titles')}")
+            print(f"  test_point_titles type: {type(sub.get('test_point_titles'))}")
+            
             row.test_point_titles = []
             for t in sub.get("test_point_titles") or []:
                 if (t.get("title") or "").strip():
+                    print(f"    adding title: '{t.get('title').strip()}'")
                     row.append("test_point_titles", {"title": t.get("title").strip()})
-        except Exception:
+                else:
+                    print(f"    skipping empty title: {t}")
+            print(f"  final row.test_point_titles count: {len(row.test_point_titles)}")
+        except Exception as e:
+            print(f"  ERROR saving test_point_titles: {e}")
             pass
 
         # Save scoreboard JSON if provided
