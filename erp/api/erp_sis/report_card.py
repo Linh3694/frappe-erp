@@ -312,38 +312,42 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
                         "title": title
                     }
                     row.append("test_point_titles", simple_child)
-                    debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_simple_append"})
+                    debug_test_points["processed"].append({
+                        "index": i, 
+                        "title": title, 
+                        "action": "added_via_simple_append_NEW_CODE_V2",
+                        "child_dict_keys": list(simple_child.keys())
+                    })
                 else:
                     debug_test_points["processed"].append({"index": i, "title": t.get("title", ""), "action": "skipped_empty"})
             
             debug_test_points["child_table_type"] = str(type(row.test_point_titles))
             debug_test_points["child_items_details"] = []
+            debug_test_points["post_append_inspection"] = "NEW_CODE_V2_MARKER"
             
-            # Handle both list and single object cases
+            # Inspect what's actually in the child table after append
             try:
-                if hasattr(row.test_point_titles, '__iter__') and not isinstance(row.test_point_titles, str):
-                    # It's iterable (list/tuple)
-                    debug_test_points["saved_count"] = len(row.test_point_titles)
+                debug_test_points["saved_count"] = len(row.test_point_titles) if row.test_point_titles else 0
+                
+                if row.test_point_titles:
                     for i, child in enumerate(row.test_point_titles):
-                        debug_test_points["child_items_details"].append({
+                        child_detail = {
                             "index": i,
                             "type": str(type(child)),
-                            "title": getattr(child, 'title', 'NO_TITLE_ATTR'),
-                            "has_as_dict": hasattr(child, 'as_dict'),
+                            "is_dict": isinstance(child, dict),
                             "str_repr": str(child)
-                        })
-                else:
-                    # It's a single object
-                    debug_test_points["saved_count"] = 1 if row.test_point_titles else 0
-                    if row.test_point_titles:
-                        debug_test_points["child_items_details"].append({
-                            "index": 0,
-                            "type": str(type(row.test_point_titles)),
-                            "title": getattr(row.test_point_titles, 'title', 'NO_TITLE_ATTR'),
-                            "has_as_dict": hasattr(row.test_point_titles, 'as_dict'),
-                            "str_repr": str(row.test_point_titles),
-                            "is_single_object": True
-                        })
+                        }
+                        
+                        # Different ways to access title
+                        if isinstance(child, dict):
+                            child_detail["title_via_dict"] = child.get('title', 'NO_TITLE_IN_DICT')
+                            child_detail["dict_keys"] = list(child.keys())
+                        elif hasattr(child, 'title'):
+                            child_detail["title_via_attr"] = child.title
+                        else:
+                            child_detail["title_access"] = "NO_ACCESS"
+                            
+                        debug_test_points["child_items_details"].append(child_detail)
             except Exception as iter_error:
                 debug_test_points["iteration_error"] = str(iter_error)
         except Exception as e:
