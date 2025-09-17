@@ -545,9 +545,6 @@ def get_teacher_week():
         week_end = frappe.local.form_dict.get("week_end") or frappe.request.args.get("week_end")
         education_stage = frappe.local.form_dict.get("education_stage") or frappe.request.args.get("education_stage")
 
-        # Debug logging
-        frappe.log_error(f"get_teacher_week DEBUG: teacher_id={teacher_id}, week_start={week_start}, week_end={week_end}, education_stage={education_stage}")
-
         if not teacher_id:
             return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
         if not week_start:
@@ -592,9 +589,6 @@ def get_teacher_week():
         # Fallback to original id if nothing resolved
         if not resolved_teacher_ids:
             resolved_teacher_ids.add(teacher_id)
-            
-        # Debug logging
-        frappe.log_error(f"get_teacher_week DEBUG: resolved_teacher_ids={list(resolved_teacher_ids)}")
         
         # Query timetable rows
         campus_id = get_current_campus_from_context()
@@ -696,19 +690,12 @@ def get_teacher_week():
         except Exception as query_error:
             pass
             return error_response(f"Query failed: {str(query_error)}")
-        # Debug logging before teacher filter
-        frappe.log_error(f"get_teacher_week DEBUG: total rows before teacher filter={len(rows)}")
-        if rows:
-            frappe.log_error(f"get_teacher_week DEBUG: sample row={rows[0]}")
         
         # Filter in-memory for teacher (to avoid OR filter limitation in simple get_all)
         rows = [
             r for r in rows
             if (r.get("teacher_1_id") in resolved_teacher_ids) or (r.get("teacher_2_id") in resolved_teacher_ids)
         ]
-        
-        # Debug logging after teacher filter
-        frappe.log_error(f"get_teacher_week DEBUG: rows after teacher filter={len(rows)}")
 
         # Attach class_id via parent instance if available
         # Also filter instances by date range to ensure only active instances are included
@@ -809,7 +796,6 @@ def get_teacher_week():
             pass
 
         entries = _build_entries(rows, ws)
-        frappe.log_error(f"get_teacher_week DEBUG: final entries count={len(entries)}")
         return list_response(entries, "Teacher week fetched successfully")
     except Exception as e:
 
@@ -995,9 +981,6 @@ def get_class_week():
             pass
 
         entries = _build_entries(rows, ws)
-        frappe.log_error(f"get_class_week DEBUG: final entries count={len(entries)}")
-        if entries:
-            frappe.log_error(f"get_class_week DEBUG: sample entry={entries[0]}")
         return list_response(entries, "Class week fetched successfully")
     except Exception as e:
 
