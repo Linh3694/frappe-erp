@@ -928,10 +928,7 @@ def get_teacher_week():
 
         entries = _build_entries(rows, ws)
         
-        # Apply date-specific overrides for teacher
-        entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, we)
-        
-        return list_response(entries_with_overrides, "Teacher week fetched successfully")
+        return list_response(entries, "Teacher week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching teacher week: {str(e)}")
@@ -1117,15 +1114,10 @@ def get_class_week():
 
         entries = _build_entries(rows, ws)
         
-        frappe.log_error(f"🎯 DEBUG get_class_week: Built {len(entries)} entries, now applying overrides for Class {class_id}")
-        frappe.log_error(f"🎯 DEBUG get_class_week: Date range {ws} to {we}")
+        # TEMPORARILY DISABLE override logic to restore original timetable
+        # entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
         
-        # Apply date-specific overrides 
-        entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
-        
-        frappe.log_error(f"🎯 DEBUG get_class_week: After override, returning {len(entries_with_overrides)} entries")
-        
-        return list_response(entries_with_overrides, "Class week fetched successfully")
+        return list_response(entries, "Class week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching class week: {str(e)}")
@@ -1910,9 +1902,6 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
             # Table might already exist, which is fine
             pass
 
-        frappe.log_error(f"🎯 DEBUG create_override: Creating override for date={date}, column={timetable_column_id}, target={target_type}:{target_id}")
-        frappe.log_error(f"🎯 DEBUG create_override: Data = subject_id={subject_id}, teacher_1_id={teacher_1_id}, teacher_2_id={teacher_2_id}")
-        
         # Check if override already exists in custom table
         existing_override = frappe.db.sql("""
             SELECT name FROM `tabTimetable_Date_Override`
