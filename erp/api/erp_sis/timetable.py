@@ -531,8 +531,6 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             if date not in override_map:
                 override_map[date] = {}
                 
-            frappe.log_error(f"🎯 DEBUG: Override date={date}, column={column_id}")
-            
             # Enrich override with display data
             subject_title = ""
             if override.get("subject_id"):
@@ -564,25 +562,16 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             
         # Apply overrides to entries
         enhanced_entries = []
-        override_applied_count = 0
-        
-        frappe.log_error(f"🎯 DEBUG: Processing {len(entries)} entries")
-        frappe.log_error(f"🎯 DEBUG: Override map = {override_map}")
         
         for entry in entries:
             entry_date = entry.get("date")
             entry_column = entry.get("timetable_column_id")
-            
-            frappe.log_error(f"🎯 DEBUG: Checking entry date={entry_date}, column={entry_column}")
             
             # Check if there's an override for this date/column combination
             if (entry_date in override_map and 
                 entry_column in override_map[entry_date]):
                 
                 override_data = override_map[entry_date][entry_column]
-                override_applied_count += 1
-                
-                frappe.log_error(f"🎯 DEBUG: Applying override {override_applied_count}: {override_data}")
                 
                 if override_data["override_type"] == "replace":
                     # Replace entry with override data
@@ -614,7 +603,6 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                 # No override, keep original entry
                 enhanced_entries.append(entry)
         
-        frappe.log_error(f"🎯 DEBUG: Applied {override_applied_count} overrides, returning {len(enhanced_entries)} entries")        
         return enhanced_entries
         
     except Exception as e:
