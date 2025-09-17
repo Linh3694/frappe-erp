@@ -53,15 +53,12 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
     # Transform subject_eval to subjects array
     if "subject_eval" in data and isinstance(data["subject_eval"], dict):
         subject_eval = data["subject_eval"]
-        frappe.logger().info(f"Found subject_eval: {json.dumps(subject_eval, indent=2, default=str)[:500]}...")
-        frappe.logger().info(f"subject_eval keys: {list(subject_eval.keys())}")
         
         # Create subjects array from subject_eval
         subjects = []
         
         # Method 1: If subject_eval has subject_id key
         subject_id = subject_eval.get("subject_id")
-        frappe.logger().info(f"Method 1: subject_id = {subject_id}")
         if subject_id and subject_id in subject_eval:
             subject_data = subject_eval[subject_id]
             if isinstance(subject_data, dict):
@@ -76,7 +73,6 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Method 2: If subject_eval itself is the subject data
         elif subject_eval.get("title_vn") or subject_eval.get("rubric") or subject_eval.get("comments"):
-            frappe.logger().info("Method 2: subject_eval is the subject data itself")
             subjects.append({
                 "subject_id": subject_id or "unknown",
                 "title_vn": subject_eval.get("title_vn", subject_id or ""),
@@ -88,18 +84,13 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Method 3: Look for object keys that might be subject IDs
         else:
-            frappe.logger().info("Method 3: Looking for subject IDs as keys")
             for key, value in subject_eval.items():
-                frappe.logger().info(f"Checking key {key}, value type: {type(value)}")
                 if key != "subject_id" and isinstance(value, dict):
-                    frappe.logger().info(f"Key {key} has dict value: {json.dumps(value, default=str)[:200]}")
                     has_title = value.get("title_vn") is not None
                     has_rubric = value.get("rubric") is not None
                     has_comments = value.get("comments") is not None
-                    frappe.logger().info(f"Key {key}: has_title={has_title}, has_rubric={has_rubric}, has_comments={has_comments}")
                     
                     if has_title or has_rubric or has_comments:
-                        frappe.logger().info(f"Adding subject {key} to subjects array")
                         subject_obj = {
                             "subject_id": key,
                             "title_vn": value.get("title_vn", key),
@@ -109,20 +100,13 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
                             **value
                         }
                         subjects.append(subject_obj)
-                        frappe.logger().info(f"Added subject: {json.dumps(subject_obj, default=str)[:300]}")
                     else:
-                        frappe.logger().info(f"Key {key} did not meet criteria - skipping")
         
-        frappe.logger().info(f"Total subjects found: {len(subjects)}")
         
         # If we found subjects, add to transformed data
         if subjects:
             transformed["subjects"] = subjects
-            frappe.logger().info(f"✅ Created subjects array with {len(subjects)} subjects")
-            frappe.logger().info(f"First subject: {json.dumps(subjects[0], indent=2, default=str)[:500]}...")
         else:
-            frappe.logger().warning("❌ Could not create subjects array from subject_eval")
-            frappe.logger().warning(f"subject_eval structure was: {json.dumps(subject_eval, default=str)[:300]}")
     
     return transformed
 
@@ -132,7 +116,6 @@ def _build_prim_vn_html(form, report_data: Dict[str, Any]) -> str:
     Simplified PRIM_VN HTML builder for testing
     """
     try:
-        frappe.logger().info("Building simplified PRIM_VN HTML")
         
         # Basic data extraction with safety checks
         student = report_data.get("student", {}) if isinstance(report_data, dict) else {}
@@ -167,7 +150,6 @@ def _build_prim_vn_html(form, report_data: Dict[str, Any]) -> str:
         </div>
         """
         
-        frappe.logger().info("PRIM_VN HTML built successfully with simplified version")
         return html_content
         
     except Exception as e:
@@ -468,17 +450,13 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
         try:
             layout = json.loads(p.layout_json or "{}") if isinstance(p.layout_json, (str, bytes)) else (p.layout_json or {})
             # Debug logging
-            frappe.logger().info(f"Page {idx} layout parsed: {layout}")
-            frappe.logger().info(f"Elements count: {len(layout.get('elements', []))}")
         except Exception as e:
             frappe.logger().error(f"Error parsing layout_json: {e}")
-            frappe.logger().info(f"Raw layout_json: {p.layout_json}")
             layout = {}
 
         overlay_items: List[str] = []
         for el in (layout.get("elements") or []):
             etype = el.get("type")
-            frappe.logger().info(f"Processing element: type={etype}, data={el}")
             if etype == "text":
                 x = el.get("x", 0)
                 y = el.get("y", 0)
@@ -492,11 +470,9 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
                 binding_path = el.get("binding")
                 if binding_path:
                     bound = _resolve_path(report_data, binding_path)
-                    frappe.logger().info(f"Binding {binding_path} resolved to: {bound}")
                     if bound is not None and not isinstance(bound, (dict, list)):
                         content_val = bound
                 else:
-                    frappe.logger().info(f"No binding for element, using text: {content_val}")
                 classes = ["text"]
                 try:
                     if fw and int(fw) >= 600:
@@ -582,7 +558,6 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
             # else: unsupported type -> ignore
         # If form has no positioned elements, provide sensible defaults for page 1
         if not overlay_items and idx == 0:
-            frappe.logger().warning(f"No overlay items found for page {idx}, using fallback defaults")
             student = report_data.get("student", {}) if isinstance(report_data, dict) else {}
             klass = report_data.get("class", {}) if isinstance(report_data, dict) else {}
             subject_eval = report_data.get("subject_eval", {}) if isinstance(report_data, dict) else {}
@@ -653,23 +628,17 @@ def get_report_html(report_id: Optional[str] = None):
             })
         except Exception:
             pass
-        frappe.logger().info(f"Report data structure: {json.dumps(data, indent=2, default=str)[:1000]}...")
-        
         # Transform data to match frontend layout binding expectations
         transformed_data = _transform_data_for_bindings(data)
-        frappe.logger().info(f"Transformed data structure: {json.dumps(transformed_data, indent=2, default=str)[:1000]}...")
         
         # Special handling for PRIM_VN - use dedicated renderer instead of layout_json
         if form.code == 'PRIM_VN':
-            frappe.logger().info("Using dedicated PRIM_VN renderer")
             try:
                 html = _build_prim_vn_html(form, transformed_data)
-                frappe.logger().info("PRIM_VN HTML built successfully")
             except Exception as prim_error:
                 frappe.logger().error(f"Error in PRIM_VN renderer: {str(prim_error)}")
                 frappe.log_error(f"PRIM_VN renderer error: {str(prim_error)}")
                 # Fallback to regular renderer
-                frappe.logger().info("Falling back to regular HTML renderer")
                 html = _build_html(form, transformed_data)
         else:
             html = _build_html(form, transformed_data)
@@ -729,9 +698,20 @@ def get_report_data(report_id: Optional[str] = None):
         if not report_id:
             return validation_error_response(message="report_id is required")
         
-        report = _load_report(report_id)
-        form = _load_form(report.form_id)
-        data = json.loads(report.data_json or "{}")
+        try:
+            report = _load_report(report_id)
+        except Exception as e:
+            return error_response(f"Failed to load report: {str(e)}")
+            
+        try:
+            form = _load_form(report.form_id)
+        except Exception as e:
+            return error_response(f"Failed to load form: {str(e)}")
+            
+        try:
+            data = json.loads(report.data_json or "{}")
+        except Exception as e:
+            return error_response(f"Failed to parse report data JSON: {str(e)}")
         
         # Enrich data with student & class info for bindings
         try:
@@ -755,11 +735,11 @@ def get_report_data(report_id: Optional[str] = None):
         except Exception:
             pass
         
-        frappe.logger().info(f"Report data structure: {json.dumps(data, indent=2, default=str)[:1000]}...")
-        
         # Transform data to match frontend layout binding expectations
-        transformed_data = _transform_data_for_bindings(data)
-        frappe.logger().info(f"Transformed data structure: {json.dumps(transformed_data, indent=2, default=str)[:1000]}...")
+        try:
+            transformed_data = _transform_data_for_bindings(data)
+        except Exception as e:
+            return error_response(f"Failed to transform data for frontend: {str(e)}")
 
         # Create report object with title from report card document
         report_obj = transformed_data.get("report", {})
@@ -781,7 +761,6 @@ def get_report_data(report_id: Optional[str] = None):
             "homeroom": transformed_data.get("homeroom", []),
         }
         
-        frappe.logger().info("Returning structured data for frontend rendering")
         return single_item_response(response_data, "Report data retrieved for frontend rendering")
         
     except frappe.DoesNotExistError:
@@ -790,9 +769,6 @@ def get_report_data(report_id: Optional[str] = None):
         return forbidden_response("Access denied")
     except Exception as e:
         frappe.log_error(f"Error get_report_data: {str(e)}")
-        frappe.logger().error(f"Full error details: {str(e)}")
-        import traceback
-        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
         return error_response(f"Error getting report data: {str(e)}")
 
 
