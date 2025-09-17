@@ -309,17 +309,39 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
                     title = t.get("title").strip()
                     # Try different approaches to append child table
                     try:
-                        row.append("test_point_titles", {"title": title})
-                        debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_append"})
+                        # Method 1: Standard append with parentfield
+                        child_data = {
+                            "title": title,
+                            "doctype": "SIS Report Card Test Point Title",
+                            "parentfield": "test_point_titles"
+                        }
+                        row.append("test_point_titles", child_data)
+                        debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_append_with_parentfield"})
                     except Exception as append_error:
-                        # Try direct assignment
+                        # Method 2: Create child doc with proper parent linking
                         try:
                             child_doc = frappe.new_doc("SIS Report Card Test Point Title")
                             child_doc.title = title
+                            child_doc.parentfield = "test_point_titles"
+                            child_doc.parenttype = "SIS Report Card Subject Config"
+                            # Don't set parent yet as row doesn't have name
                             row.test_point_titles.append(child_doc)
-                            debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_direct", "append_error": str(append_error)})
+                            debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_direct_with_parent_fields", "append_error": str(append_error)})
                         except Exception as direct_error:
-                            debug_test_points["processed"].append({"index": i, "title": title, "action": "failed_both", "append_error": str(append_error), "direct_error": str(direct_error)})
+                            # Method 3: Simple dict with all required fields
+                            try:
+                                simple_child = {
+                                    "doctype": "SIS Report Card Test Point Title", 
+                                    "title": title,
+                                    "parentfield": "test_point_titles",
+                                    "parenttype": "SIS Report Card Subject Config"
+                                }
+                                if not hasattr(row, 'test_point_titles') or row.test_point_titles is None:
+                                    row.test_point_titles = []
+                                row.test_point_titles.append(simple_child)
+                                debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_simple_dict", "append_error": str(append_error), "direct_error": str(direct_error)})
+                            except Exception as simple_error:
+                                debug_test_points["processed"].append({"index": i, "title": title, "action": "failed_all_methods", "append_error": str(append_error), "direct_error": str(direct_error), "simple_error": str(simple_error)})
                 else:
                     debug_test_points["processed"].append({"index": i, "title": t.get("title", ""), "action": "skipped_empty"})
             
@@ -534,6 +556,32 @@ def create_template():
         _apply_homeroom_titles(doc, data.get("homeroom_titles") or [])
         _apply_subjects(doc, data.get("subjects") or [])
 
+        # DEBUG: Inspect document structure before insert
+        pre_insert_debug = []
+        try:
+            for subject_row in doc.subjects:
+                subject_debug = {
+                    "subject_id": getattr(subject_row, 'subject_id', 'NO_SUBJECT_ID'),
+                    "test_point_enabled": getattr(subject_row, 'test_point_enabled', 'NO_FIELD'),
+                    "test_point_titles_type": str(type(getattr(subject_row, 'test_point_titles', None))),
+                    "test_point_titles_count": len(getattr(subject_row, 'test_point_titles', [])) if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles else 0,
+                    "test_point_titles_sample": []
+                }
+                
+                if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
+                    for i, child in enumerate(subject_row.test_point_titles[:2]):  # First 2 items only
+                        child_info = {
+                            "index": i,
+                            "type": str(type(child)),
+                            "title": getattr(child, 'title', 'NO_TITLE') if hasattr(child, 'title') else child.get('title', 'NO_TITLE_KEY') if isinstance(child, dict) else 'NOT_ACCESSIBLE',
+                            "parentfield": getattr(child, 'parentfield', 'NO_PARENTFIELD') if hasattr(child, 'parentfield') else child.get('parentfield', 'NO_PARENTFIELD_KEY') if isinstance(child, dict) else 'NOT_ACCESSIBLE'
+                        }
+                        subject_debug["test_point_titles_sample"].append(child_info)
+                
+                pre_insert_debug.append(subject_debug)
+        except Exception as e:
+            pre_insert_debug = {"error": str(e)}
+
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
 
@@ -573,6 +621,7 @@ def create_template():
         if hasattr(created, '_debug_test_points'):
             response_data["_debug_test_points"] = created._debug_test_points
         response_data["_debug_db_check"] = db_check_debug
+        response_data["_debug_pre_insert"] = pre_insert_debug
         
         return single_item_response(response_data, "Template created successfully")
     except frappe.LinkValidationError as e:
