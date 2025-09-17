@@ -881,12 +881,36 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
         if getattr(c, "education_grade", None):
             filters["education_grade"] = c.education_grade
 
+        # Debug logging
+        frappe.logger().info(f"Class {class_id} details: campus_id={c.campus_id}, school_year_id={c.school_year_id}, education_grade={c.education_grade}")
+        frappe.logger().info(f"Template filters being used: {filters}")
+
+        # First try with exact filters
         rows = frappe.get_all(
             "SIS Report Card Template",
             fields=["name", "title", "is_published", "education_grade", "curriculum", "school_year", "semester_part"],
             filters=filters,
             order_by="title asc",
         )
+        
+        # If no results with strict filtering, try relaxed filtering (only campus and published)
+        if not rows:
+            relaxed_filters = {"campus_id": campus_id, "is_published": 1}
+            frappe.logger().info(f"No templates found with strict filters, trying relaxed: {relaxed_filters}")
+            
+            all_templates = frappe.get_all(
+                "SIS Report Card Template",
+                fields=["name", "title", "is_published", "education_grade", "curriculum", "school_year", "semester_part"],
+                filters=relaxed_filters,
+                order_by="title asc",
+            )
+            
+            frappe.logger().info(f"Found {len(all_templates)} published templates in campus")
+            for template in all_templates:
+                frappe.logger().info(f"Template: {template['title']}, school_year={template.get('school_year')}, education_grade={template.get('education_grade')}")
+            
+            # Return all published templates for now to help debug
+            rows = all_templates
         return success_response(data=rows, message="Class report templates fetched successfully")
     except Exception as e:
         frappe.log_error(f"Error fetching class report templates: {str(e)}")
