@@ -796,6 +796,16 @@ def validate_vietnamese_phone_number(phone):
     if phone_str.lower() in ['nan', 'none', 'null']:
         return None
     
+    # Handle float values from Excel (e.g., 987654321.0 -> 987654321)
+    if '.' in phone_str and phone_str.replace('.', '').replace('-', '').isdigit():
+        try:
+            # Try to convert to float then int to remove decimal part
+            phone_float = float(phone_str)
+            if phone_float.is_integer():
+                phone_str = str(int(phone_float))
+        except ValueError:
+            pass  # Keep original string if conversion fails
+    
     # Remove only spaces, dashes, and dots, but keep parentheses for (+84) detection
     clean_phone = phone_str.replace(' ', '').replace('-', '').replace('.', '')
     
