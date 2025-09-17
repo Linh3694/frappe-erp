@@ -263,6 +263,7 @@ def create_subject_assignment():
             return not_found_response("Selected teacher does not exist or access denied")
         
         created_names = []
+        assignments_with_sync = []
         for item in normalized_assignments:
             cid = item.get("class_id")
             sids = item.get("actual_subject_ids") or []
@@ -305,9 +306,18 @@ def create_subject_assignment():
                         "class_id": cid,
                         "actual_subject_id": sid
                     }
-                    _sync_timetable_from_date(sync_data, assignment_doc.creation)
+                    sync_result = _sync_timetable_from_date(sync_data, assignment_doc.creation)
+                    # Store sync result for later inclusion in response
+                    assignments_with_sync.append({
+                        "assignment_id": assignment_doc.name,
+                        "sync_result": sync_result
+                    })
                 except Exception as sync_error:
                     frappe.log_error(f"Auto-sync timetable failed for new assignment {assignment_doc.name}: {str(sync_error)}")
+                    assignments_with_sync.append({
+                        "assignment_id": assignment_doc.name,
+                        "sync_error": str(sync_error)
+                    })
                     # Không fail chính, chỉ log error
 
         frappe.db.commit()
@@ -342,6 +352,8 @@ def create_subject_assignment():
         frappe.msgprint(_("Subject assignment created successfully"))
         if created_data and len(created_data) == 1:
             result = created_data[0]
+            # Find sync result for this assignment
+            sync_info = next((item for item in assignments_with_sync if item["assignment_id"] == result.name), {})
             return single_item_response({
                 "name": result.name,
                 "teacher_id": result.teacher_id,
@@ -350,10 +362,14 @@ def create_subject_assignment():
                 "campus_id": result.campus_id,
                 "teacher_name": result.teacher_name,
                 "subject_title": result.subject_title,
-                "class_title": result.class_title
-            }, "Subject assignment created successfully")
+                "class_title": result.class_title,
+                "timetable_sync": sync_info
+            }, f"Subject assignment created successfully. Timetable sync: {sync_info.get('sync_result', {}).get('summary', {}).get('rows_updated', 0)} rows updated")
         else:
-            return list_response(created_data, "Subject assignments created successfully")
+            return list_response({
+                "assignments": created_data,
+                "timetable_sync_results": assignments_with_sync
+            }, f"Subject assignments created successfully. {len(assignments_with_sync)} assignments processed for timetable sync")
         
     except Exception as e:
         frappe.log_error(f"Error creating subject assignment: {str(e)}")
@@ -561,7 +577,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                 
                 # Sync từ ngày modified của assignment
                 sync_result = _sync_timetable_from_date(sync_data, assignment_doc.modified)
-                debug_info['sync_result'] = sync_result.get('summary', {}) if sync_result else {}
+                debug_info['sync_result'] = sync_result  # Store full sync result
                 
             except Exception as sync_error:
                 frappe.log_error(f"Auto-sync timetable failed for updated assignment {assignment_id}: {str(sync_error)}")
@@ -595,6 +611,13 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
 
         if updated_data:
             result = updated_data[0]
+            sync_summary = ""
+            if 'sync_result' in debug_info:
+                sync_info = debug_info['sync_result']
+                if isinstance(sync_info, dict) and 'summary' in sync_info:
+                    rows_updated = sync_info['summary'].get('rows_updated', 0)
+                    sync_summary = f" Timetable sync: {rows_updated} rows updated"
+                
             assignment_data = {
                 "name": result.name,
                 "teacher_id": result.teacher_id,
@@ -604,18 +627,27 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                 "teacher_name": result.teacher_name,
                 "subject_title": result.subject_title,
                 "class_title": result.class_title,
+                "timetable_sync": debug_info.get('sync_result', {}),
                 "debug_info": debug_info if 'debug_info' in locals() else None
             }
-            return single_item_response(assignment_data, "Subject assignment updated successfully")
+            return single_item_response(assignment_data, f"Subject assignment updated successfully.{sync_summary}")
         else:
+            sync_summary = ""
+            if 'sync_result' in debug_info:
+                sync_info = debug_info['sync_result']
+                if isinstance(sync_info, dict) and 'summary' in sync_info:
+                    rows_updated = sync_info['summary'].get('rows_updated', 0)
+                    sync_summary = f" Timetable sync: {rows_updated} rows updated"
+            
             assignment_data = {
                 "name": assignment_doc.name,
                 "teacher_id": assignment_doc.teacher_id,
                 "actual_subject_id": assignment_doc.actual_subject_id,
                 "campus_id": assignment_doc.campus_id,
+                "timetable_sync": debug_info.get('sync_result', {}),
                 "debug_info": debug_info if 'debug_info' in locals() else None
             }
-            return single_item_response(assignment_data, "Subject assignment updated successfully")
+            return single_item_response(assignment_data, f"Subject assignment updated successfully.{sync_summary}")
         
     except Exception as e:
         frappe.log_error(f"Error updating subject assignment {assignment_id}: {str(e)}")
@@ -1143,6 +1175,17 @@ def _sync_timetable_from_date(data: dict, from_date):
     class_id = data.get("class_id")
     actual_subject_id = data.get("actual_subject_id")
     
+    sync_debug = {
+        "assignment_id": assignment_id,
+        "actual_subject_id": actual_subject_id,
+        "new_teacher_id": new_teacher_id,
+        "old_teacher_id": old_teacher_id,
+        "campus_id": campus_id,
+        "sync_from_date": None,
+        "found_subjects": [],
+        "processed_instances": []
+    }
+    
     # Convert from_date to string if it's datetime
     if hasattr(from_date, 'date'):
         sync_from_date = from_date.date()
@@ -1150,6 +1193,8 @@ def _sync_timetable_from_date(data: dict, from_date):
         sync_from_date = from_date.strftime('%Y-%m-%d')
     else:
         sync_from_date = str(from_date).split(' ')[0]  # Take date part if datetime string
+    
+    sync_debug["sync_from_date"] = str(sync_from_date)
     
     # Find timetable instances từ ngày sync trở đi
     instance_filters = {
@@ -1166,10 +1211,13 @@ def _sync_timetable_from_date(data: dict, from_date):
         filters=instance_filters
     )
     
+    sync_debug["found_instances"] = len(instances)
+    
     if not instances:
         return {
             "updated_rows": [],
             "skipped_rows": [],
+            "sync_debug": sync_debug,
             "summary": {
                 "instances_checked": 0,
                 "rows_updated": 0,
@@ -1182,6 +1230,16 @@ def _sync_timetable_from_date(data: dict, from_date):
     skipped_rows = []
     
     for instance in instances:
+        instance_debug = {
+            "instance_id": instance.name,
+            "class_id": instance.get("class_id"),
+            "found_subjects": 0,
+            "found_rows": 0,
+            "updated_rows": 0,
+            "skipped_rows": 0,
+            "method": "direct"
+        }
+        
         try:
             # Find SIS Subjects that link to this actual_subject_id
             subject_ids = frappe.get_all(
@@ -1193,10 +1251,15 @@ def _sync_timetable_from_date(data: dict, from_date):
                 }
             )
             
+            instance_debug["found_subjects"] = len(subject_ids)
+            
             # Also try to find by title matching if direct mapping fails
             if not subject_ids and actual_subject_id:
                 try:
                     actual_subject = frappe.get_doc("SIS Actual Subject", actual_subject_id)
+                    instance_debug["method"] = "title_match"
+                    instance_debug["title_vn"] = actual_subject.title_vn
+                    
                     subject_ids = frappe.get_all(
                         "SIS Subject",
                         fields=["name"],
@@ -1205,13 +1268,19 @@ def _sync_timetable_from_date(data: dict, from_date):
                             "campus_id": campus_id
                         }
                     )
+                    instance_debug["found_subjects"] = len(subject_ids)
+                    
                     # Update found subjects to have proper actual_subject_id link
                     for subj in subject_ids:
                         frappe.db.set_value("SIS Subject", subj.name, "actual_subject_id", actual_subject_id)
-                except Exception:
+                        
+                except Exception as e:
+                    instance_debug["title_match_error"] = str(e)
                     pass
             
             if not subject_ids:
+                instance_debug["skip_reason"] = "No SIS Subjects found"
+                sync_debug["processed_instances"].append(instance_debug)
                 continue
                 
             subject_id_list = [s.name for s in subject_ids]
@@ -1226,23 +1295,32 @@ def _sync_timetable_from_date(data: dict, from_date):
                 }
             )
             
+            instance_debug["found_rows"] = len(rows)
+            instance_debug["subject_ids"] = subject_id_list
+            
             for row in rows:
                 try:
                     # Determine if this row should be updated
                     should_update = False
+                    update_case = ""
                     
                     if old_teacher_id:
                         # UPDATE case: check if row has old teacher
                         should_update = (row.get("teacher_1_id") == old_teacher_id or row.get("teacher_2_id") == old_teacher_id)
+                        update_case = f"UPDATE - looking for old_teacher_id={old_teacher_id}"
                     else:
                         # CREATE case: update rows that don't have teacher assigned yet
                         should_update = not row.get("teacher_1_id") and not row.get("teacher_2_id")
+                        update_case = "CREATE - empty teacher fields"
                     
                     if not should_update:
+                        instance_debug["skipped_rows"] += 1
                         skipped_rows.append({
                             "row_id": row.name,
-                            "reason": "Teacher not matching or already assigned",
-                            "instance_id": instance.name
+                            "reason": f"{update_case} - not matching",
+                            "instance_id": instance.name,
+                            "teacher_1_id": row.get("teacher_1_id"),
+                            "teacher_2_id": row.get("teacher_2_id")
                         })
                         continue
                         
@@ -1265,23 +1343,32 @@ def _sync_timetable_from_date(data: dict, from_date):
                     
                     if updated_fields:
                         row_doc.save(ignore_permissions=True)
+                        instance_debug["updated_rows"] += 1
                         updated_rows.append({
                             "row_id": row.name,
                             "updated_fields": updated_fields,
                             "instance_id": instance.name,
                             "day_of_week": row.get("day_of_week"),
-                            "period": row.get("timetable_column_id")
+                            "period": row.get("timetable_column_id"),
+                            "subject_id": row.get("subject_id"),
+                            "new_teacher_id": new_teacher_id,
+                            "old_teacher_id": old_teacher_id
                         })
                         
                 except Exception as row_error:
+                    instance_debug["skipped_rows"] += 1
                     skipped_rows.append({
                         "row_id": row.name,
                         "reason": f"Update error: {str(row_error)}",
                         "instance_id": instance.name
                     })
                     continue
+            
+            sync_debug["processed_instances"].append(instance_debug)
                     
         except Exception as instance_error:
+            instance_debug["error"] = str(instance_error)
+            sync_debug["processed_instances"].append(instance_debug)
             continue
     
     frappe.db.commit()
@@ -1289,6 +1376,7 @@ def _sync_timetable_from_date(data: dict, from_date):
     return {
         "updated_rows": updated_rows,
         "skipped_rows": skipped_rows,
+        "sync_debug": sync_debug,
         "summary": {
             "instances_checked": len(instances),
             "rows_updated": len(updated_rows),
