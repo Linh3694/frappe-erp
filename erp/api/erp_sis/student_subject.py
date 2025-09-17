@@ -207,7 +207,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         # If template has specific subjects config, only include those (assume template now uses actual_subject_id)
         template_actual_subject_ids = []
         if hasattr(template, 'subjects') and template.subjects:
-            template_actual_subject_ids = [s.actual_subject_id for s in template.subjects if s.actual_subject_id]
+            template_actual_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
             # Filter actual_subject_ids to only include those configured in template
             actual_subject_ids = [sid for sid in actual_subject_ids if sid in template_actual_subject_ids]
         
@@ -228,7 +228,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             # If template has scores config, use that structure with actual subjects
             if hasattr(template, 'scores') and template.scores:
                 for score_config in template.scores:
-                    actual_subject_id = score_config.actual_subject_id
+                    actual_subject_id = score_config.subject_id
                     if actual_subject_id in actual_subject_ids:
                         scores[actual_subject_id] = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
@@ -268,7 +268,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             # Initialize for each actual subject configured in template
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
-                    actual_subject_id = subject_config.actual_subject_id
+                    actual_subject_id = subject_config.subject_id
                     if actual_subject_id in actual_subject_ids:
                         subject_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
@@ -304,7 +304,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
-                    actual_subject_id = subject_config.actual_subject_id
+                    actual_subject_id = subject_config.subject_id
                     if actual_subject_id in actual_subject_ids and hasattr(subject_config, 'scoreboard'):
                         scoreboard_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),

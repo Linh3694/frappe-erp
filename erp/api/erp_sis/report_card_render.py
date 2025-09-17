@@ -40,6 +40,38 @@ def _load_report(report_id: str):
     return report
 
 
+def _resolve_actual_subject_title(actual_subject_id: str) -> str:
+    """Resolve actual subject title from SIS Actual Subject"""
+    try:
+        actual_subject = frappe.get_doc("SIS Actual Subject", actual_subject_id)
+        return actual_subject.title_vn or actual_subject.title_en or actual_subject_id
+    except Exception:
+        return None
+
+
+def _resolve_teacher_name(actual_subject_id: str, class_id: str) -> str:
+    """Resolve teacher name from SIS Subject Assignment"""
+    try:
+        if not class_id:
+            return None
+        
+        # Find assignment by actual_subject_id and class_id
+        assignment = frappe.db.sql("""
+            SELECT COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name
+            FROM `tabSIS Subject Assignment` sa
+            LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
+            WHERE sa.actual_subject_id = %s AND sa.class_id = %s
+            LIMIT 1
+        """, (actual_subject_id, class_id), as_dict=True)
+        
+        if assignment:
+            return assignment[0].get("teacher_name", "")
+    except Exception:
+        pass
+    return None
+
+
 def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Transform report data to match frontend layout binding expectations.
@@ -62,10 +94,14 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
         if subject_id and subject_id in subject_eval:
             subject_data = subject_eval[subject_id]
             if isinstance(subject_data, dict):
+                # Resolve actual subject title and teacher name
+                resolved_title = _resolve_actual_subject_title(subject_id)
+                resolved_teacher = _resolve_teacher_name(subject_id, data.get("_metadata", {}).get("class_id"))
+                
                 subjects.append({
                     "subject_id": subject_id,
-                    "title_vn": subject_data.get("title_vn", subject_id),
-                    "teacher_name": subject_data.get("teacher_name", ""),
+                    "title_vn": resolved_title or subject_data.get("title_vn", subject_id),
+                    "teacher_name": resolved_teacher or subject_data.get("teacher_name", ""),
                     "rubric": subject_data.get("rubric", {}),
                     "comments": subject_data.get("comments", []),
                     **subject_data
@@ -73,10 +109,14 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Method 2: If subject_eval itself is the subject data
         elif subject_eval.get("title_vn") or subject_eval.get("rubric") or subject_eval.get("comments"):
+            # Resolve actual subject title and teacher name
+            resolved_title = _resolve_actual_subject_title(subject_id) if subject_id else None
+            resolved_teacher = _resolve_teacher_name(subject_id, data.get("_metadata", {}).get("class_id")) if subject_id else None
+            
             subjects.append({
                 "subject_id": subject_id or "unknown",
-                "title_vn": subject_eval.get("title_vn", subject_id or ""),
-                "teacher_name": subject_eval.get("teacher_name", ""),
+                "title_vn": resolved_title or subject_eval.get("title_vn", subject_id or ""),
+                "teacher_name": resolved_teacher or subject_eval.get("teacher_name", ""),
                 "rubric": subject_eval.get("rubric", {}),
                 "comments": subject_eval.get("comments", []),
                 **subject_eval
@@ -91,10 +131,14 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
                     has_comments = value.get("comments") is not None
                     
                     if has_title or has_rubric or has_comments:
+                        # Resolve actual subject title and teacher name
+                        resolved_title = _resolve_actual_subject_title(key)
+                        resolved_teacher = _resolve_teacher_name(key, data.get("_metadata", {}).get("class_id"))
+                        
                         subject_obj = {
                             "subject_id": key,
-                            "title_vn": value.get("title_vn", key),
-                            "teacher_name": value.get("teacher_name", ""),
+                            "title_vn": resolved_title or value.get("title_vn", key),
+                            "teacher_name": resolved_teacher or value.get("teacher_name", ""),
                             "rubric": value.get("rubric", {}),
                             "comments": value.get("comments", []),
                             **value
@@ -696,23 +740,17 @@ def get_report_data(report_id: Optional[str] = None):
         
         try:
             report = _load_report(report_id)
-            frappe.logger().info(f"Report loaded: {report.name}, form_id: {report.form_id}")
         except Exception as e:
-            frappe.logger().error(f"Failed to load report {report_id}: {str(e)}")
             return error_response(f"Failed to load report: {str(e)}")
             
         try:
             form = _load_form(report.form_id)
-            frappe.logger().info(f"Form loaded: {form.name}, code: {form.code}")
         except Exception as e:
-            frappe.logger().error(f"Failed to load form {report.form_id}: {str(e)}")
             return error_response(f"Failed to load form: {str(e)}")
             
         try:
             data = json.loads(report.data_json or "{}")
-            frappe.logger().info(f"Data JSON parsed, keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
         except Exception as e:
-            frappe.logger().error(f"Failed to parse report data JSON: {str(e)}")
             return error_response(f"Failed to parse report data JSON: {str(e)}")
         
         # Enrich data with student & class info for bindings
@@ -740,11 +778,7 @@ def get_report_data(report_id: Optional[str] = None):
         # Transform data to match frontend layout binding expectations
         try:
             transformed_data = _transform_data_for_bindings(data)
-            frappe.logger().info("Data transformation completed successfully")
         except Exception as e:
-            frappe.logger().error(f"Failed to transform data: {str(e)}")
-            import traceback
-            frappe.logger().error(f"Transform error traceback: {traceback.format_exc()}")
             return error_response(f"Failed to transform data for frontend: {str(e)}")
 
         # Create report object with title from report card document
@@ -767,10 +801,7 @@ def get_report_data(report_id: Optional[str] = None):
             "homeroom": transformed_data.get("homeroom", []),
         }
         
-        frappe.logger().info("About to return single_item_response")
-        result = single_item_response(response_data, "Report data retrieved for frontend rendering")
-        frappe.logger().info(f"single_item_response result: {result}")
-        return result
+        return single_item_response(response_data, "Report data retrieved for frontend rendering")
         
     except frappe.DoesNotExistError:
         return not_found_response("Report not found")
@@ -778,9 +809,6 @@ def get_report_data(report_id: Optional[str] = None):
         return forbidden_response("Access denied")
     except Exception as e:
         frappe.log_error(f"Error get_report_data: {str(e)}")
-        frappe.logger().error(f"Unexpected error in get_report_data: {str(e)}")
-        import traceback
-        frappe.logger().error(f"Full traceback: {traceback.format_exc()}")
         return error_response(f"Error getting report data: {str(e)}")
 
 
