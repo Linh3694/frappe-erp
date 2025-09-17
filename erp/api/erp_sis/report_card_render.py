@@ -469,7 +469,6 @@ def _build_html(form, report_data: Dict[str, Any]) -> str:
                     bound = _resolve_path(report_data, binding_path)
                     if bound is not None and not isinstance(bound, (dict, list)):
                         content_val = bound
-                else:
                 classes = ["text"]
                 try:
                     if fw and int(fw) >= 600:
