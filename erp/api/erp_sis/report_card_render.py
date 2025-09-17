@@ -229,8 +229,15 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         # Load template configuration for this subject
         template_config = _get_template_config_for_subject(template_id, subject_id)
         
-        # Temporary debug: add to response
-        # Template config loaded
+        # DEBUG: Temporary debug for test_point_titles issue
+        standardized_subject["_debug_template_config"] = {
+            "template_id": template_id,
+            "subject_id": subject_id,
+            "test_point_enabled": template_config.get('test_point_enabled', 'NOT_FOUND'),
+            "test_point_titles": template_config.get('test_point_titles', 'NOT_FOUND'),
+            "test_point_titles_type": str(type(template_config.get('test_point_titles', None))),
+            "test_point_titles_len": len(template_config.get('test_point_titles', [])) if isinstance(template_config.get('test_point_titles'), list) else 'NOT_LIST'
+        }
         
         # === TEST SCORES - Load from template structure ===
         test_titles = []
@@ -240,6 +247,12 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         if template_config.get('test_point_enabled') and template_config.get('test_point_titles'):
             template_titles = template_config.get('test_point_titles', [])
             test_titles = [t.get('title', '') for t in template_titles if isinstance(t, dict) and t.get('title')]
+            standardized_subject["_debug_template_config"]["processed_titles"] = test_titles
+        else:
+            standardized_subject["_debug_template_config"]["skip_reason"] = {
+                "test_point_enabled": template_config.get('test_point_enabled'),
+                "has_test_point_titles": bool(template_config.get('test_point_titles'))
+            }
         
         # Also check existing data for backwards compatibility
         existing_titles = subject.get("test_point_titles", [])
