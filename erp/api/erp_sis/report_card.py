@@ -261,15 +261,6 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
 
     frappe.logger().info(f"Applying {len(subjects_payload or [])} subjects for campus {campus_id}")
     
-    # TOP LEVEL DEBUG MARKER
-    if not hasattr(parent_doc, '_debug_function_calls'):
-        parent_doc._debug_function_calls = []
-    parent_doc._debug_function_calls.append({
-        "function": "_apply_subjects",
-        "subjects_count": len(subjects_payload or []),
-        "timestamp": "NEW_CODE_V2_FUNCTION_CALLED"
-    })
-
     for i, sub in enumerate(subjects_payload or []):
         subject_id = sub.get("subject_id")
         comment_title_id = sub.get("comment_title_id")
@@ -302,70 +293,18 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
         )
 
         # Apply nested test_point_titles for the just-appended child row
-        debug_test_points = {
-            "subject_id": subject_id,
-            "received": sub.get('test_point_titles'),
-            "received_type": str(type(sub.get('test_point_titles'))),
-            "processed": [],
-            "saved_count": 0,
-            "error": None
-        }
-        
         try:
             row.test_point_titles = []
-            for i, t in enumerate(sub.get("test_point_titles") or []):
+            for t in sub.get("test_point_titles") or []:
                 if (t.get("title") or "").strip():
                     title = t.get("title").strip()
-                    # Use simple dict approach only - this works with Frappe auto-save
+                    # Use simple dict approach - Frappe will convert to proper objects
                     simple_child = {
                         "title": title
                     }
                     row.append("test_point_titles", simple_child)
-                    debug_test_points["processed"].append({
-                        "index": i, 
-                        "title": title, 
-                        "action": "added_via_simple_append_NEW_CODE_V2",
-                        "child_dict_keys": list(simple_child.keys())
-                    })
-                else:
-                    debug_test_points["processed"].append({"index": i, "title": t.get("title", ""), "action": "skipped_empty"})
-            
-            debug_test_points["child_table_type"] = str(type(row.test_point_titles))
-            debug_test_points["child_items_details"] = []
-            debug_test_points["post_append_inspection"] = "NEW_CODE_V2_MARKER"
-            
-            # Inspect what's actually in the child table after append
-            try:
-                debug_test_points["saved_count"] = len(row.test_point_titles) if row.test_point_titles else 0
-                
-                if row.test_point_titles:
-                    for i, child in enumerate(row.test_point_titles):
-                        child_detail = {
-                            "index": i,
-                            "type": str(type(child)),
-                            "is_dict": isinstance(child, dict),
-                            "str_repr": str(child)
-                        }
-                        
-                        # Different ways to access title
-                        if isinstance(child, dict):
-                            child_detail["title_via_dict"] = child.get('title', 'NO_TITLE_IN_DICT')
-                            child_detail["dict_keys"] = list(child.keys())
-                        elif hasattr(child, 'title'):
-                            child_detail["title_via_attr"] = child.title
-                        else:
-                            child_detail["title_access"] = "NO_ACCESS"
-                            
-                        debug_test_points["child_items_details"].append(child_detail)
-            except Exception as iter_error:
-                debug_test_points["iteration_error"] = str(iter_error)
         except Exception as e:
-            debug_test_points["error"] = str(e)
-        
-        # Store debug info for response
-        if not hasattr(parent_doc, '_debug_test_points'):
-            parent_doc._debug_test_points = []
-        parent_doc._debug_test_points.append(debug_test_points)
+            frappe.logger().error(f"Error adding test_point_titles for subject {subject_id}: {str(e)}")
 
         # Save scoreboard JSON if provided
         try:
@@ -540,46 +479,12 @@ def create_template():
         _apply_homeroom_titles(doc, data.get("homeroom_titles") or [])
         _apply_subjects(doc, data.get("subjects") or [])
 
-        # DEBUG: Inspect document structure before insert
-        pre_insert_debug = []
-        try:
-            for subject_row in doc.subjects:
-                subject_debug = {
-                    "subject_id": getattr(subject_row, 'subject_id', 'NO_SUBJECT_ID'),
-                    "test_point_enabled": getattr(subject_row, 'test_point_enabled', 'NO_FIELD'),
-                    "test_point_titles_type": str(type(getattr(subject_row, 'test_point_titles', None))),
-                    "test_point_titles_count": len(getattr(subject_row, 'test_point_titles', [])) if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles else 0,
-                    "test_point_titles_sample": []
-                }
-                
-                if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
-                    for i, child in enumerate(subject_row.test_point_titles[:2]):  # First 2 items only
-                        child_info = {
-                            "index": i,
-                            "type": str(type(child)),
-                            "title": getattr(child, 'title', 'NO_TITLE') if hasattr(child, 'title') else child.get('title', 'NO_TITLE_KEY') if isinstance(child, dict) else 'NOT_ACCESSIBLE',
-                            "parentfield": getattr(child, 'parentfield', 'NO_PARENTFIELD') if hasattr(child, 'parentfield') else child.get('parentfield', 'NO_PARENTFIELD_KEY') if isinstance(child, dict) else 'NOT_ACCESSIBLE'
-                        }
-                        subject_debug["test_point_titles_sample"].append(child_info)
-                
-                pre_insert_debug.append(subject_debug)
-        except Exception as e:
-            pre_insert_debug = {"error": str(e)}
-
         doc.insert(ignore_permissions=True)
         
-        # MANUAL SAVE: Child tables of child tables need manual saving
-        manual_save_debug = []
+        # MANUAL SAVE: Child tables of child tables need manual saving in Frappe
         try:
             for subject_row in doc.subjects:
                 if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
-                    subject_debug = {
-                        "subject_config_name": subject_row.name,
-                        "subject_id": getattr(subject_row, 'subject_id', 'NO_ID'),
-                        "test_titles_to_save": [],
-                        "saved_titles": []
-                    }
-                    
                     for test_title_data in subject_row.test_point_titles:
                         try:
                             # Get title from either dict or object
@@ -588,11 +493,6 @@ def create_template():
                                 title = test_title_data.get('title', '')
                             elif hasattr(test_title_data, 'title'):
                                 title = test_title_data.title
-                            
-                            subject_debug["test_titles_to_save"].append({
-                                "title": title,
-                                "type": str(type(test_title_data))
-                            })
                             
                             if title:
                                 # Create and save child doc manually
@@ -604,58 +504,15 @@ def create_template():
                                     "parentfield": "test_point_titles"
                                 })
                                 child_doc.insert(ignore_permissions=True)
-                                subject_debug["saved_titles"].append(title)
                         except Exception as save_error:
-                            subject_debug["save_error"] = str(save_error)
-                    
-                    manual_save_debug.append(subject_debug)
+                            frappe.logger().error(f"Error saving test_point_title '{title}': {str(save_error)}")
         except Exception as manual_error:
-            manual_save_debug = {"error": str(manual_error)}
+            frappe.logger().error(f"Error in manual save of test_point_titles: {str(manual_error)}")
         
         frappe.db.commit()
 
-        # DEBUG: Check if test_point_titles were actually saved to database
-        db_check_debug = []
-        try:
-            db_subjects = frappe.db.sql("""
-                SELECT name, subject_id 
-                FROM `tabSIS Report Card Subject Config` 
-                WHERE parent = %s
-            """, (doc.name,), as_dict=True)
-            
-            for db_subject in db_subjects:
-                db_test_points = frappe.db.sql("""
-                    SELECT title 
-                    FROM `tabSIS Report Card Test Point Title` 
-                    WHERE parent = %s
-                """, (db_subject.name,), as_dict=True)
-                
-                db_check_debug.append({
-                    "subject_config_name": db_subject.name,
-                    "subject_id": db_subject.subject_id,
-                    "test_point_count": len(db_test_points),
-                    "test_point_titles": [tp.title for tp in db_test_points]
-                })
-        except Exception as e:
-            db_check_debug = {"error": str(e)}
-
         created = frappe.get_doc("SIS Report Card Template", doc.name)
-        
-        # Copy debug info from original doc to created doc
-        if hasattr(doc, '_debug_test_points'):
-            created._debug_test_points = doc._debug_test_points
-        if hasattr(doc, '_debug_function_calls'):
-            created._debug_function_calls = doc._debug_function_calls
-        
-        # Add debug info to response  
         response_data = _doc_to_template_dict(created)
-        if hasattr(created, '_debug_test_points'):
-            response_data["_debug_test_points"] = created._debug_test_points
-        if hasattr(created, '_debug_function_calls'):
-            response_data["_debug_function_calls"] = created._debug_function_calls
-        response_data["_debug_db_check"] = db_check_debug
-        response_data["_debug_pre_insert"] = pre_insert_debug
-        response_data["_debug_manual_save"] = manual_save_debug
         
         return single_item_response(response_data, "Template created successfully")
     except frappe.LinkValidationError as e:
