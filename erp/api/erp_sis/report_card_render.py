@@ -72,6 +72,136 @@ def _resolve_teacher_name(actual_subject_id: str, class_id: str) -> str:
     return None
 
 
+def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, Any]:
+    """
+    Standardize report data into consistent structure for frontend consumption
+    """
+    standardized = {}
+    
+    # === STUDENT INFO ===
+    student_data = data.get("student", {})
+    standardized["student"] = {
+        "id": getattr(report, "student_id", ""),
+        "code": student_data.get("code", ""),
+        "full_name": student_data.get("full_name", ""),
+        "dob": student_data.get("dob", ""),
+        "gender": student_data.get("gender", "")
+    }
+    
+    # === CLASS INFO ===
+    class_data = data.get("class", {})
+    standardized["class"] = {
+        "id": getattr(report, "class_id", ""),
+        "title": class_data.get("title", ""),
+        "short_title": class_data.get("short_title", "")
+    }
+    
+    # === REPORT INFO ===
+    standardized["report"] = {
+        "title_vn": getattr(report, "title", ""),
+        "title_en": getattr(report, "title", "")  # Same for now, can enhance later
+    }
+    
+    # === SUBJECTS STANDARDIZATION ===
+    subjects_raw = data.get("subjects", [])
+    standardized_subjects = []
+    
+    for subject in subjects_raw:
+        if not isinstance(subject, dict):
+            continue
+            
+        standardized_subject = {
+            "subject_id": subject.get("subject_id", ""),
+            "title_vn": subject.get("title_vn", ""),
+            "teacher_name": subject.get("teacher_name", ""),
+        }
+        
+        # Test scores (if available) 
+        # Handle various field names that might contain test scores
+        test_titles = subject.get("test_point_titles", [])
+        test_values = subject.get("test_point_values", []) or subject.get("test_point_inputs", [])
+        
+        # Also check for nested test_scores object
+        if "test_scores" in subject and isinstance(subject["test_scores"], dict):
+            test_titles = subject["test_scores"].get("titles", test_titles)
+            test_values = subject["test_scores"].get("values", test_values)
+            
+        if test_titles or test_values:
+            standardized_subject["test_scores"] = {
+                "titles": test_titles if isinstance(test_titles, list) else [],
+                "values": test_values if isinstance(test_values, list) else []
+            }
+        
+        # Rubric evaluation (if available)
+        rubric = subject.get("rubric", {})
+        criteria_raw = subject.get("criteria", {})
+        if rubric or criteria_raw:
+            criteria_list = []
+            if isinstance(criteria_raw, dict):
+                for crit_id, value in criteria_raw.items():
+                    criteria_list.append({
+                        "id": crit_id,
+                        "label": crit_id,  # Can enhance with proper labels later
+                        "value": value
+                    })
+            
+            standardized_subject["rubric"] = {
+                "criteria": criteria_list,
+                "scale_options": rubric.get("scale_options", [])
+            }
+        
+        # Comments (if available)
+        comments_raw = subject.get("comments", {})
+        if isinstance(comments_raw, dict):
+            comments_list = []
+            for comment_id, value in comments_raw.items():
+                comments_list.append({
+                    "id": comment_id,
+                    "label": comment_id,  # Can enhance with proper labels later
+                    "value": value
+                })
+            standardized_subject["comments"] = comments_list
+            
+        standardized_subjects.append(standardized_subject)
+    
+    standardized["subjects"] = standardized_subjects
+    
+    # === HOMEROOM STANDARDIZATION ===
+    homeroom_raw = data.get("homeroom", {})
+    if isinstance(homeroom_raw, dict):
+        comments_raw = homeroom_raw.get("comments", {})
+        homeroom_comments = []
+        
+        if isinstance(comments_raw, dict):
+            for comment_id, value in comments_raw.items():
+                homeroom_comments.append({
+                    "id": comment_id,
+                    "label": comment_id,  # Can enhance with proper labels later
+                    "value": value
+                })
+        
+        standardized["homeroom"] = {
+            "comments": homeroom_comments
+        }
+    else:
+        standardized["homeroom"] = {"comments": []}
+    
+    # === FORM CONFIG ===  
+    standardized["form_config"] = {
+        "code": form.code or "PRIM_VN",
+        "subjects_per_page": 2,  # Default value, can be extended in form later
+        "show_scores": getattr(form, "scores_enabled", True),
+        "show_homeroom": getattr(form, "homeroom_enabled", True), 
+        "show_subject_eval": getattr(form, "subject_eval_enabled", True),
+        # Additional configs with defaults
+        "show_test_scores": True,  # Can be configured per subject in template
+        "show_rubric": True,
+        "show_comments": True,
+    }
+    
+    return standardized
+
+
 def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Transform report data to match frontend layout binding expectations.
@@ -791,14 +921,17 @@ def get_report_data(report_id: Optional[str] = None):
             }
 
         # Return structured data for frontend React rendering
+        standardized_data = _standardize_report_data(transformed_data, report, form)
+        
         response_data = {
-            "form_code": form.code or "PRIM_VN",
+            "form_code": form.code or "PRIM_VN", 
+            "student": standardized_data.get("student", {}),
+            "class": standardized_data.get("class", {}),
+            "report": standardized_data.get("report", {}),
+            "subjects": standardized_data.get("subjects", []),
+            "homeroom": standardized_data.get("homeroom", {}),
+            "form_config": standardized_data.get("form_config", {}),
             "data": transformed_data,
-            "student": transformed_data.get("student", {}),
-            "class": transformed_data.get("class", {}),
-            "report": report_obj,
-            "subjects": transformed_data.get("subjects", []),
-            "homeroom": transformed_data.get("homeroom", []),
         }
         
         return single_item_response(response_data, "Report data retrieved for frontend rendering")
