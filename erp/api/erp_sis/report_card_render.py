@@ -221,7 +221,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         template_config = _get_template_config_for_subject(template_id, subject_id)
         
         # Temporary debug: add to response
-        # Template config loaded for processing
+        # Debug: Add template config to response temporarily 
+        standardized_subject["_debug_template_config"] = template_config
         
         # === TEST SCORES - Load from template structure ===
         test_titles = []
@@ -257,6 +258,14 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             template_criteria = _load_evaluation_criteria_options(criteria_id)
             # Load scale options
             scale_options = _load_evaluation_scale_options(scale_id)
+            
+            # Debug helper function results
+            standardized_subject["_debug_helper_results"] = {
+                "criteria_id": criteria_id,
+                "scale_id": scale_id,
+                "template_criteria": template_criteria,
+                "scale_options": scale_options
+            }
             if template_criteria:
                 # Map existing data to template criteria
                 existing_criteria = subject.get("criteria", {})
