@@ -599,6 +599,8 @@ def create_template():
         # Copy debug info from original doc to created doc
         if hasattr(doc, '_debug_test_points'):
             created._debug_test_points = doc._debug_test_points
+        if hasattr(doc, '_debug_function_calls'):
+            created._debug_function_calls = doc._debug_function_calls
         
         # Add debug info to response  
         response_data = _doc_to_template_dict(created)
