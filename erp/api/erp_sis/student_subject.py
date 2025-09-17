@@ -286,12 +286,34 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                         
                         # Initialize criteria scores (rubric evaluation)
                         if subject_config.rubric_enabled:
-                            subject_data["criteria_scores"] = {}  # Will be populated based on criteria_id
-                            subject_data["scale_scores"] = {}     # Will be populated based on scale_id
+                            # Load actual criteria structure from template
+                            if hasattr(subject_config, 'criteria_id') and subject_config.criteria_id:
+                                try:
+                                    criteria_doc = frappe.get_doc("SIS Evaluation Criteria", subject_config.criteria_id)
+                                    if hasattr(criteria_doc, 'options') and criteria_doc.options:
+                                        for opt in criteria_doc.options:
+                                            criteria_name = opt.get("name", "") or opt.get("title", "")
+                                            if criteria_name:
+                                                subject_data["criteria_scores"][criteria_name] = ""
+                                except:
+                                    pass
+                            
+                            # Scale scores can be initialized as empty for now
+                            subject_data["scale_scores"] = {}
                         
-                        # Initialize comment titles
+                        # Initialize comment titles structure
                         if subject_config.comment_title_enabled:
-                            subject_data["comments"] = {}  # Will be populated based on comment_title_id
+                            # Load actual comment structure from template
+                            if hasattr(subject_config, 'comment_title_id') and subject_config.comment_title_id:
+                                try:
+                                    comment_doc = frappe.get_doc("SIS Comment Title", subject_config.comment_title_id)
+                                    if hasattr(comment_doc, 'options') and comment_doc.options:
+                                        for opt in comment_doc.options:
+                                            comment_name = opt.get("name", "") or opt.get("title", "")
+                                            if comment_name:
+                                                subject_data["comments"][comment_name] = ""
+                                except:
+                                    pass
                         
                         subject_eval[actual_subject_id] = subject_data
             
