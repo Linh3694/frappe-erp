@@ -700,17 +700,23 @@ def get_report_data(report_id: Optional[str] = None):
         
         try:
             report = _load_report(report_id)
+            frappe.logger().info(f"Report loaded: {report.name}, form_id: {report.form_id}")
         except Exception as e:
+            frappe.logger().error(f"Failed to load report {report_id}: {str(e)}")
             return error_response(f"Failed to load report: {str(e)}")
             
         try:
             form = _load_form(report.form_id)
+            frappe.logger().info(f"Form loaded: {form.name}, code: {form.code}")
         except Exception as e:
+            frappe.logger().error(f"Failed to load form {report.form_id}: {str(e)}")
             return error_response(f"Failed to load form: {str(e)}")
             
         try:
             data = json.loads(report.data_json or "{}")
+            frappe.logger().info(f"Data JSON parsed, keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
         except Exception as e:
+            frappe.logger().error(f"Failed to parse report data JSON: {str(e)}")
             return error_response(f"Failed to parse report data JSON: {str(e)}")
         
         # Enrich data with student & class info for bindings
@@ -738,7 +744,11 @@ def get_report_data(report_id: Optional[str] = None):
         # Transform data to match frontend layout binding expectations
         try:
             transformed_data = _transform_data_for_bindings(data)
+            frappe.logger().info("Data transformation completed successfully")
         except Exception as e:
+            frappe.logger().error(f"Failed to transform data: {str(e)}")
+            import traceback
+            frappe.logger().error(f"Transform error traceback: {traceback.format_exc()}")
             return error_response(f"Failed to transform data for frontend: {str(e)}")
 
         # Create report object with title from report card document
@@ -761,7 +771,10 @@ def get_report_data(report_id: Optional[str] = None):
             "homeroom": transformed_data.get("homeroom", []),
         }
         
-        return single_item_response(response_data, "Report data retrieved for frontend rendering")
+        frappe.logger().info("About to return single_item_response")
+        result = single_item_response(response_data, "Report data retrieved for frontend rendering")
+        frappe.logger().info(f"single_item_response result: {result}")
+        return result
         
     except frappe.DoesNotExistError:
         return not_found_response("Report not found")
@@ -769,6 +782,9 @@ def get_report_data(report_id: Optional[str] = None):
         return forbidden_response("Access denied")
     except Exception as e:
         frappe.log_error(f"Error get_report_data: {str(e)}")
+        frappe.logger().error(f"Unexpected error in get_report_data: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Full traceback: {traceback.format_exc()}")
         return error_response(f"Error getting report data: {str(e)}")
 
 
