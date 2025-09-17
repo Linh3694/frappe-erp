@@ -511,17 +511,30 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             ORDER BY date ASC, timetable_column_id ASC
         """, (target_type, target_id, start_date_str, end_date_str), as_dict=True)
         
+        frappe.log_error(f"🎯 DEBUG _apply_timetable_overrides: Found {len(overrides)} overrides for {target_type}={target_id}, dates {start_date_str} to {end_date_str}")
+        frappe.log_error(f"🎯 DEBUG _apply_timetable_overrides: Overrides = {overrides}")
+        
         if not overrides:
             return entries
             
         # Build override map: {date: {timetable_column_id: override_data}}
         override_map = {}
         for override in overrides:
+            # Convert date to string format to match entries
             date = override["date"]
+            if hasattr(date, 'strftime'):
+                # If it's a datetime object, convert to string
+                date = date.strftime("%Y-%m-%d")
+            else:
+                # If it's already a string, ensure it's in correct format
+                date = str(date)
+                
             column_id = override["timetable_column_id"]
             
             if date not in override_map:
                 override_map[date] = {}
+                
+            frappe.log_error(f"🎯 DEBUG: Override date={date}, column={column_id}")
             
             # Enrich override with display data
             subject_title = ""
@@ -554,15 +567,25 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             
         # Apply overrides to entries
         enhanced_entries = []
+        override_applied_count = 0
+        
+        frappe.log_error(f"🎯 DEBUG: Processing {len(entries)} entries")
+        frappe.log_error(f"🎯 DEBUG: Override map = {override_map}")
+        
         for entry in entries:
             entry_date = entry.get("date")
             entry_column = entry.get("timetable_column_id")
+            
+            frappe.log_error(f"🎯 DEBUG: Checking entry date={entry_date}, column={entry_column}")
             
             # Check if there's an override for this date/column combination
             if (entry_date in override_map and 
                 entry_column in override_map[entry_date]):
                 
                 override_data = override_map[entry_date][entry_column]
+                override_applied_count += 1
+                
+                frappe.log_error(f"🎯 DEBUG: Applying override {override_applied_count}: {override_data}")
                 
                 if override_data["override_type"] == "replace":
                     # Replace entry with override data
@@ -593,7 +616,8 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             else:
                 # No override, keep original entry
                 enhanced_entries.append(entry)
-                
+        
+        frappe.log_error(f"🎯 DEBUG: Applied {override_applied_count} overrides, returning {len(enhanced_entries)} entries")        
         return enhanced_entries
         
     except Exception as e:
@@ -1093,8 +1117,13 @@ def get_class_week():
 
         entries = _build_entries(rows, ws)
         
+        frappe.log_error(f"🎯 DEBUG get_class_week: Built {len(entries)} entries, now applying overrides for Class {class_id}")
+        frappe.log_error(f"🎯 DEBUG get_class_week: Date range {ws} to {we}")
+        
         # Apply date-specific overrides 
         entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
+        
+        frappe.log_error(f"🎯 DEBUG get_class_week: After override, returning {len(entries_with_overrides)} entries")
         
         return list_response(entries_with_overrides, "Class week fetched successfully")
     except Exception as e:
@@ -2022,3 +2051,23 @@ def get_timetable_overrides_for_date_range(start_date: str = None, end_date: str
     except Exception as e:
         frappe.log_error(f"Error in get_timetable_overrides_for_date_range: {str(e)}")
         return error_response(f"Error fetching timetable overrides: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def debug_get_all_overrides():
+    """Debug function to get all override data"""
+    try:
+        # Get all overrides from custom table
+        all_overrides = frappe.db.sql("""
+            SELECT * FROM `tabTimetable_Date_Override`
+            ORDER BY creation DESC
+            LIMIT 50
+        """, as_dict=True)
+        
+        return single_item_response({
+            "total_count": len(all_overrides),
+            "overrides": all_overrides
+        }, f"Found {len(all_overrides)} total overrides")
+        
+    except Exception as e:
+        return error_response(f"Debug error: {str(e)}")
