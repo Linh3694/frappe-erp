@@ -293,22 +293,32 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
         )
 
         # Apply nested test_point_titles for the just-appended child row
+        debug_test_points = {
+            "subject_id": subject_id,
+            "received": sub.get('test_point_titles'),
+            "received_type": str(type(sub.get('test_point_titles'))),
+            "processed": [],
+            "saved_count": 0,
+            "error": None
+        }
+        
         try:
-            print(f"DEBUG create_template subject {subject_id}:")
-            print(f"  test_point_titles received: {sub.get('test_point_titles')}")
-            print(f"  test_point_titles type: {type(sub.get('test_point_titles'))}")
-            
             row.test_point_titles = []
-            for t in sub.get("test_point_titles") or []:
+            for i, t in enumerate(sub.get("test_point_titles") or []):
                 if (t.get("title") or "").strip():
-                    print(f"    adding title: '{t.get('title').strip()}'")
-                    row.append("test_point_titles", {"title": t.get("title").strip()})
+                    title = t.get("title").strip()
+                    row.append("test_point_titles", {"title": title})
+                    debug_test_points["processed"].append({"index": i, "title": title, "action": "added"})
                 else:
-                    print(f"    skipping empty title: {t}")
-            print(f"  final row.test_point_titles count: {len(row.test_point_titles)}")
+                    debug_test_points["processed"].append({"index": i, "title": t.get("title", ""), "action": "skipped_empty"})
+            debug_test_points["saved_count"] = len(row.test_point_titles)
         except Exception as e:
-            print(f"  ERROR saving test_point_titles: {e}")
-            pass
+            debug_test_points["error"] = str(e)
+        
+        # Store debug info for response
+        if not hasattr(template_doc, '_debug_test_points'):
+            template_doc._debug_test_points = []
+        template_doc._debug_test_points.append(debug_test_points)
 
         # Save scoreboard JSON if provided
         try:
@@ -487,7 +497,13 @@ def create_template():
         frappe.db.commit()
 
         created = frappe.get_doc("SIS Report Card Template", doc.name)
-        return single_item_response(_doc_to_template_dict(created), "Template created successfully")
+        
+        # Add debug info to response  
+        response_data = _doc_to_template_dict(created)
+        if hasattr(doc, '_debug_test_points'):
+            response_data["_debug_test_points"] = doc._debug_test_points
+        
+        return single_item_response(response_data, "Template created successfully")
     except frappe.LinkValidationError as e:
         # Handle specific link validation errors with more context
         error_msg = str(e)

@@ -152,29 +152,46 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                     # Extract test point titles properly
                     test_point_titles = getattr(subject_config, 'test_point_titles', [])
                     
-                    # Debug: temporarily log what we have
-                    print(f"DEBUG template {template_id} subject {subject_id}:")
-                    print(f"  test_point_titles raw: {test_point_titles}")
-                    print(f"  test_point_titles type: {type(test_point_titles)}")
-                    print(f"  test_point_titles len: {len(test_point_titles) if hasattr(test_point_titles, '__len__') else 'no len'}")
+                    # Debug info for response
+                    debug_extraction = {
+                        "template_id": template_id,
+                        "subject_id": subject_id,
+                        "raw_titles": list(test_point_titles) if hasattr(test_point_titles, '__iter__') else test_point_titles,
+                        "raw_type": str(type(test_point_titles)),
+                        "raw_len": len(test_point_titles) if hasattr(test_point_titles, '__len__') else "no_len",
+                        "items": [],
+                        "final_titles": []
+                    }
                     
                     # Process test point titles extraction
                     if test_point_titles and hasattr(test_point_titles, '__iter__'):
                         titles_list = []
                         for i, title_item in enumerate(test_point_titles):
-                            print(f"    item {i}: type={type(title_item)}, has_title={hasattr(title_item, 'title')}")
-                            if hasattr(title_item, 'title'):
-                                print(f"      title value: '{title_item.title}'")
+                            item_debug = {
+                                "index": i,
+                                "type": str(type(title_item)),
+                                "has_title": hasattr(title_item, 'title'),
+                                "has_name": hasattr(title_item, 'name'),
+                                "title_value": getattr(title_item, 'title', None) if hasattr(title_item, 'title') else None,
+                                "name_value": getattr(title_item, 'name', None) if hasattr(title_item, 'name') else None
+                            }
+                            debug_extraction["items"].append(item_debug)
+                            
                             if hasattr(title_item, 'title') and title_item.title:
                                 titles_list.append({"title": title_item.title})
                             elif hasattr(title_item, 'name') and title_item.name:
                                 titles_list.append({"title": title_item.name})
                         
-                        print(f"  final titles_list: {titles_list}")
+                        debug_extraction["final_titles"] = titles_list
                         if titles_list:
                             test_point_titles = titles_list
                         else:
                             test_point_titles = []
+                    
+                    # Store debug info
+                    if not hasattr(template_doc, '_debug_template_extraction'):
+                        template_doc._debug_template_extraction = []
+                    template_doc._debug_template_extraction.append(debug_extraction)
                     
                     return {
                         'test_point_enabled': getattr(subject_config, 'test_point_enabled', 0),
@@ -186,8 +203,7 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         'comment_title_id': getattr(subject_config, 'comment_title_id', '')
                     }
         return {}
-    except Exception as e:
-        print(f"Exception in _get_template_config_for_subject: {e}")
+    except Exception:
         return {}
 
 
@@ -1121,6 +1137,16 @@ def get_report_data(report_id: Optional[str] = None):
             "form_config": standardized_data.get("form_config", {}),
             "data": transformed_data,
         }
+        
+        # Add debug info if available
+        template_doc = None
+        try:
+            if hasattr(report, 'template_id') and report.template_id:
+                template_doc = frappe.get_doc("SIS Report Card Template", report.template_id)
+                if hasattr(template_doc, '_debug_template_extraction'):
+                    response_data["_debug_template_extraction"] = template_doc._debug_template_extraction
+        except:
+            pass
         
         return single_item_response(response_data, "Report data retrieved for frontend rendering")
         
