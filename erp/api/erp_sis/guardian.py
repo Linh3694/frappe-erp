@@ -1037,19 +1037,30 @@ def bulk_import_guardians():
                 guardian_doc.flags.ignore_permissions = True
                 guardian_doc.insert(ignore_permissions=True)
                 
-                # Force update phone number using direct DB call to ensure it's saved
+                update_data = {}
                 if formatted_phone:
+                    update_data["phone_number"] = formatted_phone
                     frappe.logger().info(f"About to force update phone for {guardian_doc.name}: '{formatted_phone}'")
-                    frappe.db.set_value("CRM Guardian", guardian_doc.name, "phone_number", formatted_phone)
-                    frappe.db.commit()  # Force commit immediately
-                    frappe.logger().info(f"Force updated and committed phone number for {guardian_doc.name}: {formatted_phone}")
                 else:
                     frappe.logger().info(f"No phone number to update for {guardian_doc.name}")
+                
+                if email:
+                    update_data["email"] = email
+                    frappe.logger().info(f"About to force update email for {guardian_doc.name}: '{email}'")
+                else:
+                    frappe.logger().info(f"No email to update for {guardian_doc.name}")
+                
+                # Apply updates if any
+                if update_data:
+                    frappe.db.set_value("CRM Guardian", guardian_doc.name, update_data)
+                    frappe.db.commit()  # Force commit immediately
+                    frappe.logger().info(f"Force updated and committed guardian {guardian_doc.name}: {update_data}")
                 
                 # Log what was actually saved
                 guardian_doc.reload()
                 final_phone = guardian_doc.phone_number or ''
-                frappe.logger().info(f"Guardian {guardian_doc.name} final saved state - phone: '{final_phone}'")
+                final_email = guardian_doc.email or ''
+                frappe.logger().info(f"Guardian {guardian_doc.name} final saved state - phone: '{final_phone}', email: '{final_email}'")
                 
                 # Track this creation for uniqueness checking in subsequent rows
                 existing_names.add(guardian_name.lower())
