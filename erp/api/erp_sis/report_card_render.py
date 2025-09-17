@@ -75,29 +75,11 @@ def _resolve_teacher_name(actual_subject_id: str, class_id: str) -> str:
 def _load_evaluation_criteria_options(criteria_id: str) -> List[Dict[str, str]]:
     """Load evaluation criteria options from criteria_id"""
     if not criteria_id:
-        return [{"debug": "no_criteria_id"}]
+        return []
     try:
-        criteria_doc = frappe.get_doc("SIS Evaluation Criteria", criteria_id)
-        
-        # Debug document structure
-        debug_info = {
-            "docname": criteria_doc.name,
-            "doctype": criteria_doc.doctype,
-            "has_options": hasattr(criteria_doc, 'options'),
-            "options_type": type(getattr(criteria_doc, 'options', None)),
-            "options_len": len(getattr(criteria_doc, 'options', [])) if hasattr(criteria_doc, 'options') else 0,
-            "all_fields": [f for f in dir(criteria_doc) if not f.startswith('_') and not callable(getattr(criteria_doc, f))][:10]
-        }
+        criteria_doc = frappe.get_doc("SIS Report Card Evaluation Criteria", criteria_id)
         
         if hasattr(criteria_doc, 'options') and criteria_doc.options:
-            # Get first option structure  
-            first_opt = criteria_doc.options[0] if criteria_doc.options else None
-            if first_opt:
-                debug_info["first_option_fields"] = [f for f in dir(first_opt) if not f.startswith('_') and not callable(getattr(first_opt, f))][:10]
-                debug_info["first_option_values"] = {
-                    f: getattr(first_opt, f, None) for f in debug_info["first_option_fields"][:5]
-                }
-            
             result = []
             for opt in criteria_doc.options:
                 # Try different field names for options
@@ -107,32 +89,19 @@ def _load_evaluation_criteria_options(criteria_id: str) -> List[Dict[str, str]]:
                 if opt_label:  # Only add if we have a label
                     result.append({"id": opt_id, "label": opt_label})
             
-            if result:
-                return result
-            else:
-                return [{"debug": "no_valid_options", "debug_info": debug_info}]
-        else:
-            return [{"debug": "no_options_field", "debug_info": debug_info}]
+            return result
+        return []
             
-    except frappe.DoesNotExistError:
-        return [{"debug": "document_not_found", "criteria_id": criteria_id}]
-    except Exception as e:
-        return [{"debug": "exception", "error": str(e), "criteria_id": criteria_id}]
+    except Exception:
+        return []
 
 
 def _load_evaluation_scale_options(scale_id: str) -> List[str]:
     """Load evaluation scale options from scale_id"""
     if not scale_id:
-        return ["DEBUG: no_scale_id"]
+        return []
     try:
-        scale_doc = frappe.get_doc("SIS Evaluation Scale", scale_id)
-        
-        # Debug structure
-        debug_info = {
-            "docname": scale_doc.name,
-            "has_options": hasattr(scale_doc, 'options'),
-            "options_len": len(getattr(scale_doc, 'options', [])) if hasattr(scale_doc, 'options') else 0
-        }
+        scale_doc = frappe.get_doc("SIS Report Card Evaluation Scale", scale_id)
         
         if hasattr(scale_doc, 'options') and scale_doc.options:
             # Try different field names for scale options
@@ -142,32 +111,19 @@ def _load_evaluation_scale_options(scale_id: str) -> List[str]:
                 if opt_title:
                     result.append(opt_title)
             
-            if result:
-                return result
-            else:
-                return [f"DEBUG: no_valid_titles - {debug_info}"]
-        else:
-            return [f"DEBUG: no_options_field - {debug_info}"]
+            return result
+        return []
             
-    except frappe.DoesNotExistError:
-        return [f"DEBUG: scale_not_found - {scale_id}"]
-    except Exception as e:
-        return [f"DEBUG: scale_exception - {str(e)}"]
+    except Exception:
+        return []
 
 
 def _load_comment_title_options(comment_title_id: str) -> List[Dict[str, str]]:
     """Load comment title options from comment_title_id"""
     if not comment_title_id:
-        return [{"debug": "no_comment_title_id"}]
+        return []
     try:
-        comment_doc = frappe.get_doc("SIS Comment Title", comment_title_id)
-        
-        # Debug structure
-        debug_info = {
-            "docname": comment_doc.name,
-            "has_options": hasattr(comment_doc, 'options'),
-            "options_len": len(getattr(comment_doc, 'options', [])) if hasattr(comment_doc, 'options') else 0
-        }
+        comment_doc = frappe.get_doc("SIS Report Card Comment Title", comment_title_id)
         
         if hasattr(comment_doc, 'options') and comment_doc.options:
             result = []
@@ -179,17 +135,11 @@ def _load_comment_title_options(comment_title_id: str) -> List[Dict[str, str]]:
                 if opt_label:  # Only add if we have a label
                     result.append({"id": opt_id, "label": opt_label})
             
-            if result:
-                return result
-            else:
-                return [{"debug": "no_valid_comments", "debug_info": debug_info}]
-        else:
-            return [{"debug": "no_options_field", "debug_info": debug_info}]
+            return result
+        return []
             
-    except frappe.DoesNotExistError:
-        return [{"debug": "comment_doc_not_found", "comment_title_id": comment_title_id}]
-    except Exception as e:
-        return [{"debug": "comment_exception", "error": str(e), "comment_title_id": comment_title_id}]
+    except Exception:
+        return []
 
 
 def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[str, Any]:
@@ -200,28 +150,8 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
             for subject_config in template_doc.subjects:
                 if getattr(subject_config, 'subject_id', None) == subject_id:
                     # Extract test point titles properly
-                    test_point_titles = getattr(subject_config, 'test_point_titles', [])
-                    
-                    # Debug test point titles extraction
-                    debug_test_titles = {
-                        "raw_type": type(test_point_titles),
-                        "raw_len": len(test_point_titles) if hasattr(test_point_titles, '__len__') else "no_len",
-                        "is_iterable": hasattr(test_point_titles, '__iter__'),
-                        "first_item": None
-                    }
-                    
-                    if test_point_titles and hasattr(test_point_titles, '__iter__'):
-                        try:
-                            first_item = list(test_point_titles)[0] if test_point_titles else None
-                            if first_item:
-                                debug_test_titles["first_item"] = {
-                                    "type": type(first_item),
-                                    "fields": [f for f in dir(first_item) if not f.startswith('_')][:5],
-                                    "has_title": hasattr(first_item, 'title'),
-                                    "has_name": hasattr(first_item, 'name')
-                                }
-                        except:
-                            debug_test_titles["first_item"] = "error_accessing"
+                    test_point_titles = getattr(subject_config, 'test_point_titles', [])                    
+                    # Process test point titles extraction
                     
                     # If test_point_titles is a child table, extract the actual titles
                     if test_point_titles and hasattr(test_point_titles, '__iter__'):
@@ -235,22 +165,17 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         if titles_list:
                             test_point_titles = titles_list
                         else:
-                            # Keep empty list but add debug info
                             test_point_titles = []
                     
-                    # Add debug info to return
-                    config_with_debug = {
+                    return {
                         'test_point_enabled': getattr(subject_config, 'test_point_enabled', 0),
                         'test_point_titles': test_point_titles,
                         'rubric_enabled': getattr(subject_config, 'rubric_enabled', 0),
                         'criteria_id': getattr(subject_config, 'criteria_id', ''),
                         'scale_id': getattr(subject_config, 'scale_id', ''),
                         'comment_title_enabled': getattr(subject_config, 'comment_title_enabled', 0),
-                        'comment_title_id': getattr(subject_config, 'comment_title_id', ''),
-                        '_debug_test_titles': debug_test_titles
+                        'comment_title_id': getattr(subject_config, 'comment_title_id', '')
                     }
-                    
-                    return config_with_debug
         return {}
     except Exception:
         return {}
@@ -306,8 +231,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         template_config = _get_template_config_for_subject(template_id, subject_id)
         
         # Temporary debug: add to response
-        # Debug: Add template config to response temporarily 
-        standardized_subject["_debug_template_config"] = template_config
+        # Template config loaded
         
         # === TEST SCORES - Load from template structure ===
         test_titles = []
@@ -344,13 +268,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             # Load scale options
             scale_options = _load_evaluation_scale_options(scale_id)
             
-            # Debug helper function results
-            standardized_subject["_debug_helper_results"] = {
-                "criteria_id": criteria_id,
-                "scale_id": scale_id,
-                "template_criteria": template_criteria,
-                "scale_options": scale_options
-            }
+            # Helper functions loaded
             if template_criteria:
                 # Map existing data to template criteria
                 existing_criteria = subject.get("criteria", {})
