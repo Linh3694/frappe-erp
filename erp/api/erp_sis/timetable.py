@@ -1473,8 +1473,8 @@ def update_instance_row(row_id: str = None, subject_id: str = None, teacher_1_id
             row.save(ignore_permissions=True)
             frappe.db.commit()
 
-            # Sync related data with old teacher information
-            _sync_related_timetables(row, instance, old_teacher_1_id, old_teacher_2_id)
+            # Note: Không sync related timetables để cell edit chỉ ảnh hưởng đúng 1 cell
+            # _sync_related_timetables(row, instance, old_teacher_1_id, old_teacher_2_id)
 
         result_data = {
             "row_id": row.name,
