@@ -503,25 +503,13 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
         start_date_str = week_start.strftime("%Y-%m-%d")
         end_date_str = week_end.strftime("%Y-%m-%d")
         
-        # Get all overrides for this target and date range
-        overrides = frappe.get_all(
-            "SIS Timetable Override",
-            fields=[
-                "name", 
-                "date", 
-                "timetable_column_id", 
-                "subject_id", 
-                "teacher_1_id", 
-                "teacher_2_id", 
-                "room_id",
-                "override_type"
-            ],
-            filters={
-                "target_type": target_type,
-                "target_id": target_id,
-                "date": ["between", [start_date_str, end_date_str]]
-            }
-        )
+        # Get all overrides for this target and date range from custom table
+        overrides = frappe.db.sql("""
+            SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type
+            FROM `tabTimetable_Date_Override`
+            WHERE target_type = %s AND target_id = %s AND date BETWEEN %s AND %s
+            ORDER BY date ASC, timetable_column_id ASC
+        """, (target_type, target_id, start_date_str, end_date_str), as_dict=True)
         
         if not overrides:
             return entries
@@ -1863,91 +1851,97 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
             if not frappe.db.exists("SIS Student", target_id):
                 return not_found_response(f"Student {target_id} not found")
 
-        # Create a manual event record in database since SIS Event doctype might not exist
-        event_title = f"Manual Edit {date} {target_type} {target_id}"
+        # Create a custom table for date-specific overrides to avoid SIS Event dependency
+        # We'll create this as a simple storage without going through Frappe doctype system
         virtual_event = f"manual-edit-{frappe.generate_hash()[:8]}"
         
-        # Try to create a minimal event record directly in database
+        # Create custom override table if it doesn't exist
         try:
-            # Check if there's an existing event with this title
-            existing_event = frappe.db.exists("SIS Event", {"title": event_title})
-            if not existing_event:
-                # Insert minimal event record directly via SQL to avoid doctype validation
-                frappe.db.sql("""
-                    INSERT INTO `tabSIS Event` 
-                    (name, title, start_date, end_date, status, docstatus, creation, modified, modified_by, owner)
-                    VALUES (%s, %s, %s, %s, %s, 0, NOW(), NOW(), %s, %s)
-                """, (
-                    virtual_event,
-                    event_title, 
-                    date,
-                    date,
-                    "approved",
-                    frappe.session.user,
-                    frappe.session.user
-                ))
-                frappe.db.commit()
-            else:
-                virtual_event = existing_event
-        except Exception as e:
-            frappe.log_error(f"Failed to create manual event: {str(e)}")
-            # If even direct SQL fails, we have a bigger problem
-            return error_response(f"Cannot create event for override: {str(e)}")
+            frappe.db.sql("""
+                CREATE TABLE IF NOT EXISTS `tabTimetable_Date_Override` (
+                    `name` varchar(140) NOT NULL,
+                    `date` date NOT NULL,
+                    `timetable_column_id` varchar(140) NOT NULL,
+                    `target_type` varchar(50) NOT NULL,
+                    `target_id` varchar(140) NOT NULL,
+                    `subject_id` varchar(140) NULL,
+                    `teacher_1_id` varchar(140) NULL,
+                    `teacher_2_id` varchar(140) NULL,
+                    `room_id` varchar(140) NULL,
+                    `override_type` varchar(50) DEFAULT 'replace',
+                    `created_by` varchar(140) NOT NULL,
+                    `creation` datetime NOT NULL,
+                    `modified` datetime NOT NULL,
+                    `modified_by` varchar(140) NOT NULL,
+                    PRIMARY KEY (`name`),
+                    UNIQUE KEY `unique_override` (`date`, `timetable_column_id`, `target_type`, `target_id`)
+                )
+            """)
+        except Exception as create_error:
+            # Table might already exist, which is fine
+            pass
 
-        # Check if override already exists for this date/column/target combination
-        existing_override = frappe.db.exists(
-            "SIS Timetable Override",
-            {
-                "date": date,
-                "timetable_column_id": timetable_column_id,
-                "target_type": target_type,
-                "target_id": target_id
-            }
-        )
+        # Check if override already exists in custom table
+        existing_override = frappe.db.sql("""
+            SELECT name FROM `tabTimetable_Date_Override`
+            WHERE date = %s AND timetable_column_id = %s AND target_type = %s AND target_id = %s
+            LIMIT 1
+        """, (date, timetable_column_id, target_type, target_id), as_dict=True)
+
+        override_name = f"override-{frappe.generate_hash()[:10]}"
+        current_time = frappe.utils.now()
 
         if existing_override:
             # Update existing override
-            override_doc = frappe.get_doc("SIS Timetable Override", existing_override)
+            override_name = existing_override[0]['name']
             
-            # Update fields if provided
-            update_fields = {}
+            # Build update query dynamically
+            update_fields = []
+            update_values = []
+            
             if subject_id is not None:
-                update_fields["subject_id"] = subject_id
+                update_fields.append("subject_id = %s")
+                update_values.append(subject_id)
             if teacher_1_id is not None:
-                update_fields["teacher_1_id"] = teacher_1_id
+                update_fields.append("teacher_1_id = %s")
+                update_values.append(teacher_1_id)
             if teacher_2_id is not None:
-                update_fields["teacher_2_id"] = teacher_2_id if teacher_2_id != 'none' else None
+                update_fields.append("teacher_2_id = %s")
+                update_values.append(teacher_2_id if teacher_2_id != 'none' else None)
             if room_id is not None:
-                update_fields["room_id"] = room_id
+                update_fields.append("room_id = %s")
+                update_values.append(room_id)
 
             if update_fields:
-                for field, value in update_fields.items():
-                    setattr(override_doc, field, value)
-                
-                override_doc.save(ignore_permissions=True)
-                frappe.db.commit()
+                update_fields.append("modified = %s")
+                update_fields.append("modified_by = %s")
+                update_values.extend([current_time, frappe.session.user])
+                update_values.append(override_name)  # WHERE condition
+
+                frappe.db.sql(f"""
+                    UPDATE `tabTimetable_Date_Override`
+                    SET {', '.join(update_fields)}
+                    WHERE name = %s
+                """, update_values)
 
         else:
             # Create new override
-            override_doc = frappe.get_doc({
-                "doctype": "SIS Timetable Override",
-                "event_id": virtual_event,
-                "date": date,
-                "timetable_column_id": timetable_column_id,
-                "target_type": target_type,
-                "target_id": target_id,
-                "subject_id": subject_id,
-                "teacher_1_id": teacher_1_id,
-                "teacher_2_id": teacher_2_id if teacher_2_id != 'none' else None,
-                "room_id": room_id,
-                "override_type": "replace"
-            })
+            frappe.db.sql("""
+                INSERT INTO `tabTimetable_Date_Override`
+                (name, date, timetable_column_id, target_type, target_id, subject_id, 
+                 teacher_1_id, teacher_2_id, room_id, override_type, created_by, creation, modified, modified_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                override_name, date, timetable_column_id, target_type, target_id,
+                subject_id, teacher_1_id, 
+                teacher_2_id if teacher_2_id != 'none' else None,
+                room_id, 'replace', frappe.session.user, current_time, current_time, frappe.session.user
+            ))
 
-            override_doc.insert(ignore_permissions=True)
-            frappe.db.commit()
+        frappe.db.commit()
 
         result_data = {
-            "override_id": override_doc.name,
+            "override_id": override_name,
             "date": date,
             "timetable_column_id": timetable_column_id,
             "target_type": target_type,
@@ -1990,22 +1984,13 @@ def get_timetable_overrides_for_date_range(start_date: str = None, end_date: str
             "target_id": target_id
         }
 
-        # Get overrides
-        overrides = frappe.get_all(
-            "SIS Timetable Override",
-            fields=[
-                "name",
-                "date",
-                "timetable_column_id",
-                "subject_id",
-                "teacher_1_id",
-                "teacher_2_id",
-                "room_id",
-                "override_type"
-            ],
-            filters=filters,
-            order_by="date asc, timetable_column_id asc"
-        )
+        # Get overrides from custom table
+        overrides = frappe.db.sql("""
+            SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type
+            FROM `tabTimetable_Date_Override`
+            WHERE target_type = %s AND target_id = %s AND date BETWEEN %s AND %s
+            ORDER BY date ASC, timetable_column_id ASC
+        """, (target_type, target_id, start_date, end_date), as_dict=True)
 
         # Enrich with display data similar to get_class_week
         for override in overrides:
