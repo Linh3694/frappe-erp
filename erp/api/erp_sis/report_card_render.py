@@ -72,11 +72,72 @@ def _resolve_teacher_name(actual_subject_id: str, class_id: str) -> str:
     return None
 
 
+def _load_evaluation_criteria_options(criteria_id: str) -> List[Dict[str, str]]:
+    """Load evaluation criteria options from criteria_id"""
+    if not criteria_id:
+        return []
+    try:
+        criteria_doc = frappe.get_doc("SIS Evaluation Criteria", criteria_id)
+        if hasattr(criteria_doc, 'options') and criteria_doc.options:
+            return [{"id": opt.get("name", ""), "label": opt.get("title", "")} for opt in criteria_doc.options]
+        return []
+    except Exception:
+        return []
+
+
+def _load_evaluation_scale_options(scale_id: str) -> List[str]:
+    """Load evaluation scale options from scale_id"""
+    if not scale_id:
+        return []
+    try:
+        scale_doc = frappe.get_doc("SIS Evaluation Scale", scale_id)
+        if hasattr(scale_doc, 'options') and scale_doc.options:
+            return [opt.get("title", "") for opt in scale_doc.options if opt.get("title")]
+        return []
+    except Exception:
+        return []
+
+
+def _load_comment_title_options(comment_title_id: str) -> List[Dict[str, str]]:
+    """Load comment title options from comment_title_id"""
+    if not comment_title_id:
+        return []
+    try:
+        comment_doc = frappe.get_doc("SIS Comment Title", comment_title_id)
+        if hasattr(comment_doc, 'options') and comment_doc.options:
+            return [{"id": opt.get("name", ""), "label": opt.get("title", "")} for opt in comment_doc.options]
+        return []
+    except Exception:
+        return []
+
+
+def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[str, Any]:
+    """Get template configuration for a specific subject"""
+    try:
+        template_doc = frappe.get_doc("SIS Report Card Template", template_id)
+        if hasattr(template_doc, 'subjects') and template_doc.subjects:
+            for subject_config in template_doc.subjects:
+                if getattr(subject_config, 'subject_id', None) == subject_id:
+                    return {
+                        'test_point_enabled': getattr(subject_config, 'test_point_enabled', 0),
+                        'test_point_titles': getattr(subject_config, 'test_point_titles', []),
+                        'rubric_enabled': getattr(subject_config, 'rubric_enabled', 0),
+                        'criteria_id': getattr(subject_config, 'criteria_id', ''),
+                        'scale_id': getattr(subject_config, 'scale_id', ''),
+                        'comment_title_enabled': getattr(subject_config, 'comment_title_enabled', 0),
+                        'comment_title_id': getattr(subject_config, 'comment_title_id', '')
+                    }
+        return {}
+    except Exception:
+        return {}
+
+
 def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, Any]:
     """
     Standardize report data into consistent structure for frontend consumption
     """
     standardized = {}
+    template_id = getattr(report, "template_id", "")
     
     # === STUDENT INFO ===
     student_data = data.get("student", {})
@@ -110,56 +171,116 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         if not isinstance(subject, dict):
             continue
             
+        subject_id = subject.get("subject_id", "")
         standardized_subject = {
-            "subject_id": subject.get("subject_id", ""),
+            "subject_id": subject_id,
             "title_vn": subject.get("title_vn", ""),
             "teacher_name": subject.get("teacher_name", ""),
         }
         
-        # Test scores (if available) 
-        # Handle various field names that might contain test scores
-        test_titles = subject.get("test_point_titles", [])
+        # Load template configuration for this subject
+        template_config = _get_template_config_for_subject(template_id, subject_id)
+        
+        # === TEST SCORES - Load from template structure ===
+        test_titles = []
         test_values = subject.get("test_point_values", []) or subject.get("test_point_inputs", [])
         
-        # Also check for nested test_scores object
-        if "test_scores" in subject and isinstance(subject["test_scores"], dict):
-            test_titles = subject["test_scores"].get("titles", test_titles)
-            test_values = subject["test_scores"].get("values", test_values)
+        # Load test point titles from template
+        if template_config.get('test_point_enabled') and template_config.get('test_point_titles'):
+            template_titles = template_config.get('test_point_titles', [])
+            test_titles = [t.get('title', '') for t in template_titles if isinstance(t, dict) and t.get('title')]
+        
+        # Also check existing data for backwards compatibility
+        existing_titles = subject.get("test_point_titles", [])
+        if existing_titles and not test_titles:
+            test_titles = existing_titles
             
-        if test_titles or test_values:
+        # Always include test_scores structure (even if empty) when template has it enabled
+        if template_config.get('test_point_enabled') or test_titles or test_values:
             standardized_subject["test_scores"] = {
                 "titles": test_titles if isinstance(test_titles, list) else [],
                 "values": test_values if isinstance(test_values, list) else []
             }
         
-        # Rubric evaluation (if available)
-        rubric = subject.get("rubric", {})
-        criteria_raw = subject.get("criteria", {})
-        if rubric or criteria_raw:
-            criteria_list = []
-            if isinstance(criteria_raw, dict):
-                for crit_id, value in criteria_raw.items():
+        # === RUBRIC - Load from template structure ===
+        criteria_list = []
+        scale_options = []
+        
+        # Load rubric structure from template  
+        if template_config.get('rubric_enabled'):
+            criteria_id = template_config.get('criteria_id', '')
+            scale_id = template_config.get('scale_id', '')
+            
+            # Load criteria from template
+            template_criteria = _load_evaluation_criteria_options(criteria_id)
+            if template_criteria:
+                # Map existing data to template criteria
+                existing_criteria = subject.get("criteria", {})
+                for template_crit in template_criteria:
+                    crit_id = template_crit.get("id", "")
                     criteria_list.append({
                         "id": crit_id,
-                        "label": crit_id,  # Can enhance with proper labels later
-                        "value": value
+                        "label": template_crit.get("label", crit_id),
+                        "value": existing_criteria.get(crit_id, "") if isinstance(existing_criteria, dict) else ""
                     })
             
+            # Load scale options from template
+            scale_options = _load_evaluation_scale_options(scale_id)
+        
+        # Fallback to existing data structure if template doesn't have config
+        if not criteria_list:
+            existing_criteria = subject.get("criteria", {})
+            if isinstance(existing_criteria, dict):
+                for crit_id, value in existing_criteria.items():
+                    criteria_list.append({
+                        "id": crit_id,
+                        "label": crit_id,
+                        "value": value
+                    })
+        
+        if not scale_options:
+            existing_rubric = subject.get("rubric", {})
+            scale_options = existing_rubric.get("scale_options", [])
+        
+        # Always include rubric structure (even if empty) when template has it enabled
+        if template_config.get('rubric_enabled') or criteria_list or scale_options:
             standardized_subject["rubric"] = {
                 "criteria": criteria_list,
-                "scale_options": rubric.get("scale_options", [])
+                "scale_options": scale_options
             }
         
-        # Comments (if available)
-        comments_raw = subject.get("comments", {})
-        if isinstance(comments_raw, dict):
-            comments_list = []
-            for comment_id, value in comments_raw.items():
-                comments_list.append({
-                    "id": comment_id,
-                    "label": comment_id,  # Can enhance with proper labels later
-                    "value": value
-                })
+        # === COMMENTS - Load from template structure ===
+        comments_list = []
+        
+        # Load comment structure from template  
+        if template_config.get('comment_title_enabled'):
+            comment_title_id = template_config.get('comment_title_id', '')
+            template_comments = _load_comment_title_options(comment_title_id)
+            
+            if template_comments:
+                # Map existing data to template comments
+                existing_comments = subject.get("comments", {})
+                for template_comment in template_comments:
+                    comment_id = template_comment.get("id", "")
+                    comments_list.append({
+                        "id": comment_id,
+                        "label": template_comment.get("label", comment_id),
+                        "value": existing_comments.get(comment_id, "") if isinstance(existing_comments, dict) else ""
+                    })
+        
+        # Fallback to existing data structure if template doesn't have config
+        if not comments_list:
+            existing_comments = subject.get("comments", {})
+            if isinstance(existing_comments, dict):
+                for comment_id, value in existing_comments.items():
+                    comments_list.append({
+                        "id": comment_id,
+                        "label": comment_id,
+                        "value": value
+                    })
+        
+        # Always include comments structure (even if empty) when template has it enabled
+        if template_config.get('comment_title_enabled') or comments_list:
             standardized_subject["comments"] = comments_list
             
         standardized_subjects.append(standardized_subject)
