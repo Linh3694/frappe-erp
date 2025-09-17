@@ -137,12 +137,26 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
 
 
 def _apply_scores(parent_doc, scores_payload: List[Dict[str, Any]]):
+    campus_id = _current_campus_id()
     parent_doc.scores = []
-    for s in scores_payload or []:
+    
+    frappe.logger().info(f"Applying {len(scores_payload or [])} score configs for campus {campus_id}")
+    
+    for i, s in enumerate(scores_payload or []):
+        subject_id = s.get("subject_id")
+        
+        frappe.logger().debug(f"Processing score config {i+1}: subject_id='{subject_id}'")
+        
+        # Validate actual subject exists
+        if subject_id and not _validate_actual_subject_exists(subject_id, campus_id):
+            frappe.throw(_(
+                "Môn học '{0}' không tồn tại hoặc không thuộc về trường này"
+            ).format(subject_id), frappe.LinkValidationError)
+        
         parent_doc.append(
             "scores",
             {
-                "subject_id": s.get("subject_id"),
+                "subject_id": subject_id,
                 "display_name": (s.get("display_name") or "").strip() or None,
                 "subject_type": s.get("subject_type"),
                 "weight1_count": int(s.get("weight1_count") or 0),
@@ -170,6 +184,27 @@ def _validate_comment_title_exists(comment_title_id: str, campus_id: str) -> boo
         return False
     except Exception as e:
         frappe.logger().error(f"Error validating comment title {comment_title_id}: {str(e)}")
+        return False
+
+
+def _validate_actual_subject_exists(subject_id: str, campus_id: str) -> bool:
+    """Validate that an actual subject exists and belongs to the current campus."""
+    if not subject_id:
+        frappe.logger().warning(f"Actual subject validation: empty subject_id provided")
+        return False
+
+    try:
+        doc = frappe.get_doc("SIS Actual Subject", subject_id)
+        if doc.campus_id != campus_id:
+            frappe.logger().error(f"Actual subject {subject_id} exists but belongs to campus {doc.campus_id}, not {campus_id}")
+            return False
+        frappe.logger().info(f"Actual subject {subject_id} validation successful for campus {campus_id}")
+        return True
+    except frappe.DoesNotExistError:
+        frappe.logger().error(f"Actual subject {subject_id} does not exist in database")
+        return False
+    except Exception as e:
+        frappe.logger().error(f"Error validating actual subject {subject_id}: {str(e)}")
         return False
 
 
@@ -232,6 +267,12 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
         comment_title_enabled = sub.get("comment_title_enabled", False)
 
         frappe.logger().debug(f"Processing subject {i+1}: subject_id='{subject_id}', comment_title_id='{comment_title_id}', comment_title_enabled={comment_title_enabled}")
+
+        # Validate actual subject exists
+        if subject_id and not _validate_actual_subject_exists(subject_id, campus_id):
+            frappe.throw(_(
+                "Môn học '{0}' không tồn tại hoặc không thuộc về trường này"
+            ).format(subject_id), frappe.LinkValidationError)
 
         if comment_title_id and not _validate_comment_title_exists(comment_title_id, campus_id):
             frappe.throw(_(

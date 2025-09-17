@@ -16,7 +16,7 @@
   "test_point_titles"
  ],
  "fields": [
-  {"fieldname": "subject_id", "fieldtype": "Link", "label": "Môn học", "options": "SIS Subject", "in_list_view": 1, "reqd": 1},
+  {"fieldname": "subject_id", "fieldtype": "Link", "label": "Môn học", "options": "SIS Actual Subject", "in_list_view": 1, "reqd": 1},
   {"fieldname": "test_point_enabled", "fieldtype": "Check", "label": "Điểm kiểm tra"},
   {"fieldname": "rubric_enabled", "fieldtype": "Check", "label": "Bảng đánh giá"},
   {"fieldname": "criteria_id", "fieldtype": "Link", "label": "Tiêu chí đánh giá", "options": "SIS Report Card Evaluation Criteria"},

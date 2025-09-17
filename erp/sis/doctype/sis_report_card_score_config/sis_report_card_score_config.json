@@ -13,7 +13,7 @@
   "weight3_count"
  ],
  "fields": [
-  {"fieldname": "subject_id", "fieldtype": "Link", "label": "Môn học", "options": "SIS Subject", "in_list_view": 1, "reqd": 1},
+  {"fieldname": "subject_id", "fieldtype": "Link", "label": "Môn học", "options": "SIS Actual Subject", "in_list_view": 1, "reqd": 1},
   {"fieldname": "display_name", "fieldtype": "Data", "label": "Tên hiển thị", "in_list_view": 1},
   {"fieldname": "subject_type", "fieldtype": "Select", "label": "Loại đánh giá", "options": "Môn tính điểm\nMôn đánh giá", "in_list_view": 1, "reqd": 1},
   {"fieldname": "weight1_count", "fieldtype": "Int", "label": "SL hệ số 1", "in_list_view": 1, "default": "0"},
