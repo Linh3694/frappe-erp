@@ -307,11 +307,31 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
             for i, t in enumerate(sub.get("test_point_titles") or []):
                 if (t.get("title") or "").strip():
                     title = t.get("title").strip()
-                    row.append("test_point_titles", {"title": title})
-                    debug_test_points["processed"].append({"index": i, "title": title, "action": "added"})
+                    # Try different approaches to append child table
+                    try:
+                        row.append("test_point_titles", {"title": title})
+                        debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_append"})
+                    except Exception as append_error:
+                        # Try direct assignment
+                        try:
+                            child_doc = frappe.new_doc("SIS Report Card Test Point Title")
+                            child_doc.title = title
+                            row.test_point_titles.append(child_doc)
+                            debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_direct", "append_error": str(append_error)})
+                        except Exception as direct_error:
+                            debug_test_points["processed"].append({"index": i, "title": title, "action": "failed_both", "append_error": str(append_error), "direct_error": str(direct_error)})
                 else:
                     debug_test_points["processed"].append({"index": i, "title": t.get("title", ""), "action": "skipped_empty"})
+            
             debug_test_points["saved_count"] = len(row.test_point_titles)
+            debug_test_points["child_table_type"] = str(type(row.test_point_titles))
+            debug_test_points["child_items_details"] = []
+            for child in row.test_point_titles:
+                debug_test_points["child_items_details"].append({
+                    "type": str(type(child)),
+                    "title": getattr(child, 'title', 'NO_TITLE_ATTR'),
+                    "dict_repr": dict(child) if hasattr(child, 'as_dict') else str(child)
+                })
         except Exception as e:
             debug_test_points["error"] = str(e)
         
