@@ -484,11 +484,16 @@ def create_template():
         error_msg = str(e)
         frappe.logger().error(f"Link validation error creating template: {error_msg}")
 
-        # Provide user-friendly error message for comment title issues
+        # Provide user-friendly error message for specific link validation issues
         if "Tiêu đề nhận xét" in error_msg or "comment title" in error_msg.lower():
             return error_response(
                 message="Không thể tạo mẫu báo cáo: Một hoặc nhiều tiêu đề nhận xét không tồn tại hoặc đã bị xóa. Vui lòng làm mới trang và thử lại.",
                 code="COMMENT_TITLE_NOT_FOUND"
+            )
+        elif "Môn học" in error_msg or "actual subject" in error_msg.lower():
+            return error_response(
+                message="Không thể tạo mẫu báo cáo: Một hoặc nhiều môn học không tồn tại hoặc đã bị xóa. Vui lòng kiểm tra lại danh sách môn học và thử lại.",
+                code="ACTUAL_SUBJECT_NOT_FOUND"
             )
         else:
             return error_response(
@@ -584,11 +589,16 @@ def update_template(template_id: Optional[str] = None):
         error_msg = str(e)
         frappe.logger().error(f"Link validation error updating template {template_id}: {error_msg}")
 
-        # Provide user-friendly error message for comment title issues
+        # Provide user-friendly error message for specific link validation issues
         if "Tiêu đề nhận xét" in error_msg or "comment title" in error_msg.lower():
             return error_response(
                 message="Không thể cập nhật mẫu báo cáo: Một hoặc nhiều tiêu đề nhận xét không tồn tại hoặc đã bị xóa. Vui lòng làm mới trang và thử lại.",
                 code="COMMENT_TITLE_NOT_FOUND"
+            )
+        elif "Môn học" in error_msg or "actual subject" in error_msg.lower():
+            return error_response(
+                message="Không thể cập nhật mẫu báo cáo: Một hoặc nhiều môn học không tồn tại hoặc đã bị xóa. Vui lòng kiểm tra lại danh sách môn học và thử lại.",
+                code="ACTUAL_SUBJECT_NOT_FOUND"
             )
         else:
             return error_response(
