@@ -511,9 +511,6 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             ORDER BY date ASC, timetable_column_id ASC
         """, (target_type, target_id, start_date_str, end_date_str), as_dict=True)
         
-        frappe.log_error(f"🎯 DEBUG _apply_timetable_overrides: Found {len(overrides)} overrides for {target_type}={target_id}, dates {start_date_str} to {end_date_str}")
-        frappe.log_error(f"🎯 DEBUG _apply_timetable_overrides: Overrides = {overrides}")
-        
         if not overrides:
             return entries
             
