@@ -173,9 +173,41 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
     """Get template configuration for a specific subject"""
     try:
         template_doc = frappe.get_doc("SIS Report Card Template", template_id)
+        
+        # Debug template structure
+        template_debug = {
+            "has_subjects": hasattr(template_doc, 'subjects'),
+            "subjects_count": len(getattr(template_doc, 'subjects', [])),
+            "subjects_sample": []
+        }
+        
+        if hasattr(template_doc, 'subjects') and template_doc.subjects:
+            # Sample first few subjects for debug
+            for i, subj in enumerate(list(template_doc.subjects)[:2]):
+                sample = {
+                    "index": i,
+                    "subject_id": getattr(subj, 'subject_id', None),
+                    "has_test_point_titles": hasattr(subj, 'test_point_titles'),
+                    "test_point_titles_count": len(getattr(subj, 'test_point_titles', [])),
+                    "test_point_titles_sample": list(getattr(subj, 'test_point_titles', []))[:3],
+                    "all_fields": [field for field in dir(subj) if not field.startswith('_')]
+                }
+                template_debug["subjects_sample"].append(sample)
+        
+        frappe.log_error(f"Template debug for {template_id}: {template_debug}", "DEBUG_TEMPLATE_STRUCTURE")
+        
         if hasattr(template_doc, 'subjects') and template_doc.subjects:
             for subject_config in template_doc.subjects:
                 if getattr(subject_config, 'subject_id', None) == subject_id:
+                    # Debug this specific subject config
+                    subject_debug = {
+                        "subject_id": subject_id,
+                        "has_test_point_titles": hasattr(subject_config, 'test_point_titles'),
+                        "test_point_titles_raw": getattr(subject_config, 'test_point_titles', []),
+                        "test_point_titles_type": type(getattr(subject_config, 'test_point_titles', []))
+                    }
+                    frappe.log_error(f"Subject config debug for {subject_id}: {subject_debug}", "DEBUG_SUBJECT_CONFIG")
+                    
                     return {
                         'test_point_enabled': getattr(subject_config, 'test_point_enabled', 0),
                         'test_point_titles': getattr(subject_config, 'test_point_titles', []),
@@ -186,7 +218,8 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         'comment_title_id': getattr(subject_config, 'comment_title_id', '')
                     }
         return {}
-    except Exception:
+    except Exception as e:
+        frappe.log_error(f"Error getting template config for {template_id}/{subject_id}: {str(e)}", "DEBUG_TEMPLATE_ERROR")
         return {}
 
 
@@ -278,6 +311,13 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                 "criteria_id": criteria_id,
                 "template_criteria": template_criteria
             }
+            
+            # Load and debug scale options
+            scale_options = _load_evaluation_scale_options(scale_id)
+            standardized_subject["_debug_scale_load"] = {
+                "scale_id": scale_id, 
+                "scale_options": scale_options
+            }
             if template_criteria:
                 # Map existing data to template criteria
                 existing_criteria = subject.get("criteria", {})
@@ -289,8 +329,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                         "value": existing_criteria.get(crit_id, "") if isinstance(existing_criteria, dict) else ""
                     })
             
-            # Load scale options from template
-            scale_options = _load_evaluation_scale_options(scale_id)
+      
         
         # Fallback to existing data structure if template doesn't have config
         if not criteria_list:
@@ -321,6 +360,12 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         if template_config.get('comment_title_enabled'):
             comment_title_id = template_config.get('comment_title_id', '')
             template_comments = _load_comment_title_options(comment_title_id)
+            
+            # Debug comments load
+            standardized_subject["_debug_comments_load"] = {
+                "comment_title_id": comment_title_id,
+                "template_comments": template_comments
+            }
             
             if template_comments:
                 # Map existing data to template comments
