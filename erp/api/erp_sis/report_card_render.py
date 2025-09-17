@@ -100,13 +100,10 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
                             **value
                         }
                         subjects.append(subject_obj)
-                    else:
-        
         
         # If we found subjects, add to transformed data
         if subjects:
             transformed["subjects"] = subjects
-        else:
     
     return transformed
 
