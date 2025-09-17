@@ -144,18 +144,54 @@ def _load_comment_title_options(comment_title_id: str) -> List[Dict[str, str]]:
 
 def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[str, Any]:
     """Get template configuration for a specific subject"""
+    debug_info = {
+        "function": "_get_template_config_for_subject",
+        "template_id": template_id,
+        "subject_id": subject_id,
+        "template_found": False,
+        "subjects_count": 0,
+        "subject_found": False,
+        "test_point_titles_raw": None,
+        "test_point_titles_processing": []
+    }
+    
     try:
         template_doc = frappe.get_doc("SIS Report Card Template", template_id)
+        debug_info["template_found"] = True
+        
         if hasattr(template_doc, 'subjects') and template_doc.subjects:
-            for subject_config in template_doc.subjects:
-                if getattr(subject_config, 'subject_id', None) == subject_id:
+            debug_info["subjects_count"] = len(template_doc.subjects)
+            
+            for i, subject_config in enumerate(template_doc.subjects):
+                config_subject_id = getattr(subject_config, 'subject_id', None)
+                debug_info[f"subject_{i}"] = {
+                    "subject_id": config_subject_id,
+                    "test_point_enabled": getattr(subject_config, 'test_point_enabled', 'NO_FIELD'),
+                    "has_test_point_titles": hasattr(subject_config, 'test_point_titles')
+                }
+                
+                if config_subject_id == subject_id:
+                    debug_info["subject_found"] = True
                     # Extract test point titles properly
                     test_point_titles = getattr(subject_config, 'test_point_titles', [])
+                    debug_info["test_point_titles_raw"] = {
+                        "type": str(type(test_point_titles)),
+                        "length": len(test_point_titles) if hasattr(test_point_titles, '__len__') else 'NO_LEN',
+                        "has_iter": hasattr(test_point_titles, '__iter__')
+                    }
                     
                     # Process test point titles extraction
                     if test_point_titles and hasattr(test_point_titles, '__iter__'):
                         titles_list = []
-                        for title_item in test_point_titles:
+                        for j, title_item in enumerate(test_point_titles):
+                            item_debug = {
+                                "index": j,
+                                "type": str(type(title_item)),
+                                "has_title": hasattr(title_item, 'title'),
+                                "title_value": getattr(title_item, 'title', 'NO_TITLE') if hasattr(title_item, 'title') else 'NO_TITLE_ATTR'
+                            }
+                            debug_info["test_point_titles_processing"].append(item_debug)
+                            
                             if hasattr(title_item, 'title') and title_item.title:
                                 titles_list.append({"title": title_item.title})
                             elif hasattr(title_item, 'name') and title_item.name:
@@ -166,18 +202,23 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         else:
                             test_point_titles = []
                     
-                    return {
+                    result = {
                         'test_point_enabled': getattr(subject_config, 'test_point_enabled', 0),
                         'test_point_titles': test_point_titles,
                         'rubric_enabled': getattr(subject_config, 'rubric_enabled', 0),
                         'criteria_id': getattr(subject_config, 'criteria_id', ''),
                         'scale_id': getattr(subject_config, 'scale_id', ''),
                         'comment_title_enabled': getattr(subject_config, 'comment_title_enabled', 0),
-                        'comment_title_id': getattr(subject_config, 'comment_title_id', '')
+                        'comment_title_id': getattr(subject_config, 'comment_title_id', ''),
+                        '_debug_extraction': debug_info
                     }
-        return {}
-    except Exception:
-        return {}
+                    return result
+        
+        debug_info["result"] = "subject_not_found"
+        return {'_debug_extraction': debug_info}
+    except Exception as e:
+        debug_info["exception"] = str(e)
+        return {'_debug_extraction': debug_info}
 
 
 def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, Any]:
