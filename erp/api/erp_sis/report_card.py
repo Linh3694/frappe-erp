@@ -307,41 +307,12 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
             for i, t in enumerate(sub.get("test_point_titles") or []):
                 if (t.get("title") or "").strip():
                     title = t.get("title").strip()
-                    # Try different approaches to append child table
-                    try:
-                        # Method 1: Standard append with parentfield
-                        child_data = {
-                            "title": title,
-                            "doctype": "SIS Report Card Test Point Title",
-                            "parentfield": "test_point_titles"
-                        }
-                        row.append("test_point_titles", child_data)
-                        debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_append_with_parentfield"})
-                    except Exception as append_error:
-                        # Method 2: Create child doc with proper parent linking
-                        try:
-                            child_doc = frappe.new_doc("SIS Report Card Test Point Title")
-                            child_doc.title = title
-                            child_doc.parentfield = "test_point_titles"
-                            child_doc.parenttype = "SIS Report Card Subject Config"
-                            # Don't set parent yet as row doesn't have name
-                            row.test_point_titles.append(child_doc)
-                            debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_direct_with_parent_fields", "append_error": str(append_error)})
-                        except Exception as direct_error:
-                            # Method 3: Simple dict with all required fields
-                            try:
-                                simple_child = {
-                                    "doctype": "SIS Report Card Test Point Title", 
-                                    "title": title,
-                                    "parentfield": "test_point_titles",
-                                    "parenttype": "SIS Report Card Subject Config"
-                                }
-                                if not hasattr(row, 'test_point_titles') or row.test_point_titles is None:
-                                    row.test_point_titles = []
-                                row.test_point_titles.append(simple_child)
-                                debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_simple_dict", "append_error": str(append_error), "direct_error": str(direct_error)})
-                            except Exception as simple_error:
-                                debug_test_points["processed"].append({"index": i, "title": title, "action": "failed_all_methods", "append_error": str(append_error), "direct_error": str(direct_error), "simple_error": str(simple_error)})
+                    # Use simple dict approach only - this works with Frappe auto-save
+                    simple_child = {
+                        "title": title
+                    }
+                    row.append("test_point_titles", simple_child)
+                    debug_test_points["processed"].append({"index": i, "title": title, "action": "added_via_simple_append"})
                 else:
                     debug_test_points["processed"].append({"index": i, "title": t.get("title", ""), "action": "skipped_empty"})
             
