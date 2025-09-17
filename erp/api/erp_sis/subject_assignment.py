@@ -724,6 +724,19 @@ def get_teachers_for_assignment():
             order_by="user_id asc"
         )
         
+        # Enrich with user full_name for display
+        for teacher in teachers:
+            if teacher.get("user_id"):
+                try:
+                    user_doc = frappe.get_cached_doc("User", teacher["user_id"])
+                    teacher["full_name"] = user_doc.get("full_name") or user_doc.get("first_name") or teacher["user_id"]
+                    teacher["email"] = user_doc.get("email")
+                except Exception:
+                    teacher["full_name"] = teacher["user_id"]
+                    teacher["email"] = teacher["user_id"]
+            else:
+                teacher["full_name"] = teacher["user_id"]
+        
         return list_response(teachers, "Teachers fetched successfully")
         
     except Exception as e:
