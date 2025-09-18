@@ -165,6 +165,35 @@ def get_all_teachers():
                     enhanced_teacher["subject_department_id"] = getattr(teacher_doc, 'subject_department_id', None)
                 except Exception:
                     pass
+
+                # Fetch multiple education stages from mapping table
+                try:
+                    education_stages = frappe.get_all(
+                        "SIS Teacher Education Stage",
+                        filters={
+                            "teacher_id": teacher.get('name'),
+                            "is_active": 1
+                        },
+                        fields=["education_stage_id"],
+                        order_by="creation asc"
+                    )
+                    enhanced_teacher["education_stages"] = education_stages
+                    
+                    # Create a display string for education stages
+                    if education_stages:
+                        stage_names = []
+                        for stage in education_stages:
+                            stage_name = frappe.db.get_value("SIS Education Stage", stage.education_stage_id, "title_vn")
+                            if stage_name:
+                                stage_names.append(stage_name)
+                        enhanced_teacher["education_stages_display"] = ", ".join(stage_names) if stage_names else ""
+                    else:
+                        enhanced_teacher["education_stages_display"] = ""
+                        
+                except Exception as e:
+                    frappe.logger().warning(f"Error fetching education stages for teacher {teacher.get('name')}: {str(e)}")
+                    enhanced_teacher["education_stages"] = []
+                    enhanced_teacher["education_stages_display"] = ""
                 enhanced_teachers.append(enhanced_teacher)
                 frappe.logger().info(f"👨‍🏫 Successfully processed teacher: {teacher.get('name')}")
 
