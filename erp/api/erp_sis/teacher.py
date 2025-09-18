@@ -369,6 +369,7 @@ def create_teacher():
         user_id = None
         gender = None
         education_stage_id = None
+        education_stage_ids = None  # Support multiple stages
         subject_department_id = None
         is_manager = None
 
@@ -377,6 +378,7 @@ def create_teacher():
             user_id = frappe.form_dict.get('user_id')
             gender = frappe.form_dict.get('gender')
             education_stage_id = frappe.form_dict.get('education_stage_id')
+            education_stage_ids = frappe.form_dict.get('education_stage_ids')  # Array of stage IDs
             subject_department_id = frappe.form_dict.get('subject_department_id')
             is_manager = frappe.form_dict.get('is_manager')
 
@@ -385,6 +387,7 @@ def create_teacher():
             user_id = frappe.local.form_dict.get('user_id')
             gender = gender or frappe.local.form_dict.get('gender')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
+            education_stage_ids = frappe.local.form_dict.get('education_stage_ids')
             subject_department_id = frappe.local.form_dict.get('subject_department_id')
             is_manager = is_manager or frappe.local.form_dict.get('is_manager')
 
@@ -488,18 +491,70 @@ def create_teacher():
                     "message": "Selected education stage does not exist or access denied"
                 }
         
-        # Create new teacher
+        # Process education stages - prioritize multiple stages over single stage
+        stages_to_assign = []
+        if education_stage_ids:
+            # Handle multiple stages (new feature)
+            if isinstance(education_stage_ids, str):
+                # If string, try to parse as JSON array
+                try:
+                    import json
+                    stages_to_assign = json.loads(education_stage_ids)
+                except:
+                    stages_to_assign = [education_stage_ids] if education_stage_ids else []
+            elif isinstance(education_stage_ids, list):
+                stages_to_assign = education_stage_ids
+            else:
+                stages_to_assign = [str(education_stage_ids)] if education_stage_ids else []
+        elif education_stage_id:
+            # Fallback to single stage (backward compatibility)
+            stages_to_assign = [education_stage_id]
+        
+        # Validate all education stages exist
+        for stage_id in stages_to_assign:
+            if stage_id:
+                stage_exists = frappe.db.exists(
+                    "SIS Education Stage",
+                    {
+                        "name": stage_id,
+                        "campus_id": campus_id
+                    }
+                )
+                if not stage_exists:
+                    return error_response(
+                        message=f"Education stage '{stage_id}' does not exist or access denied",
+                        code="EDUCATION_STAGE_NOT_FOUND"
+                    )
+
+        # Create new teacher (keep first stage for backward compatibility)
         teacher_doc = frappe.get_doc({
             "doctype": "SIS Teacher",
             "user_id": user_id,
             "gender": gender,
-            "education_stage_id": education_stage_id,
+            "education_stage_id": stages_to_assign[0] if stages_to_assign else None,
             "subject_department_id": subject_department_id,
             "is_manager": is_manager,
             "campus_id": campus_id
         })
         
         teacher_doc.insert()
+        
+        # Create education stage mappings
+        created_mappings = []
+        for stage_id in stages_to_assign:
+            if stage_id:
+                mapping_doc = frappe.get_doc({
+                    "doctype": "SIS Teacher Education Stage",
+                    "teacher_id": teacher_doc.name,
+                    "education_stage_id": stage_id,
+                    "is_active": 1
+                })
+                mapping_doc.insert()
+                created_mappings.append({
+                    "education_stage_id": stage_id,
+                    "mapping_id": mapping_doc.name
+                })
+        
         frappe.db.commit()
         
         # Return the created data - follow Education Stage pattern
@@ -510,6 +565,7 @@ def create_teacher():
                 "user_id": teacher_doc.user_id,
                 "gender": getattr(teacher_doc, 'gender', None),
                 "education_stage_id": teacher_doc.education_stage_id,
+                "education_stages": created_mappings,  # New: multiple stages
                 "subject_department_id": getattr(teacher_doc, 'subject_department_id', None),
                 "is_manager": getattr(teacher_doc, 'is_manager', False),
                 "campus_id": teacher_doc.campus_id
