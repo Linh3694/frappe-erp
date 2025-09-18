@@ -49,6 +49,25 @@ def _resolve_actual_subject_title(actual_subject_id: str) -> str:
         return None
 
 
+def _resolve_homeroom_teacher_name(teacher_id: str) -> str:
+    """Resolve homeroom teacher name from teacher ID"""
+    try:
+        if not teacher_id:
+            return ""
+        
+        # Get teacher name from SIS Teacher + User
+        teacher_data = frappe.db.sql("""
+            SELECT COALESCE(NULLIF(u.full_name, ''), t.user_id, t.name) as teacher_name
+            FROM `tabSIS Teacher` t
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
+            WHERE t.name = %s
+            LIMIT 1
+        """, (teacher_id,), as_dict=True)
+        
+        return teacher_data[0]['teacher_name'] if teacher_data else teacher_id
+    except Exception as e:
+        return teacher_id  # Fallback to teacher_id
+
 def _resolve_teacher_name(actual_subject_id: str, class_id: str) -> str:
     """Resolve teacher name from SIS Subject Assignment"""
     try:
@@ -379,8 +398,6 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                         "value": existing_criteria.get(crit_id, "") if isinstance(existing_criteria, dict) else ""
                     })
             
-      
-        
         # Fallback to existing data structure if template doesn't have config
         if not criteria_list:
             existing_criteria = subject.get("criteria", {})
@@ -495,7 +512,6 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         "show_scores": getattr(form, "scores_enabled", True),
         "show_homeroom": getattr(form, "homeroom_enabled", True), 
         "show_subject_eval": getattr(form, "subject_eval_enabled", True),
-        # Additional configs with defaults
         "show_test_scores": True,  # Can be configured per subject in template
         "show_rubric": True,
         "show_comments": True,
@@ -1206,10 +1222,10 @@ def get_report_data(report_id: Optional[str] = None):
             vice_homeroom_teacher_name = ""
             
             if getattr(klass, "homeroom_teacher", ""):
-                homeroom_teacher_name = _resolve_teacher_name(klass.homeroom_teacher)
+                homeroom_teacher_name = _resolve_homeroom_teacher_name(klass.homeroom_teacher)
             
             if getattr(klass, "vice_homeroom_teacher", ""):
-                vice_homeroom_teacher_name = _resolve_teacher_name(klass.vice_homeroom_teacher)
+                vice_homeroom_teacher_name = _resolve_homeroom_teacher_name(klass.vice_homeroom_teacher)
             
             data.setdefault("class", {})
             data["class"].update({
