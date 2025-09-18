@@ -254,17 +254,7 @@ def create_subject():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        # Check if subject title already exists for this campus
-        existing = frappe.db.exists(
-            "SIS Subject",
-            {
-                "title": title,
-                "campus_id": campus_id
-            }
-        )
-        
-        if existing:
-            frappe.throw(_(f"Subject with title '{title}' already exists"))
+        # Allow duplicate title - unique constraint removed
         
         # Verify education stage exists and belongs to same campus
         education_stage_exists = frappe.db.exists(
@@ -434,21 +424,7 @@ def update_subject():
 
 
         if title and title != subject_doc.title:
-            # Check for duplicate subject title
-            existing = frappe.db.exists(
-                "SIS Subject",
-                {
-                    "title": title,
-                    "campus_id": campus_id,
-                    "name": ["!=", subject_id]
-                }
-            )
-            if existing:
-                return {
-                    "success": False,
-                    "data": {},
-                    "message": f"Subject with title '{title}' already exists"
-                }
+            # Allow duplicate title - unique constraint removed
             subject_doc.title = title
         
         if education_stage and education_stage != subject_doc.education_stage:
