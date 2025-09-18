@@ -404,8 +404,58 @@ def create_subject_assignment():
             }, f"Subject assignments created successfully. {len(assignments_with_sync)} assignments processed for timetable sync")
         
     except Exception as e:
-        frappe.log_error(f"Error creating subject assignment: {str(e)}")
-        frappe.throw(_(f"Error creating subject assignment: {str(e)}"))
+        # Check if any assignments were actually created before the error
+        if created_names:
+            # Assignments were created successfully, but something else failed (likely timetable sync)
+            # Don't throw error, just log warning and return success with the created assignments
+            frappe.log_error(f"Subject assignments created successfully but post-processing failed: {str(e)}")
+            
+            # Get created data with display names (same logic as success case)
+            created_data = frappe.db.sql("""
+                SELECT
+                    sa.name,
+                    sa.teacher_id,
+                    sa.actual_subject_id,
+                    sa.class_id,
+                    sa.campus_id,
+                    COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
+                    s.title_vn as subject_title,
+                    c.title as class_title,
+                    c.education_grade as education_grade_id,
+                    eg.title_vn as education_grade_name
+                FROM `tabSIS Subject Assignment` sa
+                LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+                LEFT JOIN `tabUser` u ON t.user_id = u.name
+                LEFT JOIN `tabSIS Actual Subject` s ON sa.actual_subject_id = s.name
+                LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
+                LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                WHERE sa.name in %s
+            """, (tuple(created_names),), as_dict=True)
+            
+            # Return success response with warning about post-processing
+            frappe.msgprint(_("Subject assignment created successfully"))
+            if created_data and len(created_data) == 1:
+                return single_item_response({
+                    "name": created_data[0].name,
+                    "teacher_id": created_data[0].teacher_id,
+                    "actual_subject_id": created_data[0].actual_subject_id,
+                    "class_id": created_data[0].class_id,
+                    "campus_id": created_data[0].campus_id,
+                    "teacher_name": created_data[0].teacher_name,
+                    "subject_title": created_data[0].subject_title,
+                    "class_title": created_data[0].class_title,
+                    "post_processing_warning": str(e)
+                }, f"Subject assignment created successfully. Warning: {str(e)}")
+            else:
+                return list_response({
+                    "assignments": created_data,
+                    "timetable_sync_results": assignments_with_sync,
+                    "post_processing_warning": str(e)
+                }, f"Subject assignments created successfully. Warning: {str(e)}")
+        else:
+            # No assignments were created, this is a real error
+            frappe.log_error(f"Error creating subject assignment: {str(e)}")
+            frappe.throw(_(f"Error creating subject assignment: {str(e)}"))
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
