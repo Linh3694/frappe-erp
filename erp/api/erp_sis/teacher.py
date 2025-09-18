@@ -376,6 +376,24 @@ def get_teacher_by_id(teacher_id=None):
             except Exception as e:
                 frappe.logger().error(f"👨‍🏫 Error enriching teacher {teacher.name} with User data: {str(e)}")
 
+        # Fetch multiple education stages from mapping table
+        try:
+            education_stages = frappe.get_all(
+                "SIS Teacher Education Stage",
+                filters={
+                    "teacher_id": teacher.name,
+                    "is_active": 1
+                },
+                fields=["education_stage_id", "name"],
+                order_by="creation asc"
+            )
+            enriched_data["education_stages"] = education_stages
+            frappe.logger().info(f"👨‍🏫 Found {len(education_stages)} education stages for teacher {teacher.name}")
+            
+        except Exception as e:
+            frappe.logger().warning(f"👨‍🏫 Error fetching education stages for teacher {teacher.name}: {str(e)}")
+            enriched_data["education_stages"] = []
+
         return single_item_response(
             data=enriched_data,
             message="Teacher fetched successfully"
