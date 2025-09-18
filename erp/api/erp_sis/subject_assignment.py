@@ -957,6 +957,97 @@ def get_education_grades_for_teacher():
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def get_classes_for_teacher():
+    """Get classes for teacher selection based on teacher's education stages.
+    Pass teacher_id and school_year_id to filter classes by teacher's education stages.
+    """
+    try:
+        # Get current user's campus information from roles
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            campus_id = "campus-1"
+
+        # Get parameters
+        teacher_id = frappe.request.args.get('teacher_id') or frappe.form_dict.get('teacher_id')
+        school_year_id = frappe.request.args.get('school_year_id') or frappe.form_dict.get('school_year_id')
+        
+        if not teacher_id:
+            return validation_error_response(
+                message="Teacher ID is required",
+                errors={"teacher_id": ["Teacher ID is required"]}
+            )
+            
+        if not school_year_id:
+            return validation_error_response(
+                message="School Year ID is required", 
+                errors={"school_year_id": ["School Year ID is required"]}
+            )
+
+        # Get teacher's education stages from mapping table
+        teacher_stages = frappe.get_all(
+            "SIS Teacher Education Stage",
+            filters={
+                "teacher_id": teacher_id,
+                "is_active": 1
+            },
+            fields=["education_stage_id"]
+        )
+        
+        # Get education grades that belong to teacher's education stages
+        grade_filters = {"campus_id": campus_id}
+        
+        if teacher_stages:
+            # Use multiple education stages
+            stage_ids = [stage.education_stage_id for stage in teacher_stages]
+            grade_filters["education_stage_id"] = ["in", stage_ids]
+        else:
+            # Fallback to single education_stage_id for backward compatibility
+            teacher_stage = frappe.db.get_value("SIS Teacher", teacher_id, "education_stage_id")
+            if not teacher_stage:
+                return list_response([], "No classes found for this teacher")
+            grade_filters["education_stage_id"] = teacher_stage
+
+        # Get education grades for teacher's stages
+        education_grades = frappe.get_all(
+            "SIS Education Grade",
+            fields=["name"],
+            filters=grade_filters
+        )
+        
+        if not education_grades:
+            return list_response([], "No education grades found for teacher's stages")
+        
+        # Get grade IDs
+        grade_ids = [grade.name for grade in education_grades]
+        
+        # Get classes filtered by education grades and school year
+        class_filters = {
+            "campus_id": campus_id,
+            "school_year_id": school_year_id,
+            "education_grade": ["in", grade_ids]
+        }
+        
+        classes = frappe.get_all(
+            "SIS Class",
+            fields=[
+                "name",
+                "title",
+                "education_grade",
+                "school_year_id"
+            ],
+            filters=class_filters,
+            order_by="title asc"
+        )
+
+        return list_response(classes, "Classes fetched successfully for teacher")
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching classes for teacher: {str(e)}")
+        return error_response(f"Error fetching classes for teacher: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_classes_for_education_grade():
     """Get classes for education grade selection.
     Pass education_grade_id to filter classes by education_grade field.
