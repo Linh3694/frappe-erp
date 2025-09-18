@@ -213,18 +213,32 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                     if test_point_titles and hasattr(test_point_titles, '__iter__'):
                         titles_list = []
                         for j, title_item in enumerate(test_point_titles):
-                            item_debug = {
-                                "index": j,
-                                "type": str(type(title_item)),
-                                "has_title": hasattr(title_item, 'title'),
-                                "title_value": getattr(title_item, 'title', 'NO_TITLE') if hasattr(title_item, 'title') else 'NO_TITLE_ATTR'
-                            }
+                            # Handle both dict (from fallback) and Frappe object formats
+                            title_value = None
+                            if isinstance(title_item, dict):
+                                title_value = title_item.get('title', '')
+                                item_debug = {
+                                    "index": j,
+                                    "type": str(type(title_item)),
+                                    "is_dict": True,
+                                    "has_title": 'title' in title_item,
+                                    "title_value": title_value
+                                }
+                            else:
+                                # Frappe object
+                                title_value = getattr(title_item, 'title', '') if hasattr(title_item, 'title') else getattr(title_item, 'name', '')
+                                item_debug = {
+                                    "index": j,
+                                    "type": str(type(title_item)),
+                                    "is_dict": False,
+                                    "has_title": hasattr(title_item, 'title'),
+                                    "title_value": title_value
+                                }
+                            
                             debug_info["test_point_titles_processing"].append(item_debug)
                             
-                            if hasattr(title_item, 'title') and title_item.title:
-                                titles_list.append({"title": title_item.title})
-                            elif hasattr(title_item, 'name') and title_item.name:
-                                titles_list.append({"title": title_item.name})
+                            if title_value:
+                                titles_list.append({"title": title_value})
                         
                         if titles_list:
                             test_point_titles = titles_list
