@@ -56,6 +56,38 @@ def get_all_subject_assignments():
             ORDER BY sa.teacher_id asc
         """, (campus_id,), as_dict=True)
         
+        # Enrich with teacher's education stages
+        for assignment in subject_assignments_data:
+            if assignment.get('teacher_id'):
+                try:
+                    # Get education stages for this teacher
+                    teacher_stages = frappe.get_all(
+                        "SIS Teacher Education Stage",
+                        filters={
+                            "teacher_id": assignment['teacher_id'],
+                            "is_active": 1
+                        },
+                        fields=["education_stage_id"],
+                        order_by="creation asc"
+                    )
+                    
+                    # Create a display string for education stages
+                    if teacher_stages:
+                        stage_names = []
+                        for stage in teacher_stages:
+                            stage_name = frappe.db.get_value("SIS Education Stage", stage.education_stage_id, "title_vn")
+                            if stage_name:
+                                stage_names.append(stage_name)
+                        assignment["teacher_education_stages_display"] = ", ".join(stage_names) if stage_names else ""
+                    else:
+                        assignment["teacher_education_stages_display"] = ""
+                        
+                except Exception as e:
+                    frappe.logger().warning(f"Error fetching education stages for teacher {assignment['teacher_id']}: {str(e)}")
+                    assignment["teacher_education_stages_display"] = ""
+            else:
+                assignment["teacher_education_stages_display"] = ""
+        
         return list_response(subject_assignments_data, "Subject assignments fetched successfully")
         
     except Exception as e:
@@ -756,7 +788,7 @@ def get_teachers_for_assignment():
             order_by="user_id asc"
         )
         
-        # Enrich with user full_name for display
+        # Enrich with user full_name and education stages for display
         for teacher in teachers:
             if teacher.get("user_id"):
                 try:
@@ -768,6 +800,35 @@ def get_teachers_for_assignment():
                     teacher["email"] = teacher["user_id"]
             else:
                 teacher["full_name"] = teacher["user_id"]
+            
+            # Fetch multiple education stages from mapping table
+            try:
+                education_stages = frappe.get_all(
+                    "SIS Teacher Education Stage",
+                    filters={
+                        "teacher_id": teacher["name"],
+                        "is_active": 1
+                    },
+                    fields=["education_stage_id"],
+                    order_by="creation asc"
+                )
+                teacher["education_stages"] = education_stages
+                
+                # Create a display string for education stages
+                if education_stages:
+                    stage_names = []
+                    for stage in education_stages:
+                        stage_name = frappe.db.get_value("SIS Education Stage", stage.education_stage_id, "title_vn")
+                        if stage_name:
+                            stage_names.append(stage_name)
+                    teacher["education_stages_display"] = ", ".join(stage_names) if stage_names else ""
+                else:
+                    teacher["education_stages_display"] = ""
+                    
+            except Exception as e:
+                frappe.logger().warning(f"Error fetching education stages for teacher {teacher['name']}: {str(e)}")
+                teacher["education_stages"] = []
+                teacher["education_stages_display"] = ""
         
         return list_response(teachers, "Teachers fetched successfully")
         
