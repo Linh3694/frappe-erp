@@ -206,20 +206,7 @@ def create_actual_subject():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        # Check if actual subject title already exists for this campus
-        existing = frappe.db.exists(
-            "SIS Actual Subject",
-            {
-                "title_vn": title_vn,
-                "campus_id": campus_id
-            }
-        )
-        
-        if existing:
-            return error_response(
-                message=f"Actual subject with title '{title_vn}' already exists",
-                code="ACTUAL_SUBJECT_EXISTS"
-            )
+        # Allow duplicate title_vn - unique constraint removed
         
         # Create new actual subject
         actual_subject_doc = frappe.get_doc({
@@ -316,20 +303,7 @@ def update_actual_subject():
 
 
         if title_vn and title_vn != actual_subject_doc.title_vn:
-            # Check for duplicate actual subject title
-            existing = frappe.db.exists(
-                "SIS Actual Subject",
-                {
-                    "title_vn": title_vn,
-                    "campus_id": campus_id,
-                    "name": ["!=", subject_id]
-                }
-            )
-            if existing:
-                return error_response(
-                    message=f"Actual subject with title '{title_vn}' already exists",
-                    code="ACTUAL_SUBJECT_EXISTS"
-                )
+            # Allow duplicate title_vn - unique constraint removed
             actual_subject_doc.title_vn = title_vn
         
         if title_en and title_en != actual_subject_doc.title_en:

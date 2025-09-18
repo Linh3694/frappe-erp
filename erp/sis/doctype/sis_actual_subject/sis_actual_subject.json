@@ -42,7 +42,6 @@
    "fieldtype": "Data",
    "label": "Actual Subject Name (VN)",
    "reqd": 1,
-   "unique": 1,
    "in_list_view": 1
   },
   {
