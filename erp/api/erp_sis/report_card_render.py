@@ -625,7 +625,7 @@ def get_report_data(report_id: Optional[str] = None):
             payload = _payload()
             report_id = payload.get("report_id")
         if not report_id:
-            return validation_error_response(message="report_id is required")
+            return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
         
         try:
             report = _load_report(report_id)

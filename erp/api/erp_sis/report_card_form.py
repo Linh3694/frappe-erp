@@ -125,7 +125,7 @@ def create_form():
         campus_id = _current_campus_id()
         exists = frappe.db.exists("SIS Report Card Form", {"code": (data.get("code") or "").strip(), "campus_id": campus_id})
         if exists:
-            return validation_error_response(message="Form code already exists")
+            return validation_error_response(message="Form code already exists", errors={"code": ["Already exists"]})
         doc = frappe.get_doc({
             "doctype": "SIS Report Card Form",
             "code": (data.get("code") or "").strip(),
@@ -241,7 +241,7 @@ def debug_form_data(form_id: str = None):
     try:
         form_id = form_id or (frappe.local.form_dict or {}).get("form_id") or (_get_payload().get("form_id"))
         if not form_id:
-            return validation_error_response(message="Form ID is required")
+            return validation_error_response(message="Form ID is required", errors={"form_id": ["Required"]})
             
         doc = frappe.get_doc("SIS Report Card Form", form_id)
         if doc.campus_id != _current_campus_id():

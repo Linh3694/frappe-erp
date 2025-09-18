@@ -450,7 +450,7 @@ def create_template():
             },
         )
         if existing:
-            return validation_error_response(message=_("Template already exists for this school year and semester"))
+            return validation_error_response(message=_("Template already exists for this school year and semester"), errors={"template": ["Already exists"]})
 
         # Create doc
         doc = frappe.get_doc(
