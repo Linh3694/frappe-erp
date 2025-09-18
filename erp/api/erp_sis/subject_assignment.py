@@ -779,7 +779,8 @@ def get_teachers_for_assignment():
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_subjects_for_assignment():
     """Get actual subjects for dropdown selection.
-    Optional: pass teacher_id to filter by teacher's education_stage_id.
+    Optional: pass teacher_id to filter by teacher's education stages (supports multiple stages).
+    Falls back to single education_stage_id for backward compatibility.
     """
     try:
         # Get current user's campus information from roles
@@ -789,12 +790,28 @@ def get_subjects_for_assignment():
             campus_id = "campus-1"
 
         filters = {"campus_id": campus_id}
-        # If teacher_id provided, restrict subjects by teacher's education stage
+        # If teacher_id provided, restrict subjects by teacher's education stages
         teacher_id = frappe.request.args.get('teacher_id') or frappe.form_dict.get('teacher_id')
         if teacher_id:
-            teacher_stage = frappe.db.get_value("SIS Teacher", teacher_id, "education_stage_id")
-            if teacher_stage:
-                filters["education_stage_id"] = teacher_stage
+            # Get all education stages for this teacher from mapping table
+            teacher_stages = frappe.get_all(
+                "SIS Teacher Education Stage",
+                filters={
+                    "teacher_id": teacher_id,
+                    "is_active": 1
+                },
+                fields=["education_stage_id"]
+            )
+            
+            # If teacher has assigned stages, filter subjects by those stages
+            if teacher_stages:
+                stage_ids = [stage.education_stage_id for stage in teacher_stages]
+                filters["education_stage_id"] = ["in", stage_ids]
+            else:
+                # Fallback to single education_stage_id for backward compatibility
+                teacher_stage = frappe.db.get_value("SIS Teacher", teacher_id, "education_stage_id")
+                if teacher_stage:
+                    filters["education_stage_id"] = teacher_stage
 
         subjects = frappe.get_all(
             "SIS Actual Subject",
@@ -816,7 +833,8 @@ def get_subjects_for_assignment():
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_education_grades_for_teacher():
     """Get education grades for teacher selection.
-    Pass teacher_id to filter by teacher's education_stage_id.
+    Pass teacher_id to filter by teacher's education stages (supports multiple stages).
+    Falls back to single education_stage_id for backward compatibility.
     """
     try:
         # Get current user's campus information from roles
@@ -833,15 +851,28 @@ def get_education_grades_for_teacher():
                 errors={"teacher_id": ["Teacher ID is required"]}
             )
 
-        # Get teacher's education stage
-        teacher_stage = frappe.db.get_value("SIS Teacher", teacher_id, "education_stage_id")
-        if not teacher_stage:
-            return list_response([], "No education grades found for this teacher")
-
-        filters = {
-            "campus_id": campus_id,
-            "education_stage_id": teacher_stage
-        }
+        # Get teacher's education stages from mapping table
+        teacher_stages = frappe.get_all(
+            "SIS Teacher Education Stage",
+            filters={
+                "teacher_id": teacher_id,
+                "is_active": 1
+            },
+            fields=["education_stage_id"]
+        )
+        
+        filters = {"campus_id": campus_id}
+        
+        if teacher_stages:
+            # Use multiple education stages
+            stage_ids = [stage.education_stage_id for stage in teacher_stages]
+            filters["education_stage_id"] = ["in", stage_ids]
+        else:
+            # Fallback to single education_stage_id for backward compatibility
+            teacher_stage = frappe.db.get_value("SIS Teacher", teacher_id, "education_stage_id")
+            if not teacher_stage:
+                return list_response([], "No education grades found for this teacher")
+            filters["education_stage_id"] = teacher_stage
 
         education_grades = frappe.get_all(
             "SIS Education Grade",
