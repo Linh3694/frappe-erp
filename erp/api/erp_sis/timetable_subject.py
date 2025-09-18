@@ -155,17 +155,6 @@ def create_timetable_subject():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        # Check if timetable subject title already exists for this campus
-        existing = frappe.db.exists(
-            "SIS Timetable Subject",
-            {
-                "title_vn": title_vn,
-                "campus_id": campus_id
-            }
-        )
-        
-        if existing:
-            frappe.throw(_(f"Timetable subject with title '{title_vn}' already exists"))
         
         # Create new timetable subject
         timetable_subject_doc = frappe.get_doc({
@@ -256,16 +245,7 @@ def update_timetable_subject():
 
         if title_vn and title_vn != timetable_subject_doc.title_vn:
             # Check for duplicate timetable subject title
-            existing = frappe.db.exists(
-                "SIS Timetable Subject",
-                {
-                    "title_vn": title_vn,
-                    "campus_id": campus_id,
-                    "name": ["!=", subject_id]
-                }
-            )
-            if existing:
-                return validation_error_response({"title_vn": [f"Timetable subject with title '{title_vn}' already exists"]})
+            # Allow duplicate title_vn - unique constraint removed
             timetable_subject_doc.title_vn = title_vn
         
         if title_en and title_en != timetable_subject_doc.title_en:
