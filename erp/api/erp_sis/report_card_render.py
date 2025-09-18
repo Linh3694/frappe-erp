@@ -50,21 +50,35 @@ def _resolve_actual_subject_title(actual_subject_id: str) -> str:
 
 
 def _resolve_homeroom_teacher_name(teacher_id: str) -> str:
-    """Resolve homeroom teacher name from teacher ID"""
+    """Resolve homeroom teacher name from teacher ID with proper Vietnamese name format"""
     try:
         if not teacher_id:
             return ""
         
         # Get teacher name from SIS Teacher + User
         teacher_data = frappe.db.sql("""
-            SELECT COALESCE(NULLIF(u.full_name, ''), t.user_id, t.name) as teacher_name
+            SELECT COALESCE(NULLIF(u.full_name, ''), t.user_id, t.name) as teacher_name,
+                   u.first_name, u.last_name
             FROM `tabSIS Teacher` t
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE t.name = %s
             LIMIT 1
         """, (teacher_id,), as_dict=True)
         
-        return teacher_data[0]['teacher_name'] if teacher_data else teacher_id
+        if not teacher_data:
+            return teacher_id
+            
+        # Format Vietnamese name properly: Last Name + First Name  
+        first_name = teacher_data[0].get('first_name', '') or ''
+        last_name = teacher_data[0].get('last_name', '') or ''
+        
+        if first_name and last_name:
+            # Vietnamese format: Last name + First name (Nguyễn Hải + Linh = "Nguyễn Hải Linh")
+            return f"{last_name.strip()} {first_name.strip()}".strip()
+        else:
+            # Fallback to full_name if first/last not available
+            return teacher_data[0]['teacher_name'] or teacher_id
+            
     except Exception as e:
         return teacher_id  # Fallback to teacher_id
 
