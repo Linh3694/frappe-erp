@@ -590,6 +590,7 @@ def update_teacher():
         user_id = None
         gender = None
         education_stage_id = None
+        education_stage_ids = None  # Support multiple stages
         subject_department_id = None
         is_manager = None
 
@@ -599,6 +600,7 @@ def update_teacher():
             user_id = frappe.form_dict.get('user_id')
             gender = frappe.form_dict.get('gender')
             education_stage_id = frappe.form_dict.get('education_stage_id')
+            education_stage_ids = frappe.form_dict.get('education_stage_ids')  # Array of stage IDs
             subject_department_id = frappe.form_dict.get('subject_department_id')
             is_manager = frappe.form_dict.get('is_manager')
 
@@ -608,6 +610,7 @@ def update_teacher():
             user_id = frappe.local.form_dict.get('user_id')
             gender = gender or frappe.local.form_dict.get('gender')
             education_stage_id = frappe.local.form_dict.get('education_stage_id')
+            education_stage_ids = frappe.local.form_dict.get('education_stage_ids')
             subject_department_id = frappe.local.form_dict.get('subject_department_id')
             is_manager = is_manager or frappe.local.form_dict.get('is_manager')
 
@@ -626,6 +629,7 @@ def update_teacher():
                     user_id = parsed_data.get('user_id', [None])[0]
                     gender = gender or parsed_data.get('gender', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
+                    education_stage_ids = parsed_data.get('education_stage_ids', [])
                     subject_department_id = parsed_data.get('subject_department_id', [None])[0]
                     is_manager = is_manager or parsed_data.get('is_manager', [None])[0]
             except Exception:
@@ -646,6 +650,7 @@ def update_teacher():
                     user_id = json_data.get('user_id')
                     gender = gender or json_data.get('gender')
                     education_stage_id = json_data.get('education_stage_id')
+                    education_stage_ids = json_data.get('education_stage_ids', [])
                     subject_department_id = json_data.get('subject_department_id')
                     is_manager = is_manager or json_data.get('is_manager')
             except Exception:
@@ -751,6 +756,88 @@ def update_teacher():
 
             teacher_doc.education_stage_id = education_stage_id
         
+        # Process multiple education stages if provided
+        if education_stage_ids is not None:
+            # Parse education_stage_ids if it's a string
+            stages_to_assign = []
+            if isinstance(education_stage_ids, str):
+                # If string, try to parse as JSON array
+                try:
+                    import json
+                    stages_to_assign = json.loads(education_stage_ids)
+                except:
+                    stages_to_assign = [education_stage_ids] if education_stage_ids else []
+            elif isinstance(education_stage_ids, list):
+                stages_to_assign = education_stage_ids
+            else:
+                stages_to_assign = [str(education_stage_ids)] if education_stage_ids else []
+            
+            # Validate all education stages exist
+            for stage_id in stages_to_assign:
+                if stage_id:
+                    stage_exists = frappe.db.exists(
+                        "SIS Education Stage",
+                        {
+                            "name": stage_id,
+                            "campus_id": campus_id
+                        }
+                    )
+                    if not stage_exists:
+                        return error_response(
+                            message=f"Education stage '{stage_id}' does not exist or access denied",
+                            code="EDUCATION_STAGE_NOT_FOUND"
+                        )
+            
+            # Update education stage mappings
+            # First, deactivate all current mappings
+            existing_mappings = frappe.get_all(
+                "SIS Teacher Education Stage",
+                filters={
+                    "teacher_id": teacher_id,
+                    "is_active": 1
+                },
+                fields=["name"]
+            )
+            
+            for mapping in existing_mappings:
+                frappe.db.set_value("SIS Teacher Education Stage", mapping.name, "is_active", 0)
+            
+            # Then create new mappings for selected stages
+            updated_mappings = []
+            for stage_id in stages_to_assign:
+                if stage_id:
+                    # Check if mapping already exists (inactive)
+                    existing_mapping = frappe.db.exists(
+                        "SIS Teacher Education Stage",
+                        {
+                            "teacher_id": teacher_id,
+                            "education_stage_id": stage_id
+                        }
+                    )
+                    
+                    if existing_mapping:
+                        # Reactivate existing mapping
+                        frappe.db.set_value("SIS Teacher Education Stage", existing_mapping, "is_active", 1)
+                        updated_mappings.append({
+                            "education_stage_id": stage_id,
+                            "mapping_id": existing_mapping,
+                            "action": "reactivated"
+                        })
+                    else:
+                        # Create new mapping
+                        mapping_doc = frappe.get_doc({
+                            "doctype": "SIS Teacher Education Stage",
+                            "teacher_id": teacher_id,
+                            "education_stage_id": stage_id,
+                            "is_active": 1
+                        })
+                        mapping_doc.insert()
+                        updated_mappings.append({
+                            "education_stage_id": stage_id,
+                            "mapping_id": mapping_doc.name,
+                            "action": "created"
+                        })
+        
         # Update gender if provided
         if gender is not None:
             teacher_doc.gender = gender
@@ -779,12 +866,23 @@ def update_teacher():
         teacher_doc.save()
         frappe.db.commit()
         
+        # Get current education stage mappings for response
+        current_mappings = frappe.get_all(
+            "SIS Teacher Education Stage",
+            filters={
+                "teacher_id": teacher_id,
+                "is_active": 1
+            },
+            fields=["education_stage_id", "name"]
+        )
+        
         return single_item_response(
             data={
                 "name": teacher_doc.name,
                 "user_id": teacher_doc.user_id,
                 "gender": getattr(teacher_doc, 'gender', None),
                 "education_stage_id": teacher_doc.education_stage_id,
+                "education_stages": current_mappings,  # New: multiple stages
                 "subject_department_id": getattr(teacher_doc, 'subject_department_id', None),
                 "is_manager": getattr(teacher_doc, 'is_manager', False),
                 "campus_id": teacher_doc.campus_id
