@@ -1204,12 +1204,23 @@ def get_report_data(report_id: Optional[str] = None):
         # Enrich data with student & class info for bindings
         try:
             crm = frappe.get_doc("CRM Student", report.student_id)
+            
+            # Map gender to Vietnamese
+            gender_raw = getattr(crm, "gender", "")
+            gender_display = ""
+            if gender_raw == "male":
+                gender_display = "Nam"
+            elif gender_raw == "female":
+                gender_display = "Nữ"
+            else:
+                gender_display = gender_raw
+            
             data.setdefault("student", {})
             data["student"].update({
                 "full_name": getattr(crm, "student_name", None) or getattr(crm, "full_name", None) or getattr(crm, "name", ""),
                 "code": getattr(crm, "student_code", ""),
                 "dob": getattr(crm, "dob", ""),
-                "gender": getattr(crm, "gender", ""),
+                "gender": gender_display,
             })
         except Exception:
             pass
