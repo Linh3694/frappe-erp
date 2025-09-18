@@ -277,7 +277,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             "test_point_enabled": template_config.get('test_point_enabled', 'NOT_FOUND'),
             "test_point_titles": template_config.get('test_point_titles', 'NOT_FOUND'),
             "test_point_titles_type": str(type(template_config.get('test_point_titles', None))),
-            "test_point_titles_len": len(template_config.get('test_point_titles', [])) if isinstance(template_config.get('test_point_titles'), list) else 'NOT_LIST'
+            "test_point_titles_len": len(template_config.get('test_point_titles', [])) if isinstance(template_config.get('test_point_titles'), list) else 'NOT_LIST',
+            "_debug_extraction": template_config.get('_debug_extraction', 'NO_EXTRACTION_INFO')
         }
         
         # === TEST SCORES - Load from template structure ===
