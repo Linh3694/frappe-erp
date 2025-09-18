@@ -172,6 +172,7 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                 
                 if config_subject_id == subject_id:
                     debug_info["subject_found"] = True
+                    
                     # Extract test point titles properly
                     test_point_titles = getattr(subject_config, 'test_point_titles', [])
                     debug_info["test_point_titles_raw"] = {
@@ -179,6 +180,34 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         "length": len(test_point_titles) if hasattr(test_point_titles, '__len__') else 'NO_LEN',
                         "has_iter": hasattr(test_point_titles, '__iter__')
                     }
+                    
+                    # FALLBACK: If Frappe didn't load nested child table, query DB directly
+                    if not test_point_titles or len(test_point_titles) == 0:
+                        try:
+                            # Query database directly for test point titles
+                            direct_query_titles = frappe.db.sql("""
+                                SELECT title 
+                                FROM `tabSIS Report Card Test Point Title` 
+                                WHERE parent = %s 
+                                AND parenttype = 'SIS Report Card Subject Config'
+                                ORDER BY idx
+                            """, (subject_config.name,), as_dict=True)
+                            
+                            debug_info["direct_db_query"] = {
+                                "parent_name": subject_config.name,
+                                "query_result_count": len(direct_query_titles),
+                                "query_results": direct_query_titles[:5] if direct_query_titles else []  # First 5 for debug
+                            }
+                            
+                            if direct_query_titles:
+                                test_point_titles = [{"title": row.title} for row in direct_query_titles]
+                                debug_info["fallback_loaded"] = True
+                            else:
+                                debug_info["fallback_loaded"] = False
+                        except Exception as db_error:
+                            debug_info["db_query_error"] = str(db_error)
+                    else:
+                        debug_info["frappe_loaded_ok"] = True
                     
                     # Process test point titles extraction
                     if test_point_titles and hasattr(test_point_titles, '__iter__'):
