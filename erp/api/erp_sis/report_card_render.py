@@ -286,7 +286,9 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     standardized["class"] = {
         "id": getattr(report, "class_id", ""),
         "title": class_data.get("title", ""),
-        "short_title": class_data.get("short_title", "")
+        "short_title": class_data.get("short_title", ""),
+        "homeroom": class_data.get("homeroom", ""),
+        "vicehomeroom": class_data.get("vicehomeroom", "")
     }
     
     # === REPORT INFO ===
@@ -443,15 +445,40 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     
     # === HOMEROOM STANDARDIZATION ===
     homeroom_raw = data.get("homeroom", {})
+    homeroom_comments = []
+    
     if isinstance(homeroom_raw, dict):
         comments_raw = homeroom_raw.get("comments", {})
-        homeroom_comments = []
         
-        if isinstance(comments_raw, dict):
+        # Load comment title options from template (same as subjects)
+        homeroom_comment_titles = []
+        try:
+            # Use same comment structure as subjects from template
+            if template_id:
+                template_doc = frappe.get_doc("SIS Report Card Template", template_id)
+                if hasattr(template_doc, 'homeroom_comment_title_id') and template_doc.homeroom_comment_title_id:
+                    homeroom_comment_titles = _load_comment_title_options(template_doc.homeroom_comment_title_id)
+        except:
+            pass
+        
+        # If no template structure, create from existing data
+        if not homeroom_comment_titles and isinstance(comments_raw, dict):
             for comment_id, value in comments_raw.items():
                 homeroom_comments.append({
                     "id": comment_id,
-                    "label": comment_id,  # Can enhance with proper labels later
+                    "label": comment_id,  # Fallback to comment_id
+                    "value": value
+                })
+        else:
+            # Use template structure
+            for comment_template in homeroom_comment_titles:
+                comment_id = comment_template.get("id", "")
+                label = comment_template.get("label", comment_id)
+                value = comments_raw.get(comment_id, "") if isinstance(comments_raw, dict) else ""
+                
+                homeroom_comments.append({
+                    "id": comment_id,
+                    "label": label,
                     "value": value
                 })
         
@@ -1176,6 +1203,8 @@ def get_report_data(report_id: Optional[str] = None):
             data.setdefault("class", {})
             data["class"].update({
                 "short_title": getattr(klass, "short_title", None) or getattr(klass, "title", None) or report.class_id,
+                "homeroom": getattr(klass, "homeroom", ""),
+                "vicehomeroom": getattr(klass, "vicehomeroom", ""),
             })
         except Exception:
             pass
