@@ -1200,11 +1200,22 @@ def get_report_data(report_id: Optional[str] = None):
         
         try:
             klass = frappe.get_doc("SIS Class", report.class_id)
+            
+            # Resolve homeroom teacher names
+            homeroom_teacher_name = ""
+            vice_homeroom_teacher_name = ""
+            
+            if getattr(klass, "homeroom_teacher", ""):
+                homeroom_teacher_name = _resolve_teacher_name(klass.homeroom_teacher)
+            
+            if getattr(klass, "vice_homeroom_teacher", ""):
+                vice_homeroom_teacher_name = _resolve_teacher_name(klass.vice_homeroom_teacher)
+            
             data.setdefault("class", {})
             data["class"].update({
                 "short_title": getattr(klass, "short_title", None) or getattr(klass, "title", None) or report.class_id,
-                "homeroom": getattr(klass, "homeroom", ""),
-                "vicehomeroom": getattr(klass, "vicehomeroom", ""),
+                "homeroom": homeroom_teacher_name,
+                "vicehomeroom": vice_homeroom_teacher_name,
             })
         except Exception:
             pass
