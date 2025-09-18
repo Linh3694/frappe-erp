@@ -405,6 +405,14 @@ def create_teacher():
                     user_id = parsed_data.get('user_id', [None])[0]
                     gender = gender or parsed_data.get('gender', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
+                    raw_stage_ids = parsed_data.get('education_stage_ids', [])
+                    # Handle case where parse_qs returns array with comma-separated string
+                    education_stage_ids = []
+                    for stage_item in raw_stage_ids:
+                        if ',' in str(stage_item):
+                            education_stage_ids.extend([s.strip() for s in str(stage_item).split(',') if s.strip()])
+                        elif stage_item:
+                            education_stage_ids.append(str(stage_item))
                     subject_department_id = parsed_data.get('subject_department_id', [None])[0]
                     is_manager = is_manager or parsed_data.get('is_manager', [None])[0]
             except Exception:
@@ -496,12 +504,16 @@ def create_teacher():
         if education_stage_ids:
             # Handle multiple stages (new feature)
             if isinstance(education_stage_ids, str):
-                # If string, try to parse as JSON array
+                # If string, try to parse as JSON array first
                 try:
                     import json
                     stages_to_assign = json.loads(education_stage_ids)
                 except:
-                    stages_to_assign = [education_stage_ids] if education_stage_ids else []
+                    # If JSON parsing fails, try comma-separated values
+                    if ',' in education_stage_ids:
+                        stages_to_assign = [s.strip() for s in education_stage_ids.split(',') if s.strip()]
+                    else:
+                        stages_to_assign = [education_stage_ids] if education_stage_ids else []
             elif isinstance(education_stage_ids, list):
                 stages_to_assign = education_stage_ids
             else:
@@ -629,7 +641,13 @@ def update_teacher():
                     user_id = parsed_data.get('user_id', [None])[0]
                     gender = gender or parsed_data.get('gender', [None])[0]
                     education_stage_id = parsed_data.get('education_stage_id', [None])[0]
-                    education_stage_ids = parsed_data.get('education_stage_ids', [])
+                    raw_stage_ids = parsed_data.get('education_stage_ids', [])
+                    education_stage_ids = []
+                    for stage_item in raw_stage_ids:
+                        if ',' in str(stage_item):
+                            education_stage_ids.extend([s.strip() for s in str(stage_item).split(',') if s.strip()])
+                        elif stage_item:
+                            education_stage_ids.append(str(stage_item))
                     subject_department_id = parsed_data.get('subject_department_id', [None])[0]
                     is_manager = is_manager or parsed_data.get('is_manager', [None])[0]
             except Exception:
@@ -756,17 +774,17 @@ def update_teacher():
 
             teacher_doc.education_stage_id = education_stage_id
         
-        # Process multiple education stages if provided
         if education_stage_ids is not None:
-            # Parse education_stage_ids if it's a string
             stages_to_assign = []
             if isinstance(education_stage_ids, str):
-                # If string, try to parse as JSON array
                 try:
                     import json
                     stages_to_assign = json.loads(education_stage_ids)
                 except:
-                    stages_to_assign = [education_stage_ids] if education_stage_ids else []
+                    if ',' in education_stage_ids:
+                        stages_to_assign = [s.strip() for s in education_stage_ids.split(',') if s.strip()]
+                    else:
+                        stages_to_assign = [education_stage_ids] if education_stage_ids else []
             elif isinstance(education_stage_ids, list):
                 stages_to_assign = education_stage_ids
             else:
