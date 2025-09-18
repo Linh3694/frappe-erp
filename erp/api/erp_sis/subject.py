@@ -625,12 +625,17 @@ def get_actual_subjects_for_selection():
         
         filters = {"campus_id": campus_id}
             
-        actual_subjects = frappe.get_all(
-            "SIS Actual Subject",
-            fields=["name", "title_vn", "title_en"],
-            filters=filters,
-            order_by="title_vn asc"
-        )
+        actual_subjects = frappe.db.sql("""
+            SELECT 
+                s.name,
+                s.title_vn,
+                s.title_en,
+                COALESCE(es.title_vn, '') as education_stage_name
+            FROM `tabSIS Actual Subject` s
+            LEFT JOIN `tabSIS Education Stage` es ON s.education_stage_id = es.name
+            WHERE s.campus_id = %(campus_id)s
+            ORDER BY s.title_vn ASC
+        """, {"campus_id": campus_id}, as_dict=True)
         
         return success_response(
             data=actual_subjects,
@@ -660,12 +665,17 @@ def get_timetable_subjects_for_selection():
 
         filters = {"campus_id": campus_id}
 
-        timetable_subjects = frappe.get_all(
-            "SIS Timetable Subject",
-            fields=["name", "title_vn", "title_en"],
-            filters=filters,
-            order_by="title_vn asc"
-        )
+        timetable_subjects = frappe.db.sql("""
+            SELECT 
+                s.name,
+                s.title_vn,
+                s.title_en,
+                COALESCE(es.title_vn, '') as education_stage_name
+            FROM `tabSIS Timetable Subject` s
+            LEFT JOIN `tabSIS Education Stage` es ON s.education_stage_id = es.name
+            WHERE s.campus_id = %(campus_id)s
+            ORDER BY s.title_vn ASC
+        """, {"campus_id": campus_id}, as_dict=True)
 
         return success_response(
             data=timetable_subjects,
@@ -845,17 +855,18 @@ def get_timetable_subjects_for_selection():
 
         campus_count = frappe.db.count("SIS Timetable Subject", filters)
 
-        timetable_subjects = frappe.get_all(
-            "SIS Timetable Subject",
-            fields=[
-                "name",
-                "title_vn",
-                "title_en",
-                "campus_id"
-            ],
-            filters=filters,
-            order_by="title_vn asc"
-        )
+        timetable_subjects = frappe.db.sql("""
+            SELECT 
+                s.name,
+                s.title_vn,
+                s.title_en,
+                s.campus_id,
+                COALESCE(es.title_vn, '') as education_stage_name
+            FROM `tabSIS Timetable Subject` s
+            LEFT JOIN `tabSIS Education Stage` es ON s.education_stage_id = es.name
+            WHERE s.campus_id = %(campus_id)s
+            ORDER BY s.title_vn ASC
+        """, {"campus_id": campus_id}, as_dict=True)
 
         if timetable_subjects:
             pass
@@ -875,11 +886,17 @@ def get_timetable_subjects_for_selection():
             else:
                 print("Timetable subjects exist but campus filter doesn't match")
                 # Temporarily return all subjects for testing
-                timetable_subjects = frappe.get_all(
-                    "SIS Timetable Subject",
-                    fields=["name", "title_vn", "title_en", "campus_id"],
-                    order_by="title_vn asc"
-                )
+                timetable_subjects = frappe.db.sql("""
+                    SELECT 
+                        s.name,
+                        s.title_vn,
+                        s.title_en,
+                        s.campus_id,
+                        COALESCE(es.title_vn, '') as education_stage_name
+                    FROM `tabSIS Timetable Subject` s
+                    LEFT JOIN `tabSIS Education Stage` es ON s.education_stage_id = es.name
+                    ORDER BY s.title_vn ASC
+                """, as_dict=True)
         
         return success_response(
             data=timetable_subjects,
@@ -917,17 +934,18 @@ def get_actual_subjects_for_selection():
 
         campus_count = frappe.db.count("SIS Actual Subject", {"campus_id": campus_id})
 
-        actual_subjects = frappe.get_all(
-            "SIS Actual Subject",
-            fields=[
-                "name",
-                "title_vn",
-                "title_en",
-                "campus_id"
-            ],
-            filters=filters,
-            order_by="title_vn asc"
-        )
+        actual_subjects = frappe.db.sql("""
+            SELECT 
+                s.name,
+                s.title_vn,
+                s.title_en,
+                s.campus_id,
+                COALESCE(es.title_vn, '') as education_stage_name
+            FROM `tabSIS Actual Subject` s
+            LEFT JOIN `tabSIS Education Stage` es ON s.education_stage_id = es.name
+            WHERE s.campus_id = %(campus_id)s
+            ORDER BY s.title_vn ASC
+        """, {"campus_id": campus_id}, as_dict=True)
 
         if actual_subjects:
             pass
