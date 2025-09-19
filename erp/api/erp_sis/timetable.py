@@ -496,7 +496,7 @@ def _day_of_week_to_index(dow: str) -> int:
     return mapping[key]
 
 def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id: str, 
-                              week_start: datetime, week_end: datetime) -> list[dict]:
+                              week_start: datetime, week_end: datetime) -> tuple[list[dict], dict]:
     """Apply date-specific timetable overrides to entries"""
     try:
         # Convert datetime to date string for database query
