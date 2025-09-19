@@ -2003,7 +2003,8 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
             "teacher_names": ", ".join(teacher_names),
             "room_id": room_id,
             "override_type": "replace",
-            "action": action
+            "action": action,
+            "debug_info": debug_info  # Include debug info in response for frontend
         }, f"Timetable override {action} successfully for {date}")
 
     except Exception as e:
