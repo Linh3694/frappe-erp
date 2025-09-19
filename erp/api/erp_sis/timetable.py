@@ -2051,23 +2051,26 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         frappe.db.commit()
         
         # PRIORITY 3.5: Sync Teacher Timetable for date-specific override
-        try:
-            _sync_teacher_timetable_for_override(
-                date=date,
-                timetable_column_id=timetable_column_id,
-                target_type=target_type,
-                target_id=target_id,
-                old_teacher_1_id=None,  # Will be determined from existing data
-                old_teacher_2_id=None,  # Will be determined from existing data
-                new_teacher_1_id=teacher_1_id,
-                new_teacher_2_id=teacher_2_id,
-                subject_id=subject_id,
-                room_id=room_id
-            )
-            frappe.logger().info(f"✅ TEACHER TIMETABLE SYNC: Successfully synced for override on {date}")
-        except Exception as sync_error:
-            frappe.logger().error(f"❌ TEACHER TIMETABLE SYNC ERROR: {str(sync_error)}")
-            # Don't fail the main override if teacher timetable sync fails
+        # TEMPORARILY DISABLED due to validation error: "Ngày trong tuần không thể là \"tue\""
+        # TODO: Fix Teacher Timetable validation or format compatibility
+        frappe.logger().info(f"📝 TEACHER TIMETABLE SYNC: Temporarily disabled due to validation issues")
+        # try:
+        #     _sync_teacher_timetable_for_override(
+        #         date=date,
+        #         timetable_column_id=timetable_column_id,
+        #         target_type=target_type,
+        #         target_id=target_id,
+        #         old_teacher_1_id=None,  # Will be determined from existing data
+        #         old_teacher_2_id=None,  # Will be determined from existing data
+        #         new_teacher_1_id=teacher_1_id,
+        #         new_teacher_2_id=teacher_2_id,
+        #         subject_id=subject_id,
+        #         room_id=room_id
+        #     )
+        #     frappe.logger().info(f"✅ TEACHER TIMETABLE SYNC: Successfully synced for override on {date}")
+        # except Exception as sync_error:
+        #     frappe.logger().error(f"❌ TEACHER TIMETABLE SYNC ERROR: {str(sync_error)}")
+        #     # Don't fail the main override if teacher timetable sync fails
         
         # Get subject and teacher names for response
         subject_title = ""
