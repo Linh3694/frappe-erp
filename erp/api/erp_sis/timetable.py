@@ -1847,6 +1847,21 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         room_id = room_id or _get_request_arg("room_id")
         override_id = override_id or _get_request_arg("override_id")
         
+        # DEBUG: Log received parameters for debugging cell mismatch issue
+        import datetime
+        debug_info = {
+            "received_date": date,
+            "received_date_weekday": datetime.datetime.strptime(date, '%Y-%m-%d').strftime('%A') if date else "N/A",
+            "timetable_column_id": timetable_column_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "subject_id": subject_id,
+            "teacher_1_id": teacher_1_id,
+            "teacher_2_id": teacher_2_id,
+            "session_user": frappe.session.user
+        }
+        frappe.logger().info(f"🔍 BACKEND API DEBUG: {debug_info}")
+        
         # Convert "none" strings to None
         if teacher_1_id == "none" or teacher_1_id == "":
             teacher_1_id = None
