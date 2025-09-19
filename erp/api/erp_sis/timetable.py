@@ -496,7 +496,7 @@ def _day_of_week_to_index(dow: str) -> int:
     return mapping[key]
 
 def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id, 
-                              week_start: datetime, week_end: datetime) -> tuple[list[dict], dict]:
+                              week_start: datetime, week_end: datetime) -> list[dict]:
     """Apply date-specific timetable overrides to entries"""
     try:
         # Convert datetime to date string for database query
@@ -528,12 +528,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
             overrides.extend(direct_overrides)
         
         # Cross-target support: If querying teacher timetable, also get class overrides where this teacher is assigned
-        cross_target_info = {"enabled": False, "query_ran": False, "found_count": 0, "overrides": []}
-        
         if target_type == "Teacher":
-            cross_target_info["enabled"] = True
-            frappe.logger().info(f"🔍 CROSS-TARGET QUERY: Looking for class overrides for teacher {resolved_teacher_ids} between {start_date_str} and {end_date_str}")
-            
             # Build dynamic query for multiple teacher IDs
             teacher_conditions = []
             sql_params = [start_date_str, end_date_str]
@@ -544,7 +539,6 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
             
             teacher_where = " OR ".join(teacher_conditions)
             
-            # DEBUG: Add SQL query debug info
             sql_query = f"""
                 SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type, target_id as source_class_id
                 FROM `tabTimetable_Date_Override`
@@ -554,20 +548,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
                 ORDER BY date ASC, timetable_column_id ASC
             """
             
-            cross_target_info["sql_debug"] = {
-                "query": sql_query.strip(),
-                "params": sql_params,
-                "resolved_teacher_ids": resolved_teacher_ids,
-                "original_target_id": str(target_id)
-            }
-            
             cross_overrides = frappe.db.sql(sql_query, sql_params, as_dict=True)
-            
-            cross_target_info["query_ran"] = True
-            cross_target_info["found_count"] = len(cross_overrides)
-            cross_target_info["overrides"] = cross_overrides
-            
-            frappe.logger().info(f"🔍 CROSS-TARGET RESULTS: Found {len(cross_overrides)} overrides - {cross_overrides}")
             
             # Mark cross-target overrides 
             for override in cross_overrides:
@@ -575,12 +556,9 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
                 override["source_target_type"] = "Class"
                 
             overrides.extend(cross_overrides)
-            frappe.logger().info(f"🔄 CROSS-TARGET: Found {len(cross_overrides)} class overrides for teacher {resolved_teacher_ids}")
-        
-        frappe.logger().info(f"📊 OVERRIDE QUERY: Found {len(overrides)} total overrides for {target_type} {primary_target_id}")
         
         if not overrides:
-            return entries, cross_target_info
+            return entries
             
         # Build override map: {date: {timetable_column_id: override_data}}
         override_map = {}
@@ -736,17 +714,16 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
                         }
                         
                         enhanced_entries.append(new_entry)
-                        frappe.logger().info(f"🆕 OVERRIDE: Created new entry for unmatched override on {date_str}")
                         
                     except Exception as create_error:
-                        frappe.logger().error(f"❌ OVERRIDE CREATE ERROR: {str(create_error)}")
+                        frappe.log_error(f"Error creating override entry: {str(create_error)}")
         
-        return enhanced_entries, cross_target_info
+        return enhanced_entries
         
     except Exception as e:
         frappe.log_error(f"Error applying timetable overrides: {str(e)}")
         # Return original entries if override processing fails
-        return entries, {"error": str(e)}
+        return entries
 
 
 def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
@@ -843,9 +820,6 @@ def get_teacher_week():
         # Fallback to original id if nothing resolved
         if not resolved_teacher_ids:
             resolved_teacher_ids.add(teacher_id)
-            
-        # DEBUG: Log teacher ID resolution
-        frappe.logger().info(f"🎯 TEACHER ID RESOLUTION: {teacher_id} → {resolved_teacher_ids}")
         
         # Query timetable rows
         campus_id = get_current_campus_from_context()
@@ -1056,39 +1030,9 @@ def get_teacher_week():
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
         week_end = _add_days(ws, 6)
-        entries_with_overrides, cross_target_debug = _apply_timetable_overrides(entries, "Teacher", resolved_teacher_ids, ws, week_end)
+        entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", resolved_teacher_ids, ws, week_end)
         
-        # DEBUG: Log final results
-        override_entries = [e for e in entries_with_overrides if e.get("is_override")]
-        frappe.logger().info(f"🎯 TEACHER FINAL: {len(entries)} base entries → {len(entries_with_overrides)} final entries ({len(override_entries)} overrides)")
-        
-        # DEBUG: Include debug info in response for frontend visibility
-        debug_info = {
-            "original_teacher_id": teacher_id,
-            "resolved_teacher_ids": list(resolved_teacher_ids),
-            "base_entries_count": len(entries),
-            "final_entries_count": len(entries_with_overrides),
-            "override_entries_count": len(override_entries),
-            "override_entries": override_entries[:3] if override_entries else [],
-            "date_range": {
-                "week_start": ws.strftime("%Y-%m-%d"),
-                "week_end": week_end.strftime("%Y-%m-%d")
-            },
-            "cross_target_debug": cross_target_debug
-        }
-        
-        response_data = {
-            "data": entries_with_overrides,
-            "debug_info": debug_info
-        }
-        
-        # Use single_item_response to include debug_info properly
-        return {
-            "success": True,
-            "message": "Teacher week fetched successfully", 
-            "data": entries_with_overrides,
-            "debug_info": debug_info
-        }
+        return list_response(entries_with_overrides, "Teacher week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching teacher week: {str(e)}")
@@ -1275,7 +1219,7 @@ def get_class_week():
         entries = _build_entries(rows, ws)
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
-        entries_with_overrides, _ = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
+        entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
         
         return list_response(entries_with_overrides, "Class week fetched successfully")
     except Exception as e:
@@ -2009,20 +1953,6 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         room_id = room_id or _get_request_arg("room_id")
         override_id = override_id or _get_request_arg("override_id")
         
-        # DEBUG: Log received parameters for debugging cell mismatch issue
-        import datetime
-        debug_info = {
-            "received_date": date,
-            "received_date_weekday": datetime.datetime.strptime(date, '%Y-%m-%d').strftime('%A') if date else "N/A",
-            "timetable_column_id": timetable_column_id,
-            "target_type": target_type,
-            "target_id": target_id,
-            "subject_id": subject_id,
-            "teacher_1_id": teacher_1_id,
-            "teacher_2_id": teacher_2_id,
-            "session_user": frappe.session.user
-        }
-        frappe.logger().info(f"🔍 BACKEND API DEBUG: {debug_info}")
         
         # Convert "none" strings to None
         if teacher_1_id == "none" or teacher_1_id == "":
@@ -2126,26 +2056,8 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         frappe.db.commit()
         
         # PRIORITY 3.5: Sync Teacher Timetable for date-specific override
-        # TEMPORARILY DISABLED due to validation error: "Ngày trong tuần không thể là \"tue\""
+        # Note: Teacher timetable sync is temporarily disabled due to validation issues
         # TODO: Fix Teacher Timetable validation or format compatibility
-        frappe.logger().info(f"📝 TEACHER TIMETABLE SYNC: Temporarily disabled due to validation issues")
-        # try:
-        #     _sync_teacher_timetable_for_override(
-        #         date=date,
-        #         timetable_column_id=timetable_column_id,
-        #         target_type=target_type,
-        #         target_id=target_id,
-        #         old_teacher_1_id=None,  # Will be determined from existing data
-        #         old_teacher_2_id=None,  # Will be determined from existing data
-        #         new_teacher_1_id=teacher_1_id,
-        #         new_teacher_2_id=teacher_2_id,
-        #         subject_id=subject_id,
-        #         room_id=room_id
-        #     )
-        #     frappe.logger().info(f"✅ TEACHER TIMETABLE SYNC: Successfully synced for override on {date}")
-        # except Exception as sync_error:
-        #     frappe.logger().error(f"❌ TEACHER TIMETABLE SYNC ERROR: {str(sync_error)}")
-        #     # Don't fail the main override if teacher timetable sync fails
         
         # Get subject and teacher names for response
         subject_title = ""
@@ -2187,8 +2099,7 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
             "teacher_names": ", ".join(teacher_names),
             "room_id": room_id,
             "override_type": "replace",
-            "action": action,
-            "debug_info": debug_info  # Include debug info in response for frontend
+            "action": action
         }, f"Timetable override {action} successfully for {date}")
 
     except Exception as e:
@@ -2196,83 +2107,6 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         return error_response(f"Error creating timetable override: {str(e)}")
 
 
-@frappe.whitelist(allow_guest=False, methods=["GET"])
-def list_timetable_overrides(target_type: str = None, target_id: str = None):
-    """List all timetable overrides for debugging purposes"""
-    try:
-        target_type = target_type or _get_request_arg("target_type")
-        target_id = target_id or _get_request_arg("target_id")
-        
-        # Build query
-        query = "SELECT * FROM `tabTimetable_Date_Override`"
-        params = []
-        
-        if target_type and target_id:
-            query += " WHERE target_type = %s AND target_id = %s"
-            params = [target_type, target_id]
-        
-        query += " ORDER BY date ASC, timetable_column_id ASC"
-        
-        overrides = frappe.db.sql(query, params, as_dict=True)
-        
-        # Enrich with readable info
-        for override in overrides:
-            # Get subject title
-            if override.get("subject_id"):
-                override["subject_title"] = frappe.db.get_value("SIS Subject", override["subject_id"], "title") or ""
-            
-            # Get teacher names
-            teacher_names = []
-            for teacher_field in ["teacher_1_id", "teacher_2_id"]:
-                teacher_id = override.get(teacher_field)
-                if teacher_id:
-                    try:
-                        teacher = frappe.get_doc("SIS Teacher", teacher_id)
-                        if teacher.user_id:
-                            user = frappe.get_doc("User", teacher.user_id)
-                            display_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
-                            if display_name:
-                                teacher_names.append(display_name)
-                    except:
-                        pass
-            override["teacher_names"] = ", ".join(teacher_names)
-                
-        return list_response(overrides, f"Found {len(overrides)} timetable overrides")
-        
-    except Exception as e:
-        frappe.log_error(f"Error listing timetable overrides: {str(e)}")
-        return error_response(f"Error listing timetable overrides: {str(e)}")
-
-
-@frappe.whitelist(allow_guest=False, methods=["POST"])  
-def clear_all_overrides_for_target(target_type: str = None, target_id: str = None):
-    """Clear all overrides for a target (for debugging purposes)"""
-    try:
-        target_type = target_type or _get_request_arg("target_type")
-        target_id = target_id or _get_request_arg("target_id")
-        
-        if not target_type or not target_id:
-            return validation_error_response("Validation failed", {
-                "required_fields": ["target_type", "target_id"]
-            })
-            
-        # Delete all overrides for this target
-        deleted_count = frappe.db.sql("""
-            DELETE FROM `tabTimetable_Date_Override`
-            WHERE target_type = %s AND target_id = %s
-        """, (target_type, target_id))
-        
-        frappe.db.commit()
-        
-        return single_item_response({
-            "deleted_count": deleted_count,
-            "target_type": target_type,
-            "target_id": target_id
-        }, f"Cleared {deleted_count} overrides for {target_type} {target_id}")
-        
-    except Exception as e:
-        frappe.log_error(f"Error clearing overrides: {str(e)}")
-        return error_response(f"Error clearing overrides: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=["DELETE"])
@@ -2296,9 +2130,6 @@ def delete_timetable_override(override_id: str = None):
             frappe.db.commit()
             
             # TODO: Sync teacher timetable when deleting override
-            # For now, we'll leave teacher timetable entries as-is when override is deleted
-            # Could restore original teacher or leave empty - needs product decision
-            frappe.logger().info(f"📝 TODO: Consider teacher timetable cleanup for deleted override {override_id}")
             
             return single_item_response({"deleted": True}, "Timetable override deleted successfully")
         else:
@@ -2346,17 +2177,14 @@ def _sync_teacher_timetable_for_override(date: str, timetable_column_id: str, ta
             }
         )
         
-        frappe.logger().info(f"🔍 TEACHER SYNC: Found {len(existing_entries)} existing teacher timetable entries for {date}")
-        
         # 2. Remove existing entries (will be replaced with override teachers)
         old_teachers_removed = []
         for entry in existing_entries:
             old_teachers_removed.append(entry.teacher_id)
             try:
                 frappe.delete_doc("SIS Teacher Timetable", entry.name, ignore_permissions=True)
-                frappe.logger().info(f"🗑️ TEACHER SYNC: Removed teacher {entry.teacher_id} from {date}")
             except Exception as delete_error:
-                frappe.logger().error(f"❌ TEACHER SYNC DELETE ERROR: {str(delete_error)}")
+                frappe.log_error(f"Error removing teacher timetable entry: {str(delete_error)}")
         
         # 3. Create new Teacher Timetable entries for override teachers
         new_teachers = []
@@ -2384,7 +2212,6 @@ def _sync_teacher_timetable_for_override(date: str, timetable_column_id: str, ta
             pass
             
         if not timetable_instance_id:
-            frappe.logger().warning(f"⚠️ TEACHER SYNC: No timetable instance found for class {class_id} on {date}")
             return
             
         # Create new entries
@@ -2406,25 +2233,14 @@ def _sync_teacher_timetable_for_override(date: str, timetable_column_id: str, ta
                 })
                 
                 teacher_timetable.insert(ignore_permissions=True)
-                frappe.logger().info(f"✅ TEACHER SYNC: Added teacher {teacher_id} for {date}")
                 
             except Exception as create_error:
-                frappe.logger().error(f"❌ TEACHER SYNC CREATE ERROR for {teacher_id}: {str(create_error)}")
+                frappe.log_error(f"Error creating teacher timetable entry: {str(create_error)}")
         
         frappe.db.commit()
         
-        sync_summary = {
-            "date": date,
-            "class_id": class_id,
-            "old_teachers_removed": old_teachers_removed,
-            "new_teachers_added": new_teachers,
-            "timetable_instance_id": timetable_instance_id
-        }
-        
-        frappe.logger().info(f"🎯 TEACHER SYNC SUMMARY: {sync_summary}")
-        
     except Exception as e:
-        frappe.logger().error(f"💥 TEACHER SYNC FATAL ERROR: {str(e)}")
+        frappe.log_error(f"Error syncing teacher timetable for override: {str(e)}")
         raise
 
 
