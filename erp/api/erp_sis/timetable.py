@@ -922,17 +922,11 @@ def get_teacher_week():
 
         entries = _build_entries(rows, ws)
         
-        # Apply timetable overrides for date-specific changes (PRIORITY 3) - WITH DEBUG
+        # Apply timetable overrides for date-specific changes (PRIORITY 3)
         week_end = _add_days(ws, 6)
-        entries_with_overrides, debug_info = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
+        entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
         
-        # Include debug info in response for FE debugging
-        result_data = {
-            "entries": entries_with_overrides,
-            "debug_override_info": debug_info
-        }
-        
-        return single_item_response(result_data, f"Teacher week fetched successfully (debug mode)")
+        return list_response(entries_with_overrides, "Teacher week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching teacher week: {str(e)}")
