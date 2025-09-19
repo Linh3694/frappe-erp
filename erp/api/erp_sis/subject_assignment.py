@@ -232,6 +232,9 @@ def create_subject_assignment():
             # Fallback to form_dict
             data = frappe.local.form_dict
         
+        # Log received data for debugging [[memory:7723612]]
+        frappe.logger().info(f"CREATE DEBUG - Received data: {data}")
+        
         # Extract values from data
         teacher_id = data.get("teacher_id")
         actual_subject_id = data.get("actual_subject_id")
@@ -240,10 +243,14 @@ def create_subject_assignment():
         assignments = data.get("assignments") or []
         classes = data.get("classes") or []
         
+        frappe.logger().info(f"CREATE DEBUG - Parsed values: teacher_id={teacher_id}, assignments={len(assignments)}")
+        
         # Input validation
         if not teacher_id:
+            frappe.logger().error("CREATE DEBUG - Missing teacher_id")
             frappe.throw(_("Teacher ID is required"))
         if not actual_subject_id and not actual_subject_ids and not assignments and not classes:
+            frappe.logger().error(f"CREATE DEBUG - Missing required fields: actual_subject_id={actual_subject_id}, actual_subject_ids={actual_subject_ids}, assignments={assignments}, classes={classes}")
             frappe.throw(_("Actual Subject ID or actual_subject_ids or assignments is required"))
         
         # Get campus from user context
@@ -258,11 +265,14 @@ def create_subject_assignment():
 
         # Case 1: explicit assignments list
         if isinstance(assignments, list) and assignments:
-            for a in assignments:
+            for i, a in enumerate(assignments):
                 cid = a.get("class_id")
                 sids = a.get("actual_subject_ids") or ([] if a.get("actual_subject_id") is None else [a.get("actual_subject_id")])
+                frappe.logger().info(f"CREATE DEBUG - Assignment {i}: class_id={cid}, actual_subject_ids={sids}")
                 if cid and sids:
                     normalized_assignments.append({"class_id": cid, "actual_subject_ids": sids})
+                else:
+                    frappe.logger().warning(f"CREATE DEBUG - Skipping invalid assignment {i}: class_id={cid}, actual_subject_ids={sids}")
 
         # Case 2: top-level classes + actual_subject_ids (apply same subjects to many classes)
         if not normalized_assignments and isinstance(classes, list) and classes and isinstance(actual_subject_ids, list) and actual_subject_ids:
