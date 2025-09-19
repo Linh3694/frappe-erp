@@ -496,8 +496,22 @@ def _day_of_week_to_index(dow: str) -> int:
     return mapping[key]
 
 def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id: str, 
-                              week_start: datetime, week_end: datetime) -> list[dict]:
-    """Apply date-specific timetable overrides to entries"""
+                              week_start: datetime, week_end: datetime) -> tuple[list[dict], dict]:
+    """Apply date-specific timetable overrides to entries - Returns (entries, debug_info)"""
+    debug_info = {
+        "function_called": True,
+        "target_type": target_type,
+        "target_id": target_id,
+        "week_range": f"{week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}",
+        "original_entries_count": len(entries),
+        "overrides_found": 0,
+        "overrides_applied": 0,
+        "entry_dates_processed": [],
+        "override_dates_found": [],
+        "matching_details": [],
+        "error": None
+    }
+    
     try:
         # Convert datetime to date string for database query
         start_date_str = week_start.strftime("%Y-%m-%d")
@@ -511,8 +525,12 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             ORDER BY date ASC, timetable_column_id ASC
         """, (target_type, target_id, start_date_str, end_date_str), as_dict=True)
         
+        debug_info["overrides_found"] = len(overrides)
+        debug_info["override_dates_found"] = [str(o["date"]) for o in overrides]
+        
         if not overrides:
-            return entries
+            debug_info["result"] = "no_overrides_found"
+            return entries, debug_info
             
         # Build override map: {date: {timetable_column_id: override_data}}
         override_map = {}
@@ -534,23 +552,32 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             # Enrich override with display data
             subject_title = ""
             if override.get("subject_id"):
-                subject = frappe.get_doc("SIS Subject", override["subject_id"])
-                subject_title = subject.title
+                try:
+                    subject = frappe.get_doc("SIS Subject", override["subject_id"])
+                    subject_title = subject.title
+                except:
+                    subject_title = f"SUBJECT_NOT_FOUND({override.get('subject_id')})"
                 
             teacher_names = []
             if override.get("teacher_1_id"):
-                teacher1 = frappe.get_doc("SIS Teacher", override["teacher_1_id"])
-                if teacher1.user_id:
-                    user1 = frappe.get_doc("User", teacher1.user_id)
-                    display_name1 = user1.full_name or f"{user1.first_name or ''} {user1.last_name or ''}".strip()
-                    teacher_names.append(display_name1)
+                try:
+                    teacher1 = frappe.get_doc("SIS Teacher", override["teacher_1_id"])
+                    if teacher1.user_id:
+                        user1 = frappe.get_doc("User", teacher1.user_id)
+                        display_name1 = user1.full_name or f"{user1.first_name or ''} {user1.last_name or ''}".strip()
+                        teacher_names.append(display_name1)
+                except:
+                    teacher_names.append(f"TEACHER_NOT_FOUND({override.get('teacher_1_id')})")
                     
             if override.get("teacher_2_id"):
-                teacher2 = frappe.get_doc("SIS Teacher", override["teacher_2_id"])
-                if teacher2.user_id:
-                    user2 = frappe.get_doc("User", teacher2.user_id)
-                    display_name2 = user2.full_name or f"{user2.first_name or ''} {user2.last_name or ''}".strip()
-                    teacher_names.append(display_name2)
+                try:
+                    teacher2 = frappe.get_doc("SIS Teacher", override["teacher_2_id"])
+                    if teacher2.user_id:
+                        user2 = frappe.get_doc("User", teacher2.user_id)
+                        display_name2 = user2.full_name or f"{user2.first_name or ''} {user2.last_name or ''}".strip()
+                        teacher_names.append(display_name2)
+                except:
+                    teacher_names.append(f"TEACHER_NOT_FOUND({override.get('teacher_2_id')})")
                     
             override_map[date][column_id] = {
                 "name": f"override-{override['name']}",  # Mark as override entry
@@ -567,9 +594,24 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             entry_date = entry.get("date")
             entry_column = entry.get("timetable_column_id")
             
+            # Add to debug info
+            if entry_date not in debug_info["entry_dates_processed"]:
+                debug_info["entry_dates_processed"].append(entry_date)
+            
             # Check if there's an override for this date/column combination
             if (entry_date in override_map and 
                 entry_column in override_map[entry_date]):
+                
+                debug_info["overrides_applied"] += 1
+                debug_info["matching_details"].append({
+                    "entry_date": entry_date,
+                    "entry_column": entry_column,
+                    "override_found": True,
+                    "original_subject": entry.get("subject_title", ""),
+                    "original_teacher": entry.get("teacher_names", ""),
+                    "override_subject": override_map[entry_date][entry_column]["subject_title"],
+                    "override_teacher": override_map[entry_date][entry_column]["teacher_names"]
+                })
                 
                 override_data = override_map[entry_date][entry_column]
                 
@@ -601,14 +643,24 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                     enhanced_entries.append(override_entry)
             else:
                 # No override, keep original entry
+                debug_info["matching_details"].append({
+                    "entry_date": entry_date,
+                    "entry_column": entry_column,
+                    "override_found": False,
+                    "subject": entry.get("subject_title", ""),
+                    "teacher": entry.get("teacher_names", "")
+                })
                 enhanced_entries.append(entry)
         
-        return enhanced_entries
+        debug_info["final_entries_count"] = len(enhanced_entries)
+        debug_info["result"] = "success"
+        return enhanced_entries, debug_info
         
     except Exception as e:
-        frappe.log_error(f"Error applying timetable overrides: {str(e)}")
+        debug_info["error"] = str(e)
+        debug_info["result"] = "error"
         # Return original entries if override processing fails
-        return entries
+        return entries, debug_info
 
 
 def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
@@ -913,12 +965,17 @@ def get_teacher_week():
 
         entries = _build_entries(rows, ws)
         
-        # Apply timetable overrides for date-specific changes (PRIORITY 3)
-        # TEMPORARILY DISABLED due to critical bug affecting entire timetable
-        # week_end = _add_days(ws, 6)
-        # entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
+        # Apply timetable overrides for date-specific changes (PRIORITY 3) - WITH DEBUG
+        week_end = _add_days(ws, 6)
+        entries_with_overrides, debug_info = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
         
-        return list_response(entries, "Teacher week fetched successfully")
+        # Include debug info in response for FE debugging
+        result_data = {
+            "entries": entries_with_overrides,
+            "debug_override_info": debug_info
+        }
+        
+        return single_item_response(result_data, f"Teacher week fetched successfully (debug mode)")
     except Exception as e:
 
         return error_response(f"Error fetching teacher week: {str(e)}")
@@ -1104,11 +1161,16 @@ def get_class_week():
 
         entries = _build_entries(rows, ws)
         
-        # Apply timetable overrides for date-specific changes (PRIORITY 3)
-        # TEMPORARILY DISABLED due to critical bug affecting entire timetable
-        # entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
+        # Apply timetable overrides for date-specific changes (PRIORITY 3) - WITH DEBUG
+        entries_with_overrides, debug_info = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
         
-        return list_response(entries, "Class week fetched successfully")
+        # Include debug info in response for FE debugging
+        result_data = {
+            "entries": entries_with_overrides,
+            "debug_override_info": debug_info
+        }
+        
+        return single_item_response(result_data, f"Class week fetched successfully (debug mode)")
     except Exception as e:
 
         return error_response(f"Error fetching class week: {str(e)}")
