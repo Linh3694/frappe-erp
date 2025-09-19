@@ -914,10 +914,11 @@ def get_teacher_week():
         entries = _build_entries(rows, ws)
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
-        week_end = _add_days(ws, 6)
-        entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
+        # TEMPORARILY DISABLED due to critical bug affecting entire timetable
+        # week_end = _add_days(ws, 6)
+        # entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
         
-        return list_response(entries_with_overrides, "Teacher week fetched successfully")
+        return list_response(entries, "Teacher week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching teacher week: {str(e)}")
@@ -1104,9 +1105,10 @@ def get_class_week():
         entries = _build_entries(rows, ws)
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
-        entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
+        # TEMPORARILY DISABLED due to critical bug affecting entire timetable
+        # entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
         
-        return list_response(entries_with_overrides, "Class week fetched successfully")
+        return list_response(entries, "Class week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching class week: {str(e)}")
