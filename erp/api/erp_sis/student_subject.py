@@ -237,10 +237,13 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                             "hs1_scores": [],  # List of individual scores
                             "hs2_scores": [],
                             "hs3_scores": [],
-                            "hs1_average": None,  # Calculated average
+                            "hs1_average": None,
                             "hs2_average": None,
                             "hs3_average": None,
-                            "final_average": None
+                            "final_average": None,
+                            "weight1_count": getattr(score_config, "weight1_count", 1) or 1,
+                            "weight2_count": getattr(score_config, "weight2_count", 1) or 1,
+                            "weight3_count": getattr(score_config, "weight3_count", 1) or 1
                         }
             
             data["scores"] = scores
