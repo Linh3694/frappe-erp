@@ -2007,11 +2007,7 @@ def _get_request_arg(arg_name: str):
     if hasattr(frappe.request, 'args') and frappe.request.args:
         return frappe.request.args.get(arg_name)
         
-    return None = frappe.db.sql("""
-            SELECT name FROM `tabTimetable_Date_Override`
-            WHERE date = %s AND timetable_column_id = %s AND target_type = %s AND target_id = %s
-            LIMIT 1
-        """, (date, timetable_column_id, target_type, target_id), as_dict=True)
+    return None
 
         override_name = f"override-{frappe.generate_hash()[:10]}"
         current_time = frappe.utils.now()
