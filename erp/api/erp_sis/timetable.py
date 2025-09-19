@@ -1827,26 +1827,26 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
     Does NOT modify timetable instance rows - those are handled by Priority 2 (Subject Assignment sync).
     """
     try:
-    # Get parameters from request
-    date = date or _get_request_arg("date")
-    timetable_column_id = timetable_column_id or _get_request_arg("timetable_column_id")
-    target_type = target_type or _get_request_arg("target_type")
-    target_id = target_id or _get_request_arg("target_id")
-    subject_id = subject_id or _get_request_arg("subject_id")
-    teacher_1_id = teacher_1_id or _get_request_arg("teacher_1_id")
-    teacher_2_id = teacher_2_id or _get_request_arg("teacher_2_id")
-    room_id = room_id or _get_request_arg("room_id")
-    override_id = override_id or _get_request_arg("override_id")
-    
-    # Convert "none" strings to None
-    if teacher_1_id == "none" or teacher_1_id == "":
-        teacher_1_id = None
-    if teacher_2_id == "none" or teacher_2_id == "":
-        teacher_2_id = None
-    if subject_id == "none" or subject_id == "":
-        subject_id = None
-    if room_id == "none" or room_id == "":
-        room_id = None
+        # Get parameters from request
+        date = date or _get_request_arg("date")
+        timetable_column_id = timetable_column_id or _get_request_arg("timetable_column_id")
+        target_type = target_type or _get_request_arg("target_type")
+        target_id = target_id or _get_request_arg("target_id")
+        subject_id = subject_id or _get_request_arg("subject_id")
+        teacher_1_id = teacher_1_id or _get_request_arg("teacher_1_id")
+        teacher_2_id = teacher_2_id or _get_request_arg("teacher_2_id")
+        room_id = room_id or _get_request_arg("room_id")
+        override_id = override_id or _get_request_arg("override_id")
+        
+        # Convert "none" strings to None
+        if teacher_1_id == "none" or teacher_1_id == "":
+            teacher_1_id = None
+        if teacher_2_id == "none" or teacher_2_id == "":
+            teacher_2_id = None
+        if subject_id == "none" or subject_id == "":
+            subject_id = None
+        if room_id == "none" or room_id == "":
+            room_id = None
 
         # Validate required fields
         if not all([date, timetable_column_id, target_type, target_id]):
