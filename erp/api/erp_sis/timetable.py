@@ -549,7 +549,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
         frappe.logger().info(f"📊 OVERRIDE QUERY: Found {len(overrides)} total overrides for {target_type} {target_id}")
         
         if not overrides:
-            return entries
+            return entries, cross_target_info
             
         # Build override map: {date: {timetable_column_id: override_data}}
         override_map = {}
