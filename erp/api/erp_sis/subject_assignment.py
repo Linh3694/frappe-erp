@@ -316,7 +316,20 @@ def create_subject_assignment():
                     {"name": sid, "campus_id": campus_id}
                 )
                 if not subject_exists:
-                    return not_found_response(f"Selected actual subject does not exist or access denied: {sid}")
+                    frappe.logger().error(f"CREATE DEBUG - Actual subject not found: {sid} for campus: {campus_id}")
+                    # Instead of hard fail, let's check if it's a SIS Subject ID by mistake
+                    sis_subject_exists = frappe.db.exists("SIS Subject", {"name": sid, "campus_id": campus_id})
+                    if sis_subject_exists:
+                        frappe.logger().warning(f"CREATE DEBUG - Found SIS Subject with ID {sid}, but expected Actual Subject ID")
+                        # Try to get actual_subject_id from SIS Subject
+                        actual_subject_id = frappe.db.get_value("SIS Subject", sid, "actual_subject_id")
+                        if actual_subject_id:
+                            frappe.logger().info(f"CREATE DEBUG - Using actual_subject_id {actual_subject_id} from SIS Subject {sid}")
+                            sid = actual_subject_id  # Replace with correct actual_subject_id
+                        else:
+                            return validation_error_response(f"SIS Subject {sid} does not have a linked Actual Subject", {"actual_subject_id": [f"Subject {sid} is not properly linked to an Actual Subject"]})
+                    else:
+                        return not_found_response(f"Selected actual subject does not exist or access denied: {sid}")
 
                 filters = {
                     "teacher_id": teacher_id,
