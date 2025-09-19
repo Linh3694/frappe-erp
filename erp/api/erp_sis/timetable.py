@@ -1963,6 +1963,25 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         
         frappe.db.commit()
         
+        # PRIORITY 3.5: Sync Teacher Timetable for date-specific override
+        try:
+            _sync_teacher_timetable_for_override(
+                date=date,
+                timetable_column_id=timetable_column_id,
+                target_type=target_type,
+                target_id=target_id,
+                old_teacher_1_id=None,  # Will be determined from existing data
+                old_teacher_2_id=None,  # Will be determined from existing data
+                new_teacher_1_id=teacher_1_id,
+                new_teacher_2_id=teacher_2_id,
+                subject_id=subject_id,
+                room_id=room_id
+            )
+            frappe.logger().info(f"✅ TEACHER TIMETABLE SYNC: Successfully synced for override on {date}")
+        except Exception as sync_error:
+            frappe.logger().error(f"❌ TEACHER TIMETABLE SYNC ERROR: {str(sync_error)}")
+            # Don't fail the main override if teacher timetable sync fails
+        
         # Get subject and teacher names for response
         subject_title = ""
         if subject_id:
@@ -2110,6 +2129,12 @@ def delete_timetable_override(override_id: str = None):
         
         if deleted_count:
             frappe.db.commit()
+            
+            # TODO: Sync teacher timetable when deleting override
+            # For now, we'll leave teacher timetable entries as-is when override is deleted
+            # Could restore original teacher or leave empty - needs product decision
+            frappe.logger().info(f"📝 TODO: Consider teacher timetable cleanup for deleted override {override_id}")
+            
             return single_item_response({"deleted": True}, "Timetable override deleted successfully")
         else:
             return not_found_response("Timetable override not found or access denied")
@@ -2117,6 +2142,125 @@ def delete_timetable_override(override_id: str = None):
     except Exception as e:
         frappe.log_error(f"Error deleting timetable override: {str(e)}")
         return error_response(f"Error deleting timetable override: {str(e)}")
+
+
+def _sync_teacher_timetable_for_override(date: str, timetable_column_id: str, target_type: str, target_id: str,
+                                        old_teacher_1_id: str = None, old_teacher_2_id: str = None,
+                                        new_teacher_1_id: str = None, new_teacher_2_id: str = None,
+                                        subject_id: str = None, room_id: str = None):
+    """
+    PRIORITY 3.5: Sync Teacher Timetable entries for date-specific cell overrides
+    
+    This ensures attendance/class log systems recognize the teacher change for specific date.
+    """
+    try:
+        if target_type != "Class":
+            # Only handle class-based overrides for now
+            return
+            
+        class_id = target_id
+        
+        # Parse date to get day of week
+        from datetime import datetime
+        date_obj = datetime.strptime(date, '%Y-%m-%d')
+        day_of_week_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        day_of_week = day_of_week_map.get(date_obj.weekday())
+        
+        if not day_of_week:
+            return
+            
+        # 1. Find existing Teacher Timetable entries for this date/period/class
+        existing_entries = frappe.get_all(
+            "SIS Teacher Timetable",
+            fields=["name", "teacher_id", "timetable_instance_id"],
+            filters={
+                "class_id": class_id,
+                "day_of_week": day_of_week,
+                "timetable_column_id": timetable_column_id,
+                "date": date  # Specific date filter
+            }
+        )
+        
+        frappe.logger().info(f"🔍 TEACHER SYNC: Found {len(existing_entries)} existing teacher timetable entries for {date}")
+        
+        # 2. Remove existing entries (will be replaced with override teachers)
+        old_teachers_removed = []
+        for entry in existing_entries:
+            old_teachers_removed.append(entry.teacher_id)
+            try:
+                frappe.delete_doc("SIS Teacher Timetable", entry.name, ignore_permissions=True)
+                frappe.logger().info(f"🗑️ TEACHER SYNC: Removed teacher {entry.teacher_id} from {date}")
+            except Exception as delete_error:
+                frappe.logger().error(f"❌ TEACHER SYNC DELETE ERROR: {str(delete_error)}")
+        
+        # 3. Create new Teacher Timetable entries for override teachers
+        new_teachers = []
+        if new_teacher_1_id and new_teacher_1_id != "none":
+            new_teachers.append(new_teacher_1_id)
+        if new_teacher_2_id and new_teacher_2_id != "none":
+            new_teachers.append(new_teacher_2_id)
+            
+        # Find timetable instance for this class/date
+        timetable_instance_id = None
+        try:
+            instances = frappe.get_all(
+                "SIS Timetable Instance",
+                fields=["name"],
+                filters={
+                    "class_id": class_id,
+                    "start_date": ["<=", date],
+                    "end_date": [">=", date]
+                },
+                limit=1
+            )
+            if instances:
+                timetable_instance_id = instances[0].name
+        except:
+            pass
+            
+        if not timetable_instance_id:
+            frappe.logger().warning(f"⚠️ TEACHER SYNC: No timetable instance found for class {class_id} on {date}")
+            return
+            
+        # Create new entries
+        for teacher_id in new_teachers:
+            if not teacher_id:
+                continue
+                
+            try:
+                teacher_timetable = frappe.get_doc({
+                    "doctype": "SIS Teacher Timetable",
+                    "teacher_id": teacher_id,
+                    "timetable_instance_id": timetable_instance_id,
+                    "class_id": class_id,
+                    "day_of_week": day_of_week,
+                    "timetable_column_id": timetable_column_id,
+                    "subject_id": subject_id,
+                    "room_id": room_id,
+                    "date": date  # Specific date for override
+                })
+                
+                teacher_timetable.insert(ignore_permissions=True)
+                frappe.logger().info(f"✅ TEACHER SYNC: Added teacher {teacher_id} for {date}")
+                
+            except Exception as create_error:
+                frappe.logger().error(f"❌ TEACHER SYNC CREATE ERROR for {teacher_id}: {str(create_error)}")
+        
+        frappe.db.commit()
+        
+        sync_summary = {
+            "date": date,
+            "class_id": class_id,
+            "old_teachers_removed": old_teachers_removed,
+            "new_teachers_added": new_teachers,
+            "timetable_instance_id": timetable_instance_id
+        }
+        
+        frappe.logger().info(f"🎯 TEACHER SYNC SUMMARY: {sync_summary}")
+        
+    except Exception as e:
+        frappe.logger().error(f"💥 TEACHER SYNC FATAL ERROR: {str(e)}")
+        raise
 
 
 def _get_request_arg(arg_name: str):
