@@ -1705,23 +1705,34 @@ def _sync_timetable_from_date(data: dict, from_date):
                             row_doc.teacher_2_id = new_teacher_id
                             updated_fields.append("teacher_2_id")
                     else:
-                        # PRIORITY 2: New assignment (CREATE case) - assign to teacher_1_id if empty
+                        # PRIORITY 2: New assignment (CREATE case) 
+                        # Strategy: Always assign new teacher, prefer empty slots but can overwrite if needed
+                        
                         if not row_doc.teacher_1_id:
+                            # teacher_1_id is empty - use it
                             row_doc.teacher_1_id = new_teacher_id
                             updated_fields.append("teacher_1_id")
                         elif not row_doc.teacher_2_id:
+                            # teacher_1_id occupied but teacher_2_id empty - use teacher_2_id
                             row_doc.teacher_2_id = new_teacher_id
                             updated_fields.append("teacher_2_id")
                         else:
-                            # Both teacher slots occupied - log and skip
-                            skipped_rows.append({
-                                "row_id": row.name,
-                                "reason": "CREATE - both teacher slots occupied",
-                                "instance_id": instance.name,
-                                "teacher_1_id": row_doc.teacher_1_id,
-                                "teacher_2_id": row_doc.teacher_2_id
-                            })
-                            continue
+                            # Both slots occupied - check if new teacher is already assigned
+                            if row_doc.teacher_1_id == new_teacher_id or row_doc.teacher_2_id == new_teacher_id:
+                                # Teacher already assigned to this subject - skip
+                                skipped_rows.append({
+                                    "row_id": row.name,
+                                    "reason": "CREATE - teacher already assigned",
+                                    "instance_id": instance.name,
+                                    "teacher_1_id": row_doc.teacher_1_id,
+                                    "teacher_2_id": row_doc.teacher_2_id
+                                })
+                                continue
+                            else:
+                                # Both slots occupied by different teachers - replace teacher_2_id with new assignment
+                                row_doc.teacher_2_id = new_teacher_id
+                                updated_fields.append("teacher_2_id")
+                                frappe.logger().info(f"SYNC PRIORITY 2 - Replaced teacher_2_id in row {row.name}: old={row_doc.teacher_2_id} -> new={new_teacher_id}")
                     
                     if updated_fields:
                         row_doc.save(ignore_permissions=True)
