@@ -575,9 +575,9 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
                 override["source_target_type"] = "Class"
                 
             overrides.extend(cross_overrides)
-            frappe.logger().info(f"🔄 CROSS-TARGET: Found {len(cross_overrides)} class overrides for teacher {target_id}")
+            frappe.logger().info(f"🔄 CROSS-TARGET: Found {len(cross_overrides)} class overrides for teacher {resolved_teacher_ids}")
         
-        frappe.logger().info(f"📊 OVERRIDE QUERY: Found {len(overrides)} total overrides for {target_type} {target_id}")
+        frappe.logger().info(f"📊 OVERRIDE QUERY: Found {len(overrides)} total overrides for {target_type} {primary_target_id}")
         
         if not overrides:
             return entries, cross_target_info
@@ -636,7 +636,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
                 class_id_for_override = override.get("source_class_id", "")
             elif target_type == "Class":
                 # Direct class override: use current target_id
-                class_id_for_override = target_id
+                class_id_for_override = primary_target_id
                 
             override_map[date][column_id] = {
                 "name": f"override-{override['name']}",  # Mark as override entry
