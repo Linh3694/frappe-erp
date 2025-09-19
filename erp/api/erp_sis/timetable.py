@@ -1024,7 +1024,31 @@ def get_teacher_week():
         override_entries = [e for e in entries_with_overrides if e.get("is_override")]
         frappe.logger().info(f"🎯 TEACHER FINAL: {len(entries)} base entries → {len(entries_with_overrides)} final entries ({len(override_entries)} overrides)")
         
-        return list_response(entries_with_overrides, "Teacher week fetched successfully")
+        # DEBUG: Include debug info in response for frontend visibility
+        debug_info = {
+            "original_teacher_id": teacher_id,
+            "resolved_teacher_ids": list(resolved_teacher_ids),
+            "base_entries_count": len(entries),
+            "final_entries_count": len(entries_with_overrides),
+            "override_entries_count": len(override_entries),
+            "override_entries": override_entries[:3] if override_entries else [],
+            "date_range": {
+                "week_start": ws.strftime("%Y-%m-%d"),
+                "week_end": week_end.strftime("%Y-%m-%d")
+            }
+        }
+        
+        response_data = {
+            "data": entries_with_overrides,
+            "debug_info": debug_info
+        }
+        
+        return {
+            "success": True,
+            "data": entries_with_overrides,
+            "debug_info": debug_info,
+            "message": "Teacher week fetched successfully"
+        }
     except Exception as e:
 
         return error_response(f"Error fetching teacher week: {str(e)}")
