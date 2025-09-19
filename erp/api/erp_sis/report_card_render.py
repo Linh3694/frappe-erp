@@ -714,6 +714,8 @@ def get_report_data(report_id: Optional[str] = None):
             "subjects": standardized_data.get("subjects", []),
             "homeroom": standardized_data.get("homeroom", {}),
             "form_config": standardized_data.get("form_config", {}),
+            "scores": transformed_data.get("scores", {}),  # Bring scores to top level
+            # Keep legacy data for backward compatibility
             "data": transformed_data,
         }
         
