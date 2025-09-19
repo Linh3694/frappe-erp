@@ -47,7 +47,7 @@ def execute():
         campus_id=campus_id,
         pages=[{
             "page_no": 1,
-            "background_image": "/files/report_forms/PRIM_VN/page_1.png",
+            "background_image": "/files/report_forms/PRIM_VN/page_1.jpg",
             "layout_json": {
                 "units": "percent",
                 "elements": [

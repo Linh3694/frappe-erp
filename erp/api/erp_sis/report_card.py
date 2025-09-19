@@ -54,6 +54,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                     "weight1_count": getattr(row, "weight1_count", None),
                     "weight2_count": getattr(row, "weight2_count", None),
                     "weight3_count": getattr(row, "weight3_count", None),
+                    "semester1_average": getattr(row, "semester1_average", None),
                 }
             )
     except Exception:
@@ -162,6 +163,7 @@ def _apply_scores(parent_doc, scores_payload: List[Dict[str, Any]]):
                 "weight1_count": int(s.get("weight1_count") or 0),
                 "weight2_count": int(s.get("weight2_count") or 0),
                 "weight3_count": int(s.get("weight3_count") or 0),
+                "semester1_average": float(s.get("semester1_average") or 0) if s.get("semester1_average") is not None else None,
             },
         )
 
