@@ -517,7 +517,10 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
         overrides.extend(direct_overrides)
         
         # Cross-target support: If querying teacher timetable, also get class overrides where this teacher is assigned
+        cross_target_info = {"enabled": False, "query_ran": False, "found_count": 0, "overrides": []}
+        
         if target_type == "Teacher":
+            cross_target_info["enabled"] = True
             frappe.logger().info(f"🔍 CROSS-TARGET QUERY: Looking for class overrides for teacher {target_id} between {start_date_str} and {end_date_str}")
             
             cross_overrides = frappe.db.sql("""
@@ -528,6 +531,10 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                 AND (teacher_1_id = %s OR teacher_2_id = %s)
                 ORDER BY date ASC, timetable_column_id ASC
             """, (start_date_str, end_date_str, target_id, target_id), as_dict=True)
+            
+            cross_target_info["query_ran"] = True
+            cross_target_info["found_count"] = len(cross_overrides)
+            cross_target_info["overrides"] = cross_overrides
             
             frappe.logger().info(f"🔍 CROSS-TARGET RESULTS: Found {len(cross_overrides)} overrides - {cross_overrides}")
             
@@ -1018,7 +1025,7 @@ def get_teacher_week():
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
         week_end = _add_days(ws, 6)
-        entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
+        entries_with_overrides, cross_target_debug = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
         
         # DEBUG: Log final results
         override_entries = [e for e in entries_with_overrides if e.get("is_override")]
