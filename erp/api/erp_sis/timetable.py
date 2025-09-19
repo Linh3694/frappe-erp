@@ -1898,6 +1898,120 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
             WHERE date = %s AND timetable_column_id = %s AND target_type = %s AND target_id = %s
             LIMIT 1
         """, (date, timetable_column_id, target_type, target_id), as_dict=True)
+        
+        if existing_override:
+            # Update existing override
+            override_name = existing_override[0].name
+            frappe.db.sql("""
+                UPDATE `tabTimetable_Date_Override`
+                SET subject_id = %s, teacher_1_id = %s, teacher_2_id = %s, room_id = %s,
+                    override_type = %s, modified = %s, modified_by = %s
+                WHERE name = %s
+            """, (subject_id, teacher_1_id, teacher_2_id, room_id, 'replace',
+                  frappe.utils.now(), frappe.session.user, override_name))
+            
+            action = "updated"
+        else:
+            # Create new override
+            override_name = f"OVERRIDE-{frappe.generate_hash()[:8]}"
+            frappe.db.sql("""
+                INSERT INTO `tabTimetable_Date_Override`
+                (name, date, timetable_column_id, target_type, target_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type, created_by, creation, modified, modified_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (override_name, date, timetable_column_id, target_type, target_id, subject_id, teacher_1_id, teacher_2_id, room_id, 'replace',
+                  frappe.session.user, frappe.utils.now(), frappe.utils.now(), frappe.session.user))
+            
+            action = "created"
+        
+        frappe.db.commit()
+        
+        # Get subject and teacher names for response
+        subject_title = ""
+        if subject_id:
+            subject_title = frappe.db.get_value("SIS Subject", subject_id, "title") or ""
+            
+        teacher_names = []
+        if teacher_1_id:
+            teacher_name = frappe.db.get_value("SIS Teacher", teacher_1_id, "teacher_name") or ""
+            if teacher_name:
+                teacher_names.append(teacher_name)
+        if teacher_2_id:
+            teacher_name = frappe.db.get_value("SIS Teacher", teacher_2_id, "teacher_name") or ""
+            if teacher_name:
+                teacher_names.append(teacher_name)
+        
+        return single_item_response({
+            "name": override_name,
+            "date": date,
+            "timetable_column_id": timetable_column_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "subject_id": subject_id,
+            "subject_title": subject_title,
+            "teacher_1_id": teacher_1_id,
+            "teacher_2_id": teacher_2_id,
+            "teacher_names": ", ".join(teacher_names),
+            "room_id": room_id,
+            "override_type": "replace",
+            "action": action
+        }, f"Timetable override {action} successfully for {date}")
+
+    except Exception as e:
+        frappe.log_error(f"Error creating/updating timetable override: {str(e)}")
+        return error_response(f"Error creating timetable override: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["DELETE"])
+def delete_timetable_override(override_id: str = None):
+    """Delete a specific timetable override"""
+    try:
+        override_id = override_id or _get_request_arg("override_id")
+        
+        if not override_id:
+            return validation_error_response("Validation failed", {
+                "override_id": ["Override ID is required"]
+            })
+            
+        # Delete from custom table
+        deleted_count = frappe.db.sql("""
+            DELETE FROM `tabTimetable_Date_Override`
+            WHERE name = %s AND created_by = %s
+        """, (override_id, frappe.session.user))
+        
+        if deleted_count:
+            frappe.db.commit()
+            return single_item_response({"deleted": True}, "Timetable override deleted successfully")
+        else:
+            return not_found_response("Timetable override not found or access denied")
+            
+    except Exception as e:
+        frappe.log_error(f"Error deleting timetable override: {str(e)}")
+        return error_response(f"Error deleting timetable override: {str(e)}")
+
+
+def _get_request_arg(arg_name: str):
+    """Helper to get argument from various request sources"""
+    # Try JSON data first
+    if frappe.request.data:
+        try:
+            data = json.loads(frappe.request.data)
+            return data.get(arg_name)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    
+    # Try form data
+    if hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
+        return frappe.local.form_dict.get(arg_name)
+        
+    # Try query params
+    if hasattr(frappe.request, 'args') and frappe.request.args:
+        return frappe.request.args.get(arg_name)
+        
+    return None = frappe.db.sql("""
+            SELECT name FROM `tabTimetable_Date_Override`
+            WHERE date = %s AND timetable_column_id = %s AND target_type = %s AND target_id = %s
+            LIMIT 1
+        """, (date, timetable_column_id, target_type, target_id), as_dict=True)
 
         override_name = f"override-{frappe.generate_hash()[:10]}"
         current_time = frappe.utils.now()
