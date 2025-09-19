@@ -2012,6 +2012,54 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         return error_response(f"Error creating timetable override: {str(e)}")
 
 
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def list_timetable_overrides(target_type: str = None, target_id: str = None):
+    """List all timetable overrides for debugging purposes"""
+    try:
+        target_type = target_type or _get_request_arg("target_type")
+        target_id = target_id or _get_request_arg("target_id")
+        
+        # Build query
+        query = "SELECT * FROM `tabTimetable_Date_Override`"
+        params = []
+        
+        if target_type and target_id:
+            query += " WHERE target_type = %s AND target_id = %s"
+            params = [target_type, target_id]
+        
+        query += " ORDER BY date ASC, timetable_column_id ASC"
+        
+        overrides = frappe.db.sql(query, params, as_dict=True)
+        
+        # Enrich with readable info
+        for override in overrides:
+            # Get subject title
+            if override.get("subject_id"):
+                override["subject_title"] = frappe.db.get_value("SIS Subject", override["subject_id"], "title") or ""
+            
+            # Get teacher names
+            teacher_names = []
+            for teacher_field in ["teacher_1_id", "teacher_2_id"]:
+                teacher_id = override.get(teacher_field)
+                if teacher_id:
+                    try:
+                        teacher = frappe.get_doc("SIS Teacher", teacher_id)
+                        if teacher.user_id:
+                            user = frappe.get_doc("User", teacher.user_id)
+                            display_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+                            if display_name:
+                                teacher_names.append(display_name)
+                    except:
+                        pass
+            override["teacher_names"] = ", ".join(teacher_names)
+                
+        return list_response(overrides, f"Found {len(overrides)} timetable overrides")
+        
+    except Exception as e:
+        frappe.log_error(f"Error listing timetable overrides: {str(e)}")
+        return error_response(f"Error listing timetable overrides: {str(e)}")
+
+
 @frappe.whitelist(allow_guest=False, methods=["DELETE"])
 def delete_timetable_override(override_id: str = None):
     """Delete a specific timetable override"""
