@@ -518,6 +518,8 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
         
         # Cross-target support: If querying teacher timetable, also get class overrides where this teacher is assigned
         if target_type == "Teacher":
+            frappe.logger().info(f"🔍 CROSS-TARGET QUERY: Looking for class overrides for teacher {target_id} between {start_date_str} and {end_date_str}")
+            
             cross_overrides = frappe.db.sql("""
                 SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type, target_id as source_class_id
                 FROM `tabTimetable_Date_Override`
@@ -526,6 +528,8 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                 AND (teacher_1_id = %s OR teacher_2_id = %s)
                 ORDER BY date ASC, timetable_column_id ASC
             """, (start_date_str, end_date_str, target_id, target_id), as_dict=True)
+            
+            frappe.logger().info(f"🔍 CROSS-TARGET RESULTS: Found {len(cross_overrides)} overrides - {cross_overrides}")
             
             # Mark cross-target overrides 
             for override in cross_overrides:
@@ -801,6 +805,9 @@ def get_teacher_week():
         # Fallback to original id if nothing resolved
         if not resolved_teacher_ids:
             resolved_teacher_ids.add(teacher_id)
+            
+        # DEBUG: Log teacher ID resolution
+        frappe.logger().info(f"🎯 TEACHER ID RESOLUTION: {teacher_id} → {resolved_teacher_ids}")
         
         # Query timetable rows
         campus_id = get_current_campus_from_context()
@@ -1012,6 +1019,10 @@ def get_teacher_week():
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
         week_end = _add_days(ws, 6)
         entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
+        
+        # DEBUG: Log final results
+        override_entries = [e for e in entries_with_overrides if e.get("is_override")]
+        frappe.logger().info(f"🎯 TEACHER FINAL: {len(entries)} base entries → {len(entries_with_overrides)} final entries ({len(override_entries)} overrides)")
         
         return list_response(entries_with_overrides, "Teacher week fetched successfully")
     except Exception as e:
