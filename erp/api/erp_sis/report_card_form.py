@@ -320,18 +320,18 @@ def ensure_default_forms():
     """Ensure default FE form codes exist as SIS Report Card Form docs for current campus.
 
     Codes created if missing:
-    - PRIM_VN: Biểu mẫu Tiểu học - CTVN
-    - SEC_VN_MID: THCS - CTVN - Giữa kì
-    - SEC_VN_END1: THCS - CTVN - Cuối kì 1
-    - SEC_VN_END2: THCS - CTVN - Cuối kì 2
+    - PRIM_VN: Tiểu học - CTVN
+    - SEC_VN_MID: Trung học - CTVN - Giữa kỳ
+    - SEC_VN_END1: Trung học - CTVN - HK1
+    - SEC_VN_END2: Trung học - CTVN - HK2
     """
     try:
         campus_id = _current_campus_id()
         defaults = [
-            {"code": "PRIM_VN", "title": "Biểu mẫu Tiểu học - CTVN"},
-            {"code": "SEC_VN_MID", "title": "THCS - CTVN - Giữa kì"},
-            {"code": "SEC_VN_END1", "title": "THCS - CTVN - Cuối kì 1"},
-            {"code": "SEC_VN_END2", "title": "THCS - CTVN - Cuối kì 2"},
+            {"code": "PRIM_VN", "title": "Tiểu học - CTVN"},
+            {"code": "SEC_VN_MID", "title": "Trung học - CTVN - Giữa kỳ"},
+            {"code": "SEC_VN_END1", "title": "Trung học - CTVN - HK1"},
+            {"code": "SEC_VN_END2", "title": "Trung học - CTVN - HK2"},
         ]
         created: list[str] = []
         for d in defaults:
