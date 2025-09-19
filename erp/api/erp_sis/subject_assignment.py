@@ -1505,20 +1505,52 @@ def _sync_timetable_from_date(data: dict, from_date):
     
     sync_debug["sync_from_date"] = str(sync_from_date)
     
-    # Find timetable instances từ ngày sync trở đi (bao gồm current instances để sync với subject assignment)
+    # Find active or future timetable instances (not just future start dates)
     instance_filters = {
         "campus_id": campus_id,
-        "start_date": [">=", sync_from_date]  # Instances từ ngày sync trở đi (bao gồm current)
     }
     
     if class_id:
         instance_filters["class_id"] = class_id
-        
-    instances = frappe.get_all(
+    
+    # Get all instances and filter by date logic in Python (more flexible)
+    all_instances = frappe.get_all(
         "SIS Timetable Instance", 
-        fields=["name", "class_id", "start_date", "end_date"],
+        fields=["name", "class_id", "start_date", "end_date", "creation", "modified"],
         filters=instance_filters
     )
+    
+    # Filter instances: active (end_date >= today) or future (start_date >= today)
+    today = frappe.utils.getdate()
+    instances = []
+    
+    for instance in all_instances:
+        instance_start = instance.get("start_date") 
+        instance_end = instance.get("end_date")
+        
+        # Include if:
+        # 1. Currently active: start_date <= today <= end_date
+        # 2. Future instance: start_date >= today  
+        # 3. If dates are None, include (legacy data)
+        include_instance = False
+        
+        if not instance_start or not instance_end:
+            # Legacy instances without proper dates - include them
+            include_instance = True
+            sync_debug.setdefault("legacy_instances", []).append(instance.name)
+        elif instance_start <= today <= instance_end:
+            # Currently active instance
+            include_instance = True  
+            sync_debug.setdefault("active_instances", []).append(instance.name)
+        elif instance_start >= today:
+            # Future instance
+            include_instance = True
+            sync_debug.setdefault("future_instances", []).append(instance.name)
+            
+        if include_instance:
+            instances.append(instance)
+    
+    frappe.logger().info(f"SYNC DEBUG - Found {len(instances)} relevant instances out of {len(all_instances)} total for campus {campus_id}, class {class_id}")
     
     sync_debug["found_instances"] = len(instances)
     
@@ -1625,6 +1657,8 @@ def _sync_timetable_from_date(data: dict, from_date):
                     "subject_id": ["in", subject_id_list]
                 }
             )
+            
+            frappe.logger().info(f"SYNC DEBUG - Instance {instance.name}: Looking for rows with subject_ids {subject_id_list}, found {len(rows)} rows")
             
             instance_debug["found_rows"] = len(rows)
             instance_debug["subject_ids"] = subject_id_list
