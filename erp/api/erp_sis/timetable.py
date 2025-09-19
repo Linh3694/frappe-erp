@@ -504,12 +504,38 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
         end_date_str = week_end.strftime("%Y-%m-%d")
         
         # Get all overrides for this target and date range from custom table
-        overrides = frappe.db.sql("""
+        # CROSS-TARGET SUPPORT: For teacher view, also get class overrides where this teacher is assigned
+        overrides = []
+        
+        # Direct overrides for this target
+        direct_overrides = frappe.db.sql("""
             SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type
             FROM `tabTimetable_Date_Override`
             WHERE target_type = %s AND target_id = %s AND date BETWEEN %s AND %s
             ORDER BY date ASC, timetable_column_id ASC
         """, (target_type, target_id, start_date_str, end_date_str), as_dict=True)
+        overrides.extend(direct_overrides)
+        
+        # Cross-target support: If querying teacher timetable, also get class overrides where this teacher is assigned
+        if target_type == "Teacher":
+            cross_overrides = frappe.db.sql("""
+                SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type, target_id as source_class_id
+                FROM `tabTimetable_Date_Override`
+                WHERE target_type = 'Class' 
+                AND date BETWEEN %s AND %s 
+                AND (teacher_1_id = %s OR teacher_2_id = %s)
+                ORDER BY date ASC, timetable_column_id ASC
+            """, (start_date_str, end_date_str, target_id, target_id), as_dict=True)
+            
+            # Mark cross-target overrides 
+            for override in cross_overrides:
+                override["is_cross_target"] = True
+                override["source_target_type"] = "Class"
+                
+            overrides.extend(cross_overrides)
+            frappe.logger().info(f"🔄 CROSS-TARGET: Found {len(cross_overrides)} class overrides for teacher {target_id}")
+        
+        frappe.logger().info(f"📊 OVERRIDE QUERY: Found {len(overrides)} total overrides for {target_type} {target_id}")
         
         if not overrides:
             return entries
@@ -561,13 +587,25 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                 except:
                     pass  # Skip if teacher not found
                     
+            # Determine class_id based on override type
+            class_id_for_override = ""
+            if override.get("is_cross_target"):
+                # Cross-target override (class→teacher): use source class_id
+                class_id_for_override = override.get("source_class_id", "")
+            elif target_type == "Class":
+                # Direct class override: use current target_id
+                class_id_for_override = target_id
+                
             override_map[date][column_id] = {
                 "name": f"override-{override['name']}",  # Mark as override entry
                 "subject_title": subject_title,
                 "teacher_names": ", ".join(teacher_names),
                 "override_type": override.get("override_type", "replace"),
                 "override_id": override["name"],
-                "class_id": target_id if target_type == "Class" else ""  # Include class_id for teacher overrides
+                "class_id": class_id_for_override,
+                "is_cross_target": override.get("is_cross_target", False),
+                "source_target_type": override.get("source_target_type", target_type),
+                "source_class_id": override.get("source_class_id", "")
             }
             
         # Apply overrides to entries
@@ -650,7 +688,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                             "period_priority": period_info.get("period_priority"),
                             "subject_title": override_data["subject_title"],
                             "teacher_names": override_data["teacher_names"],
-                            "class_id": override_data.get("class_id", ""),  # Use class_id from override
+                            "class_id": override_data.get("class_id", ""),  # Use class_id from override_map
                             "is_override": True,
                             "override_id": override_data["override_id"]
                         }
