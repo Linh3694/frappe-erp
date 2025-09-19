@@ -599,7 +599,8 @@ class TimetableExcelImporter:
                             continue
                         # Derive SIS Subject from Timetable Subject
                         subject_id = self.derive_subject_from_timetable_subject(ts_id, education_stage_id)
-                        # Derive teachers by Subject Assignment using actual_subject_id
+                        
+                        # PRIORITY 1: Derive teachers ONLY from Subject Assignment (not from Excel)
                         teacher_1_id, teacher_2_id, teacher_names = (None, None, "")
                         if subject_id:
                             # Get actual_subject_id from subject
@@ -1239,17 +1240,35 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
 
                 mapped_day = day_mapping.get(day_of_week, day_of_week)
 
+                # Find class first
+                class_id = find_class(class_name, campus_id)
+                if not class_id:
+                    continue
+
                 # Find or create subject
                 subject_id = find_or_create_subject(subject_name, campus_id)
 
-                # Find or create teacher
-                teacher_1_id = find_or_create_teacher(teacher_1, campus_id) if teacher_1 else None
+                # PRIORITY 1: Get teachers ONLY from Subject Assignment, not Excel
+                teacher_1_id = None
+                if class_id and subject_id:
+                    # Try to find teacher from Subject Assignment
+                    assignments = frappe.get_all(
+                        "SIS Subject Assignment",
+                        fields=["teacher_id"],
+                        filters={
+                            "campus_id": campus_id,
+                            "class_id": class_id,
+                            "subject_id": subject_id  # Using subject_id for backward compatibility
+                        },
+                        limit=1
+                    )
+                    if assignments:
+                        teacher_1_id = assignments[0].teacher_id
+                    else:
+                        # No assignment found - log warning but continue
+                        frappe.logger().warning(f"TIMETABLE IMPORT - No Subject Assignment found for class {class_name} ({class_id}) and subject {subject_name} ({subject_id})")
 
-                # Find class
-                class_id = find_class(class_name, campus_id)
-
-                if not class_id:
-                    continue
+                # class_id already checked above
 
                 # Create timetable instance row
                 row_doc = frappe.get_doc({

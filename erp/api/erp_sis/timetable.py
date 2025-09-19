@@ -1816,7 +1816,12 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
                                        subject_id: str = None, teacher_1_id: str = None,
                                        teacher_2_id: str = None, room_id: str = None,
                                        override_id: str = None):
-    """Create or update a date-specific timetable override for individual cell edits"""
+    """
+    PRIORITY 3: Create or update a date-specific timetable override for individual cell edits.
+    
+    This handles direct changes on WeeklyGrid cells and only affects that specific date/period.
+    Does NOT modify timetable instance rows - those are handled by Priority 2 (Subject Assignment sync).
+    """
     try:
         # Get parameters from request
         date = date or _get_request_arg("date")

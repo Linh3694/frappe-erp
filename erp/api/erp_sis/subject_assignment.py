@@ -1473,8 +1473,12 @@ def _fix_subject_linkages(campus_id: str):
 
 def _sync_timetable_from_date(data: dict, from_date):
     """
-    Sync timetable instances từ một ngày cụ thể.
-    Dùng cho auto-sync khi Subject Assignment được tạo/cập nhật.
+    PRIORITY 2: Sync timetable instances when Subject Assignment created/updated.
+    
+    Rules:
+    - Only sync Timetable Instance Rows (not overrides)
+    - Sync from assignment date until end of active instances
+    - Update teacher assignments based on new Subject Assignment
     """
     campus_id = get_current_campus_from_context() or "campus-1"
     
@@ -1520,32 +1524,31 @@ def _sync_timetable_from_date(data: dict, from_date):
         filters=instance_filters
     )
     
-    # Filter instances: active (end_date >= today) or future (start_date >= today)
+    # PRIORITY 2: Filter instances that need sync from assignment date
     today = frappe.utils.getdate()
+    sync_date = frappe.utils.getdate(sync_from_date) if isinstance(sync_from_date, str) else sync_from_date
     instances = []
     
     for instance in all_instances:
         instance_start = instance.get("start_date") 
         instance_end = instance.get("end_date")
         
-        # Include if:
-        # 1. Currently active: start_date <= today <= end_date
-        # 2. Future instance: start_date >= today  
-        # 3. If dates are None, include (legacy data)
+        # PRIORITY 2: Include instance if it's active during/after sync period
         include_instance = False
         
         if not instance_start or not instance_end:
             # Legacy instances without proper dates - include them
             include_instance = True
             sync_debug.setdefault("legacy_instances", []).append(instance.name)
-        elif instance_start <= today <= instance_end:
-            # Currently active instance
+            frappe.logger().info(f"SYNC PRIORITY 2 - Including legacy instance {instance.name} (no dates)")
+        elif instance_end >= sync_date:
+            # Instance is still active on/after sync date
             include_instance = True  
             sync_debug.setdefault("active_instances", []).append(instance.name)
-        elif instance_start >= today:
-            # Future instance
-            include_instance = True
-            sync_debug.setdefault("future_instances", []).append(instance.name)
+            frappe.logger().info(f"SYNC PRIORITY 2 - Including active instance {instance.name} (end: {instance_end}, sync: {sync_date})")
+        else:
+            # Instance ended before sync date - skip
+            frappe.logger().info(f"SYNC PRIORITY 2 - Skipping expired instance {instance.name} (ended: {instance_end}, sync: {sync_date})")
             
         if include_instance:
             instances.append(instance)
@@ -1702,9 +1705,23 @@ def _sync_timetable_from_date(data: dict, from_date):
                             row_doc.teacher_2_id = new_teacher_id
                             updated_fields.append("teacher_2_id")
                     else:
-                        # No old teacher (CREATE case), assign new teacher to teacher_1_id
-                        row_doc.teacher_1_id = new_teacher_id
-                        updated_fields.append("teacher_1_id")
+                        # PRIORITY 2: New assignment (CREATE case) - assign to teacher_1_id if empty
+                        if not row_doc.teacher_1_id:
+                            row_doc.teacher_1_id = new_teacher_id
+                            updated_fields.append("teacher_1_id")
+                        elif not row_doc.teacher_2_id:
+                            row_doc.teacher_2_id = new_teacher_id
+                            updated_fields.append("teacher_2_id")
+                        else:
+                            # Both teacher slots occupied - log and skip
+                            skipped_rows.append({
+                                "row_id": row.name,
+                                "reason": "CREATE - both teacher slots occupied",
+                                "instance_id": instance.name,
+                                "teacher_1_id": row_doc.teacher_1_id,
+                                "teacher_2_id": row_doc.teacher_2_id
+                            })
+                            continue
                     
                     if updated_fields:
                         row_doc.save(ignore_permissions=True)
