@@ -2060,6 +2060,37 @@ def list_timetable_overrides(target_type: str = None, target_id: str = None):
         return error_response(f"Error listing timetable overrides: {str(e)}")
 
 
+@frappe.whitelist(allow_guest=False, methods=["POST"])  
+def clear_all_overrides_for_target(target_type: str = None, target_id: str = None):
+    """Clear all overrides for a target (for debugging purposes)"""
+    try:
+        target_type = target_type or _get_request_arg("target_type")
+        target_id = target_id or _get_request_arg("target_id")
+        
+        if not target_type or not target_id:
+            return validation_error_response("Validation failed", {
+                "required_fields": ["target_type", "target_id"]
+            })
+            
+        # Delete all overrides for this target
+        deleted_count = frappe.db.sql("""
+            DELETE FROM `tabTimetable_Date_Override`
+            WHERE target_type = %s AND target_id = %s
+        """, (target_type, target_id))
+        
+        frappe.db.commit()
+        
+        return single_item_response({
+            "deleted_count": deleted_count,
+            "target_type": target_type,
+            "target_id": target_id
+        }, f"Cleared {deleted_count} overrides for {target_type} {target_id}")
+        
+    except Exception as e:
+        frappe.log_error(f"Error clearing overrides: {str(e)}")
+        return error_response(f"Error clearing overrides: {str(e)}")
+
+
 @frappe.whitelist(allow_guest=False, methods=["DELETE"])
 def delete_timetable_override(override_id: str = None):
     """Delete a specific timetable override"""
