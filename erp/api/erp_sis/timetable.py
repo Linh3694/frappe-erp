@@ -1043,11 +1043,12 @@ def get_teacher_week():
             "debug_info": debug_info
         }
         
+        # Use single_item_response to include debug_info properly
         return {
             "success": True,
+            "message": "Teacher week fetched successfully", 
             "data": entries_with_overrides,
-            "debug_info": debug_info,
-            "message": "Teacher week fetched successfully"
+            "debug_info": debug_info
         }
     except Exception as e:
 
