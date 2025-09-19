@@ -344,6 +344,9 @@ def create_subject_assignment():
                         "assignment_id": assignment_doc.name,
                         "sync_result": sync_result
                     })
+                    
+                    # Log sync result [[memory:7723612]]
+                    frappe.logger().info(f"CREATE DEBUG - Auto-sync completed for new assignment {assignment_doc.name}: {sync_result.get('summary', {})}")
                 except Exception as sync_error:
                     frappe.log_error(f"Auto-sync timetable failed for new assignment {assignment_doc.name}: {str(sync_error)}")
                     assignments_with_sync.append({
@@ -1429,10 +1432,10 @@ def _sync_timetable_from_date(data: dict, from_date):
     
     sync_debug["sync_from_date"] = str(sync_from_date)
     
-    # Find timetable instances từ ngày sync trở đi (chỉ future instances, không touch current/past)
+    # Find timetable instances từ ngày sync trở đi (bao gồm current instances để sync với subject assignment)
     instance_filters = {
         "campus_id": campus_id,
-        "start_date": [">", sync_from_date]  # Chỉ instances SAU ngày sync (strictly future)
+        "start_date": [">=", sync_from_date]  # Instances từ ngày sync trở đi (bao gồm current)
     }
     
     if class_id:
@@ -1447,6 +1450,8 @@ def _sync_timetable_from_date(data: dict, from_date):
     sync_debug["found_instances"] = len(instances)
     
     if not instances:
+        sync_debug["message"] = f"No timetable instances found from date {sync_from_date} onwards"
+        frappe.logger().info(f"SYNC DEBUG - No instances found to sync: {sync_debug}")
         return {
             "updated_rows": [],
             "skipped_rows": [],
@@ -1456,7 +1461,8 @@ def _sync_timetable_from_date(data: dict, from_date):
                 "rows_updated": 0,
                 "rows_skipped": 0,
                 "sync_from_date": sync_from_date
-            }
+            },
+            "logs": [f"Không tìm thấy thời khóa biểu nào để đồng bộ từ ngày {sync_from_date} trở đi"]
         }
         
     updated_rows = []
