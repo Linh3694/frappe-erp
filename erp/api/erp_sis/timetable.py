@@ -495,7 +495,7 @@ def _day_of_week_to_index(dow: str) -> int:
         return -1
     return mapping[key]
 
-def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id: str, 
+def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id, 
                               week_start: datetime, week_end: datetime) -> tuple[list[dict], dict]:
     """Apply date-specific timetable overrides to entries"""
     try:
@@ -1035,7 +1035,7 @@ def get_teacher_week():
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
         week_end = _add_days(ws, 6)
-        entries_with_overrides, cross_target_debug = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
+        entries_with_overrides, cross_target_debug = _apply_timetable_overrides(entries, "Teacher", resolved_teacher_ids, ws, week_end)
         
         # DEBUG: Log final results
         override_entries = [e for e in entries_with_overrides if e.get("is_override")]
