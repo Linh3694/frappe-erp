@@ -357,6 +357,12 @@ def create_subject_assignment():
 
         frappe.db.commit()
 
+        # Auto-fix any existing SIS Subjects that don't have actual_subject_id linkage
+        try:
+            _fix_subject_linkages(campus_id)
+        except Exception as fix_error:
+            frappe.logger().warning(f"Subject linkage fix failed: {str(fix_error)}")
+
         # Get created data with display names
         created_data = []
         if created_names:
@@ -1398,6 +1404,50 @@ def bulk_update_timetable_from_assignment():
         return error_response(f"Error updating timetables: {str(e)}")
 
 
+def _fix_subject_linkages(campus_id: str):
+    """Fix SIS Subjects that don't have actual_subject_id linkages"""
+    try:
+        # Find SIS Subjects without actual_subject_id
+        unlinked_subjects = frappe.get_all(
+            "SIS Subject",
+            fields=["name", "title", "title_vn"],
+            filters={
+                "campus_id": campus_id,
+                "actual_subject_id": ["is", "not set"]
+            }
+        )
+        
+        fixed_count = 0
+        for subj in unlinked_subjects:
+            # Try to find matching Actual Subject
+            title_to_match = subj.get("title") or subj.get("title_vn")
+            if not title_to_match:
+                continue
+                
+            actual_subjects = frappe.get_all(
+                "SIS Actual Subject",
+                fields=["name"],
+                filters={
+                    "title_vn": title_to_match,
+                    "campus_id": campus_id
+                }
+            )
+            
+            if actual_subjects:
+                try:
+                    frappe.db.set_value("SIS Subject", subj.name, "actual_subject_id", actual_subjects[0].name)
+                    fixed_count += 1
+                except Exception:
+                    continue
+        
+        if fixed_count > 0:
+            frappe.db.commit()
+            frappe.logger().info(f"SUBJECT LINKAGE FIX - Fixed {fixed_count} SIS Subjects with actual_subject_id linkages")
+            
+    except Exception as e:
+        frappe.logger().error(f"Error fixing subject linkages: {str(e)}")
+
+
 def _sync_timetable_from_date(data: dict, from_date):
     """
     Sync timetable instances từ một ngày cụ thể.
@@ -1499,22 +1549,41 @@ def _sync_timetable_from_date(data: dict, from_date):
                     instance_debug["method"] = "title_match"
                     instance_debug["title_vn"] = actual_subject.title_vn
                     
-                    subject_ids = frappe.get_all(
-                        "SIS Subject",
-                        fields=["name"],
-                        filters={
-                            "title": actual_subject.title_vn,
-                            "campus_id": campus_id
-                        }
-                    )
+                    # Try multiple title fields to find matching subjects
+                    title_filters = [
+                        {"title": actual_subject.title_vn, "campus_id": campus_id},
+                        {"title_vn": actual_subject.title_vn, "campus_id": campus_id},
+                    ]
+                    
+                    for title_filter in title_filters:
+                        subject_ids = frappe.get_all(
+                            "SIS Subject",
+                            fields=["name"],
+                            filters=title_filter
+                        )
+                        if subject_ids:
+                            break
+                    
                     instance_debug["found_subjects"] = len(subject_ids)
+                    instance_debug["title_filters_used"] = title_filters
                     
                     # Update found subjects to have proper actual_subject_id link
+                    updated_count = 0
                     for subj in subject_ids:
-                        frappe.db.set_value("SIS Subject", subj.name, "actual_subject_id", actual_subject_id)
+                        try:
+                            frappe.db.set_value("SIS Subject", subj.name, "actual_subject_id", actual_subject_id)
+                            updated_count += 1
+                        except Exception as update_error:
+                            instance_debug[f"update_error_{subj.name}"] = str(update_error)
+                    
+                    instance_debug["subjects_updated"] = updated_count
+                    if updated_count > 0:
+                        frappe.db.commit()
+                        frappe.logger().info(f"SYNC DEBUG - Updated {updated_count} SIS Subjects with actual_subject_id: {actual_subject_id}")
                         
                 except Exception as e:
                     instance_debug["title_match_error"] = str(e)
+                    frappe.logger().error(f"SYNC DEBUG - Title matching failed for actual_subject_id {actual_subject_id}: {str(e)}")
                     pass
             
             if not subject_ids:

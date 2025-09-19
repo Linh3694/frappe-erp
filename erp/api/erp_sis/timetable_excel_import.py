@@ -244,18 +244,39 @@ class TimetableExcelImporter:
                         self.warnings.append(f"Đã liên kết SIS Subject '{timetable_subject.title_vn}' với Timetable Subject")
                         return existing_subject
                     else:
-                        # Tạo SIS Subject mới (không tự động tạo Actual Subject)
+                        # Tạo SIS Subject mới và link với Actual Subject nếu có
+                        actual_subject_id = None
+                        try:
+                            # Tìm Actual Subject có title tương ứng
+                            actual_subjects = frappe.get_all(
+                                "SIS Actual Subject",
+                                fields=["name"],
+                                filters={
+                                    "title_vn": timetable_subject.title_vn,
+                                    "campus_id": self.campus_id
+                                }
+                            )
+                            if actual_subjects:
+                                actual_subject_id = actual_subjects[0].name
+                                self.warnings.append(f"Đã liên kết SIS Subject '{timetable_subject.title_vn}' với Actual Subject hiện có")
+                        except Exception:
+                            pass  # Ignore if can't find actual subject
+                        
                         subject_doc = frappe.get_doc({
                             "doctype": "SIS Subject",
                             "title": timetable_subject.title_vn,
                             "campus_id": self.campus_id,
                             "education_stage": education_stage_id,
-                            "timetable_subject_id": timetable_subject_id
+                            "timetable_subject_id": timetable_subject_id,
+                            "actual_subject_id": actual_subject_id  # Link với Actual Subject nếu có
                         })
                         subject_doc.insert()
                         frappe.db.commit()
                         
-                        self.warnings.append(f"Đã tự động tạo SIS Subject '{timetable_subject.title_vn}' cho cấp học được chọn")
+                        if actual_subject_id:
+                            self.warnings.append(f"Đã tự động tạo SIS Subject '{timetable_subject.title_vn}' và liên kết với Actual Subject")
+                        else:
+                            self.warnings.append(f"Đã tự động tạo SIS Subject '{timetable_subject.title_vn}' cho cấp học được chọn")
                         return subject_doc.name
                         
                 except Exception as create_error:
