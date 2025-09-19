@@ -913,7 +913,11 @@ def get_teacher_week():
 
         entries = _build_entries(rows, ws)
         
-        return list_response(entries, "Teacher week fetched successfully")
+        # Apply timetable overrides for date-specific changes (PRIORITY 3)
+        week_end = _add_days(ws, 6)
+        entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", teacher_id, ws, week_end)
+        
+        return list_response(entries_with_overrides, "Teacher week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching teacher week: {str(e)}")
@@ -1099,10 +1103,10 @@ def get_class_week():
 
         entries = _build_entries(rows, ws)
         
-        # TEMPORARILY DISABLE override logic to restore original timetable
-        # entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
+        # Apply timetable overrides for date-specific changes (PRIORITY 3)
+        entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
         
-        return list_response(entries, "Class week fetched successfully")
+        return list_response(entries_with_overrides, "Class week fetched successfully")
     except Exception as e:
 
         return error_response(f"Error fetching class week: {str(e)}")
@@ -1823,16 +1827,26 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
     Does NOT modify timetable instance rows - those are handled by Priority 2 (Subject Assignment sync).
     """
     try:
-        # Get parameters from request
-        date = date or _get_request_arg("date")
-        timetable_column_id = timetable_column_id or _get_request_arg("timetable_column_id")
-        target_type = target_type or _get_request_arg("target_type")
-        target_id = target_id or _get_request_arg("target_id")
-        subject_id = subject_id or _get_request_arg("subject_id")
-        teacher_1_id = teacher_1_id or _get_request_arg("teacher_1_id")
-        teacher_2_id = teacher_2_id or _get_request_arg("teacher_2_id")
-        room_id = room_id or _get_request_arg("room_id")
-        override_id = override_id or _get_request_arg("override_id")
+    # Get parameters from request
+    date = date or _get_request_arg("date")
+    timetable_column_id = timetable_column_id or _get_request_arg("timetable_column_id")
+    target_type = target_type or _get_request_arg("target_type")
+    target_id = target_id or _get_request_arg("target_id")
+    subject_id = subject_id or _get_request_arg("subject_id")
+    teacher_1_id = teacher_1_id or _get_request_arg("teacher_1_id")
+    teacher_2_id = teacher_2_id or _get_request_arg("teacher_2_id")
+    room_id = room_id or _get_request_arg("room_id")
+    override_id = override_id or _get_request_arg("override_id")
+    
+    # Convert "none" strings to None
+    if teacher_1_id == "none" or teacher_1_id == "":
+        teacher_1_id = None
+    if teacher_2_id == "none" or teacher_2_id == "":
+        teacher_2_id = None
+    if subject_id == "none" or subject_id == "":
+        subject_id = None
+    if room_id == "none" or room_id == "":
+        room_id = None
 
         # Validate required fields
         if not all([date, timetable_column_id, target_type, target_id]):
