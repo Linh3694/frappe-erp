@@ -710,12 +710,12 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                     except Exception as create_error:
                         frappe.logger().error(f"❌ OVERRIDE CREATE ERROR: {str(create_error)}")
         
-        return enhanced_entries
+        return enhanced_entries, cross_target_info
         
     except Exception as e:
         frappe.log_error(f"Error applying timetable overrides: {str(e)}")
         # Return original entries if override processing fails
-        return entries
+        return entries, {"error": str(e)}
 
 
 def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
@@ -1042,7 +1042,8 @@ def get_teacher_week():
             "date_range": {
                 "week_start": ws.strftime("%Y-%m-%d"),
                 "week_end": week_end.strftime("%Y-%m-%d")
-            }
+            },
+            "cross_target_debug": cross_target_debug
         }
         
         response_data = {
@@ -1243,7 +1244,7 @@ def get_class_week():
         entries = _build_entries(rows, ws)
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
-        entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
+        entries_with_overrides, _ = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
         
         return list_response(entries_with_overrides, "Class week fetched successfully")
     except Exception as e:
