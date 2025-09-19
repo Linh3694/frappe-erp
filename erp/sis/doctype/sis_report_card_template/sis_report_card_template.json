@@ -18,9 +18,14 @@
   "campus_id",
   "scores_enabled",
   "scores",
+  "academic_ranking",
+  "academic_ranking_year", 
+  "student_achievement",
   "homeroom_enabled",
   "homeroom_conduct_enabled",
   "homeroom_conduct_year_enabled",
+  "conduct_ranking",
+  "conduct_ranking_year",
   "homeroom_titles",
   "subject_eval_enabled",
   "subjects"
@@ -40,9 +45,15 @@
   {"fieldname": "scores_enabled", "fieldtype": "Check", "label": "Bật bảng điểm"},
   {"fieldname": "scores", "fieldtype": "Table", "label": "Bảng điểm", "options": "SIS Report Card Score Config"},
 
+  {"fieldname": "academic_ranking", "fieldtype": "Select", "label": "Xếp loại học lực", "options": "Xuất sắc\nGiỏi\nKhá\nTrung bình\nYếu"},
+  {"fieldname": "academic_ranking_year", "fieldtype": "Select", "label": "Xếp loại học lực cả năm", "options": "Xuất sắc\nGiỏi\nKhá\nTrung bình\nYếu"},
+  {"fieldname": "student_achievement", "fieldtype": "Select", "label": "Danh hiệu học sinh", "options": "Học sinh xuất sắc\nHọc sinh giỏi\nHọc sinh khá\nHọc sinh tiến bộ"},
+
   {"fieldname": "homeroom_enabled", "fieldtype": "Check", "label": "Bật nhận xét chủ nhiệm"},
   {"fieldname": "homeroom_conduct_enabled", "fieldtype": "Check", "label": "Bật xếp loại rèn luyện"},
   {"fieldname": "homeroom_conduct_year_enabled", "fieldtype": "Check", "label": "Bật xếp loại rèn luyện cả năm"},
+  {"fieldname": "conduct_ranking", "fieldtype": "Select", "label": "Xếp loại rèn luyện", "options": "Tốt\nKhá\nTrung bình\nYếu"},
+  {"fieldname": "conduct_ranking_year", "fieldtype": "Select", "label": "Xếp loại rèn luyện cả năm", "options": "Tốt\nKhá\nTrung bình\nYếu"},
   {"fieldname": "homeroom_titles", "fieldtype": "Table", "label": "Nhận xét chủ nhiệm", "options": "SIS Report Card Homeroom Title Map"},
 
   {"fieldname": "subject_eval_enabled", "fieldtype": "Check", "label": "Bật đánh giá môn học"},
