@@ -523,14 +523,24 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             cross_target_info["enabled"] = True
             frappe.logger().info(f"🔍 CROSS-TARGET QUERY: Looking for class overrides for teacher {target_id} between {start_date_str} and {end_date_str}")
             
-            cross_overrides = frappe.db.sql("""
+            # DEBUG: Add SQL query debug info
+            sql_query = """
                 SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type, target_id as source_class_id
                 FROM `tabTimetable_Date_Override`
                 WHERE target_type = 'Class' 
                 AND date BETWEEN %s AND %s 
                 AND (teacher_1_id = %s OR teacher_2_id = %s)
                 ORDER BY date ASC, timetable_column_id ASC
-            """, (start_date_str, end_date_str, target_id, target_id), as_dict=True)
+            """
+            sql_params = (start_date_str, end_date_str, target_id, target_id)
+            
+            cross_target_info["sql_debug"] = {
+                "query": sql_query.strip(),
+                "params": sql_params,
+                "target_id_being_searched": target_id
+            }
+            
+            cross_overrides = frappe.db.sql(sql_query, sql_params, as_dict=True)
             
             cross_target_info["query_ran"] = True
             cross_target_info["found_count"] = len(cross_overrides)
