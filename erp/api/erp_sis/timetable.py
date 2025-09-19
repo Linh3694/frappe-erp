@@ -566,11 +566,13 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                 "subject_title": subject_title,
                 "teacher_names": ", ".join(teacher_names),
                 "override_type": override.get("override_type", "replace"),
-                "override_id": override["name"]
+                "override_id": override["name"],
+                "class_id": target_id if target_type == "Class" else ""  # Include class_id for teacher overrides
             }
             
         # Apply overrides to entries
         enhanced_entries = []
+        matched_overrides = set()  # Track which overrides were matched to existing entries
         
         for entry in entries:
             entry_date = entry.get("date")
@@ -581,6 +583,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                 entry_column in override_map[entry_date]):
                 
                 override_data = override_map[entry_date][entry_column]
+                matched_overrides.add(f"{entry_date}|{entry_column}")  # Track matched override
                 
                 if override_data["override_type"] == "replace":
                     # Replace entry with override data
@@ -589,6 +592,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                         "name": override_data["name"],
                         "subject_title": override_data["subject_title"],
                         "teacher_names": override_data["teacher_names"],
+                        "class_id": override_data.get("class_id", entry.get("class_id", "")),  # Use override class_id if available
                         "is_override": True,
                         "override_id": override_data["override_id"]
                     })
@@ -604,6 +608,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
                         "name": override_data["name"],
                         "subject_title": override_data["subject_title"], 
                         "teacher_names": override_data["teacher_names"],
+                        "class_id": override_data.get("class_id", entry.get("class_id", "")),  # Use override class_id if available
                         "is_override": True,
                         "override_id": override_data["override_id"]
                     })
@@ -611,6 +616,50 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id:
             else:
                 # No override, keep original entry
                 enhanced_entries.append(entry)
+        
+        # CRITICAL FIX: Create entries for unmatched overrides (teacher has no existing entry for that date/period)
+        for date_str, date_overrides in override_map.items():
+            for column_id, override_data in date_overrides.items():
+                override_key = f"{date_str}|{column_id}"
+                
+                if override_key not in matched_overrides:
+                    # This override didn't match any existing entry - create a new entry
+                    try:
+                        # Parse date to get day_of_week
+                        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                        day_names = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+                        day_of_week = day_names[date_obj.weekday()]
+                        
+                        # Get period info from timetable column
+                        period_info = {}
+                        try:
+                            column = frappe.get_doc("SIS Timetable Column", column_id)
+                            period_info = {
+                                "period_priority": column.period_priority,
+                                "period_name": column.period_name
+                            }
+                        except:
+                            pass
+                        
+                        # Create new entry for the override
+                        new_entry = {
+                            "name": override_data["name"],
+                            "date": date_str,
+                            "day_of_week": day_of_week,
+                            "timetable_column_id": column_id,
+                            "period_priority": period_info.get("period_priority"),
+                            "subject_title": override_data["subject_title"],
+                            "teacher_names": override_data["teacher_names"],
+                            "class_id": override_data.get("class_id", ""),  # Use class_id from override
+                            "is_override": True,
+                            "override_id": override_data["override_id"]
+                        }
+                        
+                        enhanced_entries.append(new_entry)
+                        frappe.logger().info(f"🆕 OVERRIDE: Created new entry for unmatched override on {date_str}")
+                        
+                    except Exception as create_error:
+                        frappe.logger().error(f"❌ OVERRIDE CREATE ERROR: {str(create_error)}")
         
         return enhanced_entries
         
