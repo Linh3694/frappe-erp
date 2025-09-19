@@ -503,41 +503,62 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
         start_date_str = week_start.strftime("%Y-%m-%d")
         end_date_str = week_end.strftime("%Y-%m-%d")
         
+        # Handle different target_id types: string for Class, set for Teacher
+        if target_type == "Teacher":
+            # For teacher, target_id is a set of resolved teacher IDs
+            resolved_teacher_ids = list(target_id) if isinstance(target_id, set) else [target_id]
+            primary_target_id = resolved_teacher_ids[0] if resolved_teacher_ids else str(target_id)
+        else:
+            # For class/student, target_id is a simple string
+            resolved_teacher_ids = []
+            primary_target_id = str(target_id)
+        
         # Get all overrides for this target and date range from custom table
         # CROSS-TARGET SUPPORT: For teacher view, also get class overrides where this teacher is assigned
         overrides = []
         
-        # Direct overrides for this target
-        direct_overrides = frappe.db.sql("""
-            SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type
-            FROM `tabTimetable_Date_Override`
-            WHERE target_type = %s AND target_id = %s AND date BETWEEN %s AND %s
-            ORDER BY date ASC, timetable_column_id ASC
-        """, (target_type, target_id, start_date_str, end_date_str), as_dict=True)
-        overrides.extend(direct_overrides)
+        # Direct overrides for this target (only for Class/Student, not Teacher since teachers don't have direct overrides)
+        if target_type != "Teacher":
+            direct_overrides = frappe.db.sql("""
+                SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type
+                FROM `tabTimetable_Date_Override`
+                WHERE target_type = %s AND target_id = %s AND date BETWEEN %s AND %s
+                ORDER BY date ASC, timetable_column_id ASC
+            """, (target_type, primary_target_id, start_date_str, end_date_str), as_dict=True)
+            overrides.extend(direct_overrides)
         
         # Cross-target support: If querying teacher timetable, also get class overrides where this teacher is assigned
         cross_target_info = {"enabled": False, "query_ran": False, "found_count": 0, "overrides": []}
         
         if target_type == "Teacher":
             cross_target_info["enabled"] = True
-            frappe.logger().info(f"🔍 CROSS-TARGET QUERY: Looking for class overrides for teacher {target_id} between {start_date_str} and {end_date_str}")
+            frappe.logger().info(f"🔍 CROSS-TARGET QUERY: Looking for class overrides for teacher {resolved_teacher_ids} between {start_date_str} and {end_date_str}")
+            
+            # Build dynamic query for multiple teacher IDs
+            teacher_conditions = []
+            sql_params = [start_date_str, end_date_str]
+            
+            for teacher_id in resolved_teacher_ids:
+                teacher_conditions.append("(teacher_1_id = %s OR teacher_2_id = %s)")
+                sql_params.extend([teacher_id, teacher_id])
+            
+            teacher_where = " OR ".join(teacher_conditions)
             
             # DEBUG: Add SQL query debug info
-            sql_query = """
+            sql_query = f"""
                 SELECT name, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type, target_id as source_class_id
                 FROM `tabTimetable_Date_Override`
                 WHERE target_type = 'Class' 
                 AND date BETWEEN %s AND %s 
-                AND (teacher_1_id = %s OR teacher_2_id = %s)
+                AND ({teacher_where})
                 ORDER BY date ASC, timetable_column_id ASC
             """
-            sql_params = (start_date_str, end_date_str, target_id, target_id)
             
             cross_target_info["sql_debug"] = {
                 "query": sql_query.strip(),
                 "params": sql_params,
-                "target_id_being_searched": target_id
+                "resolved_teacher_ids": resolved_teacher_ids,
+                "original_target_id": str(target_id)
             }
             
             cross_overrides = frappe.db.sql(sql_query, sql_params, as_dict=True)
