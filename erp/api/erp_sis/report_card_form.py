@@ -329,9 +329,9 @@ def ensure_default_forms():
         campus_id = _current_campus_id()
         defaults = [
             {"code": "PRIM_VN", "title": "Tiểu học - CTVN"},
-            {"code": "SEC_VN_MID", "title": "Trung học - CTVN - Giữa kỳ"},
-            {"code": "SEC_VN_END1", "title": "Trung học - CTVN - HK1"},
-            {"code": "SEC_VN_END2", "title": "Trung học - CTVN - HK2"},
+            {"code": "SEC_VN_MID", "title": "Trung Học - CTVN - Giữa kỳ"},
+            {"code": "SEC_VN_END1", "title": "Trung Học - CTVN - HK1"},
+            {"code": "SEC_VN_END2", "title": "Trung Học - CTVN - HK2"},
         ]
         created: list[str] = []
         for d in defaults:
@@ -371,7 +371,7 @@ def ensure_intl_forms():
         campus_id = _current_campus_id()
         defaults = [
             {"code": "PRIM_INTL", "title": "Tiểu học - Chương trình Quốc tế"},
-            {"code": "SEC_INTL", "title": "Trung học - Chương trình Quốc tế"},
+            {"code": "SEC_INTL", "title": "Trung học Cơ sở - Chương trình Quốc tế"},
             {"code": "HIGH_INTL", "title": "Trung học Phổ thông - Chương trình Quốc tế"},
         ]
         created: list[str] = []
@@ -397,4 +397,31 @@ def ensure_intl_forms():
     except Exception as e:
         frappe.log_error(f"Error ensure_intl_forms: {str(e)}")
         return error_response("Error ensuring default INTL forms")
+
+
+@frappe.whitelist()
+def update_vn_form_titles():
+    """Update existing VN form titles from THCS to Trung Học for current campus."""
+    try:
+        campus_id = _current_campus_id()
+        updates = [
+            {"code": "SEC_VN_MID", "new_title": "Trung Học - CTVN - Giữa kỳ"},
+            {"code": "SEC_VN_END1", "new_title": "Trung Học - CTVN - HK1"},
+            {"code": "SEC_VN_END2", "new_title": "Trung Học - CTVN - HK2"},
+        ]
+        updated: list[str] = []
+        for u in updates:
+            doc_name = frappe.db.get_value("SIS Report Card Form", {"code": u["code"], "campus_id": campus_id}, "name")
+            if doc_name:
+                doc = frappe.get_doc("SIS Report Card Form", doc_name)
+                old_title = doc.title
+                if "THCS" in old_title:
+                    doc.title = u["new_title"]
+                    doc.save(ignore_permissions=True)
+                    updated.append(f"{u['code']}: {old_title} -> {u['new_title']}")
+        frappe.db.commit()
+        return success_response(data={"updated": updated}, message="VN form titles updated")
+    except Exception as e:
+        frappe.log_error(f"Error update_vn_form_titles: {str(e)}")
+        return error_response("Error updating VN form titles")
 
