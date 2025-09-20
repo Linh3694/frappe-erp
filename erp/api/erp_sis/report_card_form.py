@@ -434,9 +434,69 @@ def debug_forms():
         campus_id = _current_campus_id()
         forms = frappe.get_all("SIS Report Card Form", 
                                filters={"campus_id": campus_id},
-                               fields=["name", "code", "title", "program_type"])
+                               fields=["name", "code", "title", "program_type", "owner"])
         return success_response(data={"forms": forms, "campus_id": campus_id}, message="Debug forms")
     except Exception as e:
         frappe.log_error(f"Error debug_forms: {str(e)}")
         return error_response("Error debugging forms")
+
+
+@frappe.whitelist()
+def force_update_database():
+    """Force update database records directly."""
+    try:
+        campus_id = _current_campus_id()
+        results = []
+        
+        # 1. Update VN form titles
+        vn_updates = [
+            {"code": "SEC_VN_MID", "new_title": "Trung Học - CTVN - Giữa kỳ"},
+            {"code": "SEC_VN_END1", "new_title": "Trung Học - CTVN - HK1"},  
+            {"code": "SEC_VN_END2", "new_title": "Trung Học - CTVN - HK2"},
+        ]
+        
+        for update in vn_updates:
+            # Direct SQL update
+            updated_count = frappe.db.sql("""
+                UPDATE `tabSIS Report Card Form` 
+                SET title = %s 
+                WHERE code = %s AND campus_id = %s
+            """, (update["new_title"], update["code"], campus_id))
+            
+            results.append(f"Updated {update['code']}: {updated_count} rows affected")
+        
+        # 2. Create INTL forms if they don't exist
+        intl_forms = [
+            {"code": "PRIM_INTL", "title": "Tiểu học - Chương trình Quốc tế"},
+            {"code": "SEC_INTL", "title": "Trung học Cơ sở - Chương trình Quốc tế"},  
+            {"code": "HIGH_INTL", "title": "Trung học Phổ thông - Chương trình Quốc tế"},
+        ]
+        
+        for intl_form in intl_forms:
+            # Check if exists
+            exists = frappe.db.exists("SIS Report Card Form", {"code": intl_form["code"], "campus_id": campus_id})
+            if not exists:
+                # Create new document
+                doc = frappe.get_doc({
+                    "doctype": "SIS Report Card Form",
+                    "code": intl_form["code"],
+                    "title": intl_form["title"], 
+                    "program_type": "intl",
+                    "scores_enabled": 1,
+                    "homeroom_enabled": 1,
+                    "subject_eval_enabled": 1,
+                    "campus_id": campus_id,
+                })
+                doc.append("pages", {"page_no": 1, "background_image": None, "layout_json": "{}"})
+                doc.insert(ignore_permissions=True)
+                results.append(f"Created INTL form: {intl_form['code']}")
+            else:
+                results.append(f"INTL form already exists: {intl_form['code']}")
+        
+        frappe.db.commit()
+        return success_response(data={"results": results}, message="Force update completed")
+        
+    except Exception as e:
+        frappe.log_error(f"Error force_update_database: {str(e)}")
+        return error_response(f"Error in force update: {str(e)}")
 
