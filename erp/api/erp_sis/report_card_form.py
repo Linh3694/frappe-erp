@@ -357,3 +357,44 @@ def ensure_default_forms():
         frappe.log_error(f"Error ensure_default_forms: {str(e)}")
         return error_response("Error ensuring default forms")
 
+
+@frappe.whitelist()
+def ensure_intl_forms():
+    """Ensure default INTL form codes exist as SIS Report Card Form docs for current campus.
+
+    Codes created if missing:
+    - PRIM_INTL: Tiểu học - Chương trình Quốc tế
+    - SEC_INTL: Trung học - Chương trình Quốc tế
+    - HIGH_INTL: Trung học Phổ thông - Chương trình Quốc tế
+    """
+    try:
+        campus_id = _current_campus_id()
+        defaults = [
+            {"code": "PRIM_INTL", "title": "Tiểu học - Chương trình Quốc tế"},
+            {"code": "SEC_INTL", "title": "Trung học - Chương trình Quốc tế"},
+            {"code": "HIGH_INTL", "title": "Trung học Phổ thông - Chương trình Quốc tế"},
+        ]
+        created: list[str] = []
+        for d in defaults:
+            exists = frappe.db.exists("SIS Report Card Form", {"code": d["code"], "campus_id": campus_id})
+            if exists:
+                continue
+            doc = frappe.get_doc({
+                "doctype": "SIS Report Card Form",
+                "code": d["code"],
+                "title": d["title"],
+                "program_type": "intl",
+                "scores_enabled": 1,
+                "homeroom_enabled": 1,
+                "subject_eval_enabled": 1,
+                "campus_id": campus_id,
+            })
+            doc.append("pages", {"page_no": 1, "background_image": None, "layout_json": "{}"})
+            doc.insert(ignore_permissions=True)
+            created.append(doc.name)
+        frappe.db.commit()
+        return success_response(data={"created": created}, message="Default INTL forms ensured")
+    except Exception as e:
+        frappe.log_error(f"Error ensure_intl_forms: {str(e)}")
+        return error_response("Error ensuring default INTL forms")
+
