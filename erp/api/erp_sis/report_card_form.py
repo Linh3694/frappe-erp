@@ -321,9 +321,9 @@ def ensure_default_forms():
 
     Codes created if missing:
     - PRIM_VN: Tiểu học - CTVN
-    - SEC_VN_MID: Trung học - CTVN - Giữa kỳ
-    - SEC_VN_END1: Trung học - CTVN - HK1
-    - SEC_VN_END2: Trung học - CTVN - HK2
+    - SEC_VN_MID: Trung Học - CTVN - Giữa kỳ
+    - SEC_VN_END1: Trung Học - CTVN - HK1
+    - SEC_VN_END2: Trung Học - CTVN - HK2
     """
     try:
         campus_id = _current_campus_id()
