@@ -415,7 +415,8 @@ def update_vn_form_titles():
             if doc_name:
                 doc = frappe.get_doc("SIS Report Card Form", doc_name)
                 old_title = doc.title
-                if "THCS" in old_title:
+                # Update if title contains "THCS" or if title is different from new title
+                if "THCS" in old_title or old_title != u["new_title"]:
                     doc.title = u["new_title"]
                     doc.save(ignore_permissions=True)
                     updated.append(f"{u['code']}: {old_title} -> {u['new_title']}")
@@ -424,4 +425,18 @@ def update_vn_form_titles():
     except Exception as e:
         frappe.log_error(f"Error update_vn_form_titles: {str(e)}")
         return error_response("Error updating VN form titles")
+
+
+@frappe.whitelist()
+def debug_forms():
+    """Debug function to check current forms in database."""
+    try:
+        campus_id = _current_campus_id()
+        forms = frappe.get_all("SIS Report Card Form", 
+                               filters={"campus_id": campus_id},
+                               fields=["name", "code", "title", "program_type"])
+        return success_response(data={"forms": forms, "campus_id": campus_id}, message="Debug forms")
+    except Exception as e:
+        frappe.log_error(f"Error debug_forms: {str(e)}")
+        return error_response("Error debugging forms")
 
