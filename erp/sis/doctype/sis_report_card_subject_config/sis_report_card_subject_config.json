@@ -12,6 +12,7 @@
   "scale_id",
   "comment_title_enabled",
   "comment_title_id",
+  "subcurriculum_id",
   "scoreboard",
   "test_point_titles"
  ],
@@ -23,6 +24,7 @@
   {"fieldname": "scale_id", "fieldtype": "Link", "label": "Thang đánh giá", "options": "SIS Report Card Evaluation Scale"},
   {"fieldname": "comment_title_enabled", "fieldtype": "Check", "label": "Tiêu đề nhận xét"},
   {"fieldname": "comment_title_id", "fieldtype": "Link", "label": "Tiêu đề nhận xét", "options": "SIS Report Card Comment Title"},
+  {"fieldname": "subcurriculum_id", "fieldtype": "Link", "label": "Thang điểm", "options": "SIS SubCurriculum"},
   {"fieldname": "scoreboard", "fieldtype": "Long Text", "label": "Scoreboard JSON", "description": "Config lưu dạng JSON: { main_scores: [{ title, weight, components: [{ title, weight }] }] }"},
   {"fieldname": "test_point_titles", "fieldtype": "Table", "label": "Tiêu đề điểm kiểm tra", "options": "SIS Report Card Test Point Title"}
  ]

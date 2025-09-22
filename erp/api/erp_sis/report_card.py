@@ -85,6 +85,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                 "scale_id": getattr(row, "scale_id", None),
                 "comment_title_enabled": 1 if getattr(row, "comment_title_enabled", 0) else 0,
                 "comment_title_id": getattr(row, "comment_title_id", None),
+                "subcurriculum_id": getattr(row, "subcurriculum_id", None),
                 "test_point_titles": [],
                 "scoreboard": None,
             }
@@ -296,6 +297,7 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
                 "scale_id": sub.get("scale_id"),
                 "comment_title_enabled": 1 if comment_title_enabled else 0,
                 "comment_title_id": comment_title_id,
+                "subcurriculum_id": sub.get("subcurriculum_id"),
             },
         )
 
