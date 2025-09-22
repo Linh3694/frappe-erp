@@ -336,23 +336,40 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                             "main_scores": {}
                         }
                         
-                        # Initialize main scores structure
-                        if subject_config.scoreboard and hasattr(subject_config.scoreboard, 'main_scores'):
-                            for main_score in subject_config.scoreboard.main_scores:
-                                main_title = main_score.title
-                                scoreboard_data["main_scores"][main_title] = {
-                                    "weight": main_score.weight,
-                                    "components": {},
-                                    "final_score": None
-                                }
+                        # Initialize main scores structure from JSON scoreboard
+                        if subject_config.scoreboard:
+                            try:
+                                # Parse JSON scoreboard if it's a string
+                                if isinstance(subject_config.scoreboard, str):
+                                    import json
+                                    scoreboard_obj = json.loads(subject_config.scoreboard)
+                                else:
+                                    scoreboard_obj = subject_config.scoreboard
                                 
-                                # Initialize components
-                                if hasattr(main_score, 'components'):
-                                    for component in main_score.components:
-                                        scoreboard_data["main_scores"][main_title]["components"][component.title] = {
-                                            "weight": component.weight,
-                                            "score": None
-                                        }
+                                # Process main_scores if exists
+                                if scoreboard_obj and "main_scores" in scoreboard_obj:
+                                    for main_score in scoreboard_obj["main_scores"]:
+                                        main_title = main_score.get("title", "")
+                                        if main_title:
+                                            scoreboard_data["main_scores"][main_title] = {
+                                                "weight": main_score.get("weight", 0),
+                                                "components": {},
+                                                "final_score": None
+                                            }
+                                            
+                                            # Initialize components
+                                            if "components" in main_score:
+                                                for component in main_score["components"]:
+                                                    comp_title = component.get("title", "")
+                                                    if comp_title:
+                                                        scoreboard_data["main_scores"][main_title]["components"][comp_title] = {
+                                                            "weight": component.get("weight", 0),
+                                                            "score": None
+                                                        }
+                            except (json.JSONDecodeError, AttributeError, KeyError) as e:
+                                frappe.logger().error(f"Error parsing scoreboard for subject {actual_subject_id}: {str(e)}")
+                                # Initialize empty structure on error
+                                pass
                         
                         intl_scoreboard[actual_subject_id] = scoreboard_data
             
