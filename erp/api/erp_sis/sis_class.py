@@ -846,24 +846,49 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
         
         frappe.logger().info(f"Getting timetable for user {teacher_user_id} between {week_start} and {week_end}")
         
-        # Get timetable instances for this teacher this week
-        # Use proper date filter format for Frappe
-        timetable_entries = frappe.get_all(
-            "SIS Timetable Instance",
-            filters=[
-                ["teacher_user_id", "=", teacher_user_id],
-                ["instance_date", ">=", week_start],
-                ["instance_date", "<=", week_end]
-            ],
-            fields=["class_id"]
-        )
-        
-        frappe.logger().info(f"Found {len(timetable_entries)} timetable entries")
-        
-        # Get unique class IDs from timetable
-        for entry in timetable_entries:
-            if entry.class_id:
-                teaching_class_ids.add(entry.class_id)
+        # Get teaching classes from timetable rows (similar to teacher.py logic)
+        if teacher_records:
+            teacher_name = teacher_records[0].name
+            teacher_keys = [teacher_name, teacher_user_id]  # Try both teacher name and user_id
+            
+            # Get timetable rows where this teacher is assigned
+            rows_1 = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["parent"],
+                filters={"teacher_1_id": ["in", teacher_keys]},
+                limit=1000,
+            ) or []
+            
+            rows_2 = frappe.get_all(
+                "SIS Timetable Instance Row", 
+                fields=["parent"],
+                filters={"teacher_2_id": ["in", teacher_keys]},
+                limit=1000,
+            ) or []
+            
+            # Get unique parent instance IDs
+            parent_ids = list({r.get("parent") for r in rows_1 + rows_2 if r.get("parent")})
+            
+            frappe.logger().info(f"Found {len(parent_ids)} timetable instances for teacher")
+            
+            if parent_ids:
+                # Get instances and filter by current week
+                instances = frappe.get_all(
+                    "SIS Timetable Instance",
+                    fields=["class_id", "instance_date"],
+                    filters=[
+                        ["name", "in", parent_ids],
+                        ["instance_date", ">=", week_start],
+                        ["instance_date", "<=", week_end]
+                    ]
+                )
+                
+                # Extract unique class IDs
+                for instance in instances:
+                    if instance.class_id:
+                        teaching_class_ids.add(instance.class_id)
+                        
+                frappe.logger().info(f"Found {len(instances)} instances in current week with {len(teaching_class_ids)} unique classes")
         
         # Get teaching classes data (exclude homeroom classes to avoid duplicates)
         homeroom_class_names = {cls.name for cls in homeroom_classes}
