@@ -331,9 +331,21 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                 for subject_config in template.subjects:
                     actual_subject_id = subject_config.subject_id
                     if actual_subject_id in actual_subject_ids:
+                        subcurriculum_id = getattr(subject_config, 'subcurriculum_id', None) or 'none'
+                        subcurriculum_title_en = 'General Program'
+                        
+                        # Fetch subcurriculum title if ID exists
+                        if subcurriculum_id and subcurriculum_id != 'none':
+                            try:
+                                subcurriculum_doc = frappe.get_doc("Sub Curriculum", subcurriculum_id)
+                                subcurriculum_title_en = subcurriculum_doc.title_en or subcurriculum_doc.title_vn or subcurriculum_id
+                            except:
+                                subcurriculum_title_en = subcurriculum_id  # Fallback to ID if doc not found
+                        
                         scoreboard_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
-                            "subcurriculum_id": getattr(subject_config, 'subcurriculum_id', None) or 'none',
+                            "subcurriculum_id": subcurriculum_id,
+                            "subcurriculum_title_en": subcurriculum_title_en,  # ← Added this field
                             "intl_comment": getattr(subject_config, 'intl_comment', None) or '',
                             "main_scores": {}
                         }
