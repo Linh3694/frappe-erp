@@ -330,14 +330,15 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
                     actual_subject_id = subject_config.subject_id
-                    if actual_subject_id in actual_subject_ids and hasattr(subject_config, 'scoreboard'):
+                    if actual_subject_id in actual_subject_ids:
                         scoreboard_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
+                            "subcurriculum_id": getattr(subject_config, 'subcurriculum_id', None) or 'none',
                             "main_scores": {}
                         }
                         
                         # Initialize main scores structure from JSON scoreboard
-                        if subject_config.scoreboard:
+                        if hasattr(subject_config, 'scoreboard') and subject_config.scoreboard:
                             try:
                                 # Parse JSON scoreboard if it's a string
                                 if isinstance(subject_config.scoreboard, str):
