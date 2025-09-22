@@ -770,6 +770,181 @@ def update_class(class_id: str = None):
         return error_response(f"Error updating class: {str(e)}")
 
 
+@frappe.whitelist(allow_guest=False)
+def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None):
+    """Get classes where teacher is homeroom teacher or teaching (based on timetable).
+    This is optimized to avoid fetching all classes and filtering client-side.
+    """
+    try:
+        # Get teacher_user_id from current user if not provided
+        if not teacher_user_id:
+            teacher_user_id = frappe.session.user
+        
+        if not teacher_user_id:
+            return validation_error_response({"teacher_user_id": ["Teacher user ID is required"]})
+
+        # Get current school year if not provided
+        if not school_year_id:
+            current_year = frappe.get_all(
+                "SIS School Year",
+                filters={"is_enable": 1},
+                fields=["name"],
+                limit=1
+            )
+            if current_year:
+                school_year_id = current_year[0].name
+
+        # Get current campus
+        campus_id = get_current_campus_from_context()
+        
+        # 1. Get homeroom classes (where teacher is homeroom_teacher or vice_homeroom_teacher)
+        # First get teacher record to find teacher name from user_id
+        teacher_records = frappe.get_all(
+            "SIS Teacher",
+            filters={"user_id": teacher_user_id},
+            fields=["name"],
+            limit=1
+        )
+        
+        homeroom_classes = []
+        teaching_class_ids = set()
+        
+        if teacher_records:
+            teacher_name = teacher_records[0].name
+            
+            # Get homeroom classes
+            homeroom_filters = {
+                "campus_id": campus_id or "campus-1"
+            }
+            if school_year_id:
+                homeroom_filters["school_year_id"] = school_year_id
+                
+            homeroom_classes = frappe.get_all(
+                "SIS Class",
+                fields=[
+                    "name", "title", "short_title", "campus_id", "school_year_id",
+                    "education_grade", "academic_program", "homeroom_teacher",
+                    "vice_homeroom_teacher", "room", "class_type", "creation", "modified"
+                ],
+                filters=homeroom_filters,
+                or_filters=[
+                    {"homeroom_teacher": teacher_name},
+                    {"vice_homeroom_teacher": teacher_name}
+                ],
+                order_by="title asc"
+            )
+
+        # 2. Get teaching classes from timetable for current week
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        day = now.weekday()  # Monday = 0, Sunday = 6
+        monday = now - timedelta(days=day)
+        sunday = monday + timedelta(days=6)
+        
+        week_start = monday.strftime('%Y-%m-%d')
+        week_end = sunday.strftime('%Y-%m-%d')
+        
+        # Get timetable instances for this teacher this week
+        timetable_entries = frappe.get_all(
+            "SIS Timetable Instance",
+            filters={
+                "teacher_user_id": teacher_user_id,
+                "instance_date": ["between", [week_start, week_end]]
+            },
+            fields=["class_id"],
+            distinct=True
+        )
+        
+        # Get unique class IDs from timetable
+        for entry in timetable_entries:
+            if entry.class_id:
+                teaching_class_ids.add(entry.class_id)
+        
+        # Get teaching classes data (exclude homeroom classes to avoid duplicates)
+        homeroom_class_names = {cls.name for cls in homeroom_classes}
+        teaching_class_ids = teaching_class_ids - homeroom_class_names
+        
+        teaching_classes = []
+        if teaching_class_ids:
+            teaching_filters = {
+                "name": ["in", list(teaching_class_ids)]
+            }
+            if campus_id:
+                teaching_filters["campus_id"] = campus_id
+            if school_year_id:
+                teaching_filters["school_year_id"] = school_year_id
+                
+            teaching_classes = frappe.get_all(
+                "SIS Class",
+                fields=[
+                    "name", "title", "short_title", "campus_id", "school_year_id",
+                    "education_grade", "academic_program", "homeroom_teacher", 
+                    "vice_homeroom_teacher", "room", "class_type", "creation", "modified"
+                ],
+                filters=teaching_filters,
+                order_by="title asc"
+            )
+
+        # 3. Enhance with teacher information (reuse existing logic)
+        def enhance_classes_with_teacher_info(classes):
+            enhanced = []
+            for class_data in classes:
+                enhanced_class = class_data.copy()
+                
+                # Get homeroom teacher details
+                if class_data.get("homeroom_teacher"):
+                    teacher_info = frappe.get_all(
+                        "SIS Teacher",
+                        fields=["user_id"],
+                        filters={"name": class_data["homeroom_teacher"]},
+                        limit=1
+                    )
+                    if teacher_info and teacher_info[0].get("user_id"):
+                        enhanced_class["homeroom_teacher_info"] = enrich_teacher_info(
+                            teacher_info[0]["user_id"],
+                            class_data["homeroom_teacher"]
+                        )
+
+                # Get vice homeroom teacher details  
+                if class_data.get("vice_homeroom_teacher"):
+                    teacher_info = frappe.get_all(
+                        "SIS Teacher",
+                        fields=["user_id"],
+                        filters={"name": class_data["vice_homeroom_teacher"]},
+                        limit=1
+                    )
+                    if teacher_info and teacher_info[0].get("user_id"):
+                        enhanced_class["vice_homeroom_teacher_info"] = enrich_teacher_info(
+                            teacher_info[0]["user_id"],
+                            class_data["vice_homeroom_teacher"]
+                        )
+                
+                enhanced.append(enhanced_class)
+            return enhanced
+
+        homeroom_classes = enhance_classes_with_teacher_info(homeroom_classes)
+        teaching_classes = enhance_classes_with_teacher_info(teaching_classes)
+
+        result = {
+            "homeroom_classes": homeroom_classes,
+            "teaching_classes": teaching_classes,
+            "teacher_user_id": teacher_user_id,
+            "school_year_id": school_year_id,
+            "week_range": {"start": week_start, "end": week_end}
+        }
+
+        frappe.logger().info(f"Teacher classes fetched: {len(homeroom_classes)} homeroom, {len(teaching_classes)} teaching for user {teacher_user_id}")
+
+        return success_response(
+            data=result,
+            message="Teacher classes fetched successfully"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching teacher classes: {str(e)}")
+        return error_response(f"Error fetching teacher classes: {str(e)}")
+
+
 @frappe.whitelist(allow_guest=False, methods=['POST'])
 def delete_class(class_id: str = None):
     try:
