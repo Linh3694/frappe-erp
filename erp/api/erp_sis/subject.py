@@ -108,6 +108,123 @@ def get_all_subjects():
 
 
 @frappe.whitelist(allow_guest=False)
+def get_subjects_by_curriculums():
+    """Get subjects filtered by curriculum IDs for report card templates"""
+    try:
+        # Get curriculum_ids from request data
+        data = {}
+        
+        # Try to get from JSON payload first
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                data = json_data
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
+                data = frappe.local.form_dict
+        else:
+            data = frappe.local.form_dict
+        
+        curriculum_ids = data.get('curriculum_ids')
+        
+        if not curriculum_ids:
+            return validation_error_response({"curriculum_ids": ["Curriculum IDs are required"]})
+        
+        # Ensure curriculum_ids is a list
+        if isinstance(curriculum_ids, str):
+            try:
+                curriculum_ids = json.loads(curriculum_ids)
+            except json.JSONDecodeError:
+                curriculum_ids = [curriculum_ids]
+        
+        if not isinstance(curriculum_ids, list) or len(curriculum_ids) == 0:
+            return validation_error_response({"curriculum_ids": ["At least one curriculum ID is required"]})
+        
+        # Get current user's campus information
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        
+        # Query subjects with curriculum filtering
+        # We need to check both direct curriculum field and through subcurriculum
+        try:
+            subjects_query = """
+                SELECT DISTINCT
+                    s.name,
+                    s.title as title_vn,
+                    s.title as title,
+                    '' as title_en,
+                    s.education_stage,
+                    s.timetable_subject_id,
+                    s.actual_subject_id,
+                    s.subcurriculum_id,
+                    s.campus_id,
+                    COALESCE(es.title_vn, '') as education_stage_name,
+                    COALESCE(ts.title_vn, '') as timetable_subject_name,
+                    COALESCE(act.title_vn, '') as actual_subject_name,
+                    COALESCE(sc.curriculum_id, '') as curriculum
+                FROM `tabSIS Subject` s
+                LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Sub Curriculum` sc ON s.subcurriculum_id = sc.name AND sc.campus_id = s.campus_id
+                WHERE s.campus_id = %s 
+                  AND (
+                    sc.curriculum_id IN ({placeholders})
+                    OR s.curriculum IN ({placeholders})
+                  )
+                ORDER BY s.title ASC
+            """.format(placeholders=','.join(['%s'] * len(curriculum_ids)))
+            
+            # Parameters: campus_id + curriculum_ids (twice for both OR conditions)
+            query_params = [campus_id] + curriculum_ids + curriculum_ids
+            subjects = frappe.db.sql(subjects_query, query_params, as_dict=True)
+            
+        except Exception as column_error:
+            frappe.logger().warning(f"Query with curriculum field failed: {str(column_error)}, trying without direct curriculum field")
+            # Fallback query - only check through subcurriculum
+            subjects_query = """
+                SELECT DISTINCT
+                    s.name,
+                    s.title as title_vn,
+                    s.title as title,
+                    '' as title_en,
+                    s.education_stage,
+                    s.timetable_subject_id,
+                    s.actual_subject_id,
+                    s.subcurriculum_id,
+                    s.campus_id,
+                    COALESCE(es.title_vn, '') as education_stage_name,
+                    COALESCE(ts.title_vn, '') as timetable_subject_name,
+                    COALESCE(act.title_vn, '') as actual_subject_name,
+                    COALESCE(sc.curriculum_id, '') as curriculum
+                FROM `tabSIS Subject` s
+                LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
+                LEFT JOIN `tabSIS Sub Curriculum` sc ON s.subcurriculum_id = sc.name AND sc.campus_id = s.campus_id
+                WHERE s.campus_id = %s 
+                  AND sc.curriculum_id IN ({placeholders})
+                ORDER BY s.title ASC
+            """.format(placeholders=','.join(['%s'] * len(curriculum_ids)))
+            
+            query_params = [campus_id] + curriculum_ids
+            subjects = frappe.db.sql(subjects_query, query_params, as_dict=True)
+
+        frappe.logger().info(f"Found {len(subjects)} subjects for curriculums {curriculum_ids}")
+
+        return list_response(subjects, f"Found {len(subjects)} subjects for specified curriculums")
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching subjects by curriculums: {str(e)}")
+        return error_response(
+            message=f"Error fetching subjects by curriculums: {str(e)}",
+            code="FETCH_SUBJECTS_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
 def get_subject_by_id():
     """Get a specific subject by ID"""
     try:
