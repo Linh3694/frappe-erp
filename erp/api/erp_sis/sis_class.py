@@ -844,16 +844,21 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
         week_start = monday.strftime('%Y-%m-%d')
         week_end = sunday.strftime('%Y-%m-%d')
         
+        frappe.logger().info(f"Getting timetable for user {teacher_user_id} between {week_start} and {week_end}")
+        
         # Get timetable instances for this teacher this week
+        # Use proper date filter format for Frappe
         timetable_entries = frappe.get_all(
             "SIS Timetable Instance",
-            filters={
-                "teacher_user_id": teacher_user_id,
-                "instance_date": ["between", [week_start, week_end]]
-            },
-            fields=["class_id"],
-            distinct=True
+            filters=[
+                ["teacher_user_id", "=", teacher_user_id],
+                ["instance_date", ">=", week_start],
+                ["instance_date", "<=", week_end]
+            ],
+            fields=["class_id"]
         )
+        
+        frappe.logger().info(f"Found {len(timetable_entries)} timetable entries")
         
         # Get unique class IDs from timetable
         for entry in timetable_entries:
