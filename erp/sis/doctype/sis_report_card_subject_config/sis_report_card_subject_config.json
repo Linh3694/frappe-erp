@@ -14,6 +14,7 @@
   "comment_title_id",
   "subcurriculum_id",
   "scoreboard",
+  "intl_comment",
   "test_point_titles"
  ],
  "fields": [
@@ -26,6 +27,7 @@
   {"fieldname": "comment_title_id", "fieldtype": "Link", "label": "Tiêu đề nhận xét", "options": "SIS Report Card Comment Title"},
   {"fieldname": "subcurriculum_id", "fieldtype": "Link", "label": "Thang điểm", "options": "SIS Sub Curriculum"},
   {"fieldname": "scoreboard", "fieldtype": "Long Text", "label": "Scoreboard JSON", "description": "Config lưu dạng JSON: { main_scores: [{ title, weight, components: [{ title, weight }] }] }"},
+  {"fieldname": "intl_comment", "fieldtype": "Long Text", "label": "Nhận xét INTL", "description": "Nhận xét cho môn học trong chương trình quốc tế"},
   {"fieldname": "test_point_titles", "fieldtype": "Table", "label": "Tiêu đề điểm kiểm tra", "options": "SIS Report Card Test Point Title"}
  ]
 }

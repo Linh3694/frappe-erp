@@ -334,6 +334,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                         scoreboard_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
                             "subcurriculum_id": getattr(subject_config, 'subcurriculum_id', None) or 'none',
+                            "intl_comment": getattr(subject_config, 'intl_comment', None) or '',
                             "main_scores": {}
                         }
                         

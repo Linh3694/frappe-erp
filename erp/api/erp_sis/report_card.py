@@ -86,6 +86,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                 "comment_title_enabled": 1 if getattr(row, "comment_title_enabled", 0) else 0,
                 "comment_title_id": getattr(row, "comment_title_id", None),
                 "subcurriculum_id": getattr(row, "subcurriculum_id", None) or 'none',
+                "intl_comment": getattr(row, "intl_comment", None) or '',
                 "test_point_titles": [],
                 "scoreboard": None,
             }
@@ -302,6 +303,11 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
         subcurriculum_id = sub.get("subcurriculum_id")
         if subcurriculum_id and subcurriculum_id != "none":
             subject_data["subcurriculum_id"] = subcurriculum_id
+
+        # Add intl_comment for international program subjects
+        intl_comment = sub.get("intl_comment")
+        if intl_comment is not None:
+            subject_data["intl_comment"] = intl_comment
             
         row = parent_doc.append("subjects", subject_data)
 
