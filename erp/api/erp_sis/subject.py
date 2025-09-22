@@ -146,71 +146,25 @@ def get_subjects_by_curriculums():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        # Query subjects with curriculum filtering
-        # We need to check both direct curriculum field and through subcurriculum
-        try:
-            subjects_query = """
-                SELECT DISTINCT
-                    s.name,
-                    s.title as title_vn,
-                    s.title as title,
-                    '' as title_en,
-                    s.education_stage,
-                    s.timetable_subject_id,
-                    s.actual_subject_id,
-                    s.subcurriculum_id,
-                    s.campus_id,
-                    COALESCE(es.title_vn, '') as education_stage_name,
-                    COALESCE(ts.title_vn, '') as timetable_subject_name,
-                    COALESCE(act.title_vn, '') as actual_subject_name,
-                    COALESCE(sc.curriculum_id, '') as curriculum
-                FROM `tabSIS Subject` s
-                LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
-                LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
-                LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
-                LEFT JOIN `tabSIS Sub Curriculum` sc ON s.subcurriculum_id = sc.name AND sc.campus_id = s.campus_id
-                WHERE s.campus_id = %s 
-                  AND (
-                    sc.curriculum_id IN ({placeholders})
-                    OR s.curriculum IN ({placeholders})
-                  )
-                ORDER BY s.title ASC
-            """.format(placeholders=','.join(['%s'] * len(curriculum_ids)))
-            
-            # Parameters: campus_id + curriculum_ids (twice for both OR conditions)
-            query_params = [campus_id] + curriculum_ids + curriculum_ids
-            subjects = frappe.db.sql(subjects_query, query_params, as_dict=True)
-            
-        except Exception as column_error:
-            frappe.logger().warning(f"Query with curriculum field failed: {str(column_error)}, trying without direct curriculum field")
-            # Fallback query - only check through subcurriculum
-            subjects_query = """
-                SELECT DISTINCT
-                    s.name,
-                    s.title as title_vn,
-                    s.title as title,
-                    '' as title_en,
-                    s.education_stage,
-                    s.timetable_subject_id,
-                    s.actual_subject_id,
-                    s.subcurriculum_id,
-                    s.campus_id,
-                    COALESCE(es.title_vn, '') as education_stage_name,
-                    COALESCE(ts.title_vn, '') as timetable_subject_name,
-                    COALESCE(act.title_vn, '') as actual_subject_name,
-                    COALESCE(sc.curriculum_id, '') as curriculum
-                FROM `tabSIS Subject` s
-                LEFT JOIN `tabSIS Education Stage` es ON s.education_stage = es.name AND es.campus_id = s.campus_id
-                LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
-                LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
-                LEFT JOIN `tabSIS Sub Curriculum` sc ON s.subcurriculum_id = sc.name AND sc.campus_id = s.campus_id
-                WHERE s.campus_id = %s 
-                  AND sc.curriculum_id IN ({placeholders})
-                ORDER BY s.title ASC
-            """.format(placeholders=','.join(['%s'] * len(curriculum_ids)))
-            
-            query_params = [campus_id] + curriculum_ids
-            subjects = frappe.db.sql(subjects_query, query_params, as_dict=True)
+        # Query subjects with curriculum filtering from SIS Actual Subject table
+        # This matches the same logic as get_subjects_by_classes in student_subject.py
+        subjects_query = """
+            SELECT DISTINCT
+                s.name,
+                s.title_vn,
+                s.title_en,
+                s.education_stage_id,
+                s.curriculum_id,
+                s.campus_id,
+                s.title_vn as title
+            FROM `tabSIS Actual Subject` s
+            WHERE s.campus_id = %s 
+              AND s.curriculum_id IN ({placeholders})
+            ORDER BY s.title_vn ASC
+        """.format(placeholders=','.join(['%s'] * len(curriculum_ids)))
+        
+        query_params = [campus_id] + curriculum_ids
+        subjects = frappe.db.sql(subjects_query, query_params, as_dict=True)
 
         frappe.logger().info(f"Found {len(subjects)} subjects for curriculums {curriculum_ids}")
 
