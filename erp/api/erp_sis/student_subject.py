@@ -337,9 +337,11 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                         # Fetch subcurriculum title if ID exists
                         if subcurriculum_id and subcurriculum_id != 'none':
                             try:
-                                subcurriculum_doc = frappe.get_doc("Sub Curriculum", subcurriculum_id)
+                                subcurriculum_doc = frappe.get_doc("SIS Sub Curriculum", subcurriculum_id)
                                 subcurriculum_title_en = subcurriculum_doc.title_en or subcurriculum_doc.title_vn or subcurriculum_id
-                            except:
+                                frappe.logger().info(f"Found subcurriculum: {subcurriculum_id} -> {subcurriculum_title_en}")
+                            except Exception as e:
+                                frappe.logger().error(f"Failed to fetch subcurriculum {subcurriculum_id}: {str(e)}")
                                 subcurriculum_title_en = subcurriculum_id  # Fallback to ID if doc not found
                         
                         scoreboard_data = {
