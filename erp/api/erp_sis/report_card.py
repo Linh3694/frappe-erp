@@ -85,7 +85,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                 "scale_id": getattr(row, "scale_id", None),
                 "comment_title_enabled": 1 if getattr(row, "comment_title_enabled", 0) else 0,
                 "comment_title_id": getattr(row, "comment_title_id", None),
-                "subcurriculum_id": getattr(row, "subcurriculum_id", None),
+                "subcurriculum_id": getattr(row, "subcurriculum_id", None) or 'none',
                 "test_point_titles": [],
                 "scoreboard": None,
             }
@@ -287,19 +287,23 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
                 "Tiêu đề nhận xét '{0}' không tồn tại hoặc không thuộc về trường này"
             ).format(comment_title_id), frappe.LinkValidationError)
 
-        row = parent_doc.append(
-            "subjects",
-            {
-                "subject_id": subject_id,
-                "test_point_enabled": 1 if sub.get("test_point_enabled") else 0,
-                "rubric_enabled": 1 if sub.get("rubric_enabled") else 0,
-                "criteria_id": sub.get("criteria_id"),
-                "scale_id": sub.get("scale_id"),
-                "comment_title_enabled": 1 if comment_title_enabled else 0,
-                "comment_title_id": comment_title_id,
-                "subcurriculum_id": sub.get("subcurriculum_id"),
-            },
-        )
+        # Prepare subject data, handle subcurriculum_id properly
+        subject_data = {
+            "subject_id": subject_id,
+            "test_point_enabled": 1 if sub.get("test_point_enabled") else 0,
+            "rubric_enabled": 1 if sub.get("rubric_enabled") else 0,
+            "criteria_id": sub.get("criteria_id"),
+            "scale_id": sub.get("scale_id"),
+            "comment_title_enabled": 1 if comment_title_enabled else 0,
+            "comment_title_id": comment_title_id,
+        }
+        
+        # Only set subcurriculum_id if it's not 'none' or empty
+        subcurriculum_id = sub.get("subcurriculum_id")
+        if subcurriculum_id and subcurriculum_id != "none":
+            subject_data["subcurriculum_id"] = subcurriculum_id
+            
+        row = parent_doc.append("subjects", subject_data)
 
         # Apply nested test_point_titles for the just-appended child row
         try:
