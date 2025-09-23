@@ -895,43 +895,65 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
             
             frappe.logger().info(f"Subject Assignment: Added {len(teaching_class_ids) - assignment_class_count} classes from {len(subject_assignments)} assignments")
             
-            # PRIORITY 3: Timetable Overrides (for special events/replacements)
+            # PRIORITY 3: Custom Timetable Overrides (for special events/cell-level edits)
             try:
-                override_classes = frappe.get_all(
-                    "SIS Timetable Override",
-                    fields=["target_id"],
-                    filters={
-                        "teacher_1_id": ["in", teacher_keys],
-                        "target_type": "Class",
-                        "date": ["between", [week_start, week_end]],
-                        "override_type": ["in", ["replace", "add"]]
-                    },
-                    distinct=True,
-                    limit=1000
-                ) or []
-                
-                override_classes_2 = frappe.get_all(
-                    "SIS Timetable Override",
-                    fields=["target_id"],
-                    filters={
-                        "teacher_2_id": ["in", teacher_keys],
-                        "target_type": "Class", 
-                        "date": ["between", [week_start, week_end]],
-                        "override_type": ["in", ["replace", "add"]]
-                    },
-                    distinct=True,
-                    limit=1000
-                ) or []
+                # Use direct SQL for custom override table (non-doctype implementation)
+                overrides = frappe.db.sql("""
+                    SELECT DISTINCT target_id as class_id
+                    FROM `tabTimetable_Date_Override`
+                    WHERE (teacher_1_id = %s OR teacher_2_id = %s)
+                    AND target_type = 'Class' 
+                    AND date BETWEEN %s AND %s
+                    AND override_type IN ('replace', 'add')
+                """, (teacher_name, teacher_name, week_start, week_end), as_dict=True) or []
                 
                 override_class_count = len(teaching_class_ids)
-                for record in override_classes + override_classes_2:
-                    if record.target_id:
-                        teaching_class_ids.add(record.target_id)
+                for override in overrides:
+                    if override.get("class_id"):
+                        teaching_class_ids.add(override.get("class_id"))
                         
-                frappe.logger().info(f"Timetable Override: Added {len(teaching_class_ids) - override_class_count} classes from {len(override_classes + override_classes_2)} overrides")
+                frappe.logger().info(f"Custom Timetable Override: Added {len(teaching_class_ids) - override_class_count} classes from {len(overrides)} overrides")
                 
             except Exception as e:
-                frappe.logger().warning(f"Timetable Override query failed: {str(e)}")
+                frappe.logger().warning(f"Custom Timetable Override query failed (table may not exist): {str(e)}")
+                
+                # Fallback to doctype-based overrides if custom table doesn't exist
+                try:
+                    override_classes = frappe.get_all(
+                        "SIS Timetable Override",
+                        fields=["target_id"],
+                        filters={
+                            "teacher_1_id": ["in", teacher_keys],
+                            "target_type": "Class",
+                            "date": ["between", [week_start, week_end]],
+                            "override_type": ["in", ["replace", "add"]]
+                        },
+                        distinct=True,
+                        limit=1000
+                    ) or []
+                    
+                    override_classes_2 = frappe.get_all(
+                        "SIS Timetable Override",
+                        fields=["target_id"],
+                        filters={
+                            "teacher_2_id": ["in", teacher_keys],
+                            "target_type": "Class", 
+                            "date": ["between", [week_start, week_end]],
+                            "override_type": ["in", ["replace", "add"]]
+                        },
+                        distinct=True,
+                        limit=1000
+                    ) or []
+                    
+                    override_class_count = len(teaching_class_ids)
+                    for record in override_classes + override_classes_2:
+                        if record.target_id:
+                            teaching_class_ids.add(record.target_id)
+                            
+                    frappe.logger().info(f"Doctype Timetable Override: Added {len(teaching_class_ids) - override_class_count} classes from {len(override_classes + override_classes_2)} overrides")
+                    
+                except Exception as fallback_error:
+                    frappe.logger().warning(f"Both custom table and doctype override queries failed: {str(fallback_error)}")
             
             # PRIORITY 4: Fallback to Timetable Instance Rows (current implementation)
             if len(teaching_class_ids) == 0:
