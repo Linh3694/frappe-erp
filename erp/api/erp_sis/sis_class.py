@@ -844,14 +844,48 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
         week_start = monday.strftime('%Y-%m-%d')
         week_end = sunday.strftime('%Y-%m-%d')
         
+        # Initialize debug logs for frontend
+        debug_logs = []
+        debug_logs.append(f"Getting teaching classes for user {teacher_user_id} (optimized approach)")
+        debug_logs.append(f"Week range: {week_start} to {week_end}")
+        debug_logs.append(f"Teacher records found: {teacher_records}")
+        
         frappe.logger().info(f"Getting teaching classes for user {teacher_user_id} (optimized approach)")
+        frappe.logger().info(f"Week range: {week_start} to {week_end}")
+        frappe.logger().info(f"Teacher records found: {teacher_records}")
         
         if teacher_records:
             teacher_name = teacher_records[0].name
             teacher_keys = [teacher_name, teacher_user_id]  # Try both teacher name and user_id
             
+            debug_logs.append(f"Using teacher_name: {teacher_name}, teacher_keys: {teacher_keys}")
+            frappe.logger().info(f"Using teacher_name: {teacher_name}, teacher_keys: {teacher_keys}")
+            
             # PRIORITY 1: Try Teacher Timetable (materialized view - fastest)
             try:
+                # First check what data exists for this teacher
+                all_teacher_data = frappe.get_all(
+                    "SIS Teacher Timetable",
+                    fields=["class_id", "date", "day_of_week"],
+                    filters={"teacher_id": teacher_name},
+                    limit=100
+                )
+                debug_logs.append(f"All teacher timetable data for {teacher_name}: {all_teacher_data}")
+                frappe.logger().info(f"All teacher timetable data for {teacher_name}: {all_teacher_data}")
+                
+                # Temporarily remove date filter to test if data exists at all
+                teacher_timetable_classes_all = frappe.get_all(
+                    "SIS Teacher Timetable",
+                    fields=["class_id", "date"],
+                    filters={"teacher_id": teacher_name},
+                    distinct=True,
+                    limit=1000
+                ) or []
+                
+                debug_logs.append(f"All teacher timetable classes (no date filter): {teacher_timetable_classes_all}")
+                frappe.logger().info(f"All teacher timetable classes (no date filter): {teacher_timetable_classes_all}")
+                
+                # Now apply date filter
                 teacher_timetable_classes = frappe.get_all(
                     "SIS Teacher Timetable",
                     fields=["class_id"],
@@ -863,13 +897,18 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
                     limit=1000
                 ) or []
                 
+                debug_logs.append(f"Teacher timetable query result: {teacher_timetable_classes}")
+                frappe.logger().info(f"Teacher timetable query result: {teacher_timetable_classes}")
+                
                 for record in teacher_timetable_classes:
                     if record.class_id:
                         teaching_class_ids.add(record.class_id)
                         
+                debug_logs.append(f"Teacher Timetable: Found {len(teacher_timetable_classes)} class records for current week")
                 frappe.logger().info(f"Teacher Timetable: Found {len(teacher_timetable_classes)} class records for current week")
                 
             except Exception as e:
+                debug_logs.append(f"Teacher Timetable query failed: {str(e)} - falling back to other methods")
                 frappe.logger().warning(f"Teacher Timetable query failed: {str(e)} - falling back to other methods")
             
             # PRIORITY 2: Subject Assignment (for long-term assignments)
@@ -1065,9 +1104,11 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
             "teaching_classes": teaching_classes,
             "teacher_user_id": teacher_user_id,
             "school_year_id": school_year_id,
-            "week_range": {"start": week_start, "end": week_end}
+            "week_range": {"start": week_start, "end": week_end},
+            "debug_logs": debug_logs  # Include debug logs for frontend
         }
 
+        debug_logs.append(f"FINAL RESULT: {len(homeroom_classes)} homeroom, {len(teaching_classes)} teaching for user {teacher_user_id}")
         frappe.logger().info(f"Teacher classes fetched: {len(homeroom_classes)} homeroom, {len(teaching_classes)} teaching for user {teacher_user_id}")
 
         return success_response(
