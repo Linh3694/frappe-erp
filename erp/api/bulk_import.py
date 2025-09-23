@@ -637,41 +637,55 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             "campus_id": campus_id
         }
 
-        # Map Excel columns to DocType fields
+        # Special handling for SIS Timetable Subject reference fields BEFORE regular field mapping
+        if doctype == "SIS Timetable Subject":
+            
+            # Handle curriculum lookup - check various possible keys
+            curriculum_name = None
+            for key in ["curriculum", "curriculum_id", "Curriculum"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    curriculum_name = str(row_data[key]).strip()
+                    break
+            
+            if curriculum_name:
+                # Normalize and clean the curriculum name
+                curriculum_name = ' '.join(curriculum_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - Looking up curriculum: '{curriculum_name}'")
+                
+                # Lookup curriculum by title_vn
+                curriculum_id = _lookup_curriculum_by_name(curriculum_name, campus_id)
+                if curriculum_id:
+                    doc_data["curriculum_id"] = curriculum_id
+                    frappe.logger().info(f"Row {row_num} - Found curriculum ID: {curriculum_id}")
+                else:
+                    raise frappe.ValidationError(f"Không thể tìm thấy Curriculum: {curriculum_name}")
+            
+            # Handle education stage lookup - check various possible keys  
+            education_stage_name = None
+            for key in ["stage", "education_stage", "education_stage_id", "Stage"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    education_stage_name = str(row_data[key]).strip()
+                    break
+                    
+            if education_stage_name:
+                # Normalize and clean the education stage name
+                education_stage_name = ' '.join(education_stage_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - Looking up education stage: '{education_stage_name}'")
+                
+                # Lookup education stage by title_vn
+                education_stage_id = _lookup_education_stage_by_name(education_stage_name, campus_id)
+                if education_stage_id:
+                    doc_data["education_stage_id"] = education_stage_id
+                    frappe.logger().info(f"Row {row_num} - Found education stage ID: {education_stage_id}")
+                else:
+                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
+
+        # Map Excel columns to DocType fields (regular fields)
         meta = frappe.get_meta(doctype)
         for field in meta.fields:
-            if field.fieldname in row_data and field.fieldname not in ["name", "owner", "creation", "modified"]:
-                
-                # Special handling for SIS Timetable Subject reference fields
-                if doctype == "SIS Timetable Subject" and field.fieldname == "curriculum_id":
-                    curriculum_name = row_data.get("curriculum")
-                    if curriculum_name:
-                        # Normalize and clean the curriculum name
-                        curriculum_name = str(curriculum_name).strip()
-                        curriculum_name = ' '.join(curriculum_name.split())  # Remove extra spaces
-                        
-                        # Lookup curriculum by title_vn
-                        curriculum_id = _lookup_curriculum_by_name(curriculum_name, campus_id)
-                        if curriculum_id:
-                            doc_data[field.fieldname] = curriculum_id
-                        else:
-                            raise frappe.ValidationError(f"Không thể tìm thấy Curriculum: {curriculum_name}")
-                elif doctype == "SIS Timetable Subject" and field.fieldname == "education_stage_id":
-                    education_stage_name = row_data.get("education_stage") or row_data.get("stage")
-                    if education_stage_name:
-                        # Normalize and clean the education stage name
-                        education_stage_name = str(education_stage_name).strip()
-                        education_stage_name = ' '.join(education_stage_name.split())  # Remove extra spaces
-                        
-                        # Lookup education stage by title_vn
-                        education_stage_id = _lookup_education_stage_by_name(education_stage_name, campus_id)
-                        if education_stage_id:
-                            doc_data[field.fieldname] = education_stage_id
-                        else:
-                            raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
-                else:
-                    # Regular field mapping
-                    doc_data[field.fieldname] = row_data[field.fieldname]
+            if field.fieldname in row_data and field.fieldname not in ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id"]:
+                # Regular field mapping (skip already processed reference fields)
+                doc_data[field.fieldname] = row_data[field.fieldname]
 
         # Check if record exists for update
         existing_doc = None
