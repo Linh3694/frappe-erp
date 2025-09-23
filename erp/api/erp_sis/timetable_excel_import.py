@@ -1445,9 +1445,31 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         }
         
         for row in instance_rows:
+            # Normalize and validate day_of_week first
+            original_day = str(row.day_of_week or "").strip().lower()
+            
+            # Apply same day mapping as in main import logic
+            day_map = {
+                "monday": "mon", "tuesday": "tue", "wednesday": "wed", "thursday": "thu",
+                "friday": "fri", "saturday": "sat", "sunday": "sun",
+                "thứ 2": "mon", "thu 2": "mon", "thứ 3": "tue", "thu 3": "tue",
+                "thứ 4": "wed", "thu 4": "wed", "thứ 5": "thu", "thu 5": "thu", 
+                "thứ 6": "fri", "thu 6": "fri", "thứ 7": "sat", "thu 7": "sat",
+                "chủ nhật": "sun", "cn": "sun"
+            }
+            
+            normalized_day = day_map.get(original_day, original_day)
+            
+            # Validate against allowed values
+            valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+            if normalized_day not in valid_days:
+                logs.append(f"Skipping invalid day_of_week: '{original_day}' -> '{normalized_day}'")
+                continue
+                
             # Calculate specific date for this day_of_week
-            day_num = day_to_num.get(row.day_of_week)
+            day_num = day_to_num.get(normalized_day)
             if day_num is None:
+                logs.append(f"Could not map day '{normalized_day}' to day number")
                 continue
                 
             # Find the date for this day in the current week
@@ -1471,7 +1493,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     existing = frappe.db.exists("SIS Teacher Timetable", {
                         "teacher_id": teacher_id,
                         "class_id": class_id,
-                        "day_of_week": row.day_of_week,
+                        "day_of_week": normalized_day,
                         "timetable_column_id": row.timetable_column_id,
                         "date": specific_date
                     })
@@ -1483,7 +1505,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                 "doctype": "SIS Teacher Timetable",
                                 "teacher_id": teacher_id,
                                 "class_id": class_id,
-                                "day_of_week": row.day_of_week,
+                                "day_of_week": normalized_day,
                                 "timetable_column_id": row.timetable_column_id,
                                 "subject_id": row.subject_id,
                                 "room_id": row.room_id,
@@ -1516,7 +1538,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     existing_student = frappe.db.exists("SIS Student Timetable", {
                         "student_id": student_id,
                         "class_id": class_id,
-                        "day_of_week": row.day_of_week,
+                        "day_of_week": normalized_day,
                         "timetable_column_id": row.timetable_column_id,
                         "date": specific_date
                     })
@@ -1528,7 +1550,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                 "doctype": "SIS Student Timetable",
                                 "student_id": student_id,
                                 "class_id": class_id,
-                                "day_of_week": row.day_of_week,
+                                "day_of_week": normalized_day,
                                 "timetable_column_id": row.timetable_column_id,
                                 "subject_id": row.subject_id,
                                 "teacher_1_id": row.teacher_1_id,
@@ -1593,6 +1615,21 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
         logs.append(f"Found {len(student_ids)} students for simplified sync")
         
         for row in instance_rows:
+            # Normalize day_of_week for simplified sync too
+            original_day = str(row.day_of_week or "").strip().lower()
+            day_map = {
+                "monday": "mon", "tuesday": "tue", "wednesday": "wed", "thursday": "thu",
+                "friday": "fri", "saturday": "sat", "sunday": "sun",
+                "thứ 2": "mon", "thu 2": "mon", "thứ 3": "tue", "thu 3": "tue",
+                "thứ 4": "wed", "thu 4": "wed", "thứ 5": "thu", "thu 5": "thu", 
+                "thứ 6": "fri", "thu 6": "fri", "thứ 7": "sat", "thu 7": "sat",
+                "chủ nhật": "sun", "cn": "sun"
+            }
+            normalized_day = day_map.get(original_day, original_day)
+            valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+            if normalized_day not in valid_days:
+                continue
+                
             # Create teacher entries (basic)
             for teacher_field in ["teacher_1_id", "teacher_2_id"]:
                 teacher_id = row.get(teacher_field)
@@ -1601,7 +1638,7 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
                         # Check if exists
                         exists = frappe.db.exists("SIS Teacher Timetable", {
                             "teacher_id": teacher_id,
-                            "day_of_week": row.day_of_week,
+                            "day_of_week": normalized_day,
                             "timetable_column_id": row.timetable_column_id,
                             "date": current_date
                         })
@@ -1611,7 +1648,7 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
                                 "doctype": "SIS Teacher Timetable",
                                 "teacher_id": teacher_id,
                                 "class_id": class_id,
-                                "day_of_week": row.day_of_week,
+                                "day_of_week": normalized_day,
                                 "timetable_column_id": row.timetable_column_id,
                                 "subject_id": row.subject_id,
                                 "date": current_date,
@@ -1626,7 +1663,7 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
                 try:
                     exists = frappe.db.exists("SIS Student Timetable", {
                         "student_id": student_id,
-                        "day_of_week": row.day_of_week,
+                        "day_of_week": normalized_day,
                         "timetable_column_id": row.timetable_column_id,
                         "date": current_date
                     })
@@ -1636,7 +1673,7 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
                             "doctype": "SIS Student Timetable", 
                             "student_id": student_id,
                             "class_id": class_id,
-                            "day_of_week": row.day_of_week,
+                            "day_of_week": normalized_day,
                             "timetable_column_id": row.timetable_column_id,
                             "subject_id": row.subject_id,
                             "teacher_1_id": row.teacher_1_id,
