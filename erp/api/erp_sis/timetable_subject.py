@@ -323,3 +323,216 @@ def delete_timetable_subject():
     except Exception as e:
         frappe.log_error(f"Error deleting timetable subject {subject_id}: {str(e)}")
         return error_response(f"Error deleting timetable subject: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def bulk_import_timetable_subjects():
+    """Bulk import timetable subjects from Excel file"""
+    try:
+        # Get file from request
+        import io
+        import pandas as pd
+        from werkzeug.datastructures import FileStorage
+        
+        # Get uploaded file
+        uploaded_file = frappe.request.files.get('file')
+        if not uploaded_file:
+            return error_response(
+                message="No file uploaded",
+                code="NO_FILE_UPLOADED"
+            )
+        
+        frappe.logger().info(f"Timetable subject bulk import file received: {uploaded_file.filename}")
+        
+        # Read Excel file
+        try:
+            df = pd.read_excel(uploaded_file, sheet_name=0)
+            frappe.logger().info(f"Excel file read successfully. Shape: {df.shape}")
+        except Exception as e:
+            return error_response(
+                message=f"Error reading Excel file: {str(e)}",
+                code="EXCEL_READ_ERROR"
+            )
+        
+        # Log available columns for debugging
+        frappe.logger().info(f"Excel columns found: {list(df.columns)}")
+        
+        # Validate required columns
+        required_columns = ['title_vn']
+        optional_columns = ['title_en', 'education_stage', 'curriculum']
+        
+        # Check for required columns (case insensitive)
+        missing_columns = []
+        for req_col in required_columns:
+            if req_col not in df.columns:
+                # Try case insensitive match
+                found = False
+                for col in df.columns:
+                    if col.lower().replace(' ', '').replace('_', '') == req_col.lower().replace(' ', '').replace('_', ''):
+                        found = True
+                        break
+                if not found:
+                    missing_columns.append(req_col)
+        
+        if missing_columns:
+            return error_response(
+                message=f"Missing required columns: {', '.join(missing_columns)}. Found columns: {', '.join(df.columns)}",
+                code="MISSING_COLUMNS"
+            )
+        
+        # Get current campus
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Get existing timetable subjects to check for uniqueness
+        existing_subjects = frappe.get_all(
+            "SIS Timetable Subject",
+            fields=["name", "title_vn", "education_stage_id", "curriculum_id"],
+            filters={"campus_id": campus_id},
+            order_by="creation asc"
+        )
+        
+        existing_combinations = set()
+        for subj in existing_subjects:
+            # For timetable subjects, we check uniqueness by title_vn + education_stage_id + curriculum_id combo
+            combo = f"{subj.get('title_vn', '').lower()}|{subj.get('education_stage_id', '') or ''}|{subj.get('curriculum_id', '') or ''}"
+            existing_combinations.add(combo)
+        
+        # Process each row
+        success_count = 0
+        error_count = 0
+        errors = []
+        logs = []
+        
+        for index, row in df.iterrows():
+            try:
+                # Extract data from row
+                title_vn = str(row.get('title_vn', '')).strip() if pd.notna(row.get('title_vn')) else ''
+                title_en = str(row.get('title_en', '')).strip() if pd.notna(row.get('title_en')) else ''
+                education_stage_name = str(row.get('education_stage', '')).strip() if pd.notna(row.get('education_stage')) else None
+                curriculum_name = str(row.get('curriculum', '')).strip() if pd.notna(row.get('curriculum')) else None
+                
+                frappe.logger().info(f"Processing row {index + 2}: Title VN='{title_vn}', Education Stage='{education_stage_name}'")
+                
+                # Validation
+                if not title_vn:
+                    error_count += 1
+                    error_msg = f"Row {index + 2}: Title VN is required"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+                
+                # Lookup education stage ID from title_vn (if provided)
+                education_stage_id = None
+                if education_stage_name and education_stage_name != 'nan':
+                    education_stage_id = frappe.db.get_value(
+                        "SIS Education Stage",
+                        {
+                            "title_vn": education_stage_name,
+                            "campus_id": campus_id
+                        },
+                        "name"
+                    )
+                    
+                    if not education_stage_id:
+                        error_count += 1
+                        error_msg = f"Row {index + 2}: Education stage '{education_stage_name}' does not exist or access denied"
+                        errors.append(error_msg)
+                        logs.append(error_msg)
+                        continue
+                
+                # Lookup curriculum ID from title_vn (if provided)
+                curriculum_id = None
+                if curriculum_name and curriculum_name != 'nan':
+                    curriculum_id = frappe.db.get_value(
+                        "SIS Curriculum",
+                        {
+                            "title_vn": curriculum_name,
+                            "campus_id": campus_id
+                        },
+                        "name"
+                    )
+                    
+                    if not curriculum_id:
+                        error_count += 1
+                        error_msg = f"Row {index + 2}: Curriculum '{curriculum_name}' does not exist or access denied"
+                        errors.append(error_msg)
+                        logs.append(error_msg)
+                        continue
+                
+                # Check uniqueness combination
+                combo = f"{title_vn.lower()}|{education_stage_id or ''}|{curriculum_id or ''}"
+                if combo in existing_combinations:
+                    error_count += 1
+                    error_msg = f"Row {index + 2}: Timetable subject '{title_vn}' already exists with same education stage and curriculum combination"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+                
+                # Build timetable subject data
+                timetable_subject_data = {
+                    "doctype": "SIS Timetable Subject",
+                    "title_vn": title_vn,
+                    "title_en": title_en or title_vn,  # Default to title_vn if title_en is empty
+                    "campus_id": campus_id
+                }
+                
+                # Add optional fields if provided
+                if education_stage_id:
+                    timetable_subject_data["education_stage_id"] = education_stage_id
+                if curriculum_id:
+                    timetable_subject_data["curriculum_id"] = curriculum_id
+                
+                # Create timetable subject
+                timetable_subject_doc = frappe.get_doc(timetable_subject_data)
+                
+                timetable_subject_doc.flags.ignore_validate = True
+                timetable_subject_doc.flags.ignore_permissions = True
+                timetable_subject_doc.insert(ignore_permissions=True)
+                
+                # Track this creation for uniqueness checking in subsequent rows
+                existing_combinations.add(combo)
+                
+                success_count += 1
+                logs.append(f"Row {index + 2}: Successfully created timetable subject '{title_vn}'")
+                
+            except Exception as e:
+                error_count += 1
+                error_msg = f"Row {index + 2}: Error creating timetable subject: {str(e)}"
+                errors.append(error_msg)
+                logs.append(error_msg)
+        
+        # Commit all changes
+        frappe.db.commit()
+        
+        # Prepare response
+        total_rows = len(df)
+        is_success = success_count > 0
+        
+        response_data = {
+            "total_rows": total_rows,
+            "success_count": success_count,
+            "error_count": error_count,
+            "errors": errors[:10],  # Limit errors in response
+            "logs": logs[-20:],  # Last 20 logs
+        }
+        
+        if is_success:
+            return success_response(
+                data=response_data,
+                message=f"Bulk import completed. {success_count} timetable subjects created, {error_count} errors."
+            )
+        else:
+            return error_response(
+                data=response_data,
+                message=f"Bulk import failed. {error_count} errors occurred.",
+                code="BULK_IMPORT_FAILED"
+            )
+            
+    except Exception as e:
+        frappe.log_error(f"Error in bulk import timetable subjects: {str(e)}", "Timetable Subject Bulk Import Error")
+        return error_response(
+            message=f"Error in bulk import timetable subjects: {str(e)}",
+            code="BULK_IMPORT_ERROR"
+        )

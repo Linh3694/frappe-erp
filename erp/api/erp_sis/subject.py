@@ -1084,3 +1084,265 @@ def get_rooms_for_selection():
             "data": [],
             "message": f"Error fetching rooms: {str(e)}"
         }
+
+
+@frappe.whitelist(allow_guest=False)
+def bulk_import_subjects():
+    """Bulk import subjects from Excel file"""
+    try:
+        # Get file from request
+        import io
+        import pandas as pd
+        from werkzeug.datastructures import FileStorage
+        
+        # Get uploaded file
+        uploaded_file = frappe.request.files.get('file')
+        if not uploaded_file:
+            return error_response(
+                message="No file uploaded",
+                code="NO_FILE_UPLOADED"
+            )
+        
+        frappe.logger().info(f"Subject bulk import file received: {uploaded_file.filename}")
+        
+        # Read Excel file
+        try:
+            df = pd.read_excel(uploaded_file, sheet_name=0)
+            frappe.logger().info(f"Excel file read successfully. Shape: {df.shape}")
+        except Exception as e:
+            return error_response(
+                message=f"Error reading Excel file: {str(e)}",
+                code="EXCEL_READ_ERROR"
+            )
+        
+        # Log available columns for debugging
+        frappe.logger().info(f"Excel columns found: {list(df.columns)}")
+        
+        # Validate required columns
+        required_columns = ['title', 'education_stage']
+        optional_columns = ['timetable_subject', 'actual_subject', 'subcurriculum', 'room']
+        
+        # Check for required columns (case insensitive)
+        missing_columns = []
+        for req_col in required_columns:
+            if req_col not in df.columns:
+                # Try case insensitive match
+                found = False
+                for col in df.columns:
+                    if col.lower().replace(' ', '').replace('_', '') == req_col.lower().replace(' ', '').replace('_', ''):
+                        found = True
+                        break
+                if not found:
+                    missing_columns.append(req_col)
+        
+        if missing_columns:
+            return error_response(
+                message=f"Missing required columns: {', '.join(missing_columns)}. Found columns: {', '.join(df.columns)}",
+                code="MISSING_COLUMNS"
+            )
+        
+        # Get current campus
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Get existing subjects to check for uniqueness
+        existing_subjects = frappe.get_all(
+            "SIS Subject",
+            fields=["name", "title", "education_stage"],
+            filters={"campus_id": campus_id},
+            order_by="creation asc"
+        )
+        
+        existing_titles_per_stage = {}
+        for subj in existing_subjects:
+            stage = subj.get('education_stage', '')  # This is already the ID
+            title = subj.get('title', '').lower()
+            if stage not in existing_titles_per_stage:
+                existing_titles_per_stage[stage] = set()
+            existing_titles_per_stage[stage].add(title)
+        
+        # Process each row
+        success_count = 0
+        error_count = 0
+        errors = []
+        logs = []
+        
+        for index, row in df.iterrows():
+            try:
+                # Extract data from row
+                title = str(row.get('title', '')).strip() if pd.notna(row.get('title')) else ''
+                education_stage = str(row.get('education_stage', '')).strip() if pd.notna(row.get('education_stage')) else ''
+                
+                # Optional fields - get names, then lookup IDs
+                timetable_subject_name = str(row.get('timetable_subject', '')).strip() if pd.notna(row.get('timetable_subject')) else None
+                actual_subject_name = str(row.get('actual_subject', '')).strip() if pd.notna(row.get('actual_subject')) else None
+                subcurriculum_name = str(row.get('subcurriculum', '')).strip() if pd.notna(row.get('subcurriculum')) else None
+                room_name = str(row.get('room', '')).strip() if pd.notna(row.get('room')) else None
+                
+                frappe.logger().info(f"Processing row {index + 2}: Title='{title}', Education Stage='{education_stage}'")
+                
+                # Validation
+                if not title:
+                    error_count += 1
+                    error_msg = f"Row {index + 2}: Title is required"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+                
+                if not education_stage:
+                    error_count += 1
+                    error_msg = f"Row {index + 2}: Education stage is required"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+                
+                # Lookup education stage ID from title_vn
+                education_stage_doc = frappe.db.get_value(
+                    "SIS Education Stage",
+                    {
+                        "title_vn": education_stage,
+                        "campus_id": campus_id
+                    },
+                    "name"
+                )
+                
+                if not education_stage_doc:
+                    error_count += 1
+                    error_msg = f"Row {index + 2}: Education stage '{education_stage}' does not exist or access denied"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+                
+                # Check title uniqueness within the same education stage
+                if education_stage_doc in existing_titles_per_stage and title.lower() in existing_titles_per_stage[education_stage_doc]:
+                    error_count += 1
+                    error_msg = f"Row {index + 2}: Subject title '{title}' already exists in education stage '{education_stage}'"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+                
+                # Lookup optional fields IDs from names
+                timetable_subject_id = None
+                if timetable_subject_name and timetable_subject_name != 'nan':
+                    timetable_subject_id = frappe.db.get_value(
+                        "SIS Timetable Subject",
+                        {
+                            "title_vn": timetable_subject_name,
+                            "campus_id": campus_id
+                        },
+                        "name"
+                    )
+                    if not timetable_subject_id:
+                        logs.append(f"Row {index + 2}: Warning - Timetable subject '{timetable_subject_name}' not found, skipping")
+                
+                actual_subject_id = None
+                if actual_subject_name and actual_subject_name != 'nan':
+                    actual_subject_id = frappe.db.get_value(
+                        "SIS Actual Subject",
+                        {
+                            "title_vn": actual_subject_name,
+                            "campus_id": campus_id
+                        },
+                        "name"
+                    )
+                    if not actual_subject_id:
+                        logs.append(f"Row {index + 2}: Warning - Actual subject '{actual_subject_name}' not found, skipping")
+                
+                subcurriculum_id = None
+                if subcurriculum_name and subcurriculum_name != 'nan':
+                    subcurriculum_id = frappe.db.get_value(
+                        "SIS Sub Curriculum",
+                        {
+                            "title_vn": subcurriculum_name,
+                            "campus_id": campus_id
+                        },
+                        "name"
+                    )
+                    if not subcurriculum_id:
+                        logs.append(f"Row {index + 2}: Warning - Subcurriculum '{subcurriculum_name}' not found, skipping")
+                
+                room_id = None
+                if room_name and room_name != 'nan':
+                    room_id = frappe.db.get_value(
+                        "ERP Administrative Room",
+                        {
+                            "title_vn": room_name
+                        },
+                        "name"
+                    )
+                    if not room_id:
+                        logs.append(f"Row {index + 2}: Warning - Room '{room_name}' not found, skipping")
+                
+                # Build subject data
+                subject_data = {
+                    "doctype": "SIS Subject",
+                    "title": title,
+                    "education_stage": education_stage_doc,
+                    "campus_id": campus_id
+                }
+                
+                # Add optional fields if IDs were found
+                if timetable_subject_id:
+                    subject_data["timetable_subject_id"] = timetable_subject_id
+                if actual_subject_id:
+                    subject_data["actual_subject_id"] = actual_subject_id
+                if subcurriculum_id:
+                    subject_data["subcurriculum_id"] = subcurriculum_id
+                if room_id:
+                    subject_data["room_id"] = room_id
+                
+                # Create subject
+                subject_doc = frappe.get_doc(subject_data)
+                
+                subject_doc.flags.ignore_validate = True
+                subject_doc.flags.ignore_permissions = True
+                subject_doc.insert(ignore_permissions=True)
+                
+                # Track this creation for uniqueness checking in subsequent rows
+                if education_stage_doc not in existing_titles_per_stage:
+                    existing_titles_per_stage[education_stage_doc] = set()
+                existing_titles_per_stage[education_stage_doc].add(title.lower())
+                
+                success_count += 1
+                logs.append(f"Row {index + 2}: Successfully created subject '{title}'")
+                
+            except Exception as e:
+                error_count += 1
+                error_msg = f"Row {index + 2}: Error creating subject: {str(e)}"
+                errors.append(error_msg)
+                logs.append(error_msg)
+        
+        # Commit all changes
+        frappe.db.commit()
+        
+        # Prepare response
+        total_rows = len(df)
+        is_success = success_count > 0
+        
+        response_data = {
+            "total_rows": total_rows,
+            "success_count": success_count,
+            "error_count": error_count,
+            "errors": errors[:10],  # Limit errors in response
+            "logs": logs[-20:],  # Last 20 logs
+        }
+        
+        if is_success:
+            return success_response(
+                data=response_data,
+                message=f"Bulk import completed. {success_count} subjects created, {error_count} errors."
+            )
+        else:
+            return error_response(
+                data=response_data,
+                message=f"Bulk import failed. {error_count} errors occurred.",
+                code="BULK_IMPORT_FAILED"
+            )
+            
+    except Exception as e:
+        frappe.log_error(f"Error in bulk import subjects: {str(e)}", "Subject Bulk Import Error")
+        return error_response(
+            message=f"Error in bulk import subjects: {str(e)}",
+            code="BULK_IMPORT_ERROR"
+        )
