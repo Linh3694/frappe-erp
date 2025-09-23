@@ -313,6 +313,9 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                     "test_point_values": payload.get("test_point_values") or [],  # ✅ ADD: Support test scores
                 }
             json_data["subject_eval"] = existing
+        elif section == "intl_scores":
+            # INTL Scores section handling
+            json_data["intl_scores"] = payload
         else:
             # Overwrite the section with provided payload for other sections (e.g., homeroom)
             json_data[section] = payload
