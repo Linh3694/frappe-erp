@@ -872,16 +872,20 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
             frappe.logger().info(f"Found {len(parent_ids)} timetable instances for teacher")
             
             if parent_ids:
-                # Get instances and filter by current week
+                # Get instances and filter by current week using start_date and end_date
+                # An instance overlaps with current week if:
+                # instance.start_date <= week_end AND instance.end_date >= week_start
                 instances = frappe.get_all(
                     "SIS Timetable Instance",
-                    fields=["class_id", "instance_date"],
+                    fields=["class_id", "start_date", "end_date"],
                     filters=[
                         ["name", "in", parent_ids],
-                        ["instance_date", ">=", week_start],
-                        ["instance_date", "<=", week_end]
+                        ["start_date", "<=", week_end],
+                        ["end_date", ">=", week_start]
                     ]
                 )
+                
+                frappe.logger().info(f"Found {len(instances)} timetable instances overlapping with current week")
                 
                 # Extract unique class IDs
                 for instance in instances:
