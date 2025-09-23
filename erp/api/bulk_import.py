@@ -761,6 +761,26 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 else:
                     raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
                     
+            # Handle actual subject lookup
+            actual_subject_name = None
+            for key in ["actual_subject", "actual_subject_id", "Actual Subject"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    actual_subject_name = str(row_data[key]).strip()
+                    break
+                    
+            if actual_subject_name:
+                # Normalize and clean the actual subject name
+                actual_subject_name = ' '.join(actual_subject_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Subject] Looking up actual subject: '{actual_subject_name}'")
+                
+                # Lookup actual subject by title_vn
+                actual_subject_id = _lookup_actual_subject_by_name(actual_subject_name, campus_id)
+                if actual_subject_id:
+                    doc_data["actual_subject_id"] = actual_subject_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Subject] Found actual subject ID: {actual_subject_id}")
+                else:
+                    raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Actual Subject: '{actual_subject_name}' cho campus {campus_id}")
+                    
         elif doctype == "SIS Actual Subject":
             
             # Handle curriculum lookup
@@ -825,7 +845,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
         # Map Excel columns to DocType fields (regular fields)
         meta = frappe.get_meta(doctype)
-        excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id"]
+        excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id"]
         for field in meta.fields:
             if field.fieldname in row_data and field.fieldname not in excluded_fields:
                 # Regular field mapping (skip already processed reference fields)
@@ -946,6 +966,61 @@ def _normalize_vietnamese_text(text):
     text = text.replace('phổ thông', 'phổ thông')  # Ensure consistent spacing
     
     return text
+
+
+def _lookup_actual_subject_by_name(actual_subject_name, campus_id):
+    """Lookup actual subject ID by title_vn with normalized matching"""
+    try:
+        # Get all actual subjects for the campus
+        actual_subjects = frappe.get_all(
+            "SIS Actual Subject",
+            filters={"campus_id": campus_id},
+            fields=["name", "title_vn"]
+        )
+        
+        frappe.logger().info(f"Found {len(actual_subjects)} actual subjects for campus {campus_id}")
+        for subj in actual_subjects:
+            frappe.logger().info(f"Available actual subject: '{subj.get('title_vn', '')}' (ID: {subj.get('name', '')})")
+        
+        # Normalize search term
+        normalized_search = _normalize_vietnamese_text(actual_subject_name)
+        frappe.logger().info(f"Looking up actual subject: '{actual_subject_name}' -> '{normalized_search}'")
+        
+        # Try exact match first
+        for subj in actual_subjects:
+            subj_title = subj.get('title_vn', '')
+            if subj_title == actual_subject_name:
+                frappe.logger().info(f"Found actual subject with exact match: {subj_title}")
+                return subj.get('name')
+        
+        # If not found, try normalized matching
+        for subj in actual_subjects:
+            subj_title = subj.get('title_vn', '')
+            normalized_subj = _normalize_vietnamese_text(subj_title)
+            
+            frappe.logger().info(f"Comparing normalized: '{normalized_search}' with '{normalized_subj}'")
+            if normalized_subj == normalized_search:
+                frappe.logger().info(f"Found actual subject with normalized match: {subj_title}")
+                return subj.get('name')
+        
+        # If still not found, try partial matching (contains)
+        for subj in actual_subjects:
+            subj_title = subj.get('title_vn', '')
+            normalized_subj = _normalize_vietnamese_text(subj_title)
+            
+            # Try both directions: search term contains subject name OR subject name contains search term
+            if (normalized_search in normalized_subj or normalized_subj in normalized_search) and len(normalized_search) > 2:
+                frappe.logger().info(f"Found actual subject with partial match: '{subj_title}' matches '{actual_subject_name}'")
+                return subj.get('name')
+        
+        # Log available actual subjects for debugging
+        available_titles = [s.get('title_vn', '') for s in actual_subjects]
+        frappe.logger().warning(f"Actual subject '{actual_subject_name}' not found. Available: {available_titles}")
+        return None
+        
+    except Exception as e:
+        frappe.logger().error(f"Error looking up actual subject: {str(e)}")
+        return None
 
 
 def _lookup_curriculum_by_name(curriculum_name, campus_id):
