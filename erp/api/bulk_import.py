@@ -513,6 +513,30 @@ def _process_excel_file(job):
             if getattr(f, 'label', None):
                 label_map[_normalize_key(f.label)] = f.fieldname
         
+        # Add special column mappings for specific DocTypes
+        special_mappings = {
+            "SIS Subject": {
+                "education_stage": "education_stage_id",
+                "curriculum": "curriculum_id",
+                "timetable_subject": "timetable_subject_id"
+            },
+            "SIS Timetable Subject": {
+                "education_stage": "education_stage_id",
+                "curriculum": "curriculum_id"
+            },
+            "SIS Actual Subject": {
+                "education_stage": "education_stage_id", 
+                "curriculum": "curriculum_id",
+                "timetable_subject": "timetable_subject_id"
+            }
+        }
+
+        # Apply special mappings
+        if job.doctype_target in special_mappings:
+            for excel_col, target_field in special_mappings[job.doctype_target].items():
+                normalized_col = "".join(ch.lower() for ch in excel_col if ch.isalnum())
+                label_map[normalized_col] = target_field
+
         # Debug: Show column mapping for troubleshooting
         column_names = df.columns.tolist() if len(df) > 0 else []
         debug_mapping = {}
