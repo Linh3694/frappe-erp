@@ -1180,6 +1180,18 @@ def bulk_import_subjects():
                 subcurriculum_name = str(row.get('subcurriculum', '')).strip() if pd.notna(row.get('subcurriculum')) else None
                 room_name = str(row.get('room', '')).strip() if pd.notna(row.get('room')) else None
                 
+                # Clean up extra spaces
+                if education_stage:
+                    education_stage = ' '.join(education_stage.split())
+                if timetable_subject_name:
+                    timetable_subject_name = ' '.join(timetable_subject_name.split())
+                if actual_subject_name:
+                    actual_subject_name = ' '.join(actual_subject_name.split())
+                if subcurriculum_name:
+                    subcurriculum_name = ' '.join(subcurriculum_name.split())
+                if room_name:
+                    room_name = ' '.join(room_name.split())
+                
                 frappe.logger().info(f"Processing row {index + 2}: Title='{title}', Education Stage='{education_stage}'")
                 
                 # Validation
@@ -1207,9 +1219,29 @@ def bulk_import_subjects():
                     "name"
                 )
                 
+                # If not found, try case insensitive search
                 if not education_stage_doc:
+                    all_stages = frappe.db.get_all(
+                        "SIS Education Stage",
+                        filters={"campus_id": campus_id},
+                        fields=["name", "title_vn"]
+                    )
+                    
+                    for stage in all_stages:
+                        if stage.get('title_vn', '').lower().strip() == education_stage.lower().strip():
+                            education_stage_doc = stage.get('name')
+                            logs.append(f"Row {index + 2}: Found education stage '{education_stage}' with case insensitive match")
+                            break
+                
+                if not education_stage_doc:
+                    # Log available stages for debugging
+                    available_stages = [stage.get('title_vn', '') for stage in frappe.db.get_all(
+                        "SIS Education Stage",
+                        filters={"campus_id": campus_id},
+                        fields=["title_vn"]
+                    )]
                     error_count += 1
-                    error_msg = f"Row {index + 2}: Education stage '{education_stage}' does not exist or access denied"
+                    error_msg = f"Row {index + 2}: Education stage '{education_stage}' does not exist. Available: {', '.join(available_stages[:5])}{'...' if len(available_stages) > 5 else ''}"
                     errors.append(error_msg)
                     logs.append(error_msg)
                     continue

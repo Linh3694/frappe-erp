@@ -413,6 +413,12 @@ def bulk_import_timetable_subjects():
                 education_stage_name = str(row.get('education_stage', '')).strip() if pd.notna(row.get('education_stage')) else None
                 curriculum_name = str(row.get('curriculum', '')).strip() if pd.notna(row.get('curriculum')) else None
                 
+                # Clean up extra spaces in names
+                if education_stage_name:
+                    education_stage_name = ' '.join(education_stage_name.split())  # Remove extra spaces
+                if curriculum_name:
+                    curriculum_name = ' '.join(curriculum_name.split())  # Remove extra spaces
+                
                 frappe.logger().info(f"Processing row {index + 2}: Title VN='{title_vn}', Education Stage='{education_stage_name}'")
                 
                 # Validation
@@ -426,6 +432,7 @@ def bulk_import_timetable_subjects():
                 # Lookup education stage ID from title_vn (if provided)
                 education_stage_id = None
                 if education_stage_name and education_stage_name != 'nan':
+                    # First try exact match
                     education_stage_id = frappe.db.get_value(
                         "SIS Education Stage",
                         {
@@ -435,9 +442,29 @@ def bulk_import_timetable_subjects():
                         "name"
                     )
                     
+                    # If not found, try case insensitive search
                     if not education_stage_id:
+                        all_stages = frappe.db.get_all(
+                            "SIS Education Stage",
+                            filters={"campus_id": campus_id},
+                            fields=["name", "title_vn"]
+                        )
+                        
+                        for stage in all_stages:
+                            if stage.get('title_vn', '').lower().strip() == education_stage_name.lower().strip():
+                                education_stage_id = stage.get('name')
+                                logs.append(f"Row {index + 2}: Found education stage '{education_stage_name}' with case insensitive match")
+                                break
+                    
+                    if not education_stage_id:
+                        # Log available stages for debugging
+                        available_stages = [stage.get('title_vn', '') for stage in frappe.db.get_all(
+                            "SIS Education Stage",
+                            filters={"campus_id": campus_id},
+                            fields=["title_vn"]
+                        )]
                         error_count += 1
-                        error_msg = f"Row {index + 2}: Education stage '{education_stage_name}' does not exist or access denied"
+                        error_msg = f"Row {index + 2}: Education stage '{education_stage_name}' does not exist. Available: {', '.join(available_stages[:5])}{'...' if len(available_stages) > 5 else ''}"
                         errors.append(error_msg)
                         logs.append(error_msg)
                         continue
@@ -445,6 +472,7 @@ def bulk_import_timetable_subjects():
                 # Lookup curriculum ID from title_vn (if provided)
                 curriculum_id = None
                 if curriculum_name and curriculum_name != 'nan':
+                    # First try exact match
                     curriculum_id = frappe.db.get_value(
                         "SIS Curriculum",
                         {
@@ -454,9 +482,29 @@ def bulk_import_timetable_subjects():
                         "name"
                     )
                     
+                    # If not found, try case insensitive search
                     if not curriculum_id:
+                        all_curriculums = frappe.db.get_all(
+                            "SIS Curriculum",
+                            filters={"campus_id": campus_id},
+                            fields=["name", "title_vn"]
+                        )
+                        
+                        for curr in all_curriculums:
+                            if curr.get('title_vn', '').lower().strip() == curriculum_name.lower().strip():
+                                curriculum_id = curr.get('name')
+                                logs.append(f"Row {index + 2}: Found curriculum '{curriculum_name}' with case insensitive match")
+                                break
+                    
+                    if not curriculum_id:
+                        # Log available curriculums for debugging
+                        available_curriculums = [curr.get('title_vn', '') for curr in frappe.db.get_all(
+                            "SIS Curriculum",
+                            filters={"campus_id": campus_id},
+                            fields=["title_vn"]
+                        )]
                         error_count += 1
-                        error_msg = f"Row {index + 2}: Curriculum '{curriculum_name}' does not exist or access denied"
+                        error_msg = f"Row {index + 2}: Curriculum '{curriculum_name}' does not exist. Available: {', '.join(available_curriculums[:5])}{'...' if len(available_curriculums) > 5 else ''}"
                         errors.append(error_msg)
                         logs.append(error_msg)
                         continue
