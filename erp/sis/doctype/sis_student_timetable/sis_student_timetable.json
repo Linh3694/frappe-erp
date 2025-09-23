@@ -60,7 +60,7 @@
    "fieldname": "day_of_week",
    "fieldtype": "Select",
    "label": "Day of Week",
-   "options": "mon\\ntue\\nwed\\nthu\\nfri\\nsat\\nsun",
+   "options": "mon\ntue\nwed\nthu\nfri\nsat\nsun",
    "reqd": 1
   },
   {
