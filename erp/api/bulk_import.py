@@ -678,7 +678,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["education_stage_id"] = education_stage_id
                     frappe.logger().info(f"Row {row_num} - Found education stage ID: {education_stage_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
+                    raise frappe.ValidationError(f"[{doctype}] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
         
         elif doctype == "SIS Subject":
             
@@ -782,7 +782,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["education_stage_id"] = education_stage_id
                     frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Found education stage ID: {education_stage_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
+                    raise frappe.ValidationError(f"[{doctype}] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
 
         # Map Excel columns to DocType fields (regular fields)
         meta = frappe.get_meta(doctype)
