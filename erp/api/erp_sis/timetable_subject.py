@@ -497,12 +497,23 @@ def bulk_import_timetable_subjects():
                 # Lookup curriculum ID from title_vn (if provided)
                 curriculum_id = None
                 if curriculum_name and curriculum_name != 'nan':
+                    # Test normalize function with known values
+                    test1 = "Chương  trình Quốc Tế"  # Excel value (2 spaces)
+                    test2 = "Chương trình Quốc Tế"   # DB value (1 space)
+                    norm1 = normalize_vietnamese_text(test1)
+                    norm2 = normalize_vietnamese_text(test2)
+                    frappe.logger().info(f"TEST: '{test1}' -> '{norm1}' | '{test2}' -> '{norm2}' | Equal: {norm1 == norm2}")
+                    
                     # Get all curriculums for debugging
                     all_curriculums = frappe.db.get_all(
                         "SIS Curriculum",
                         filters={"campus_id": campus_id},
                         fields=["name", "title_vn"]
                     )
+                    
+                    # Normalize search term first
+                    normalized_search = normalize_vietnamese_text(curriculum_name)
+                    frappe.logger().info(f"Normalized search: '{curriculum_name}' -> '{normalized_search}'")
                     
                     # Try exact match first
                     for curr in all_curriculums:
@@ -513,13 +524,8 @@ def bulk_import_timetable_subjects():
                             logs.append(f"Row {index + 2}: Found curriculum '{curriculum_name}' with exact match")
                             break
                     
-                    # If not found, try case insensitive and normalized
+                    # If not found, try normalized matching
                     if not curriculum_id:
-                        import unicodedata
-                        
-                        # Normalize search term once using our function
-                        normalized_search = normalize_vietnamese_text(curriculum_name)
-                        frappe.logger().info(f"Normalized search: '{curriculum_name}' -> '{normalized_search}'")
                         
                         for curr in all_curriculums:
                             curr_title = curr.get('title_vn', '')
@@ -545,10 +551,21 @@ def bulk_import_timetable_subjects():
                                 break
                     
                     if not curriculum_id:
-                        # Log available curriculums for debugging
-                        available_curriculums = [f"'{curr.get('title_vn', '')}'" for curr in all_curriculums]
+                        # Create detailed debug error message
+                        debug_info = []
+                        debug_info.append(f"SEARCH: '{curriculum_name}' (len:{len(curriculum_name)})")
+                        debug_info.append(f"NORMALIZED: '{normalized_search}'")
+                        debug_info.append(f"BYTES: {curriculum_name.encode('utf-8')}")
+                        
+                        debug_info.append("AVAILABLE:")
+                        for curr in all_curriculums[:3]:  # Show first 3 only
+                            curr_title = curr.get('title_vn', '')
+                            normalized_curr = normalize_vietnamese_text(curr_title)
+                            debug_info.append(f"  • '{curr_title}' -> '{normalized_curr}'")
+                            debug_info.append(f"    bytes: {curr_title.encode('utf-8')}")
+                        
                         error_count += 1
-                        error_msg = f"Row {index + 2}: Curriculum '{curriculum_name}' not found. Available: {', '.join(available_curriculums[:10])}"
+                        error_msg = f"Row {index + 2}: Curriculum not found. " + " | ".join(debug_info)
                         errors.append(error_msg)
                         logs.append(error_msg)
                         continue
