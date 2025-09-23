@@ -328,10 +328,10 @@ def ensure_default_forms():
     try:
         campus_id = _current_campus_id()
         defaults = [
-            {"code": "PRIM_VN", "title": "Tiểu học - CTVN"},
-            {"code": "SEC_VN_MID", "title": "Trung Học - CTVN - Giữa kỳ"},
-            {"code": "SEC_VN_END1", "title": "Trung Học - CTVN - HK1"},
-            {"code": "SEC_VN_END2", "title": "Trung Học - CTVN - HK2"},
+            {"code": "PRIM_VN", "title": "Tiểu học"},
+            {"code": "SEC_VN_MID", "title": "Trung Học - Giữa kỳ"},
+            {"code": "SEC_VN_END1", "title": "Trung Học - HK1"},
+            {"code": "SEC_VN_END2", "title": "Trung Học - HK2"},
         ]
         created: list[str] = []
         for d in defaults:
@@ -363,16 +363,19 @@ def ensure_intl_forms():
     """Ensure default INTL form codes exist as SIS Report Card Form docs for current campus.
 
     Codes created if missing:
-    - PRIM_INTL: Tiểu học - Chương trình Quốc tế
-    - SEC_INTL: Trung học - Chương trình Quốc tế
+    - PRIM_INTL: Tiểu học
+    - SEC_INTL: Trung học Cơ sở
     - HIGH_INTL: Trung học Phổ thông - Chương trình Quốc tế
+    - HIGH_INTL_AP: Trung học Phổ thông - Chương trình Quốc tế AP
     """
     try:
         campus_id = _current_campus_id()
         defaults = [
-            {"code": "PRIM_INTL", "title": "Tiểu học - Chương trình Quốc tế"},
-            {"code": "SEC_INTL", "title": "Trung học Cơ sở - Chương trình Quốc tế"},
+            {"code": "PRIM_INTL", "title": "Tiểu học"},
+            {"code": "SEC_INTL", "title": "Trung học Cơ sở"},
             {"code": "HIGH_INTL", "title": "Trung học Phổ thông - Chương trình Quốc tế"},
+            {"code": "HIGH_INTL_AP", "title": "Trung học Phổ thông - Chương trình Quốc tế AP"},
+
         ]
         created: list[str] = []
         for d in defaults:
