@@ -325,6 +325,28 @@ def delete_timetable_subject():
         return error_response(f"Error deleting timetable subject: {str(e)}")
 
 
+def normalize_vietnamese_text(text):
+    """Normalize Vietnamese text for better matching"""
+    import unicodedata
+    import re
+    
+    if not text:
+        return ""
+    
+    # Convert to string and strip
+    text = str(text).strip()
+    
+    # Normalize Unicode (NFC - Canonical Decomposition, followed by Canonical Composition)
+    text = unicodedata.normalize('NFC', text)
+    
+    # Remove extra whitespace (including non-breaking spaces, tabs, etc.)
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Convert to lowercase for comparison
+    text = text.lower()
+    
+    return text
+
 @frappe.whitelist(allow_guest=False)
 def bulk_import_timetable_subjects():
     """Bulk import timetable subjects from Excel file"""
@@ -413,11 +435,16 @@ def bulk_import_timetable_subjects():
                 education_stage_name = str(row.get('education_stage', '')).strip() if pd.notna(row.get('education_stage')) else None
                 curriculum_name = str(row.get('curriculum', '')).strip() if pd.notna(row.get('curriculum')) else None
                 
+                # Debug raw values before cleaning
+                if curriculum_name:
+                    frappe.logger().info(f"RAW curriculum from Excel: '{curriculum_name}' (length: {len(curriculum_name)}, bytes: {curriculum_name.encode('utf-8')})")
+                
                 # Clean up extra spaces in names
                 if education_stage_name:
                     education_stage_name = ' '.join(education_stage_name.split())  # Remove extra spaces
                 if curriculum_name:
                     curriculum_name = ' '.join(curriculum_name.split())  # Remove extra spaces
+                    frappe.logger().info(f"CLEANED curriculum name: '{curriculum_name}' (length: {len(curriculum_name)}, bytes: {curriculum_name.encode('utf-8')})")
                 
                 # Validation
                 if not title_vn:
@@ -490,15 +517,14 @@ def bulk_import_timetable_subjects():
                     if not curriculum_id:
                         import unicodedata
                         
-                        # Normalize search term once
-                        normalized_search = unicodedata.normalize('NFC', curriculum_name.strip().lower())
-                        normalized_search = ' '.join(normalized_search.split())
+                        # Normalize search term once using our function
+                        normalized_search = normalize_vietnamese_text(curriculum_name)
+                        frappe.logger().info(f"Normalized search: '{curriculum_name}' -> '{normalized_search}'")
                         
                         for curr in all_curriculums:
                             curr_title = curr.get('title_vn', '')
-                            # Normalize current curriculum name
-                            normalized_curr = unicodedata.normalize('NFC', curr_title.strip().lower())
-                            normalized_curr = ' '.join(normalized_curr.split())
+                            # Normalize current curriculum name using our function
+                            normalized_curr = normalize_vietnamese_text(curr_title)
                             
                             frappe.logger().info(f"Comparing normalized: '{normalized_search}' with '{normalized_curr}'")
                             if normalized_curr == normalized_search:
@@ -510,8 +536,7 @@ def bulk_import_timetable_subjects():
                         for curr in all_curriculums:
                             curr_title = curr.get('title_vn', '')
                             # Use normalized strings for partial matching too
-                            normalized_curr = unicodedata.normalize('NFC', curr_title.strip().lower())
-                            normalized_curr = ' '.join(normalized_curr.split())
+                            normalized_curr = normalize_vietnamese_text(curr_title)
                             
                             frappe.logger().info(f"Partial match check: '{normalized_search}' vs '{normalized_curr}'")
                             if normalized_search in normalized_curr or normalized_curr in normalized_search:
