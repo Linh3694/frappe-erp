@@ -847,9 +847,15 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
 
         user = frappe.session.user
 
+        # Initialize debug logs for frontend (same as get_teacher_classes)
+        debug_logs = []
+        debug_logs.append(f"get_my_classes called by user: {user}")
+        debug_logs.append(f"Campus ID: {campus_id}, School Year: {school_year}")
+
         # Get teacher record for current user (if any)
         teacher_rows = frappe.get_all("SIS Teacher", fields=["name"], filters={"user_id": user, "campus_id": campus_id}, limit=1)
         teacher_id = teacher_rows[0].name if teacher_rows else None
+        debug_logs.append(f"Teacher found: {teacher_id} from query: {teacher_rows}")
 
         # Build base filters for class
         class_filters = {"campus_id": campus_id}
@@ -865,6 +871,9 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                 filters={**class_filters, "homeroom_teacher": teacher_id},
                 order_by="title asc",
             )
+            debug_logs.append(f"Homeroom classes found: {len(homeroom_classes)} - {[c.name for c in homeroom_classes]}")
+        else:
+            debug_logs.append("No teacher_id found - skipping homeroom classes")
 
         # 2) Teaching classes using SAME logic as get_teacher_classes for consistency
         teaching_class_ids = set()
@@ -893,8 +902,12 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                 for record in teacher_timetable_classes:
                     if record.class_id:
                         teaching_class_ids.add(record.class_id)
+                
+                debug_logs.append(f"Teacher Timetable: Found {len(teacher_timetable_classes)} timetable records")
+                debug_logs.append(f"Teaching class IDs from timetable: {list(teaching_class_ids)}")
                         
-            except Exception:
+            except Exception as e:
+                debug_logs.append(f"Teacher Timetable query failed: {str(e)}")
                 pass  # Continue with fallback methods
                 
             # PRIORITY 2: Subject Assignment (existing logic)
@@ -912,9 +925,15 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                 for assignment in assignment_classes:
                     if assignment.class_id:
                         teaching_class_ids.add(assignment.class_id)
+                
+                debug_logs.append(f"Subject Assignment: Found {len(assignment_classes)} assignment records")
+                debug_logs.append(f"Final teaching class IDs: {list(teaching_class_ids)}")
                         
-            except Exception:
+            except Exception as e:
+                debug_logs.append(f"Subject Assignment query failed: {str(e)}")
                 pass
+        else:
+            debug_logs.append("No teacher_id found - skipping teaching classes lookup")
         
         # Get teaching class details
         teaching_classes = []
@@ -932,6 +951,10 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                 filters=teaching_filters,
                 order_by="title asc"
             ) or []
+            
+            debug_logs.append(f"Teaching classes fetched: {len(teaching_classes)} - {[c.name for c in teaching_classes]}")
+        else:
+            debug_logs.append("No teaching class IDs found - skipping teaching class fetch")
 
         # Merge & uniq by class name
         by_name: Dict[str, Dict[str, Any]] = {}
@@ -941,13 +964,26 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         all_rows = list(by_name.values())
         total_count = len(all_rows)
         page_rows = all_rows[offset : offset + limit]
+        
+        debug_logs.append(f"FINAL RESULT: {len(all_rows)} total classes, {len(page_rows)} in page")
+        debug_logs.append(f"Class names: {[c['name'] for c in all_rows]}")
 
-        return paginated_response(
-            data=page_rows,
-            current_page=page,
-            total_count=total_count,
-            per_page=limit,
-            message="Classes for report card fetched successfully",
+        # Create response with debug logs
+        from erp.utils.api_response import success_response
+        
+        response = {
+            "data": page_rows,
+            "current_page": page,
+            "total_count": total_count,
+            "per_page": limit,
+            "debug_logs": debug_logs,  # Include debug logs for frontend
+            "has_next": (offset + limit) < total_count,
+            "has_prev": page > 1
+        }
+
+        return success_response(
+            data=response,
+            message="Classes for report card fetched successfully"
         )
     except Exception as e:
         frappe.log_error(f"Error fetching my classes for report card: {str(e)}")
