@@ -419,8 +419,6 @@ def bulk_import_timetable_subjects():
                 if curriculum_name:
                     curriculum_name = ' '.join(curriculum_name.split())  # Remove extra spaces
                 
-                frappe.logger().info(f"Processing row {index + 2}: Title VN='{title_vn}', Education Stage='{education_stage_name}'")
-                
                 # Validation
                 if not title_vn:
                     error_count += 1
@@ -472,16 +470,12 @@ def bulk_import_timetable_subjects():
                 # Lookup curriculum ID from title_vn (if provided)
                 curriculum_id = None
                 if curriculum_name and curriculum_name != 'nan':
-                    frappe.logger().info(f"Looking for curriculum: '{curriculum_name}' (length: {len(curriculum_name)})")
-                    
                     # Get all curriculums for debugging
                     all_curriculums = frappe.db.get_all(
                         "SIS Curriculum",
                         filters={"campus_id": campus_id},
                         fields=["name", "title_vn"]
                     )
-                    
-                    frappe.logger().info(f"Available curriculums: {[curr.get('title_vn', '') for curr in all_curriculums]}")
                     
                     # Try exact match first
                     for curr in all_curriculums:
@@ -494,23 +488,33 @@ def bulk_import_timetable_subjects():
                     
                     # If not found, try case insensitive and normalized
                     if not curriculum_id:
+                        import unicodedata
+                        
+                        # Normalize search term once
+                        normalized_search = unicodedata.normalize('NFC', curriculum_name.strip().lower())
+                        normalized_search = ' '.join(normalized_search.split())
+                        
                         for curr in all_curriculums:
                             curr_title = curr.get('title_vn', '')
-                            # Normalize both strings: remove extra spaces, convert to lowercase
-                            normalized_search = ' '.join(curriculum_name.lower().strip().split())
-                            normalized_curr = ' '.join(curr_title.lower().strip().split())
+                            # Normalize current curriculum name
+                            normalized_curr = unicodedata.normalize('NFC', curr_title.strip().lower())
+                            normalized_curr = ' '.join(normalized_curr.split())
                             
                             frappe.logger().info(f"Comparing normalized: '{normalized_search}' with '{normalized_curr}'")
                             if normalized_curr == normalized_search:
                                 curriculum_id = curr.get('name')
                                 logs.append(f"Row {index + 2}: Found curriculum '{curriculum_name}' with normalized match (was '{curr_title}')")
                                 break
-                    
-                    # If still not found, try partial match
+                    # If still not found, try partial match with normalized strings
                     if not curriculum_id:
                         for curr in all_curriculums:
                             curr_title = curr.get('title_vn', '')
-                            if curriculum_name.lower().strip() in curr_title.lower().strip() or curr_title.lower().strip() in curriculum_name.lower().strip():
+                            # Use normalized strings for partial matching too
+                            normalized_curr = unicodedata.normalize('NFC', curr_title.strip().lower())
+                            normalized_curr = ' '.join(normalized_curr.split())
+                            
+                            frappe.logger().info(f"Partial match check: '{normalized_search}' vs '{normalized_curr}'")
+                            if normalized_search in normalized_curr or normalized_curr in normalized_search:
                                 curriculum_id = curr.get('name')
                                 logs.append(f"Row {index + 2}: Found curriculum '{curriculum_name}' with partial match (was '{curr_title}')")
                                 break
