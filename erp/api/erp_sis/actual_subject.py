@@ -337,7 +337,7 @@ def update_actual_subject():
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=['POST'])
 def delete_actual_subject():
     """Delete an actual subject"""
     try:
