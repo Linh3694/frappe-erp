@@ -79,6 +79,59 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         )
 
 
+@frappe.whitelist(allow_guest=False)
+def get_all_class_students_no_pagination(school_year_id=None, class_id=None):
+    """Get ALL class students without pagination - similar to get_all_students endpoint"""
+    try:
+        # Get parameters from request args if not provided as function parameters
+        if not school_year_id:
+            school_year_id = frappe.request.args.get("school_year_id")
+        if not class_id:
+            class_id = frappe.request.args.get("class_id")
+
+        # Build filters
+        filters = {}
+        if school_year_id:
+            filters['school_year_id'] = school_year_id
+        if class_id:
+            filters['class_id'] = class_id
+
+        # Get campus filter from context
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+        if campus_id:
+            filters['campus_id'] = campus_id
+
+        frappe.logger().info(f"get_all_class_students_no_pagination called with filters: {filters}")
+
+        # Get ALL class students - NO PAGINATION!
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            filters=filters,
+            fields=[
+                "name", "class_id", "student_id", "school_year_id",
+                "class_type", "campus_id", "creation", "modified"
+            ],
+            order_by="creation desc"
+            # NO limit_start or limit_page_length = fetch ALL records
+        )
+
+        frappe.logger().info(f"Fetched {len(class_students)} class students without pagination")
+
+        # Return all records in standard success format (no pagination info)
+        return success_response(
+            data=class_students,
+            message=f"Fetched all {len(class_students)} class students successfully"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error getting all class students: {str(e)}")
+        return error_response(
+            message="Error fetching all class students",
+            code="FETCH_ALL_CLASS_STUDENTS_ERROR"
+        )
+
+
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
