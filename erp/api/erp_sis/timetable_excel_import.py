@@ -1018,35 +1018,15 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             else:
                                 import_logs.append(f"No mapping found for '{original_day}', keeping as '{day_raw}'")
 
-                            try:
-                                meta = frappe.get_meta("SIS Timetable Instance Row")
-                                options_str = meta.get_field("day_of_week").options or ""
-
-                                import_logs.append(f"Raw options string: '{options_str}'")
-                                import_logs.append(f"day_raw before validation: '{day_raw}'")
-
-                                # Parse options string to individual values
-                                available_options = [opt.strip() for opt in options_str.split("\n") if opt.strip()]
-                                import_logs.append(f"Available options: {available_options}")
-
-                                # Check if day_raw is valid
-                                if day_raw in available_options:
-                                    import_logs.append(f"'{day_raw}' is valid, keeping as is")
-                                else:
-                                    import_logs.append(f"'{day_raw}' not valid, falling back to 'mon'")
-                                    day_raw = "mon"  # Simple fallback
-
-                            except Exception as e:
-                                import_logs.append(f"Error getting meta options: {str(e)}")
-                                import traceback
-                                import_logs.append(f"Traceback: {traceback.format_exc()}")
-
-                                # Fallback static set if meta is unavailable
-                                if day_raw not in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}:
-                                    import_logs.append(f"'{day_raw}' not in static set, falling back to 'mon'")
-                                    day_raw = "mon"
-                                else:
-                                    import_logs.append(f"'{day_raw}' is valid in static set")
+                            # Simplified validation using static valid options
+                            valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+                            import_logs.append(f"day_raw before validation: '{day_raw}'")
+                            
+                            if day_raw in valid_days:
+                                import_logs.append(f"'{day_raw}' is valid, keeping as is")
+                            else:
+                                import_logs.append(f"'{day_raw}' not valid, falling back to 'mon'")
+                                day_raw = "mon"  # Simple fallback
 
                             import_logs.append(f"Final day_of_week for row: '{day_raw}'")
 
@@ -1493,6 +1473,10 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             # 4. Create Student Timetable entries
             for student_id in student_ids:
                 try:
+                    # Validate student exists first
+                    if not student_id:
+                        continue
+                        
                     # Check if entry already exists
                     existing_student = frappe.db.exists("SIS Student Timetable", {
                         "student_id": student_id,
@@ -1503,22 +1487,31 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     })
                     
                     if not existing_student:
-                        student_timetable = frappe.get_doc({
-                            "doctype": "SIS Student Timetable",
-                            "student_id": student_id,
-                            "class_id": class_id,
-                            "day_of_week": row.day_of_week,
-                            "timetable_column_id": row.timetable_column_id,
-                            "subject_id": row.subject_id,
-                            "teacher_1_id": row.teacher_1_id,
-                            "teacher_2_id": row.teacher_2_id,
-                            "room_id": row.room_id,
-                            "date": specific_date,
-                            "timetable_instance_id": instance_id
-                        })
-                        
-                        student_timetable.insert(ignore_permissions=True)
-                        student_timetable_count += 1
+                        # Create student timetable with error handling
+                        try:
+                            student_timetable = frappe.get_doc({
+                                "doctype": "SIS Student Timetable",
+                                "student_id": student_id,
+                                "class_id": class_id,
+                                "day_of_week": row.day_of_week,
+                                "timetable_column_id": row.timetable_column_id,
+                                "subject_id": row.subject_id,
+                                "teacher_1_id": row.teacher_1_id,
+                                "teacher_2_id": row.teacher_2_id,
+                                "room_id": row.room_id,
+                                "date": specific_date,
+                                "timetable_instance_id": instance_id
+                            })
+                            
+                            student_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
+                            student_timetable_count += 1
+                            
+                        except frappe.DoesNotExistError:
+                            logs.append(f"Error creating student timetable for {student_id}: Tài liệu SIS Student không tìm thấy")
+                            continue
+                        except Exception as insert_error:
+                            logs.append(f"Error creating student timetable for {student_id}: {str(insert_error)}")
+                            continue
                         
                 except Exception as st_error:
                     logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
