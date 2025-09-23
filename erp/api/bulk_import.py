@@ -512,6 +512,14 @@ def _process_excel_file(job):
                 label_map[_normalize_key(f.fieldname)] = f.fieldname
             if getattr(f, 'label', None):
                 label_map[_normalize_key(f.label)] = f.fieldname
+        
+        # Debug: Show column mapping for troubleshooting
+        column_names = df.columns.tolist() if len(df) > 0 else []
+        debug_mapping = {}
+        for col in column_names:
+            normalized = "".join(ch.lower() for ch in cstr(col) if ch.isalnum())
+            target_key = label_map.get(normalized, col)
+            debug_mapping[col] = target_key
 
         # Process data in batches
         batch_size = 100
@@ -527,7 +535,7 @@ def _process_excel_file(job):
         for i in range(0, total_rows, batch_size):
             batch_df = df.iloc[i:i+batch_size]
             original_start_index = i + 1 + 1  # +1 for skipped header row, +1 for Excel 1-indexing
-            batch_result = _process_batch(job, batch_df, original_start_index, update_if_exists, dry_run, label_map)
+            batch_result = _process_batch(job, batch_df, original_start_index, update_if_exists, dry_run, label_map, debug_mapping)
 
             success_count += batch_result["success_count"]
             error_count += batch_result["error_count"]
@@ -565,7 +573,7 @@ def _process_excel_file(job):
         }
 
 
-def _process_batch(job, batch_df, start_index, update_if_exists, dry_run, label_map):
+def _process_batch(job, batch_df, start_index, update_if_exists, dry_run, label_map, debug_mapping):
     """Process a batch of records"""
     success_count = 0
     error_count = 0
@@ -600,18 +608,25 @@ def _process_batch(job, batch_df, start_index, update_if_exists, dry_run, label_
                 success_count += 1
             else:
                 error_count += 1
+                
+                # Add debug info to error
+                debug_info = f"DEBUG - DocType: {job.doctype_target} | Column mapping: {debug_mapping} | Row data: {row_data}"
+                enhanced_error = f"{result['error']} | {debug_info}"
+                
                 errors.append({
                     "row": row_num,
                     "data": row_data,
-                    "error": result["error"]
+                    "error": enhanced_error
                 })
 
         except Exception as e:
             error_count += 1
+            debug_info = f"DEBUG - DocType: {job.doctype_target} | Column mapping: {debug_mapping} | Exception in batch processing"
+            enhanced_error = f"{str(e)} | {debug_info}"
             errors.append({
                 "row": row_num,
                 "data": str(row.to_dict())[:500],  # Limit data size
-                "error": str(e)
+                "error": enhanced_error
             })
 
     return {
