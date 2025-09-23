@@ -968,22 +968,18 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         debug_logs.append(f"FINAL RESULT: {len(all_rows)} total classes, {len(page_rows)} in page")
         debug_logs.append(f"Class names: {[c['name'] for c in all_rows]}")
 
-        # Create response with debug logs
-        from erp.utils.api_response import success_response
+        # Return classes data directly (maintain backward compatibility)
+        # But include debug_logs in the response for troubleshooting
         
-        response = {
-            "data": page_rows,
-            "current_page": page,
-            "total_count": total_count,
-            "per_page": limit,
-            "debug_logs": debug_logs,  # Include debug logs for frontend
-            "has_next": (offset + limit) < total_count,
-            "has_prev": page > 1
-        }
-
-        return success_response(
-            data=response,
-            message="Classes for report card fetched successfully"
+        # Log debug info to backend for troubleshooting
+        frappe.log_error("\n".join(debug_logs), "Report Card Debug Logs")
+        
+        return paginated_response(
+            data=page_rows,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Classes for report card fetched successfully",
         )
     except Exception as e:
         frappe.log_error(f"Error fetching my classes for report card: {str(e)}")
