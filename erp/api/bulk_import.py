@@ -790,6 +790,28 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 else:
                     raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Actual Subject: '{actual_subject_name}' cho campus {campus_id}")
                     
+            # Handle timetable subject lookup
+            timetable_subject_name = None
+            for key in ["timetable_subject", "timetable_subject_id", "Timetable Subject"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    timetable_subject_name = str(row_data[key]).strip()
+                    break
+                    
+            if timetable_subject_name:
+                # Normalize and clean the timetable subject name
+                timetable_subject_name = ' '.join(timetable_subject_name.split())  # Remove extra spaces
+                
+                # Lookup timetable subject by title_vn
+                timetable_subject_id = _lookup_timetable_subject_by_name(timetable_subject_name, campus_id)
+                if timetable_subject_id:
+                    # For SIS Subject, field name is "timetable_subject_id" (as per JSON)
+                    doc_data["timetable_subject_id"] = timetable_subject_id
+                    # Remove the original text value to avoid confusion
+                    if "timetable_subject_id" in row_data:
+                        row_data.pop("timetable_subject_id", None)
+                else:
+                    raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Timetable Subject: '{timetable_subject_name}' cho campus {campus_id}")
+                    
         elif doctype == "SIS Actual Subject":
             
             # Handle curriculum lookup
