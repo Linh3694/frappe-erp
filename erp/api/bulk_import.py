@@ -658,7 +658,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["curriculum_id"] = curriculum_id
                     frappe.logger().info(f"Row {row_num} - Found curriculum ID: {curriculum_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Curriculum: {curriculum_name}")
+                    raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Curriculum: '{curriculum_name}' cho campus {campus_id}")
             
             # Handle education stage lookup - check various possible keys  
             education_stage_name = None
@@ -678,7 +678,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["education_stage_id"] = education_stage_id
                     frappe.logger().info(f"Row {row_num} - Found education stage ID: {education_stage_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
+                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
         
         elif doctype == "SIS Subject":
             
@@ -700,7 +700,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["curriculum_id"] = curriculum_id
                     frappe.logger().info(f"Row {row_num} - [SIS Subject] Found curriculum ID: {curriculum_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Curriculum: {curriculum_name}")
+                    raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Curriculum: '{curriculum_name}' cho campus {campus_id}")
             
             # Handle education stage lookup
             education_stage_name = None
@@ -720,7 +720,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["education_stage_id"] = education_stage_id
                     frappe.logger().info(f"Row {row_num} - [SIS Subject] Found education stage ID: {education_stage_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
+                    raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
                     
         elif doctype == "SIS Actual Subject":
             
@@ -742,7 +742,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["curriculum_id"] = curriculum_id
                     frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Found curriculum ID: {curriculum_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Curriculum: {curriculum_name}")
+                    raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Curriculum: '{curriculum_name}' cho campus {campus_id}")
             
             # Handle timetable subject lookup
             timetable_subject_name = None
@@ -762,7 +762,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["timetable_subject_id"] = timetable_subject_id
                     frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Found timetable subject ID: {timetable_subject_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Timetable Subject: {timetable_subject_name}")
+                    raise frappe.ValidationError(f"Không thể tìm thấy Timetable Subject: '{timetable_subject_name}' cho campus {campus_id}")
             
             # Handle education stage lookup
             education_stage_name = None
@@ -782,7 +782,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["education_stage_id"] = education_stage_id
                     frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Found education stage ID: {education_stage_id}")
                 else:
-                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
+                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
 
         # Map Excel columns to DocType fields (regular fields)
         meta = frappe.get_meta(doctype)
@@ -901,6 +901,11 @@ def _normalize_vietnamese_text(text):
     # Convert to lowercase for comparison
     text = text.lower()
     
+    # Handle common variations/typos
+    text = text.replace('cơ sở', 'cơ sở')  # Ensure consistent spacing
+    text = text.replace('trung học', 'trung học')  # Ensure consistent spacing
+    text = text.replace('phổ thông', 'phổ thông')  # Ensure consistent spacing
+    
     return text
 
 
@@ -955,6 +960,10 @@ def _lookup_education_stage_by_name(stage_name, campus_id):
             fields=["name", "title_vn"]
         )
         
+        frappe.logger().info(f"Found {len(stages)} education stages for campus {campus_id}")
+        for stage in stages:
+            frappe.logger().info(f"Available stage: '{stage.get('title_vn', '')}' (ID: {stage.get('name', '')})")
+        
         # Normalize search term
         normalized_search = _normalize_vietnamese_text(stage_name)
         frappe.logger().info(f"Looking up education stage: '{stage_name}' -> '{normalized_search}'")
@@ -974,6 +983,16 @@ def _lookup_education_stage_by_name(stage_name, campus_id):
             frappe.logger().info(f"Comparing normalized: '{normalized_search}' with '{normalized_stage}'")
             if normalized_stage == normalized_search:
                 frappe.logger().info(f"Found education stage with normalized match: {stage_title}")
+                return stage.get('name')
+        
+        # If still not found, try partial matching (contains)
+        for stage in stages:
+            stage_title = stage.get('title_vn', '')
+            normalized_stage = _normalize_vietnamese_text(stage_title)
+            
+            # Try both directions: search term contains stage name OR stage name contains search term
+            if (normalized_search in normalized_stage or normalized_stage in normalized_search) and len(normalized_search) > 3:
+                frappe.logger().info(f"Found education stage with partial match: '{stage_title}' matches '{stage_name}'")
                 return stage.get('name')
         
         # Log available stages for debugging

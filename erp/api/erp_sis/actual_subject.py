@@ -342,7 +342,6 @@ def delete_actual_subject():
     """Delete an actual subject"""
     try:
 
-
         # Get subject_id from multiple sources (form data or JSON payload)
         subject_id = None
 
