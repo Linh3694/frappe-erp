@@ -985,8 +985,8 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
 
 @frappe.whitelist(allow_guest=False)
 def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str] = None):
-    """Return available templates for a class (by grade/year/stage/curriculum if available).
-    This API will be refined when class-template mapping rules are finalized.
+    """Return ONLY templates that have ACTUAL Student Report Cards created for this class.
+    This ensures teachers only see classes with actual reports needing data entry.
     """
     try:
         if not class_id:
@@ -1002,7 +1002,7 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
 
         campus_id = _current_campus_id()
 
-        # Load class to infer filters
+        # Verify class exists and campus access
         try:
             c = frappe.get_doc("SIS Class", class_id)
         except frappe.DoesNotExistError:
@@ -1010,22 +1010,64 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
         if c.campus_id != campus_id:
             return forbidden_response("Access denied: Class belongs to another campus")
 
-        filters = {"campus_id": campus_id}
-        # Try infer from class fields if present
-        if getattr(c, "school_year_id", None):
-            filters["school_year"] = c.school_year_id
+        # CORE LOGIC: Find templates that have ACTUAL Student Report Cards for this class
+        frappe.logger().info(f"get_class_reports: Finding actual student reports for class {class_id}")
+        
+        # Step 1: Get distinct template_ids that have Student Report Cards for this class
+        student_report_query = """
+            SELECT DISTINCT template_id
+            FROM `tabSIS Student Report Card`
+            WHERE class_id = %s AND campus_id = %s
+        """
+        params = [class_id, campus_id]
+        
+        # Add school_year filter if specified
         if school_year:
-            filters["school_year"] = school_year
-        if getattr(c, "education_grade", None):
-            filters["education_grade"] = c.education_grade
-
+            student_report_query += " AND school_year = %s"
+            params.append(school_year)
+        elif getattr(c, "school_year_id", None):
+            student_report_query += " AND school_year = %s"
+            params.append(c.school_year_id)
+            
+        template_ids = frappe.db.sql(student_report_query, tuple(params), as_dict=True)
+        
+        frappe.logger().info(f"get_class_reports: Found {len(template_ids)} templates with actual student reports")
+        
+        if not template_ids:
+            # No student reports exist for this class
+            frappe.logger().info(f"get_class_reports: No student reports found for class {class_id}")
+            return success_response(data=[], message="No report templates with student data found for this class")
+        
+        # Step 2: Get template details for these template_ids only
+        template_id_list = [t['template_id'] for t in template_ids if t['template_id']]
+        
+        if not template_id_list:
+            return success_response(data=[], message="No valid template IDs found")
+            
         rows = frappe.get_all(
             "SIS Report Card Template",
             fields=["name", "title", "is_published", "education_grade", "curriculum", "school_year", "semester_part"],
-            filters=filters,
+            filters={
+                "name": ["in", template_id_list],
+                "campus_id": campus_id,
+                "is_published": 1  # Only published templates
+            },
             order_by="title asc",
         )
-        return success_response(data=rows, message="Class report templates fetched successfully")
+        
+        frappe.logger().info(f"get_class_reports: Returning {len(rows)} published templates with actual student data")
+        
+        # Add debug info to each template
+        for row in rows:
+            # Count student reports for this template + class combination
+            report_count = frappe.db.count("SIS Student Report Card", {
+                "template_id": row["name"],
+                "class_id": class_id,
+                "campus_id": campus_id
+            })
+            row["student_report_count"] = report_count
+        
+        return success_response(data=rows, message="Templates with actual student reports fetched successfully")
     except Exception as e:
         frappe.log_error(f"Error fetching class report templates: {str(e)}")
         return error_response("Error fetching class report templates")
