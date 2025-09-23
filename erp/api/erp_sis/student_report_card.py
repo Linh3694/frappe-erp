@@ -310,6 +310,7 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                     "subject_id": subject_id,
                     "criteria": payload.get("criteria") or {},
                     "comments": payload.get("comments") or {},
+                    "test_point_values": payload.get("test_point_values") or [],  # ✅ ADD: Support test scores
                 }
             json_data["subject_eval"] = existing
         else:
