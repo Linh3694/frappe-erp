@@ -516,9 +516,10 @@ def _process_excel_file(job):
         # Add special column mappings for specific DocTypes
         special_mappings = {
             "SIS Subject": {
-                "education_stage": "education_stage_id",
+                # education_stage field exists as-is in SIS Subject DocType
                 "curriculum": "curriculum_id",
-                "timetable_subject": "timetable_subject_id"
+                "timetable_subject": "timetable_subject_id",
+                "actual_subject": "actual_subject_id"
             },
             "SIS Timetable Subject": {
                 "education_stage": "education_stage_id",
@@ -751,15 +752,20 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             if education_stage_name:
                 # Normalize and clean the education stage name
                 education_stage_name = ' '.join(education_stage_name.split())  # Remove extra spaces
-                frappe.logger().info(f"Row {row_num} - [SIS Subject] Looking up education stage: '{education_stage_name}'")
+                
+                # Debug message to track in error response
+                debug_msg = f"DEBUG LOOKUP - Education stage: '{education_stage_name}' for campus {campus_id}"
                 
                 # Lookup education stage by title_vn
                 education_stage_id = _lookup_education_stage_by_name(education_stage_name, campus_id)
                 if education_stage_id:
-                    doc_data["education_stage_id"] = education_stage_id
-                    frappe.logger().info(f"Row {row_num} - [SIS Subject] Found education stage ID: {education_stage_id}")
+                    # For SIS Subject, field name is "education_stage" not "education_stage_id"
+                    doc_data["education_stage"] = education_stage_id
+                    # Remove the original text value to avoid confusion
+                    if "education_stage" in row_data:
+                        row_data.pop("education_stage", None)
                 else:
-                    raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
+                    raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id} | {debug_msg}")
                     
             # Handle actual subject lookup
             actual_subject_name = None
@@ -776,8 +782,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 # Lookup actual subject by title_vn
                 actual_subject_id = _lookup_actual_subject_by_name(actual_subject_name, campus_id)
                 if actual_subject_id:
+                    # For SIS Subject, field name is "actual_subject_id" (as per JSON)
                     doc_data["actual_subject_id"] = actual_subject_id
-                    frappe.logger().info(f"Row {row_num} - [SIS Subject] Found actual subject ID: {actual_subject_id}")
+                    # Remove the original text value to avoid confusion
+                    if "actual_subject_id" in row_data:
+                        row_data.pop("actual_subject_id", None)
                 else:
                     raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Actual Subject: '{actual_subject_name}' cho campus {campus_id}")
                     
@@ -845,7 +854,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
         # Map Excel columns to DocType fields (regular fields)
         meta = frappe.get_meta(doctype)
-        excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id"]
+        excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id", "education_stage"]
         for field in meta.fields:
             if field.fieldname in row_data and field.fieldname not in excluded_fields:
                 # Regular field mapping (skip already processed reference fields)
