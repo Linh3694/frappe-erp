@@ -1034,9 +1034,12 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
                         
             frappe.logger().info(f"TOTAL unique teaching classes: {len(teaching_class_ids)} (from all sources)")
         
-        # Get teaching classes data (exclude homeroom classes to avoid duplicates)
-        homeroom_class_names = {cls.name for cls in homeroom_classes}
-        teaching_class_ids = teaching_class_ids - homeroom_class_names
+        # Get teaching classes data (don't exclude homeroom classes - teacher can teach in their own homeroom)
+        # homeroom_class_names = {cls.name for cls in homeroom_classes}
+        # teaching_class_ids = teaching_class_ids - homeroom_class_names  # Removed this exclusion
+        
+        debug_logs.append(f"Teaching class IDs found: {list(teaching_class_ids)}")
+        debug_logs.append(f"Homeroom class names: {[cls.name for cls in homeroom_classes]}")
         
         teaching_classes = []
         if teaching_class_ids:
@@ -1058,6 +1061,8 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
                 filters=teaching_filters,
                 order_by="title asc"
             )
+            
+            debug_logs.append(f"Final teaching classes fetched: {len(teaching_classes)} classes")
 
         # 3. Enhance with teacher information (reuse existing logic)
         def enhance_classes_with_teacher_info(classes):
