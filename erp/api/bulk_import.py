@@ -724,6 +724,26 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     
         elif doctype == "SIS Actual Subject":
             
+            # Handle curriculum lookup
+            curriculum_name = None
+            for key in ["curriculum", "curriculum_id", "Curriculum"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    curriculum_name = str(row_data[key]).strip()
+                    break
+            
+            if curriculum_name:
+                # Normalize and clean the curriculum name
+                curriculum_name = ' '.join(curriculum_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Looking up curriculum: '{curriculum_name}'")
+                
+                # Lookup curriculum by title_vn
+                curriculum_id = _lookup_curriculum_by_name(curriculum_name, campus_id)
+                if curriculum_id:
+                    doc_data["curriculum_id"] = curriculum_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Found curriculum ID: {curriculum_id}")
+                else:
+                    raise frappe.ValidationError(f"Không thể tìm thấy Curriculum: {curriculum_name}")
+            
             # Handle timetable subject lookup
             timetable_subject_name = None
             for key in ["timetable_subject", "timetable_subject_id", "Timetable Subject"]:
