@@ -1419,14 +1419,14 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         teacher_timetable_count = 0
         student_timetable_count = 0
         
-        # Get students in this class for Student Timetable
+        # Get students in this class - use CRM Student IDs directly
         students_in_class = frappe.get_all(
             "SIS Class Student",
             fields=["student_id"],
             filters={"class_id": class_id}
         )
         student_ids = [s.student_id for s in students_in_class if s.student_id]
-        logs.append(f"Found {len(student_ids)} students in class {class_id}")
+        logs.append(f"Found {len(student_ids)} CRM students in class {class_id}")
         
         # Generate dates for the timetable period (simplified - use week dates)
         from datetime import datetime, timedelta
@@ -1605,14 +1605,14 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
         student_count = 0
         current_date = frappe.utils.today()
         
-        # Get students in class (basic lookup)
+        # Get students in class - use CRM Student IDs directly (basic lookup)
         try:
             students = frappe.get_all("SIS Class Student", fields=["student_id"], filters={"class_id": class_id})
             student_ids = [s.student_id for s in students if s.student_id]
         except Exception:
             student_ids = []
             
-        logs.append(f"Found {len(student_ids)} students for simplified sync")
+        logs.append(f"Found {len(student_ids)} CRM students for simplified sync")
         
         for row in instance_rows:
             # Normalize day_of_week for simplified sync too

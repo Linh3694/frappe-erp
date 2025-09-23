@@ -38,7 +38,7 @@
    "fieldname": "student_id",
    "fieldtype": "Link",
    "label": "Student",
-   "options": "SIS Student",
+   "options": "CRM Student",
    "reqd": 1,
    "in_list_view": 1
   },
