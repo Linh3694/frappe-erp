@@ -641,7 +641,37 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
         meta = frappe.get_meta(doctype)
         for field in meta.fields:
             if field.fieldname in row_data and field.fieldname not in ["name", "owner", "creation", "modified"]:
-                doc_data[field.fieldname] = row_data[field.fieldname]
+                
+                # Special handling for SIS Timetable Subject reference fields
+                if doctype == "SIS Timetable Subject" and field.fieldname == "curriculum_id":
+                    curriculum_name = row_data.get("curriculum")
+                    if curriculum_name:
+                        # Normalize and clean the curriculum name
+                        curriculum_name = str(curriculum_name).strip()
+                        curriculum_name = ' '.join(curriculum_name.split())  # Remove extra spaces
+                        
+                        # Lookup curriculum by title_vn
+                        curriculum_id = _lookup_curriculum_by_name(curriculum_name, campus_id)
+                        if curriculum_id:
+                            doc_data[field.fieldname] = curriculum_id
+                        else:
+                            raise frappe.ValidationError(f"Không thể tìm thấy Curriculum: {curriculum_name}")
+                elif doctype == "SIS Timetable Subject" and field.fieldname == "education_stage_id":
+                    education_stage_name = row_data.get("education_stage") or row_data.get("stage")
+                    if education_stage_name:
+                        # Normalize and clean the education stage name
+                        education_stage_name = str(education_stage_name).strip()
+                        education_stage_name = ' '.join(education_stage_name.split())  # Remove extra spaces
+                        
+                        # Lookup education stage by title_vn
+                        education_stage_id = _lookup_education_stage_by_name(education_stage_name, campus_id)
+                        if education_stage_id:
+                            doc_data[field.fieldname] = education_stage_id
+                        else:
+                            raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
+                else:
+                    # Regular field mapping
+                    doc_data[field.fieldname] = row_data[field.fieldname]
 
         # Check if record exists for update
         existing_doc = None
@@ -729,4 +759,109 @@ def _generate_error_report(job, errors):
 
     except Exception as e:
         frappe.logger().error(f"Failed to generate error report: {str(e)}")
+        return None
+
+
+def _normalize_vietnamese_text(text):
+    """Normalize Vietnamese text for better matching"""
+    import unicodedata
+    import re
+    
+    if not text:
+        return ""
+    
+    # Convert to string and strip
+    text = str(text).strip()
+    
+    # Normalize Unicode (NFC - Canonical Decomposition, followed by Canonical Composition)
+    text = unicodedata.normalize('NFC', text)
+    
+    # Remove extra whitespace (including non-breaking spaces, tabs, etc.)
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Convert to lowercase for comparison
+    text = text.lower()
+    
+    return text
+
+
+def _lookup_curriculum_by_name(curriculum_name, campus_id):
+    """Lookup curriculum ID by title_vn with normalized matching"""
+    try:
+        # Get all curriculums for the campus
+        curriculums = frappe.get_all(
+            "SIS Curriculum",
+            filters={"campus_id": campus_id},
+            fields=["name", "title_vn"]
+        )
+        
+        # Normalize search term
+        normalized_search = _normalize_vietnamese_text(curriculum_name)
+        frappe.logger().info(f"Looking up curriculum: '{curriculum_name}' -> '{normalized_search}'")
+        
+        # Try exact match first
+        for curr in curriculums:
+            curr_title = curr.get('title_vn', '')
+            if curr_title == curriculum_name:
+                frappe.logger().info(f"Found curriculum with exact match: {curr_title}")
+                return curr.get('name')
+        
+        # If not found, try normalized matching
+        for curr in curriculums:
+            curr_title = curr.get('title_vn', '')
+            normalized_curr = _normalize_vietnamese_text(curr_title)
+            
+            frappe.logger().info(f"Comparing normalized: '{normalized_search}' with '{normalized_curr}'")
+            if normalized_curr == normalized_search:
+                frappe.logger().info(f"Found curriculum with normalized match: {curr_title}")
+                return curr.get('name')
+        
+        # Log available curriculums for debugging
+        available_titles = [c.get('title_vn', '') for c in curriculums]
+        frappe.logger().warning(f"Curriculum '{curriculum_name}' not found. Available: {available_titles}")
+        return None
+        
+    except Exception as e:
+        frappe.logger().error(f"Error looking up curriculum: {str(e)}")
+        return None
+
+
+def _lookup_education_stage_by_name(stage_name, campus_id):
+    """Lookup education stage ID by title_vn with normalized matching"""
+    try:
+        # Get all education stages for the campus
+        stages = frappe.get_all(
+            "SIS Education Stage",
+            filters={"campus_id": campus_id},
+            fields=["name", "title_vn"]
+        )
+        
+        # Normalize search term
+        normalized_search = _normalize_vietnamese_text(stage_name)
+        frappe.logger().info(f"Looking up education stage: '{stage_name}' -> '{normalized_search}'")
+        
+        # Try exact match first
+        for stage in stages:
+            stage_title = stage.get('title_vn', '')
+            if stage_title == stage_name:
+                frappe.logger().info(f"Found education stage with exact match: {stage_title}")
+                return stage.get('name')
+        
+        # If not found, try normalized matching
+        for stage in stages:
+            stage_title = stage.get('title_vn', '')
+            normalized_stage = _normalize_vietnamese_text(stage_title)
+            
+            frappe.logger().info(f"Comparing normalized: '{normalized_search}' with '{normalized_stage}'")
+            if normalized_stage == normalized_search:
+                frappe.logger().info(f"Found education stage with normalized match: {stage_title}")
+                return stage.get('name')
+        
+        # Log available stages for debugging
+        available_titles = [s.get('title_vn', '') for s in stages]
+        frappe.logger().warning(f"Education stage '{stage_name}' not found. Available: {available_titles}")
+        return None
+        
+    except Exception as e:
+        frappe.logger().error(f"Error looking up education stage: {str(e)}")
         return None
