@@ -866,28 +866,72 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                 order_by="title asc",
             )
 
-        # 2) Teaching classes through subject assignments
-        # Use direct join from Subject Assignment to Class since assignment has class_id
-        teaching_classes = []
+        # 2) Teaching classes using SAME logic as get_teacher_classes for consistency
+        teaching_class_ids = set()
         if teacher_id:
+            # PRIORITY 1: Try Teacher Timetable (newly populated from imports)
             try:
-                teaching_classes = frappe.db.sql(
-                    """
-                    SELECT DISTINCT c.name, c.title, c.short_title, c.education_grade, c.school_year_id
-                    FROM `tabSIS Subject Assignment` sa
-                    INNER JOIN `tabSIS Class` c ON c.name = sa.class_id
-                    WHERE sa.teacher_id = %s AND sa.campus_id = %s
-                    {school_year_filter}
-                    ORDER BY c.title asc
-                    """.format(
-                        school_year_filter=("AND c.school_year_id = %s" if school_year else "")
-                    ),
-                    tuple([teacher_id, campus_id] + ([school_year] if school_year else [])),
-                    as_dict=True,
-                )
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                day = now.weekday()  # Monday = 0, Sunday = 6
+                monday = now - timedelta(days=day)
+                sunday = monday + timedelta(days=6)
+                week_start = monday.strftime('%Y-%m-%d')
+                week_end = sunday.strftime('%Y-%m-%d')
+                
+                teacher_timetable_classes = frappe.get_all(
+                    "SIS Teacher Timetable",
+                    fields=["class_id"],
+                    filters={
+                        "teacher_id": teacher_id,
+                        "date": ["between", [week_start, week_end]]
+                    },
+                    distinct=True,
+                    limit=1000
+                ) or []
+                
+                for record in teacher_timetable_classes:
+                    if record.class_id:
+                        teaching_class_ids.add(record.class_id)
+                        
             except Exception:
-                # Fallback in case of any issues
-                teaching_classes = []
+                pass  # Continue with fallback methods
+                
+            # PRIORITY 2: Subject Assignment (existing logic)
+            try:
+                assignment_classes = frappe.db.sql(
+                    """
+                    SELECT DISTINCT sa.class_id
+                    FROM `tabSIS Subject Assignment` sa
+                    WHERE sa.teacher_id = %s AND sa.campus_id = %s
+                    """,
+                    (teacher_id, campus_id),
+                    as_dict=True,
+                ) or []
+                
+                for assignment in assignment_classes:
+                    if assignment.class_id:
+                        teaching_class_ids.add(assignment.class_id)
+                        
+            except Exception:
+                pass
+        
+        # Get teaching class details
+        teaching_classes = []
+        if teaching_class_ids:
+            teaching_filters = {
+                "name": ["in", list(teaching_class_ids)],
+                "campus_id": campus_id
+            }
+            if school_year:
+                teaching_filters["school_year_id"] = school_year
+                
+            teaching_classes = frappe.get_all(
+                "SIS Class",
+                fields=["name", "title", "short_title", "education_grade", "school_year_id"],
+                filters=teaching_filters,
+                order_by="title asc"
+            ) or []
 
         # Merge & uniq by class name
         by_name: Dict[str, Dict[str, Any]] = {}
