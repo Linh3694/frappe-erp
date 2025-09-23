@@ -637,7 +637,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             "campus_id": campus_id
         }
 
-        # Special handling for SIS Timetable Subject reference fields BEFORE regular field mapping
+        # Special handling for reference fields BEFORE regular field mapping
         if doctype == "SIS Timetable Subject":
             
             # Handle curriculum lookup - check various possible keys
@@ -679,11 +679,96 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     frappe.logger().info(f"Row {row_num} - Found education stage ID: {education_stage_id}")
                 else:
                     raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
+        
+        elif doctype == "SIS Subject":
+            
+            # Handle curriculum lookup
+            curriculum_name = None
+            for key in ["curriculum", "curriculum_id", "Curriculum"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    curriculum_name = str(row_data[key]).strip()
+                    break
+            
+            if curriculum_name:
+                # Normalize and clean the curriculum name
+                curriculum_name = ' '.join(curriculum_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Subject] Looking up curriculum: '{curriculum_name}'")
+                
+                # Lookup curriculum by title_vn
+                curriculum_id = _lookup_curriculum_by_name(curriculum_name, campus_id)
+                if curriculum_id:
+                    doc_data["curriculum_id"] = curriculum_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Subject] Found curriculum ID: {curriculum_id}")
+                else:
+                    raise frappe.ValidationError(f"Không thể tìm thấy Curriculum: {curriculum_name}")
+            
+            # Handle education stage lookup
+            education_stage_name = None
+            for key in ["stage", "education_stage", "education_stage_id", "Stage"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    education_stage_name = str(row_data[key]).strip()
+                    break
+                    
+            if education_stage_name:
+                # Normalize and clean the education stage name
+                education_stage_name = ' '.join(education_stage_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Subject] Looking up education stage: '{education_stage_name}'")
+                
+                # Lookup education stage by title_vn
+                education_stage_id = _lookup_education_stage_by_name(education_stage_name, campus_id)
+                if education_stage_id:
+                    doc_data["education_stage_id"] = education_stage_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Subject] Found education stage ID: {education_stage_id}")
+                else:
+                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
+                    
+        elif doctype == "SIS Actual Subject":
+            
+            # Handle timetable subject lookup
+            timetable_subject_name = None
+            for key in ["timetable_subject", "timetable_subject_id", "Timetable Subject"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    timetable_subject_name = str(row_data[key]).strip()
+                    break
+            
+            if timetable_subject_name:
+                # Normalize and clean the timetable subject name
+                timetable_subject_name = ' '.join(timetable_subject_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Looking up timetable subject: '{timetable_subject_name}'")
+                
+                # Lookup timetable subject by title_vn
+                timetable_subject_id = _lookup_timetable_subject_by_name(timetable_subject_name, campus_id)
+                if timetable_subject_id:
+                    doc_data["timetable_subject_id"] = timetable_subject_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Found timetable subject ID: {timetable_subject_id}")
+                else:
+                    raise frappe.ValidationError(f"Không thể tìm thấy Timetable Subject: {timetable_subject_name}")
+            
+            # Handle education stage lookup
+            education_stage_name = None
+            for key in ["stage", "education_stage", "education_stage_id", "Stage"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    education_stage_name = str(row_data[key]).strip()
+                    break
+                    
+            if education_stage_name:
+                # Normalize and clean the education stage name
+                education_stage_name = ' '.join(education_stage_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Looking up education stage: '{education_stage_name}'")
+                
+                # Lookup education stage by title_vn
+                education_stage_id = _lookup_education_stage_by_name(education_stage_name, campus_id)
+                if education_stage_id:
+                    doc_data["education_stage_id"] = education_stage_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Actual Subject] Found education stage ID: {education_stage_id}")
+                else:
+                    raise frappe.ValidationError(f"Không thể tìm thấy Education Stage: {education_stage_name}")
 
         # Map Excel columns to DocType fields (regular fields)
         meta = frappe.get_meta(doctype)
+        excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id"]
         for field in meta.fields:
-            if field.fieldname in row_data and field.fieldname not in ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id"]:
+            if field.fieldname in row_data and field.fieldname not in excluded_fields:
                 # Regular field mapping (skip already processed reference fields)
                 doc_data[field.fieldname] = row_data[field.fieldname]
 
@@ -878,4 +963,45 @@ def _lookup_education_stage_by_name(stage_name, campus_id):
         
     except Exception as e:
         frappe.logger().error(f"Error looking up education stage: {str(e)}")
+        return None
+
+
+def _lookup_timetable_subject_by_name(timetable_subject_name, campus_id):
+    """Lookup timetable subject ID by title_vn with normalized matching"""
+    try:
+        # Get all timetable subjects for the campus
+        timetable_subjects = frappe.get_all(
+            "SIS Timetable Subject",
+            filters={"campus_id": campus_id},
+            fields=["name", "title_vn"]
+        )
+        
+        # Normalize search term
+        normalized_search = _normalize_vietnamese_text(timetable_subject_name)
+        frappe.logger().info(f"Looking up timetable subject: '{timetable_subject_name}' -> '{normalized_search}'")
+        
+        # Try exact match first
+        for tts in timetable_subjects:
+            tts_title = tts.get('title_vn', '')
+            if tts_title == timetable_subject_name:
+                frappe.logger().info(f"Found timetable subject with exact match: {tts_title}")
+                return tts.get('name')
+        
+        # If not found, try normalized matching
+        for tts in timetable_subjects:
+            tts_title = tts.get('title_vn', '')
+            normalized_tts = _normalize_vietnamese_text(tts_title)
+            
+            frappe.logger().info(f"Comparing normalized: '{normalized_search}' with '{normalized_tts}'")
+            if normalized_tts == normalized_search:
+                frappe.logger().info(f"Found timetable subject with normalized match: {tts_title}")
+                return tts.get('name')
+        
+        # Log available timetable subjects for debugging
+        available_titles = [t.get('title_vn', '') for t in timetable_subjects]
+        frappe.logger().warning(f"Timetable subject '{timetable_subject_name}' not found. Available: {available_titles}")
+        return None
+        
+    except Exception as e:
+        frappe.logger().error(f"Error looking up timetable subject: {str(e)}")
         return None
