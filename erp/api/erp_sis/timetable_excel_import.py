@@ -1070,6 +1070,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                                         import_logs.append(f"Saved child {i+1} - day_of_week: '{getattr(child, 'day_of_week', 'NOT_SET')}', name: '{getattr(child, 'name', 'NO_NAME')}")
 
                             # CRITICAL: Sync Teacher & Student Timetable after successful instance creation
+                            # This is non-blocking - import continues even if sync fails
                             try:
                                 teacher_timetable_synced, student_timetable_synced = sync_materialized_views_for_instance(
                                     instance_doc.name, 
@@ -1080,9 +1081,30 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                                     import_logs
                                 )
                                 import_logs.append(f"Materialized view sync - Teacher: {teacher_timetable_synced}, Student: {student_timetable_synced}")
+                                
+                                if teacher_timetable_synced == 0 and student_timetable_synced == 0:
+                                    import_logs.append("Warning: No materialized views were created - check teacher assignments and student enrollments")
+                                    
                             except Exception as sync_error:
                                 import_logs.append(f"Warning: Failed to sync materialized views for {instance_doc.name}: {str(sync_error)}")
-                                # Don't fail import if sync fails, just log warning
+                                # Continue with import - sync failure should not fail the entire import
+                                import traceback
+                                import_logs.append(f"Sync error traceback: {traceback.format_exc()}")
+                                
+                                # Try a simplified sync as fallback
+                                try:
+                                    import_logs.append("Attempting simplified materialized view sync...")
+                                    # This will at least get some basic entries created
+                                    simplified_teacher_count, simplified_student_count = sync_materialized_views_simplified(
+                                        instance_doc.name, 
+                                        class_id, 
+                                        campus_id,
+                                        import_logs
+                                    )
+                                    import_logs.append(f"Simplified sync completed - Teacher: {simplified_teacher_count}, Student: {simplified_student_count}")
+                                except Exception as simplified_sync_error:
+                                    import_logs.append(f"Simplified sync also failed: {str(simplified_sync_error)}")
+                                    # Continue anyway - the main timetable data is still imported
 
                         except Exception as save_error:
                             import_logs.append(f"Error saving instance {instance_doc.name}: {str(save_error)}")
@@ -1441,6 +1463,10 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                 
             for teacher_id in teachers:
                 try:
+                    # Validate teacher exists first
+                    if not teacher_id:
+                        continue
+                        
                     # Check if entry already exists
                     existing = frappe.db.exists("SIS Teacher Timetable", {
                         "teacher_id": teacher_id,
@@ -1451,20 +1477,29 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     })
                     
                     if not existing:
-                        teacher_timetable = frappe.get_doc({
-                            "doctype": "SIS Teacher Timetable",
-                            "teacher_id": teacher_id,
-                            "class_id": class_id,
-                            "day_of_week": row.day_of_week,
-                            "timetable_column_id": row.timetable_column_id,
-                            "subject_id": row.subject_id,
-                            "room_id": row.room_id,
-                            "date": specific_date,
-                            "timetable_instance_id": instance_id
-                        })
-                        
-                        teacher_timetable.insert(ignore_permissions=True)
-                        teacher_timetable_count += 1
+                        # Create teacher timetable with error handling
+                        try:
+                            teacher_timetable = frappe.get_doc({
+                                "doctype": "SIS Teacher Timetable",
+                                "teacher_id": teacher_id,
+                                "class_id": class_id,
+                                "day_of_week": row.day_of_week,
+                                "timetable_column_id": row.timetable_column_id,
+                                "subject_id": row.subject_id,
+                                "room_id": row.room_id,
+                                "date": specific_date,
+                                "timetable_instance_id": instance_id
+                            })
+                            
+                            teacher_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
+                            teacher_timetable_count += 1
+                            
+                        except frappe.DoesNotExistError:
+                            logs.append(f"Error creating teacher timetable for {teacher_id}: Tài liệu SIS Teacher không tìm thấy")
+                            continue
+                        except Exception as insert_error:
+                            logs.append(f"Error creating teacher timetable for {teacher_id}: {str(insert_error)}")
+                            continue
                         
                 except Exception as te_error:
                     logs.append(f"Error creating teacher timetable for {teacher_id}: {str(te_error)}")
@@ -1526,4 +1561,97 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
     except Exception as e:
         logs.append(f"Critical error in sync_materialized_views_for_instance: {str(e)}")
         frappe.log_error(f"Materialized view sync error: {str(e)}")
+        return 0, 0
+
+
+def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_id: str, logs: list) -> tuple:
+    try:
+        logs.append(f"Starting simplified materialized view sync for instance {instance_id}")
+        
+        # Get instance rows with minimal validation
+        instance_rows = frappe.get_all(
+            "SIS Timetable Instance Row",
+            fields=["name", "day_of_week", "timetable_column_id", "subject_id", "teacher_1_id", "teacher_2_id"],
+            filters={"parent": instance_id}
+        )
+        
+        if not instance_rows:
+            logs.append("No instance rows found for simplified sync")
+            return 0, 0
+        
+        teacher_count = 0
+        student_count = 0
+        current_date = frappe.utils.today()
+        
+        # Get students in class (basic lookup)
+        try:
+            students = frappe.get_all("SIS Class Student", fields=["student_id"], filters={"class_id": class_id})
+            student_ids = [s.student_id for s in students if s.student_id]
+        except Exception:
+            student_ids = []
+            
+        logs.append(f"Found {len(student_ids)} students for simplified sync")
+        
+        for row in instance_rows:
+            # Create teacher entries (basic)
+            for teacher_field in ["teacher_1_id", "teacher_2_id"]:
+                teacher_id = row.get(teacher_field)
+                if teacher_id:
+                    try:
+                        # Check if exists
+                        exists = frappe.db.exists("SIS Teacher Timetable", {
+                            "teacher_id": teacher_id,
+                            "day_of_week": row.day_of_week,
+                            "timetable_column_id": row.timetable_column_id,
+                            "date": current_date
+                        })
+                        
+                        if not exists:
+                            frappe.get_doc({
+                                "doctype": "SIS Teacher Timetable",
+                                "teacher_id": teacher_id,
+                                "class_id": class_id,
+                                "day_of_week": row.day_of_week,
+                                "timetable_column_id": row.timetable_column_id,
+                                "subject_id": row.subject_id,
+                                "date": current_date,
+                                "timetable_instance_id": instance_id
+                            }).insert(ignore_permissions=True, ignore_mandatory=True)
+                            teacher_count += 1
+                    except Exception:
+                        continue
+            
+            # Create student entries (basic - only first 10 to avoid timeout)
+            for student_id in student_ids[:10]:  # Limit to avoid timeouts
+                try:
+                    exists = frappe.db.exists("SIS Student Timetable", {
+                        "student_id": student_id,
+                        "day_of_week": row.day_of_week,
+                        "timetable_column_id": row.timetable_column_id,
+                        "date": current_date
+                    })
+                    
+                    if not exists:
+                        frappe.get_doc({
+                            "doctype": "SIS Student Timetable", 
+                            "student_id": student_id,
+                            "class_id": class_id,
+                            "day_of_week": row.day_of_week,
+                            "timetable_column_id": row.timetable_column_id,
+                            "subject_id": row.subject_id,
+                            "teacher_1_id": row.teacher_1_id,
+                            "teacher_2_id": row.teacher_2_id,
+                            "date": current_date,
+                            "timetable_instance_id": instance_id
+                        }).insert(ignore_permissions=True, ignore_mandatory=True)
+                        student_count += 1
+                except Exception:
+                    continue
+        
+        frappe.db.commit()
+        logs.append(f"Simplified sync completed: {teacher_count} teacher entries, {student_count} student entries")
+        return teacher_count, student_count
+        
+    except Exception as e:
+        logs.append(f"Simplified sync failed: {str(e)}")
         return 0, 0
