@@ -472,39 +472,54 @@ def bulk_import_timetable_subjects():
                 # Lookup curriculum ID from title_vn (if provided)
                 curriculum_id = None
                 if curriculum_name and curriculum_name != 'nan':
-                    # First try exact match
-                    curriculum_id = frappe.db.get_value(
+                    frappe.logger().info(f"Looking for curriculum: '{curriculum_name}' (length: {len(curriculum_name)})")
+                    
+                    # Get all curriculums for debugging
+                    all_curriculums = frappe.db.get_all(
                         "SIS Curriculum",
-                        {
-                            "title_vn": curriculum_name,
-                            "campus_id": campus_id
-                        },
-                        "name"
+                        filters={"campus_id": campus_id},
+                        fields=["name", "title_vn"]
                     )
                     
-                    # If not found, try case insensitive search
+                    frappe.logger().info(f"Available curriculums: {[curr.get('title_vn', '') for curr in all_curriculums]}")
+                    
+                    # Try exact match first
+                    for curr in all_curriculums:
+                        curr_title = curr.get('title_vn', '')
+                        frappe.logger().info(f"Comparing '{curriculum_name}' with '{curr_title}' (exact)")
+                        if curr_title == curriculum_name:
+                            curriculum_id = curr.get('name')
+                            logs.append(f"Row {index + 2}: Found curriculum '{curriculum_name}' with exact match")
+                            break
+                    
+                    # If not found, try case insensitive and normalized
                     if not curriculum_id:
-                        all_curriculums = frappe.db.get_all(
-                            "SIS Curriculum",
-                            filters={"campus_id": campus_id},
-                            fields=["name", "title_vn"]
-                        )
-                        
                         for curr in all_curriculums:
-                            if curr.get('title_vn', '').lower().strip() == curriculum_name.lower().strip():
+                            curr_title = curr.get('title_vn', '')
+                            # Normalize both strings: remove extra spaces, convert to lowercase
+                            normalized_search = ' '.join(curriculum_name.lower().strip().split())
+                            normalized_curr = ' '.join(curr_title.lower().strip().split())
+                            
+                            frappe.logger().info(f"Comparing normalized: '{normalized_search}' with '{normalized_curr}'")
+                            if normalized_curr == normalized_search:
                                 curriculum_id = curr.get('name')
-                                logs.append(f"Row {index + 2}: Found curriculum '{curriculum_name}' with case insensitive match")
+                                logs.append(f"Row {index + 2}: Found curriculum '{curriculum_name}' with normalized match (was '{curr_title}')")
+                                break
+                    
+                    # If still not found, try partial match
+                    if not curriculum_id:
+                        for curr in all_curriculums:
+                            curr_title = curr.get('title_vn', '')
+                            if curriculum_name.lower().strip() in curr_title.lower().strip() or curr_title.lower().strip() in curriculum_name.lower().strip():
+                                curriculum_id = curr.get('name')
+                                logs.append(f"Row {index + 2}: Found curriculum '{curriculum_name}' with partial match (was '{curr_title}')")
                                 break
                     
                     if not curriculum_id:
                         # Log available curriculums for debugging
-                        available_curriculums = [curr.get('title_vn', '') for curr in frappe.db.get_all(
-                            "SIS Curriculum",
-                            filters={"campus_id": campus_id},
-                            fields=["title_vn"]
-                        )]
+                        available_curriculums = [f"'{curr.get('title_vn', '')}'" for curr in all_curriculums]
                         error_count += 1
-                        error_msg = f"Row {index + 2}: Curriculum '{curriculum_name}' does not exist. Available: {', '.join(available_curriculums[:5])}{'...' if len(available_curriculums) > 5 else ''}"
+                        error_msg = f"Row {index + 2}: Curriculum '{curriculum_name}' not found. Available: {', '.join(available_curriculums[:10])}"
                         errors.append(error_msg)
                         logs.append(error_msg)
                         continue
