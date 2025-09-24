@@ -204,9 +204,46 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
 
     return {
         "success_count": success_count,
-        "error_count": len(errors),
+        "total_rows": len(df),
         "errors": errors
     }
+
+
+def generate_family_import_error_file(errors: list[dict[str, object]]) -> str | None:
+    if not errors:
+        return None
+
+    try:
+        import pandas as pd
+        from frappe.utils.file_manager import save_file
+
+        error_data = []
+        for err in errors:
+            row_info = {
+                "__row_number": err.get("row"),
+                "__error": err.get("error")
+            }
+            row_dict = err.get("data") or {}
+            for key, value in row_dict.items():
+                row_info[key] = value
+            error_data.append(row_info)
+
+        error_df = pd.DataFrame(error_data)
+        temp_file_path = f"/tmp/family_import_errors_{frappe.generate_hash(length=6)}.xlsx"
+        error_df.to_excel(temp_file_path, index=False)
+        with open(temp_file_path, "rb") as f:
+            file_doc = save_file(
+                fname=f"family_import_errors_{frappe.generate_hash(length=4)}.xlsx",
+                content=f.read(),
+                dt=None,
+                dn=None,
+                folder="Home/Bulk Import",
+                is_private=1
+            )
+        return file_doc.file_url
+    except Exception as e:
+        frappe.log_error(f"Failed to generate family import error file: {str(e)}")
+        return None
 
 
 @frappe.whitelist(allow_guest=False)
@@ -1221,35 +1258,11 @@ def bulk_import_families():
 
         success_count = result.get("success_count", 0)
         errors = result.get("errors", [])
-        error_count = result.get("error_count", len(errors))
+        error_count = len(errors)
 
         if errors:
             try:
-                error_data = []
-                for err in errors:
-                    row_info = {
-                        "__row_number": err.get("row"),
-                        "__error": err.get("error")
-                    }
-                    row_dict = err.get("data") or {}
-                    for key, value in row_dict.items():
-                        row_info[key] = value
-                    error_data.append(row_info)
-
-                error_df = pd.DataFrame(error_data)
-                temp_file_path = f"/tmp/family_import_errors_{frappe.generate_hash(length=6)}.xlsx"
-                error_df.to_excel(temp_file_path, index=False)
-                with open(temp_file_path, "rb") as f:
-                    file_doc = frappe.get_doc({
-                        "doctype": "File",
-                        "file_name": f"family_import_errors_{frappe.generate_hash(length=4)}.xlsx",
-                        "attached_to_doctype": None,
-                        "attached_to_name": None
-                    })
-                    file_doc.save(ignore_permissions=True)
-                    file_doc._file_write(f.read(), folder="Home/Bulk Import", is_private=1)
-                frappe.db.commit()
-                error_file_url = file_doc.file_url
+                error_file_url = generate_family_import_error_file(errors)
             except Exception as e:
                 frappe.log_error(f"Failed to generate error file for family import: {str(e)}")
                 error_file_url = None
@@ -1271,7 +1284,7 @@ def bulk_import_families():
                 "success_count": success_count,
                 "error_count": error_count
             },
-            message=_(f"Import hoàn tất: {success_count} gia đình thành công")
+            message=_("Import hoàn tất: {success_count} gia đình thành công")
         )
 
     except Exception as e:
