@@ -63,6 +63,8 @@ def _stringify_cell(value: object) -> str | None:
     if isinstance(value, float) and pd.isna(value):
         return None
     text = str(value).strip()
+    if text.lower() in {"nan", "none", "null"}:
+        return None
     return text or None
 
 
