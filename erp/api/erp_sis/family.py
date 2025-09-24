@@ -236,6 +236,10 @@ def _get_or_create_guardian(
 
 def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
     df = df.replace({pd.NA: None})
+    for col in df.columns:
+        df[col] = df[col].apply(
+            lambda value: value.decode('utf-8', 'ignore') if isinstance(value, bytes) else value
+        )
     df = df.where(pd.notnull(df), None)
 
     required_student_cols = [f"student_code_{i}" for i in range(1, 5)]
