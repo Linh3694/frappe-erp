@@ -18,6 +18,7 @@
  "field_order": [
   "basic_information",
   "family_code",
+  "import_section",
   "relationships_section",
   "relationships"
  ],
@@ -36,6 +37,17 @@
    "in_list_view": 1,
    "read_only": 1,
    "description": "Auto-generated family code (FAM-1, FAM-2, ...)"
+  },
+  {
+   "fieldname": "import_section",
+   "fieldtype": "Section Break",
+   "label": "Bulk Import",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "import_note",
+   "fieldtype": "HTML",
+   "options": "<p>Tải file mẫu từ frontend để nhập dữ liệu.</p>"
   },
   {
    "fieldname": "relationships_section",

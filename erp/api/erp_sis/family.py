@@ -2,11 +2,31 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
+import pandas as pd
 from erp.utils.api_response import (
     success_response, error_response, list_response,
     single_item_response, validation_error_response,
     not_found_response, forbidden_response, paginated_response
 )
+from erp.utils.decorators import campus_required
+
+
+def _find_existing_family_for_student(student_id: str, exclude_family: str | None = None):
+    if not student_id:
+        return None
+    params = [student_id]
+    query = """
+        SELECT f.name, f.family_code
+        FROM `tabCRM Family Relationship` fr
+        INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+        WHERE fr.student = %s
+    """
+    if exclude_family:
+        query += " AND f.name != %s"
+        params.append(exclude_family)
+
+    result = frappe.db.sql(query, params, as_dict=True)
+    return result[0] if result else None
 
 
 @frappe.whitelist(allow_guest=False)
@@ -108,6 +128,7 @@ def get_family_details(family_id=None, family_code=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
+@campus_required
 def update_family_members(family_id=None, students=None, guardians=None, relationships=None):
     """Replace students/guardians and relationships of an existing family."""
     try:
@@ -163,6 +184,12 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
 
         for student_id in students:
             if frappe.db.exists("CRM Student", student_id):
+                existing_fam = _find_existing_family_for_student(student_id, exclude_family=family_id)
+                if existing_fam:
+                    return validation_error_response(
+                        message=f"Student already belongs to family {existing_fam['family_code']}",
+                        errors={"student": [existing_fam['family_code']]}
+                    )
                 student_doc = frappe.get_doc("CRM Student", student_id)
                 student_doc.family_code = family_code
                 student_doc.set("family_relationships", [])
@@ -493,7 +520,13 @@ def create_family():
                     message=f"Student '{student_id}' not found",
                     code="STUDENT_NOT_FOUND"
                 )
-        
+            existing_fam = _find_existing_family_for_student(student_id)
+            if existing_fam:
+                return validation_error_response(
+                    message=f"Student already belongs to family {existing_fam['family_code']}",
+                    errors={"student": [existing_fam['family_code']]}
+                )
+ 
         # Verify all guardians exist
         for guardian_id in guardians:
             if not frappe.db.exists("CRM Guardian", guardian_id):
@@ -954,4 +987,228 @@ def get_family_codes(student_id=None, guardian_id=None):
         return error_response(
             message="Error fetching family codes",
             code="FETCH_FAMILY_CODES_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+@campus_required
+def bulk_import_families(campus_id=None):
+    """Bulk import families from Excel template
+
+    Required columns per row:
+    - student_code_1..student_code_4 (at least 1 required)
+    - guardian_1_phone (required)
+    - relationship_1 (required)
+    - is_main_contact_1 (Y/N)
+    - can_view_information_1 (Y/N)
+    Optional guardian_2/guardian_3 columns follow same pattern.
+    """
+    try:
+        uploaded_file = frappe.request.files.get('file') if hasattr(frappe.request, 'files') else None
+        if not uploaded_file:
+            return validation_error_response(
+                message="Missing file upload",
+                errors={"file": ["Required"]}
+            )
+
+        try:
+            df = pd.read_excel(uploaded_file, sheet_name=0)
+        except Exception as e:
+            frappe.log_error(f"bulk_import_families: failed to read excel - {str(e)}")
+            return error_response(
+                message="Không đọc được file Excel. Hãy dùng đúng mẫu.",
+                code="FAMILY_IMPORT_READ_ERROR"
+            )
+
+        df = df.replace({pd.NA: None})
+        df = df.where(pd.notnull(df), None)
+
+        required_student_cols = [f"student_code_{i}" for i in range(1, 5)]
+        guardian_cols = [
+            {
+                "phone": f"guardian_{i}_phone",
+                "relationship": f"relationship_{i}",
+                "main": f"is_main_contact_{i}",
+                "view": f"can_view_information_{i}"
+            }
+            for i in range(1, 4)
+        ]
+
+        if df.empty:
+            return validation_error_response(
+                message="File không có dữ liệu",
+                errors={"rows": ["Chưa nhập nội dung"]}
+            )
+
+        for col in [guardian_cols[0]["phone"], guardian_cols[0]["relationship"], guardian_cols[0]["main"], guardian_cols[0]["view"]]:
+            if col not in df.columns:
+                return validation_error_response(
+                    message="Thiếu cột bắt buộc trong file import",
+                    errors={col: ["Required"]}
+                )
+
+        success_count = 0
+        error_count = 0
+        errors = []
+
+        for idx, row in df.iterrows():
+            excel_row = idx + 2
+            try:
+                student_ids = []
+                for col in required_student_cols:
+                    value = row.get(col)
+                    if value:
+                        student_code = str(value).strip()
+                        if student_code:
+                            student_doc = frappe.db.get_value("CRM Student", {"student_code": student_code}, ["name"], as_dict=True)
+                            if not student_doc:
+                                raise frappe.ValidationError(_(f"Row {excel_row}: Không tìm thấy học sinh có mã {student_code}"))
+                            student_ids.append(student_doc['name'])
+
+                if not student_ids:
+                    raise frappe.ValidationError(_(f"Row {excel_row}: Cần ít nhất một học sinh"))
+
+                guardians = []
+                relationships = []
+                main_contact_count = 0
+
+                for info in guardian_cols:
+                    phone_raw = row.get(info["phone"])
+                    relationship_type = row.get(info["relationship"])
+                    if not phone_raw and not relationship_type:
+                        continue
+
+                    if not phone_raw:
+                        raise frappe.ValidationError(_(f"Row {excel_row}: {info['phone']} bắt buộc"))
+
+                    phone_str = str(phone_raw).strip()
+                    try:
+                        formatted_phone = frappe.get_attr('erp.api.erp_sis.guardian.validate_vietnamese_phone_number')(phone_str)
+                    except Exception as phone_err:
+                        raise frappe.ValidationError(_(f"Row {excel_row}: SĐT không hợp lệ {phone_str}: {phone_err}"))
+
+                    guardian_doc = frappe.db.get_value("CRM Guardian", {"phone_number": formatted_phone}, ["name", "guardian_name", "family_code"], as_dict=True)
+                    if not guardian_doc:
+                        guardian_doc = frappe.get_doc({
+                            "doctype": "CRM Guardian",
+                            "guardian_name": formatted_phone,
+                            "phone_number": formatted_phone
+                        })
+                        guardian_doc.flags.ignore_validate = True
+                        guardian_doc.flags.ignore_permissions = True
+                        guardian_doc.insert(ignore_permissions=True)
+                        guardian_doc = {"name": guardian_doc.name, "guardian_name": guardian_doc.guardian_name, "family_code": guardian_doc.family_code}
+                    else:
+                        # Nếu guardian đã thuộc family khác và user muốn tạo mới -> chặn
+                        if guardian_doc.get("family_code") and guardian_doc.get("family_code") not in [None, "", family_doc.family_code if 'family_doc' in locals() else None]:
+                            raise frappe.ValidationError(_(f"Row {excel_row}: Người giám hộ với SĐT {formatted_phone} đã thuộc gia đình khác ({guardian_doc['family_code']})"))
+
+                    if guardian_doc['name'] not in guardians:
+                        guardians.append(guardian_doc['name'])
+
+                    relationship_value = (relationship_type or '').strip()
+                    if not relationship_value:
+                        raise frappe.ValidationError(_(f"Row {excel_row}: {info['relationship']} bắt buộc"))
+
+                    # Chuẩn hoá relationship sang key hệ thống
+                    relationship_map = {
+                        'bố': 'dad', 'bo': 'dad', 'cha': 'dad', 'father': 'dad',
+                        'mẹ': 'mom', 'me': 'mom', 'mother': 'mom',
+                        'ông': 'grandparent', 'ba': 'grandparent', 'bà': 'grandparent', 'grandparent': 'grandparent',
+                        'anh': 'sibling', 'chị': 'sibling', 'em': 'sibling', 'sibling': 'sibling',
+                        'cô': 'uncle_aunt', 'chú': 'uncle_aunt', 'dì': 'uncle_aunt', 'bác': 'uncle_aunt', 'uncle': 'uncle_aunt', 'aunt': 'uncle_aunt',
+                        'nuôi': 'foster_parent', 'foster': 'foster_parent',
+                    }
+                    key = relationship_value.lower().strip()
+                    relationship_code = relationship_map.get(key, relationship_value)
+
+                    main_flag = str(row.get(info['main']) or '').strip().lower() == 'y'
+                    view_flag = str(row.get(info['view']) or '').strip().lower() != 'n'
+
+                    if main_flag:
+                        main_contact_count += 1
+
+                # Kiểm tra học sinh đã thuộc family khác
+                for student_id in student_ids:
+                    fam = _find_existing_family_for_student(student_id)
+                    if fam:
+                        raise frappe.ValidationError(_(f"Row {excel_row}: Học sinh đã thuộc gia đình {fam['family_code']}"))
+
+                if not guardians:
+                    raise frappe.ValidationError(_(f"Row {excel_row}: Cần ít nhất một người giám hộ"))
+
+                if main_contact_count == 0:
+                    raise frappe.ValidationError(_(f"Row {excel_row}: Phải chọn 1 người liên lạc chính"))
+                if main_contact_count > 1:
+                    raise frappe.ValidationError(_(f"Row {excel_row}: Chỉ được phép 1 người liên lạc chính"))
+
+                family_doc = frappe.get_doc({
+                    "doctype": "CRM Family",
+                    "relationships": [],
+                    "campus_id": campus_id
+                })
+                family_doc.flags.ignore_validate = True
+                family_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+                family_doc.family_code = family_doc.name
+                family_doc.flags.ignore_validate = True
+                family_doc.save(ignore_permissions=True)
+
+                for rel in relationships:
+                    family_doc.append("relationships", rel)
+                family_doc.flags.ignore_validate = True
+                family_doc.save(ignore_permissions=True)
+
+                for student_id in student_ids:
+                    student_doc = frappe.get_doc("CRM Student", student_id)
+                    student_doc.family_code = family_doc.family_code
+                    student_doc.set("family_relationships", [])
+                    for rel in relationships:
+                        if rel['student'] == student_id:
+                            student_doc.append("family_relationships", rel)
+                    student_doc.flags.ignore_validate = True
+                    student_doc.save(ignore_permissions=True)
+
+                for guardian_id in guardians:
+                    guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
+                    guardian_doc.family_code = family_doc.family_code
+                    guardian_doc.set("student_relationships", [])
+                    for rel in relationships:
+                        if rel['guardian'] == guardian_id:
+                            guardian_doc.append("student_relationships", rel)
+                    guardian_doc.flags.ignore_validate = True
+                    guardian_doc.save(ignore_permissions=True)
+
+                frappe.db.commit()
+                success_count += 1
+
+            except Exception as row_error:
+                frappe.db.rollback()
+                error_count += 1
+                errors.append(f"Row {excel_row}: {row_error}")
+
+        message = _(f"Import hoàn tất: {success_count} gia đình thành công, {error_count} lỗi")
+        if errors:
+            return error_response(
+                data={
+                    "success_count": success_count,
+                    "error_count": error_count,
+                    "errors": errors[:20]
+                },
+                message=message,
+                code="FAMILY_IMPORT_PARTIAL_FAIL"
+            )
+
+        return success_response(
+            data={
+                "success_count": success_count,
+                "error_count": error_count
+            },
+            message=message
+        )
+
+    except Exception as e:
+        frappe.log_error(f"bulk_import_families error: {str(e)}")
+        return error_response(
+            message="Có lỗi xảy ra khi import gia đình",
+            code="FAMILY_IMPORT_ERROR"
         )
