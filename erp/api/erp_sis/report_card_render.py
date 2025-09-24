@@ -333,6 +333,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     # === SUBJECTS STANDARDIZATION ===
     subjects_raw = data.get("subjects", [])
     standardized_subjects = []
+    scores_data = data.get("scores") if isinstance(data.get("scores"), dict) else {}
     
     for subject in subjects_raw:
         if not isinstance(subject, dict):
@@ -344,6 +345,26 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             "title_vn": subject.get("title_vn", ""),
             "teacher_name": subject.get("teacher_name", ""),
         }
+
+        # Merge scores data if available for this subject
+        if subject_id and isinstance(scores_data, dict) and scores_data.get(subject_id):
+            score_info = scores_data.get(subject_id) or {}
+            try:
+                standardized_subject["scores"] = {
+                    "hs1_scores": score_info.get("hs1_scores", []),
+                    "hs2_scores": score_info.get("hs2_scores", []),
+                    "hs3_scores": score_info.get("hs3_scores", []),
+                    "hs1_average": score_info.get("hs1_average"),
+                    "hs2_average": score_info.get("hs2_average"),
+                    "hs3_average": score_info.get("hs3_average"),
+                    "final_average": score_info.get("final_average"),
+                    "weight1_count": score_info.get("weight1_count"),
+                    "weight2_count": score_info.get("weight2_count"),
+                    "weight3_count": score_info.get("weight3_count"),
+                    "subject_type": score_info.get("subject_type"),
+                }
+            except Exception:
+                pass
         
         # Load template configuration for this subject
         template_config = _get_template_config_for_subject(template_id, subject_id)

@@ -38,6 +38,97 @@ def _payload() -> Dict[str, Any]:
     return data
 
 
+def _resolve_actual_subject_title(subject_id: Optional[str]) -> str:
+    if not subject_id:
+        return ""
+    try:
+        title = frappe.db.get_value("SIS Actual Subject", subject_id, "title_vn")
+        return title or subject_id
+    except Exception:
+        return subject_id
+
+
+def _initialize_report_data_from_template(template, class_id: Optional[str]) -> Dict[str, Any]:
+    base: Dict[str, Any] = {
+        "_metadata": {
+            "template_id": getattr(template, "name", None),
+            "class_id": class_id,
+        }
+    }
+
+    # Initialize scores structure (VN program)
+    if getattr(template, "scores_enabled", 0):
+        scores: Dict[str, Dict[str, Any]] = {}
+        if hasattr(template, "scores") and template.scores:
+            for score_cfg in template.scores:
+                subject_id = getattr(score_cfg, "subject_id", None)
+                if not subject_id:
+                    continue
+
+                subject_title = (
+                    getattr(score_cfg, "display_name", None)
+                    or getattr(score_cfg, "subject_title", None)
+                    or _resolve_actual_subject_title(subject_id)
+                )
+
+                scores[subject_id] = {
+                    "subject_title": subject_title,
+                    "display_name": subject_title,
+                    "subject_type": getattr(score_cfg, "subject_type", "Môn tính điểm"),
+                    "hs1_scores": [],
+                    "hs2_scores": [],
+                    "hs3_scores": [],
+                    "hs1_average": None,
+                    "hs2_average": None,
+                    "hs3_average": None,
+                    "final_average": None,
+                    "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
+                    "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
+                    "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1,
+                }
+        base["scores"] = scores
+
+    # Initialize homeroom section
+    if getattr(template, "homeroom_enabled", 0):
+        homeroom: Dict[str, Any] = {}
+        if getattr(template, "homeroom_conduct_enabled", 0):
+            homeroom["conduct"] = ""
+        if getattr(template, "homeroom_conduct_year_enabled", 0):
+            homeroom["conduct_year"] = ""
+
+        comments: Dict[str, str] = {}
+        if hasattr(template, "homeroom_titles") and template.homeroom_titles:
+            for title_cfg in template.homeroom_titles:
+                comment_title = getattr(title_cfg, "title", None)
+                if comment_title:
+                    comments[comment_title] = ""
+        homeroom["comments"] = comments
+        base["homeroom"] = homeroom
+
+    # Initialize subject evaluation section
+    if getattr(template, "subject_eval_enabled", 0):
+        subject_eval: Dict[str, Dict[str, Any]] = {}
+        if hasattr(template, "subjects") and template.subjects:
+            for subject_cfg in template.subjects:
+                subject_id = getattr(subject_cfg, "subject_id", None)
+                if not subject_id:
+                    continue
+
+                subject_eval[subject_id] = {
+                    "subject_id": subject_id,
+                    "criteria": {},
+                    "comments": {},
+                    "test_point_values": [],
+                }
+        base["subject_eval"] = subject_eval
+
+    # Initialize INTL scores metadata if applicable
+    if getattr(template, "program_type", "vn") == "intl":
+        base.setdefault("intl_scores", {})
+
+    return base
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def create_reports_for_class(template_id: Optional[str] = None, class_id: Optional[str] = None):
     """Generate draft student report cards for all students in a class based on a template."""
@@ -63,15 +154,6 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
             "SIS Class Student",
             fields=["name", "student_id"],
             filters={"class_id": class_id, "campus_id": campus_id}
-        )
-        frappe.logger().info(
-            "create_reports_for_class resolved context",
-            {
-                "template_id": template_id,
-                "class_id": class_id,
-                "campus_id": campus_id,
-                "student_count": len(students),
-            },
         )
 
         # Create student report cards if not exists (best-effort; DO NOT require SIS Student doc)
@@ -128,6 +210,7 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 )
                 continue
 
+            initial_data = _initialize_report_data_from_template(template, class_id)
             doc = frappe.get_doc({
                 "doctype": "SIS Student Report Card",
                 "title": template.title,
@@ -139,7 +222,7 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 "semester_part": template.semester_part,
                 "status": "draft",
                 "campus_id": campus_id,
-                "data_json": json.dumps({}),
+                "data_json": json.dumps(initial_data, ensure_ascii=False),
             })
             try:
                 doc.insert(ignore_permissions=True)
