@@ -264,12 +264,19 @@ def get_current_campus_from_context():
                         body = body.decode('utf-8')
                     except UnicodeDecodeError:
                         body = body.decode('latin1', 'ignore')
-                body = body or ''
-                if isinstance(body, str):
-                    body_str = body.strip()
+                body = (body or '').strip()
+                if body:
+                    try:
+                        data = json.loads(body)
+                    except UnicodeDecodeError:
+                        try:
+                            data = json.loads(body.encode('latin1').decode('utf-8', 'ignore'))
+                        except Exception:
+                            data = {}
+                    except json.JSONDecodeError:
+                        data = {}
                 else:
-                    body_str = ''
-                data = json.loads(body_str) if body_str else {}
+                    data = {}
                 campus_id_from_body = data.get('campus_id')
                 if campus_id_from_body:
                     frappe.logger().info(f"Campus_id from request body: '{campus_id_from_body}'")
