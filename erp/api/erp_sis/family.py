@@ -425,6 +425,8 @@ def generate_family_import_error_file(errors: list[dict[str, object]]) -> str | 
     try:
         import pandas as pd
         from frappe.utils.file_manager import save_file
+        from frappe.utils import touch_file
+        from pathlib import Path
 
         error_data = []
         for err in errors:
@@ -440,6 +442,23 @@ def generate_family_import_error_file(errors: list[dict[str, object]]) -> str | 
         error_df = pd.DataFrame(error_data)
         temp_file_path = f"/tmp/family_import_errors_{frappe.generate_hash(length=6)}.xlsx"
         error_df.to_excel(temp_file_path, index=False)
+
+        bulk_folder_path = Path(frappe.get_site_path("private", "files", "Bulk Import"))
+        bulk_folder_path.mkdir(parents=True, exist_ok=True)
+        try:
+            touch_file(str(bulk_folder_path / ".keep"))
+        except Exception:
+            pass
+        try:
+            frappe.get_doc({
+                "doctype": "File",
+                "file_name": "Bulk Import",
+                "is_folder": 1,
+                "folder": "Home",
+            }).insert(ignore_permissions=True, ignore_if_duplicate=True)
+        except Exception:
+            pass
+
         with open(temp_file_path, "rb") as f:
             file_doc = save_file(
                 fname=f"family_import_errors_{frappe.generate_hash(length=4)}.xlsx",
