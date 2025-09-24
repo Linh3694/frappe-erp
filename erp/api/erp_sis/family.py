@@ -8,7 +8,7 @@ from erp.utils.api_response import (
     single_item_response, validation_error_response,
     not_found_response, forbidden_response, paginated_response
 )
-from erp.utils.decorators import campus_required
+from erp.utils.campus_utils import get_current_campus_from_context
 
 
 def _find_existing_family_for_student(student_id: str, exclude_family: str | None = None):
@@ -128,7 +128,6 @@ def get_family_details(family_id=None, family_code=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
-@campus_required
 def update_family_members(family_id=None, students=None, guardians=None, relationships=None):
     """Replace students/guardians and relationships of an existing family."""
     try:
@@ -991,8 +990,7 @@ def get_family_codes(student_id=None, guardian_id=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
-@campus_required
-def bulk_import_families(campus_id=None):
+def bulk_import_families():
     """Bulk import families from Excel template
 
     Required columns per row:
@@ -1022,6 +1020,13 @@ def bulk_import_families(campus_id=None):
 
         df = df.replace({pd.NA: None})
         df = df.where(pd.notnull(df), None)
+
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            return forbidden_response(
+                message="Không xác định được campus của người dùng",
+                code="NO_CAMPUS_ACCESS"
+            )
 
         required_student_cols = [f"student_code_{i}" for i in range(1, 5)]
         guardian_cols = [
