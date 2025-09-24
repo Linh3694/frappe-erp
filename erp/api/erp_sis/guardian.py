@@ -807,31 +807,34 @@ def validate_vietnamese_phone_number(phone):
         result = clean_phone.replace('(+84)', '+84')
         frappe.logger().info(f"Rule 1 applied: {clean_phone} -> {result}")
         # Validate final format
-        if re.match(r'^\+84[0-9]{9,10}$', result):
+        if re.match(r'^\+84[0-9]{7,10}$', result):
             return result
         else:
             frappe.logger().error(f"Invalid format after Rule 1: {result}")
             raise ValueError(f"Invalid phone number format after processing. Got: {result}")
     
     # Rule 2: If starts with 0 -> replace 0 with (+84)
-    if clean_phone.startswith('0') and re.match(r'^0[0-9]{9,10}$', clean_phone):
+    if clean_phone.startswith('0') and re.match(r'^0[0-9]{8,10}$', clean_phone):
         result = f"+84{clean_phone[1:]}"
         frappe.logger().info(f"Rule 2 applied: {clean_phone} -> {result}")
-        return result
+        if re.match(r'^\+84[0-9]{7,10}$', result):
+            return result
+        frappe.logger().error(f"Invalid final format after Rule 2: Original='{phone}', Result='{result}'")
+        raise ValueError(f"Invalid phone number format. Expected Vietnamese mobile format. Got: {phone}")
     
     # Rule 3: Otherwise -> add (+84) at the beginning
     # First remove any existing +84 or 84 prefix to avoid duplication
     if clean_phone.startswith('+84'):
         clean_phone = clean_phone[3:]
-    elif clean_phone.startswith('84'):
+    elif clean_phone.startswith('84') and len(clean_phone) > 9:
         clean_phone = clean_phone[2:]
     
     # Add +84 prefix
     result = f"+84{clean_phone}"
     frappe.logger().info(f"Rule 3 applied: {phone_str} -> {result}")
     
-    # Final validation - must be +84 followed by 9-10 digits
-    if re.match(r'^\+84[0-9]{9,10}$', result):
+    # Final validation - must be +84 followed by 7-10 digits (support landline formats and missing leading zeros)
+    if re.match(r'^\+84[0-9]{7,10}$', result):
         return result
     else:
         frappe.logger().error(f"Invalid final format: Original='{phone}', Result='{result}'")
