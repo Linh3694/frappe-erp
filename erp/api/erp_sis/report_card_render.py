@@ -334,6 +334,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     subjects_raw = data.get("subjects", [])
     standardized_subjects = []
     scores_data = data.get("scores") if isinstance(data.get("scores"), dict) else {}
+    intl_scores_data = data.get("intl_scores") if isinstance(data.get("intl_scores"), dict) else {}
     
     for subject in subjects_raw:
         if not isinstance(subject, dict):
@@ -345,6 +346,81 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             "title_vn": subject.get("title_vn", ""),
             "teacher_name": subject.get("teacher_name", ""),
         }
+
+        # Merge INTL scoreboard data if available for this subject
+        if subject_id and isinstance(intl_scores_data, dict) and intl_scores_data.get(subject_id):
+            try:
+                intl_payload = intl_scores_data.get(subject_id) or {}
+
+                intl_standardized = {
+                    "main_scores": {},
+                    "component_scores": {},
+                    "ielts_scores": {},
+                    "overall_mark": None,
+                    "overall_grade": None,
+                    "comment": None,
+                }
+
+                raw_main = intl_payload.get("main_scores")
+                if isinstance(raw_main, dict):
+                    for title, value in raw_main.items():
+                        if title:
+                            try:
+                                intl_standardized["main_scores"][title] = float(value) if value is not None else None
+                            except (TypeError, ValueError):
+                                intl_standardized["main_scores"][title] = None
+
+                raw_components = intl_payload.get("component_scores")
+                if isinstance(raw_components, dict):
+                    for main_title, components in raw_components.items():
+                        if not main_title or not isinstance(components, dict):
+                            continue
+                        intl_standardized["component_scores"][main_title] = {}
+                        for comp_title, comp_value in components.items():
+                            if not comp_title:
+                                continue
+                            try:
+                                intl_standardized["component_scores"][main_title][comp_title] = float(comp_value) if comp_value is not None else None
+                            except (TypeError, ValueError):
+                                intl_standardized["component_scores"][main_title][comp_title] = None
+
+                raw_ielts = intl_payload.get("ielts_scores")
+                if isinstance(raw_ielts, dict):
+                    for option, fields in raw_ielts.items():
+                        if not option or not isinstance(fields, dict):
+                            continue
+                        intl_standardized["ielts_scores"][option] = {}
+                        for field_key, field_value in fields.items():
+                            if not field_key:
+                                continue
+                            try:
+                                intl_standardized["ielts_scores"][option][field_key] = float(field_value) if field_value is not None else None
+                            except (TypeError, ValueError):
+                                intl_standardized["ielts_scores"][option][field_key] = None
+
+                intl_standardized["overall_mark"] = intl_payload.get("overall_mark")
+                intl_standardized["overall_grade"] = intl_payload.get("overall_grade")
+                intl_standardized["comment"] = intl_payload.get("comment")
+
+                if not intl_standardized["main_scores"]:
+                    intl_standardized["main_scores"] = {}
+                if not intl_standardized["component_scores"]:
+                    intl_standardized["component_scores"] = {}
+                if not intl_standardized["ielts_scores"]:
+                    intl_standardized["ielts_scores"] = {}
+
+                if intl_payload.get("subcurriculum_id"):
+                    intl_standardized["subcurriculum_id"] = intl_payload.get("subcurriculum_id")
+                if intl_payload.get("subcurriculum_title_en"):
+                    intl_standardized["subcurriculum_title_en"] = intl_payload.get("subcurriculum_title_en")
+                if intl_payload.get("subject_title"):
+                    intl_standardized["subject_title"] = intl_payload.get("subject_title")
+                if intl_payload.get("intl_comment"):
+                    intl_standardized["intl_comment"] = intl_payload.get("intl_comment")
+
+                standardized_subject["intl_scores"] = intl_standardized
+            except Exception:
+                pass
 
         # Merge scores data if available for this subject
         if subject_id and isinstance(scores_data, dict) and scores_data.get(subject_id):

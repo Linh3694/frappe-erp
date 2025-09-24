@@ -48,6 +48,82 @@ def _resolve_actual_subject_title(subject_id: Optional[str]) -> str:
         return subject_id
 
 
+def _sanitize_int(value: Any, minimum: Optional[int] = None) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        parsed = int(value)
+        if minimum is not None and parsed < minimum:
+            return minimum
+        return parsed
+    except (TypeError, ValueError):
+        return None
+
+
+def _sanitize_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        parsed = float(value)
+        if parsed != parsed:  # NaN check
+            return None
+        return parsed
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_intl_scores_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    payload = payload or {}
+
+    normalized_main_scores: Dict[str, Optional[float]] = {}
+    raw_main_scores = payload.get("main_scores")
+    if isinstance(raw_main_scores, dict):
+        for key, value in raw_main_scores.items():
+            if not key:
+                continue
+            normalized_main_scores[key] = _sanitize_float(value)
+
+    normalized_component_scores: Dict[str, Dict[str, Optional[float]]] = {}
+    raw_component_scores = payload.get("component_scores")
+    if isinstance(raw_component_scores, dict):
+        for main_title, components in raw_component_scores.items():
+            if not main_title or not isinstance(components, dict):
+                continue
+            normalized_component_scores[main_title] = {}
+            for comp_title, comp_value in components.items():
+                if not comp_title:
+                    continue
+                normalized_component_scores[main_title][comp_title] = _sanitize_float(comp_value)
+
+    normalized_ielts_scores: Dict[str, Dict[str, Optional[float]]] = {}
+    raw_ielts_scores = payload.get("ielts_scores")
+    if isinstance(raw_ielts_scores, dict):
+        for option, fields in raw_ielts_scores.items():
+            if not option or not isinstance(fields, dict):
+                continue
+            normalized_ielts_scores[option] = {}
+            for field_key, field_value in fields.items():
+                if not field_key:
+                    continue
+                normalized_ielts_scores[option][field_key] = _sanitize_float(field_value)
+
+    normalized = {
+        "main_scores": normalized_main_scores,
+        "component_scores": normalized_component_scores,
+        "ielts_scores": normalized_ielts_scores,
+        "overall_mark": _sanitize_float(payload.get("overall_mark")),
+        "overall_grade": payload.get("overall_grade") if isinstance(payload.get("overall_grade"), str) else None,
+        "comment": payload.get("comment") if isinstance(payload.get("comment"), str) else None,
+    }
+
+    # Preserve extra keys that might be required later
+    for key in ["subcurriculum_id", "subcurriculum_title_en", "intl_comment", "subject_title"]:
+        if key in payload and key not in normalized:
+            normalized[key] = payload[key]
+
+    return normalized
+
+
 def _initialize_report_data_from_template(template, class_id: Optional[str]) -> Dict[str, Any]:
     base: Dict[str, Any] = {
         "_metadata": {
@@ -432,8 +508,16 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 }
             json_data["subject_eval"] = existing
         elif section == "intl_scores":
-            # INTL Scores section handling
-            json_data["intl_scores"] = payload
+            # INTL Scores section handling with validation
+            normalized = _normalize_intl_scores_payload(payload)
+
+            existing = json_data.get("intl_scores")
+            if isinstance(existing, dict):
+                merged = {**existing, **normalized}
+            else:
+                merged = normalized
+
+            json_data["intl_scores"] = merged
         else:
             # Overwrite the section with provided payload for other sections (e.g., homeroom)
             json_data[section] = payload
