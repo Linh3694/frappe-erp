@@ -1459,7 +1459,7 @@ def bulk_import_families():
             )
 
         try:
-            df = pd.read_excel(uploaded_file, sheet_name=0)
+        df = pd.read_excel(uploaded_file, sheet_name=0)
         except Exception as e:
             frappe.log_error(f"bulk_import_families: failed to read excel - {str(e)}")
             return error_response(

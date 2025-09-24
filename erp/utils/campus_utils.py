@@ -258,7 +258,12 @@ def get_current_campus_from_context():
         if frappe.request and frappe.request.data:
             try:
                 import json
-                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                body = frappe.request.data
+                if isinstance(body, bytes):
+                    try:
+                        body = body.decode('utf-8')
+                    except UnicodeDecodeError:
+                        body = body.decode('latin1', 'ignore')
                 data = json.loads(body or '{}')
                 campus_id_from_body = data.get('campus_id')
                 if campus_id_from_body:
