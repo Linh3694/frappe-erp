@@ -3,6 +3,8 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 import pandas as pd
+import re
+import unicodedata
 from erp.utils.api_response import (
     success_response, error_response, list_response,
     single_item_response, validation_error_response,
@@ -29,6 +31,207 @@ def _find_existing_family_for_student(student_id: str, exclude_family: str | Non
     return result[0] if result else None
 
 
+def _normalize_column_name(column: str) -> str:
+    if not column:
+        return ""
+    value = column.strip().lower().replace('-', '_')
+    value = re.sub(r"[^a-z0-9_]+", "_", value)
+    value = re.sub(r"__+", "_", value)
+    return value.strip('_')
+
+
+def _get_raw_value(row: pd.Series, column_map: dict[str, str], keys: list[str]) -> object | None:
+    for key in keys:
+        normalized_key = _normalize_column_name(key)
+        actual_col = column_map.get(normalized_key)
+        if not actual_col:
+            continue
+        value = row.get(actual_col)
+        if value is None:
+            continue
+        if isinstance(value, float) and pd.isna(value):
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _stringify_cell(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _guardian_key_variants(index: int, field: str) -> list[str]:
+    base = f"guardian_{index}_{field}"
+    variants = {
+        base,
+        base.replace('_', ' '),
+        f"guardian {index} {field}".replace('  ', ' '),
+        f"Guardian {index} {field.replace('_', ' ').title()}"
+    }
+
+    if field == "phone":
+        variants.update({
+            f"guardian_{index}_phone_number",
+            f"guardian_phone_{index}",
+            f"guardian{index}phone",
+            f"phone_{index}",
+            f"phone_number_{index}"
+        })
+    elif field == "relationship":
+        variants.update({
+            f"guardian_{index}_relationship",
+            f"relationship_{index}",
+            f"relationship_type_{index}"
+        })
+    elif field == "main":
+        variants.update({
+            f"guardian_{index}_is_main_contact",
+            f"is_main_contact_{index}",
+            f"main_contact_{index}",
+            f"guardian_is_main_{index}"
+        })
+    elif field == "view":
+        variants.update({
+            f"guardian_{index}_can_view_information",
+            f"can_view_information_{index}",
+            f"view_information_{index}"
+        })
+    elif field == "name":
+        variants.update({
+            f"guardian_{index}_name",
+            f"guardian_{index}_full_name",
+            f"guardian_name_{index}",
+            f"guardian_full_name_{index}",
+            f"guardian{index}name"
+        })
+    elif field == "id":
+        variants.update({
+            f"guardian_{index}_id",
+            f"guardian_{index}_code",
+            f"guardian_{index}_guardian_id",
+            f"guardian_id_{index}",
+            f"guardian_code_{index}",
+            f"guardian{index}id"
+        })
+    elif field == "email":
+        variants.update({
+            f"guardian_{index}_email",
+            f"guardian_email_{index}",
+            f"guardian_{index}_email_address",
+            f"email_{index}",
+            f"guardian{index}email"
+        })
+
+    normalized_variants = []
+    for variant in variants:
+        if variant:
+            normalized_variants.append(variant)
+    return list(dict.fromkeys(normalized_variants))
+
+
+def _normalize_text_for_identifier(value: str) -> str:
+    if not value:
+        return ""
+    text = unicodedata.normalize("NFD", value)
+    text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
+    text = text.replace('đ', 'd').replace('Đ', 'D')
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"-+", "-", text)
+    return text.strip('-')
+
+
+def _generate_guardian_identifier(preferred: str | None = None) -> str:
+    base = _normalize_text_for_identifier(preferred or "guardian") or "guardian"
+    base = base[:40]
+    candidate = base
+    counter = 1
+    while frappe.db.exists("CRM Guardian", {"guardian_id": candidate}):
+        counter += 1
+        candidate = f"{base}-{counter}"
+    return candidate
+
+
+def _get_or_create_guardian(
+    formatted_phone: str,
+    guardian_name: str | None = None,
+    guardian_identifier: str | None = None,
+    guardian_email: str | None = None
+) -> dict[str, object]:
+    guardian_doc = frappe.db.get_value(
+        "CRM Guardian",
+        {"phone_number": formatted_phone},
+        ["name", "guardian_name", "guardian_id", "family_code", "email"],
+        as_dict=True,
+    )
+
+    def _resolve_name() -> str:
+        return guardian_name or (guardian_doc.get("guardian_name") if guardian_doc else None) or formatted_phone
+
+    def _resolve_identifier() -> str:
+        existing_identifier = guardian_doc.get("guardian_id") if guardian_doc else None
+        if guardian_identifier:
+            hit = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_identifier}, "name")
+            if hit and (not guardian_doc or hit != guardian_doc.get("name")):
+                raise frappe.ValidationError(_(f"Guardian ID {guardian_identifier} đã được sử dụng cho người khác"))
+            return guardian_identifier
+        if existing_identifier:
+            return existing_identifier
+        return _generate_guardian_identifier(_resolve_name())
+
+    if guardian_doc:
+        if guardian_doc.get("family_code"):
+            raise frappe.ValidationError(_(f"Người giám hộ với SĐT {formatted_phone} đã thuộc gia đình {guardian_doc['family_code']}"))
+
+        updates: dict[str, object] = {}
+
+        resolved_name = _resolve_name()
+        if guardian_doc.get("guardian_name") != resolved_name:
+            updates["guardian_name"] = resolved_name
+
+        resolved_identifier = _resolve_identifier()
+        if guardian_doc.get("guardian_id") != resolved_identifier:
+            updates["guardian_id"] = resolved_identifier
+
+        if guardian_email and guardian_doc.get("email") != guardian_email:
+            updates["email"] = guardian_email
+
+        if updates:
+            frappe.db.set_value("CRM Guardian", guardian_doc["name"], updates)
+            guardian_doc.update(updates)
+
+        return guardian_doc
+
+    resolved_name = _resolve_name()
+    resolved_identifier = _resolve_identifier()
+
+    guardian_rec = frappe.get_doc({
+        "doctype": "CRM Guardian",
+        "guardian_id": resolved_identifier,
+        "guardian_name": resolved_name,
+        "phone_number": formatted_phone,
+        "email": guardian_email or ""
+    })
+    guardian_rec.flags.ignore_validate = True
+    guardian_rec.flags.ignore_permissions = True
+    guardian_rec.flags.ignore_mandatory = True
+    guardian_rec.insert(ignore_permissions=True)
+
+    return {
+        "name": guardian_rec.name,
+        "guardian_name": guardian_rec.guardian_name,
+        "guardian_id": guardian_rec.guardian_id,
+        "family_code": guardian_rec.family_code,
+        "email": guardian_rec.email,
+    }
+
+
 def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
     df = df.replace({pd.NA: None})
     df = df.where(pd.notnull(df), None)
@@ -36,6 +239,7 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
     required_student_cols = [f"student_code_{i}" for i in range(1, 5)]
     guardian_cols = [
         {
+            "index": i,
             "phone": f"guardian_{i}_phone",
             "relationship": f"relationship_{i}",
             "main": f"is_main_contact_{i}",
@@ -47,7 +251,13 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
     if df.empty:
         raise frappe.ValidationError("File không có dữ liệu")
 
-    missing_cols = [col for col in [guardian_cols[0]["phone"], guardian_cols[0]["relationship"], guardian_cols[0]["main"], guardian_cols[0]["view"]] if col not in df.columns]
+    normalized_columns = {_normalize_column_name(col): col for col in df.columns}
+
+    missing_cols = [
+        col
+        for col in [guardian_cols[0]["phone"], guardian_cols[0]["relationship"], guardian_cols[0]["main"], guardian_cols[0]["view"]]
+        if _normalize_column_name(col) not in normalized_columns
+    ]
     if missing_cols:
         raise frappe.ValidationError(f"Thiếu cột bắt buộc: {', '.join(missing_cols)}")
 
@@ -60,11 +270,11 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
         try:
             student_ids: list[str] = []
             for col in required_student_cols:
-                value = row.get(col)
-                if value:
-                    student_code_str = str(value).strip()
-                    if isinstance(value, (int, float)) and not str(value).strip().isalpha():
-                        student_code_str = str(int(value)) if float(value).is_integer() else student_code_str
+                value_raw = _get_raw_value(row, normalized_columns, [col, col.replace('_', ' '), col.replace('_', '')])
+                if value_raw is not None:
+                    student_code_str = _stringify_cell(value_raw)
+                    if isinstance(value_raw, (int, float)) and student_code_str and not student_code_str.isalpha():
+                        student_code_str = str(int(value_raw)) if float(value_raw).is_integer() else student_code_str
                     if student_code_str:
                         student_doc = frappe.db.get_value("CRM Student", {"student_code": student_code_str}, ["name"], as_dict=True)
                         if not student_doc:
@@ -82,15 +292,16 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
             main_contact_count = 0
 
             for info in guardian_cols:
-                phone_raw = row.get(info["phone"])
-                relationship_type = row.get(info["relationship"])
+                idx = info["index"]
+                phone_raw = _get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "phone"))
+                relationship_type = _get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "relationship"))
                 if not phone_raw and not relationship_type:
                     continue
 
                 if not phone_raw:
                     raise frappe.ValidationError(_(f"{info['phone']} bắt buộc"))
 
-                phone_str = str(phone_raw).strip()
+                phone_str = _stringify_cell(phone_raw) or ""
                 if isinstance(phone_raw, (int, float)) and not str(phone_raw).strip().startswith("+"):
                     phone_str = str(int(phone_raw)) if float(phone_raw).is_integer() else str(phone_raw).rstrip(".0")
 
@@ -99,25 +310,21 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
                 except Exception as phone_err:
                     raise frappe.ValidationError(_(f"SĐT không hợp lệ {phone_str}: {phone_err}"))
 
-                guardian_doc = frappe.db.get_value("CRM Guardian", {"phone_number": formatted_phone}, ["name", "guardian_name", "family_code"], as_dict=True)
-                if not guardian_doc:
-                    guardian_rec = frappe.get_doc({
-                        "doctype": "CRM Guardian",
-                        "guardian_name": formatted_phone,
-                        "phone_number": formatted_phone
-                    })
-                    guardian_rec.flags.ignore_validate = True
-                    guardian_rec.flags.ignore_permissions = True
-                    guardian_rec.insert(ignore_permissions=True)
-                    guardian_doc = {"name": guardian_rec.name, "guardian_name": guardian_rec.guardian_name, "family_code": guardian_rec.family_code}
-                else:
-                    if guardian_doc.get("family_code"):
-                        raise frappe.ValidationError(_(f"Người giám hộ với SĐT {formatted_phone} đã thuộc gia đình {guardian_doc['family_code']}"))
+                guardian_name_value = _stringify_cell(_get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "name")))
+                guardian_identifier_value = _stringify_cell(_get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "id")))
+                guardian_email_value = _stringify_cell(_get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "email")))
+
+                guardian_doc = _get_or_create_guardian(
+                    formatted_phone=formatted_phone,
+                    guardian_name=guardian_name_value,
+                    guardian_identifier=guardian_identifier_value,
+                    guardian_email=guardian_email_value,
+                )
 
                 if guardian_doc['name'] not in guardians:
                     guardians.append(guardian_doc['name'])
 
-                relationship_value = (relationship_type or '').strip()
+                relationship_value = (_stringify_cell(relationship_type) or '').strip()
                 if not relationship_value:
                     raise frappe.ValidationError(_(f"{info['relationship']} bắt buộc"))
 
@@ -132,8 +339,8 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
                 key = relationship_value.lower().strip()
                 relationship_code = relationship_map.get(key, relationship_value)
 
-                main_flag = str(row.get(info['main']) or '').strip().lower() == 'y'
-                view_flag = str(row.get(info['view']) or '').strip().lower() != 'n'
+                main_flag = (_stringify_cell(_get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "main"))) or '').lower() == 'y'
+                view_flag = (_stringify_cell(_get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "view"))) or '').lower() != 'n'
 
                 if main_flag:
                     main_contact_count += 1
