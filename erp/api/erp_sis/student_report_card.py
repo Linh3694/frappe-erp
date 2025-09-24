@@ -64,10 +64,21 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
             fields=["name", "student_id"],
             filters={"class_id": class_id, "campus_id": campus_id}
         )
+        frappe.logger().info(
+            "create_reports_for_class resolved context",
+            {
+                "template_id": template_id,
+                "class_id": class_id,
+                "campus_id": campus_id,
+                "student_count": len(students),
+            },
+        )
 
         # Create student report cards if not exists (best-effort; DO NOT require SIS Student doc)
-        created = []
-        failed_students = []
+        created: List[str] = []
+        failed_students: List[Dict[str, Any]] = []
+        skipped_students: List[str] = []
+        logs: List[str] = []
         for row in students:
             # Resolve SIS Student id: class_student may store CRM-STUDENT-xxxxx
             resolved_student_id = row.get("student_id")
@@ -111,6 +122,10 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
             })
             if exists:
                 frappe.logger().info(f"Report already exists for student {resolved_student_id}, skipping creation")
+                skipped_students.append(resolved_student_id or row.get("student_id") or row.get("name"))
+                logs.append(
+                    f"Student {resolved_student_id or row.get('student_id') or row.get('name')} already has report. Skipped."
+                )
                 continue
 
             doc = frappe.get_doc({
@@ -129,11 +144,31 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
             try:
                 doc.insert(ignore_permissions=True)
                 created.append(doc.name)
+                logs.append(
+                    f"Created report {doc.name} for student {resolved_student_id or row.get('student_id') or row.get('name')}"
+                )
             except Exception as e:
                 failed_students.append({"student_id": resolved_student_id, "error": str(e)})
                 frappe.log_error(f"Create report failed for student {resolved_student_id}: {str(e)}")
+                logs.append(
+                    f"Failed to create report for student {resolved_student_id or row.get('student_id') or row.get('name')}: {str(e)}"
+                )
         frappe.db.commit()
-        return success_response(data={"created": created, "failed": failed_students}, message="Student report cards generated")
+        summary = {
+            "created_count": len(created),
+            "skipped_count": len(skipped_students),
+            "failed_count": len(failed_students),
+            "logs": logs,
+        }
+        return success_response(
+            data={
+                "created": created,
+                "failed": failed_students,
+                "skipped": skipped_students,
+                "summary": summary,
+            },
+            message="Student report cards generated",
+        )
     except Exception as e:
         frappe.log_error(f"Error create_reports_for_class: {str(e)}")
         return error_response("Error generating reports")
