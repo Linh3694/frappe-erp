@@ -241,6 +241,41 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
             if intl_comment is not None:
                 subject_payload["intl_comment"] = intl_comment
 
+            # ✅ POPULATE MAIN_SCORES AND COMPONENT_SCORES FROM TEMPLATE SCOREBOARD CONFIG
+            scoreboard_config = None
+            try:
+                scoreboard_config = getattr(subject_cfg, "scoreboard", None)
+                if isinstance(scoreboard_config, str):
+                    import json
+                    scoreboard_config = json.loads(scoreboard_config or "{}")
+            except Exception:
+                scoreboard_config = None
+
+            if isinstance(scoreboard_config, dict):
+                main_scores_config = scoreboard_config.get("main_scores", [])
+                if isinstance(main_scores_config, list):
+                    # Initialize main_scores structure from template
+                    for main_score in main_scores_config:
+                        if not isinstance(main_score, dict):
+                            continue
+                        main_title = main_score.get("title")
+                        if not main_title:
+                            continue
+                        
+                        # Initialize main score with null value
+                        subject_payload["main_scores"][main_title] = None
+                        
+                        # Initialize component scores if they exist
+                        components = main_score.get("components", [])
+                        if isinstance(components, list) and components:
+                            subject_payload["component_scores"][main_title] = {}
+                            for component in components:
+                                if not isinstance(component, dict):
+                                    continue
+                                component_title = component.get("title")
+                                if component_title:
+                                    subject_payload["component_scores"][main_title][component_title] = None
+
             ielts_config = None
             try:
                 ielts_config = getattr(subject_cfg, "intl_ielts_config", None)
