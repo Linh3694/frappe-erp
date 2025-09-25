@@ -126,7 +126,7 @@ def _normalize_intl_scores_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "comment": payload.get("comment") if isinstance(payload.get("comment"), str) else None,
     }
 
-    # Preserve extra keys that might be required later
+    # Preserve extra keys that might be required later (exclude subject_id as it's for routing)
     for key in ["subcurriculum_id", "subcurriculum_title_en", "intl_comment", "subject_title"]:
         if key in payload and key not in normalized:
             normalized[key] = payload[key]
@@ -295,9 +295,25 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
                         if not option_key:
                             continue
                         subject_payload["ielts_scores"].setdefault(option_key, {})
-                        # Guarantee raw & band keys exist
-                        subject_payload["ielts_scores"][option_key]["raw"] = None
-                        subject_payload["ielts_scores"][option_key]["band"] = None
+                        
+                        # Special handling for IELTS Writing - generate Task 1 and Task 2 structure
+                        if option_key == "IELTS Writing":
+                            subject_payload["ielts_scores"]["IELTS Writing Task 1"] = {
+                                "raw": None,
+                                "band": None
+                            }
+                            subject_payload["ielts_scores"]["IELTS Writing Task 2"] = {
+                                "raw": None, 
+                                "band": None
+                            }
+                            # Overall Writing band (calculated from Task 1 and Task 2)
+                            subject_payload["ielts_scores"][option_key]["band"] = None
+                            # Remove raw for overall Writing as it will be calculated
+                            # from Task 1 and Task 2
+                        else:
+                            # Standard IELTS skills (Listening, Reading, Speaking)
+                            subject_payload["ielts_scores"][option_key]["raw"] = None
+                            subject_payload["ielts_scores"][option_key]["band"] = None
 
             intl_scores[subject_id] = subject_payload
 
@@ -609,9 +625,40 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 }
             json_data["subject_eval"] = existing
         elif section == "intl_scores":
-            # INTL Scores section handling with validation
+            # INTL Scores section handling with validation and MERGING
+            # CRITICAL: Merge per subject to avoid data loss
             processed = _normalize_intl_scores_payload(payload)
-            json_data["intl_scores"] = processed
+            
+            # Get subject_id from payload to update only specific subject data
+            subject_id = None
+            if isinstance(payload, dict):
+                # Frontend now sends subject_id directly in payload
+                subject_id = payload.get("subject_id")
+            
+            # If subject_id still not found, try other sources
+            if not subject_id:
+                import frappe
+                # Try to get from request form data
+                form_data = frappe.local.form_dict
+                subject_id = form_data.get("subject_id") or form_data.get("selectedSubject")
+                
+            # Debug log for troubleshooting (only log if no subject_id found)
+            if not subject_id:
+                frappe.log_error(f"[WARNING] intl_scores update: No subject_id found. payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}")
+            
+            # If we have existing intl_scores, preserve other subjects' data
+            existing_intl_scores = json_data.get("intl_scores", {})
+            if not isinstance(existing_intl_scores, dict):
+                existing_intl_scores = {}
+            
+            if subject_id:
+                # Update only the specific subject, preserve others
+                existing_intl_scores[subject_id] = processed
+                json_data["intl_scores"] = existing_intl_scores
+            else:
+                # Fallback: if no subject_id identified, replace entire intl_scores (old behavior)
+                # This maintains backward compatibility but may cause data loss
+                json_data["intl_scores"] = processed
         else:
             # Overwrite the section with provided payload for other sections (e.g., homeroom)
             json_data[section] = payload
