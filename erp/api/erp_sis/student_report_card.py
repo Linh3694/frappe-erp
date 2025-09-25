@@ -656,10 +656,26 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 existing_intl_scores = {}
             
             if subject_id:
-                # Update only the specific subject, preserve others
-                existing_intl_scores[subject_id] = processed
+                # Deep merge the specific subject data to preserve existing fields
+                if subject_id not in existing_intl_scores:
+                    existing_intl_scores[subject_id] = {}
+                
+                # Deep merge each top-level field
+                for field_name, field_value in processed.items():
+                    if field_value is None:
+                        # Skip null values to preserve existing data
+                        continue
+                    elif isinstance(field_value, dict) and field_name in existing_intl_scores[subject_id] and isinstance(existing_intl_scores[subject_id][field_name], dict):
+                        # Deep merge nested dictionaries (like ielts_scores, component_scores, main_scores)
+                        existing_intl_scores[subject_id][field_name].update(field_value)
+                        frappe.logger().info(f"Deep merged {field_name} for subject '{subject_id}': {len(field_value)} fields updated")
+                    else:
+                        # Replace field value (for simple types or when target is not dict)
+                        existing_intl_scores[subject_id][field_name] = field_value
+                        frappe.logger().info(f"Updated {field_name} for subject '{subject_id}': {field_value}")
+                
                 json_data["intl_scores"] = existing_intl_scores
-                frappe.logger().info(f"intl_scores merge successful: updated subject '{subject_id}', preserved {len(existing_intl_scores) - 1} other subjects")
+                frappe.logger().info(f"intl_scores deep merge successful: updated subject '{subject_id}', preserved {len(existing_intl_scores) - 1} other subjects")
             else:
                 # Fallback: if no subject_id identified, replace entire intl_scores (old behavior)
                 # This maintains backward compatibility but may cause data loss
@@ -696,10 +712,23 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 existing_scores = {}
             
             if subject_id and isinstance(payload, dict) and subject_id in payload:
-                # Update only the specific subject, preserve others
-                existing_scores[subject_id] = payload[subject_id]
+                # Deep merge the specific subject data to preserve existing fields
+                if subject_id not in existing_scores:
+                    existing_scores[subject_id] = {}
+                
+                new_subject_data = payload[subject_id]
+                if isinstance(new_subject_data, dict):
+                    # Merge each field in the subject data
+                    for field_name, field_value in new_subject_data.items():
+                        if field_value is not None:  # Only update non-null values
+                            existing_scores[subject_id][field_name] = field_value
+                            frappe.logger().info(f"Updated scores {field_name} for subject '{subject_id}': {field_value}")
+                else:
+                    # Fallback: replace entire subject if not dict
+                    existing_scores[subject_id] = new_subject_data
+                
                 json_data["scores"] = existing_scores
-                frappe.logger().info(f"scores merge successful: updated subject '{subject_id}', preserved {len(existing_scores) - 1} other subjects")
+                frappe.logger().info(f"scores deep merge successful: updated subject '{subject_id}', preserved {len(existing_scores) - 1} other subjects")
             else:
                 # Fallback: if no subject_id identified or payload doesn't match expected structure, 
                 # use old behavior (may cause data loss but maintains backward compatibility)
