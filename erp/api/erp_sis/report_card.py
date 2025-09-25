@@ -87,6 +87,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                 "comment_title_id": getattr(row, "comment_title_id", None),
                 "subcurriculum_id": getattr(row, "subcurriculum_id", None) or 'none',
                 "intl_comment": getattr(row, "intl_comment", None) or '',
+                "intl_ielts_config": None,
                 "test_point_titles": [],
                 "scoreboard": None,
             }
@@ -106,6 +107,18 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                         subject_detail["scoreboard"] = _json.loads(sb)
                     else:
                         subject_detail["scoreboard"] = sb
+            except Exception:
+                pass
+
+            # IELTS config JSON (optional)
+            try:
+                ielts_cfg = getattr(row, "intl_ielts_config", None)
+                if ielts_cfg:
+                    if isinstance(ielts_cfg, str):
+                        import json as _json
+                        subject_detail["intl_ielts_config"] = _json.loads(ielts_cfg)
+                    else:
+                        subject_detail["intl_ielts_config"] = ielts_cfg
             except Exception:
                 pass
 
@@ -332,6 +345,23 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
                 row.set("scoreboard", _json.dumps(sub.get("scoreboard")))
         except Exception:
             pass
+
+        # Save IELTS config JSON if provided
+        try:
+            if "intl_ielts_config" in sub:
+                import json as _json
+                ielts_cfg = sub.get("intl_ielts_config")
+                if ielts_cfg in [None, ""]:
+                    row.set("intl_ielts_config", None)
+                elif isinstance(ielts_cfg, (dict, list)):
+                    row.set("intl_ielts_config", _json.dumps(ielts_cfg))
+                elif isinstance(ielts_cfg, str):
+                    cleaned = ielts_cfg.strip()
+                    row.set("intl_ielts_config", cleaned or None)
+                else:
+                    row.set("intl_ielts_config", _json.dumps(ielts_cfg))
+        except Exception as e:
+            frappe.logger().error(f"Error saving intl_ielts_config for subject {subject_id}: {str(e)}")
 
         # If template has a form_id selected, auto-apply section toggles based on form
         try:
