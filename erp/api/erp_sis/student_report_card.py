@@ -658,6 +658,43 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 # Fallback: if no subject_id identified, replace entire intl_scores (old behavior)
                 # This maintains backward compatibility but may cause data loss
                 json_data["intl_scores"] = processed
+        elif section == "scores":
+            # VN Scores section handling with MERGING to avoid data loss
+            # CRITICAL: Merge per subject to preserve other subjects' data
+            
+            # Get subject_id from payload
+            subject_id = None
+            if isinstance(payload, dict):
+                # Try to get subject_id from payload structure
+                for key in payload.keys():
+                    # Payload structure for scores is: { subject_id: { hs1_scores: [...], hs2_scores: [...], ... } }
+                    if isinstance(payload[key], dict) and any(score_key in payload[key] for score_key in ['hs1_scores', 'hs2_scores', 'hs3_scores']):
+                        subject_id = key
+                        break
+            
+            # If subject_id still not found, try other sources
+            if not subject_id:
+                # Try to get from request form data
+                form_data = frappe.local.form_dict
+                subject_id = form_data.get("subject_id") or form_data.get("selectedSubject")
+            
+            # Debug log for troubleshooting (only log if no subject_id found)
+            if not subject_id:
+                frappe.log_error(f"[WARNING] scores update: No subject_id found. payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}")
+            
+            # If we have existing scores, preserve other subjects' data
+            existing_scores = json_data.get("scores", {})
+            if not isinstance(existing_scores, dict):
+                existing_scores = {}
+            
+            if subject_id and isinstance(payload, dict) and subject_id in payload:
+                # Update only the specific subject, preserve others
+                existing_scores[subject_id] = payload[subject_id]
+                json_data["scores"] = existing_scores
+            else:
+                # Fallback: if no subject_id identified or payload doesn't match expected structure, 
+                # use old behavior (may cause data loss but maintains backward compatibility)
+                json_data["scores"] = payload
         else:
             # Overwrite the section with provided payload for other sections (e.g., homeroom)
             json_data[section] = payload
