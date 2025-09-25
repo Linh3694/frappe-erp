@@ -15,6 +15,7 @@
   "subcurriculum_id",
   "scoreboard",
   "intl_comment",
+  "intl_ielts_config",
   "test_point_titles"
  ],
  "fields": [
@@ -28,6 +29,7 @@
   {"fieldname": "subcurriculum_id", "fieldtype": "Link", "label": "Thang điểm", "options": "SIS Sub Curriculum"},
   {"fieldname": "scoreboard", "fieldtype": "Long Text", "label": "Scoreboard JSON", "description": "Config lưu dạng JSON: { main_scores: [{ title, weight, components: [{ title, weight }] }] }"},
   {"fieldname": "intl_comment", "fieldtype": "Long Text", "label": "Nhận xét INTL", "description": "Nhận xét cho môn học trong chương trình quốc tế"},
+  {"fieldname": "intl_ielts_config", "fieldtype": "Long Text", "label": "IELTS Config", "description": "Config IELTS định dạng JSON"},
   {"fieldname": "test_point_titles", "fieldtype": "Table", "label": "Tiêu đề điểm kiểm tra", "options": "SIS Report Card Test Point Title"}
  ]
 }
