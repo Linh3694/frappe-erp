@@ -16,7 +16,7 @@ from erp.utils.api_response import (
 
 def _current_campus_id() -> str:
     campus_id = get_current_campus_from_context()
-    return campus_id or "campus-1"
+    return campus_id or "CAMPUS-00001"
 
 
 def _get_payload() -> Dict[str, Any]:
@@ -491,10 +491,11 @@ def migrate_intl_scoreboard_enabled():
 
 
 @frappe.whitelist()
-def force_update_database():
+def force_update_database(campus_id: str = None):
     """Force update database records directly."""
     try:
-        campus_id = _current_campus_id()
+        if not campus_id:
+            campus_id = _current_campus_id()
         results = []
         
         # 1. Update VN form titles
@@ -549,4 +550,73 @@ def force_update_database():
     except Exception as e:
         frappe.log_error(f"Error force_update_database: {str(e)}")
         return error_response(f"Error in force update: {str(e)}")
+
+
+@frappe.whitelist()
+def force_update_all_campuses():
+    """Force update database for all campuses."""
+    try:
+        # Get all campuses
+        campuses = frappe.get_all("SIS Campus", fields=["name"])
+        if not campuses:
+            return error_response("No campuses found")
+
+        results = []
+
+        for campus in campuses:
+            campus_id = campus["name"]
+            try:
+                # Update VN form titles for this campus
+                vn_updates = [
+                    {"code": "SEC_VN_MID", "new_title": "Trung Học - CTVN - Giữa kỳ"},
+                    {"code": "SEC_VN_END1", "new_title": "Trung Học - CTVN - HK1"},
+                    {"code": "SEC_VN_END2", "new_title": "Trung Học - CTVN - HK2"},
+                ]
+
+                for update in vn_updates:
+                    updated_count = frappe.db.sql("""
+                        UPDATE `tabSIS Report Card Form`
+                        SET title = %s
+                        WHERE code = %s AND campus_id = %s
+                    """, (update["new_title"], update["code"], campus_id))
+
+                    results.append(f"Updated {update['code']} for {campus_id}: {updated_count} rows affected")
+
+                # Create INTL forms if they don't exist
+                intl_forms = [
+                    {"code": "PRIM_INTL", "title": "Tiểu học - Chương trình Quốc tế"},
+                    {"code": "SEC_INTL", "title": "Trung học Cơ sở - Chương trình Quốc tế"},
+                    {"code": "HIGH_INTL", "title": "Trung học Phổ thông - Chương trình Quốc tế"},
+                ]
+
+                for intl_form in intl_forms:
+                    exists = frappe.db.exists("SIS Report Card Form", {"code": intl_form["code"], "campus_id": campus_id})
+                    if not exists:
+                        doc = frappe.get_doc({
+                            "doctype": "SIS Report Card Form",
+                            "code": intl_form["code"],
+                            "title": intl_form["title"],
+                            "program_type": "intl",
+                            "scores_enabled": 1,
+                            "homeroom_enabled": 1,
+                            "subject_eval_enabled": 1,
+                            "intl_scoreboard_enabled": 1,
+                            "campus_id": campus_id,
+                        })
+                        doc.append("pages", {"page_no": 1, "background_image": None, "layout_json": "{}"})
+                        doc.insert(ignore_permissions=True)
+                        results.append(f"Created INTL form: {intl_form['code']} for {campus_id}")
+                    else:
+                        results.append(f"INTL form already exists: {intl_form['code']} for {campus_id}")
+
+            except Exception as e:
+                results.append(f"Error updating campus {campus_id}: {str(e)}")
+
+        frappe.db.commit()
+        return success_response(data={"results": results}, message="Force update for all campuses completed")
+
+    except Exception as e:
+        frappe.log_error(f"Error force_update_all_campuses: {str(e)}")
+        return error_response(f"Error in force update all campuses: {str(e)}")
+
 
