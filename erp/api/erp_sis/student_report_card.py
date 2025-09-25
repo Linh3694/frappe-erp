@@ -627,13 +627,18 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         elif section == "intl_scores":
             # INTL Scores section handling with validation and MERGING
             # CRITICAL: Merge per subject to avoid data loss
-            processed = _normalize_intl_scores_payload(payload)
             
-            # Get subject_id from payload to update only specific subject data
+            # Get subject_id from payload BEFORE normalizing (as normalize may exclude it)
             subject_id = None
             if isinstance(payload, dict):
                 # Frontend now sends subject_id directly in payload
                 subject_id = payload.get("subject_id")
+            
+            # Debug logging for intl_scores payload structure
+            frappe.logger().info(f"intl_scores update: subject_id='{subject_id}', payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}")
+            
+            # Now normalize the payload (subject_id is excluded from normalized data but we already have it)
+            processed = _normalize_intl_scores_payload(payload)
             
             # If subject_id still not found, try other sources
             if not subject_id:
@@ -654,10 +659,13 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 # Update only the specific subject, preserve others
                 existing_intl_scores[subject_id] = processed
                 json_data["intl_scores"] = existing_intl_scores
+                frappe.logger().info(f"intl_scores merge successful: updated subject '{subject_id}', preserved {len(existing_intl_scores) - 1} other subjects")
             else:
                 # Fallback: if no subject_id identified, replace entire intl_scores (old behavior)
                 # This maintains backward compatibility but may cause data loss
                 json_data["intl_scores"] = processed
+                frappe.logger().warning(f"intl_scores fallback: no subject_id found, replacing entire intl_scores (may cause data loss)")
+                frappe.log_error(f"intl_scores update: No subject_id found. payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}", title="intl_scores_no_subject_id")
         elif section == "scores":
             # VN Scores section handling with MERGING to avoid data loss
             # CRITICAL: Merge per subject to preserve other subjects' data
@@ -691,10 +699,14 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 # Update only the specific subject, preserve others
                 existing_scores[subject_id] = payload[subject_id]
                 json_data["scores"] = existing_scores
+                frappe.logger().info(f"scores merge successful: updated subject '{subject_id}', preserved {len(existing_scores) - 1} other subjects")
             else:
                 # Fallback: if no subject_id identified or payload doesn't match expected structure, 
                 # use old behavior (may cause data loss but maintains backward compatibility)
                 json_data["scores"] = payload
+                frappe.logger().warning(f"scores fallback: subject_id='{subject_id}', payload_structure_valid={isinstance(payload, dict) and subject_id in payload}, using old behavior (may cause data loss)")
+                if not subject_id:
+                    frappe.log_error(f"scores update: No subject_id found. payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}", title="scores_no_subject_id")
         else:
             # Overwrite the section with provided payload for other sections (e.g., homeroom)
             json_data[section] = payload
