@@ -613,6 +613,11 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         data = _payload()
         report_id = report_id or data.get("report_id")
         section = section or data.get("section")
+        
+        # Debug logging for incoming request
+        frappe.logger().info(f"update_report_section called: report_id={report_id}, section={section}")
+        frappe.logger().info(f"Request data keys: {list(data.keys()) if isinstance(data, dict) else 'not_dict'}")
+        
         if not report_id or not section:
             errors = {}
             if not report_id:
@@ -626,6 +631,14 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         if doc.status == "locked":
             return forbidden_response("Report is locked")
         payload = data.get("payload") or {}
+        
+        # Debug logging for payload
+        frappe.logger().info(f"Payload received - size: {len(str(payload)) if payload else 0} chars")
+        frappe.logger().info(f"Payload type: {type(payload)}")
+        if isinstance(payload, dict):
+            frappe.logger().info(f"Payload keys: {list(payload.keys())}")
+        else:
+            frappe.logger().warning(f"Payload is not dict: {payload}")
         # Merge section into data_json
         json_data = json.loads(doc.data_json or "{}")
 
@@ -759,9 +772,17 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         else:
             # Overwrite the section with provided payload for other sections (e.g., homeroom)
             json_data[section] = payload
+            frappe.logger().info(f"Section '{section}' replaced entirely (standard behavior)")
+        
+        # Debug logging before saving
+        frappe.logger().info(f"Final data_json keys: {list(json_data.keys())}")
+        frappe.logger().info(f"Final data_json size: {len(str(json_data))} chars")
+        
         doc.data_json = json.dumps(json_data)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
+        
+        frappe.logger().info(f"Report {doc.name} updated successfully for section '{section}'")
         return success_response(message="Updated", data={"name": doc.name})
     except Exception as e:
         frappe.log_error(f"Error update_report_section: {str(e)}")
