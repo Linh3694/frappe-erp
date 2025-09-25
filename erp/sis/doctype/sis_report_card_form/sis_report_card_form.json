@@ -13,6 +13,7 @@
   "scores_enabled",
   "homeroom_enabled",
   "subject_eval_enabled",
+  "intl_scoreboard_enabled",
   "pages",
   "is_system"
  ],
@@ -24,6 +25,7 @@
   {"fieldname": "scores_enabled", "fieldtype": "Check", "label": "Bảng điểm"},
   {"fieldname": "homeroom_enabled", "fieldtype": "Check", "label": "Nhận xét chủ nhiệm"},
   {"fieldname": "subject_eval_enabled", "fieldtype": "Check", "label": "Đánh giá môn học"},
+  {"fieldname": "intl_scoreboard_enabled", "fieldtype": "Check", "label": "Bảng điểm Quốc tế"},
   {"fieldname": "pages", "fieldtype": "Table", "label": "Trang", "options": "SIS Report Card Form Page"},
   {"fieldname": "is_system", "fieldtype": "Check", "label": "Hệ thống (không cho sửa/xóa)"}
  ],

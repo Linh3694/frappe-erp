@@ -54,6 +54,7 @@ def _doc_to_dict(doc):
         "scores_enabled": 1 if getattr(doc, "scores_enabled", 0) else 0,
         "homeroom_enabled": 1 if getattr(doc, "homeroom_enabled", 0) else 0,
         "subject_eval_enabled": 1 if getattr(doc, "subject_eval_enabled", 0) else 0,
+        "intl_scoreboard_enabled": 1 if getattr(doc, "intl_scoreboard_enabled", 0) else 0,
         "campus_id": getattr(doc, "campus_id", None),
         "pages": pages,
     }
@@ -81,6 +82,7 @@ def get_all_forms(page: int = 1, limit: int = 50, include_all_campuses: int = 0)
                 "scores_enabled",
                 "homeroom_enabled",
                 "subject_eval_enabled",
+                "intl_scoreboard_enabled",
             ],
             filters=filters,
             order_by="modified desc",
@@ -126,14 +128,17 @@ def create_form():
         exists = frappe.db.exists("SIS Report Card Form", {"code": (data.get("code") or "").strip(), "campus_id": campus_id})
         if exists:
             return validation_error_response(message="Form code already exists", errors={"code": ["Already exists"]})
+        program_type = data.get("program_type") or "vn"
+        
         doc = frappe.get_doc({
             "doctype": "SIS Report Card Form",
             "code": (data.get("code") or "").strip(),
             "title": (data.get("title") or "").strip(),
-            "program_type": (data.get("program_type") or "vn"),
+            "program_type": program_type,
             "scores_enabled": 1 if data.get("scores_enabled") else 0,
             "homeroom_enabled": 1 if data.get("homeroom_enabled") else 0,
             "subject_eval_enabled": 1 if data.get("subject_eval_enabled") else 0,
+            "intl_scoreboard_enabled": 1 if program_type == "intl" else 0,
             "campus_id": campus_id,
         })
         # pages
@@ -167,12 +172,20 @@ def update_form(form_id: str = None):
         doc = frappe.get_doc("SIS Report Card Form", form_id)
         if doc.campus_id != _current_campus_id():
             return forbidden_response("Access denied: Form belongs to another campus")
-        for f in ["code", "title", "program_type", "scores_enabled", "homeroom_enabled", "subject_eval_enabled"]:
+        for f in ["code", "title", "program_type", "scores_enabled", "homeroom_enabled", "subject_eval_enabled", "intl_scoreboard_enabled"]:
             if f in data:
                 val = data.get(f)
-                if f in ["scores_enabled", "homeroom_enabled", "subject_eval_enabled"]:
+                if f in ["scores_enabled", "homeroom_enabled", "subject_eval_enabled", "intl_scoreboard_enabled"]:
                     val = 1 if val else 0
                 doc.set(f, val)
+        
+        # Auto-set intl_scoreboard_enabled based on program_type if program_type is being updated
+        if "program_type" in data:
+            program_type = data.get("program_type", "vn")
+            if program_type == "intl":
+                doc.set("intl_scoreboard_enabled", 1)
+            elif program_type == "vn":
+                doc.set("intl_scoreboard_enabled", 0)
         if "pages" in data:
             pages_data = data.get("pages") or []
             frappe.logger().info(f"Updating pages count: {len(pages_data)}")
@@ -321,9 +334,9 @@ def ensure_default_forms():
 
     Codes created if missing:
     - PRIM_VN: Tiểu học - CTVN
-    - SEC_VN_MID: Trung Học - CTVN - Giữa kỳ
-    - SEC_VN_END1: Trung Học - CTVN - HK1
-    - SEC_VN_END2: Trung Học - CTVN - HK2
+    - SEC_VN_MID: Trung Học - Giữa kỳ
+    - SEC_VN_END1: Trung Học - HK1
+    - SEC_VN_END2: Trung Học - HK2
     """
     try:
         campus_id = _current_campus_id()
@@ -346,6 +359,7 @@ def ensure_default_forms():
                 "scores_enabled": 1,
                 "homeroom_enabled": 1,
                 "subject_eval_enabled": 1,
+                "intl_scoreboard_enabled": 0,  # VN programs don't use intl scoreboard
                 "campus_id": campus_id,
             })
             doc.append("pages", {"page_no": 1, "background_image": None, "layout_json": "{}"})
@@ -373,8 +387,8 @@ def ensure_intl_forms():
         defaults = [
             {"code": "PRIM_INTL", "title": "Tiểu học"},
             {"code": "SEC_INTL", "title": "Trung học Cơ sở"},
-            {"code": "HIGH_INTL", "title": "Trung học Phổ thông - Chương trình Quốc tế"},
-            {"code": "HIGH_INTL_AP", "title": "Trung học Phổ thông - Chương trình Quốc tế AP"},
+            {"code": "HIGH_INTL", "title": "Trung học Phổ thông"},
+            {"code": "HIGH_INTL_AP", "title": "Trung học Phổ thông - AP"},
 
         ]
         created: list[str] = []
@@ -387,9 +401,10 @@ def ensure_intl_forms():
                 "code": d["code"],
                 "title": d["title"],
                 "program_type": "intl",
-                "scores_enabled": 1,
-                "homeroom_enabled": 1,
-                "subject_eval_enabled": 1,
+                "scores_enabled": 0,
+                "homeroom_enabled": 0,
+                "subject_eval_enabled": 0,
+                "intl_scoreboard_enabled": 1,  # INTL programs use intl scoreboard
                 "campus_id": campus_id,
             })
             doc.append("pages", {"page_no": 1, "background_image": None, "layout_json": "{}"})
@@ -445,6 +460,37 @@ def debug_forms():
 
 
 @frappe.whitelist()
+def migrate_intl_scoreboard_enabled():
+    """Migrate existing forms to set intl_scoreboard_enabled based on program_type."""
+    try:
+        campus_id = _current_campus_id()
+        results = []
+        
+        # Update VN forms to have intl_scoreboard_enabled = 0
+        vn_count = frappe.db.sql("""
+            UPDATE `tabSIS Report Card Form` 
+            SET intl_scoreboard_enabled = 0 
+            WHERE program_type = 'vn' AND campus_id = %s
+        """, (campus_id,))
+        results.append(f"Updated {len(vn_count)} VN forms to have intl_scoreboard_enabled = 0")
+        
+        # Update INTL forms to have intl_scoreboard_enabled = 1  
+        intl_count = frappe.db.sql("""
+            UPDATE `tabSIS Report Card Form` 
+            SET intl_scoreboard_enabled = 1 
+            WHERE program_type = 'intl' AND campus_id = %s
+        """, (campus_id,))
+        results.append(f"Updated {len(intl_count)} INTL forms to have intl_scoreboard_enabled = 1")
+        
+        frappe.db.commit()
+        return success_response(data={"results": results}, message="Migration completed")
+        
+    except Exception as e:
+        frappe.log_error(f"Error migrate_intl_scoreboard_enabled: {str(e)}")
+        return error_response(f"Error in migration: {str(e)}")
+
+
+@frappe.whitelist()
 def force_update_database():
     """Force update database records directly."""
     try:
@@ -488,6 +534,7 @@ def force_update_database():
                     "scores_enabled": 1,
                     "homeroom_enabled": 1,
                     "subject_eval_enabled": 1,
+                    "intl_scoreboard_enabled": 1,  # INTL programs use intl scoreboard
                     "campus_id": campus_id,
                 })
                 doc.append("pages", {"page_no": 1, "background_image": None, "layout_json": "{}"})
