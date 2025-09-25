@@ -66,9 +66,11 @@ def _sanitize_float(value: Any) -> Optional[float]:
             return None
         parsed = float(value)
         if parsed != parsed:  # NaN check
+            frappe.logger().warning(f"_sanitize_float: NaN detected for value '{value}'")
             return None
         return parsed
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as e:
+        frappe.logger().warning(f"_sanitize_float: Parse failed for value '{value}': {str(e)}")
         return None
 
 
@@ -95,25 +97,43 @@ def _normalize_intl_scores_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                     continue
                 normalized_component_scores[main_title][comp_title] = _sanitize_float(comp_value)
 
-    normalized_ielts_scores: Dict[str, Dict[str, Optional[float]]] = {}
+    normalized_ielts_scores: Dict[str, Dict[str, Any]] = {}
     raw_ielts_scores = payload.get("ielts_scores")
+    
+    # Debug log for IELTS scores normalization
+    if raw_ielts_scores:
+        frappe.logger().info(f"_normalize_intl_scores: Processing IELTS scores: {list(raw_ielts_scores.keys()) if isinstance(raw_ielts_scores, dict) else 'not_dict'}")
+    
     if isinstance(raw_ielts_scores, dict):
         for option, fields in raw_ielts_scores.items():
             if not option or not isinstance(fields, dict):
                 continue
-            normalized_fields: Dict[str, Optional[float]] = {}
+            normalized_fields: Dict[str, Any] = {}
+
+            # Debug log for each IELTS option
+            frappe.logger().info(f"_normalize_intl_scores: Processing IELTS option '{option}' with fields: {list(fields.keys())}")
 
             # Accept both legacy format (single value) and new object {raw, band}
             if "raw" in fields or "band" in fields:
                 raw_value = fields.get("raw")
                 band_value = fields.get("band")
                 normalized_fields["raw"] = _sanitize_float(raw_value)
-                normalized_fields["band"] = _sanitize_float(band_value)
+                # Band scores should be preserved as strings (e.g., "6.5", not float 6.5)
+                normalized_fields["band"] = band_value if isinstance(band_value, str) else str(band_value) if band_value is not None else None
+                
+                # Debug log sanitization results
+                frappe.logger().info(f"_normalize_intl_scores: {option} - raw: '{raw_value}' -> {normalized_fields['raw']}, band: '{band_value}' -> '{normalized_fields['band']}'")
             else:
                 for field_key, field_value in fields.items():
                     if not field_key:
                         continue
-                    normalized_fields[field_key] = _sanitize_float(field_value)
+                    # Handle band scores as strings, other fields as floats
+                    if field_key.lower() == 'band':
+                        sanitized_value = field_value if isinstance(field_value, str) else str(field_value) if field_value is not None else None
+                    else:
+                        sanitized_value = _sanitize_float(field_value)
+                    normalized_fields[field_key] = sanitized_value
+                    frappe.logger().info(f"_normalize_intl_scores: {option}.{field_key}: '{field_value}' -> {sanitized_value}")
 
             normalized_ielts_scores[option] = normalized_fields
 
