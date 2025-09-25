@@ -637,7 +637,6 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
             
             # If subject_id still not found, try other sources
             if not subject_id:
-                import frappe
                 # Try to get from request form data
                 form_data = frappe.local.form_dict
                 subject_id = form_data.get("subject_id") or form_data.get("selectedSubject")
