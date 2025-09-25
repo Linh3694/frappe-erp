@@ -101,11 +101,21 @@ def _normalize_intl_scores_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         for option, fields in raw_ielts_scores.items():
             if not option or not isinstance(fields, dict):
                 continue
-            normalized_ielts_scores[option] = {}
-            for field_key, field_value in fields.items():
-                if not field_key:
-                    continue
-                normalized_ielts_scores[option][field_key] = _sanitize_float(field_value)
+            normalized_fields: Dict[str, Optional[float]] = {}
+
+            # Accept both legacy format (single value) and new object {raw, band}
+            if "raw" in fields or "band" in fields:
+                raw_value = fields.get("raw")
+                band_value = fields.get("band")
+                normalized_fields["raw"] = _sanitize_float(raw_value)
+                normalized_fields["band"] = _sanitize_float(band_value)
+            else:
+                for field_key, field_value in fields.items():
+                    if not field_key:
+                        continue
+                    normalized_fields[field_key] = _sanitize_float(field_value)
+
+            normalized_ielts_scores[option] = normalized_fields
 
     normalized = {
         "main_scores": normalized_main_scores,
@@ -200,7 +210,62 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
 
     # Initialize INTL scores metadata if applicable
     if getattr(template, "program_type", "vn") == "intl":
-        base.setdefault("intl_scores", {})
+        intl_scores: Dict[str, Dict[str, Any]] = {}
+        intl_subject_configs = {}
+
+        if hasattr(template, "subjects") and template.subjects:
+            for subject_cfg in template.subjects:
+                subject_id = getattr(subject_cfg, "subject_id", None)
+                if not subject_id:
+                    continue
+
+                intl_subject_configs[subject_id] = subject_cfg
+
+        for subject_id, subject_cfg in intl_subject_configs.items():
+            subject_payload: Dict[str, Any] = {
+                "main_scores": {},
+                "component_scores": {},
+                "ielts_scores": {},
+                "overall_mark": None,
+                "overall_grade": None,
+                "comment": None,
+            }
+
+            subject_payload["subject_title"] = _resolve_actual_subject_title(subject_id)
+
+            subcurriculum_id = getattr(subject_cfg, "subcurriculum_id", None)
+            if subcurriculum_id:
+                subject_payload["subcurriculum_id"] = subcurriculum_id
+
+            intl_comment = getattr(subject_cfg, "intl_comment", None)
+            if intl_comment is not None:
+                subject_payload["intl_comment"] = intl_comment
+
+            ielts_config = None
+            try:
+                ielts_config = getattr(subject_cfg, "intl_ielts_config", None)
+                if isinstance(ielts_config, str):
+                    ielts_config = json.loads(ielts_config or "{}")
+            except Exception:
+                ielts_config = None
+
+            if isinstance(ielts_config, dict) and ielts_config.get("enabled"):
+                options = ielts_config.get("options")
+                if isinstance(options, list):
+                    for option in options:
+                        if not isinstance(option, dict):
+                            continue
+                        option_key = option.get("option")
+                        if not option_key:
+                            continue
+                        subject_payload["ielts_scores"].setdefault(option_key, {})
+                        # Guarantee raw & band keys exist
+                        subject_payload["ielts_scores"][option_key]["raw"] = None
+                        subject_payload["ielts_scores"][option_key]["band"] = None
+
+            intl_scores[subject_id] = subject_payload
+
+        base.setdefault("intl_scores", intl_scores)
 
     return base
 

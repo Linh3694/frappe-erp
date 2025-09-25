@@ -389,14 +389,24 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                     for option, fields in raw_ielts.items():
                         if not option or not isinstance(fields, dict):
                             continue
-                        intl_standardized["ielts_scores"][option] = {}
-                        for field_key, field_value in fields.items():
-                            if not field_key:
-                                continue
-                            try:
-                                intl_standardized["ielts_scores"][option][field_key] = float(field_value) if field_value is not None else None
-                            except (TypeError, ValueError):
-                                intl_standardized["ielts_scores"][option][field_key] = None
+
+                        normalized_fields: Dict[str, Optional[float]] = {}
+
+                        # Always expose both raw & band to renderer
+                        raw_value = fields.get("raw") if isinstance(fields, dict) else None
+                        band_value = fields.get("band") if isinstance(fields, dict) else None
+
+                        try:
+                            normalized_fields["raw"] = float(raw_value) if raw_value is not None else None
+                        except (TypeError, ValueError):
+                            normalized_fields["raw"] = None
+
+                        try:
+                            normalized_fields["band"] = float(band_value) if band_value is not None else None
+                        except (TypeError, ValueError):
+                            normalized_fields["band"] = None
+
+                        intl_standardized["ielts_scores"][option] = normalized_fields
 
                 intl_standardized["overall_mark"] = intl_payload.get("overall_mark")
                 intl_standardized["overall_grade"] = intl_payload.get("overall_grade")
