@@ -245,6 +245,7 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
             try:
                 ielts_config = getattr(subject_cfg, "intl_ielts_config", None)
                 if isinstance(ielts_config, str):
+                    import json
                     ielts_config = json.loads(ielts_config or "{}")
             except Exception:
                 ielts_config = None
