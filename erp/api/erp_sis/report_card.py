@@ -153,8 +153,44 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
         "intl_overall_mark_enabled": 1 if getattr(doc, "intl_overall_mark_enabled", 0) else 0,
         "intl_overall_grade_enabled": 1 if getattr(doc, "intl_overall_grade_enabled", 0) else 0,
         "intl_comment_enabled": 1 if getattr(doc, "intl_comment_enabled", 0) else 0,
+        "intl_scoreboard_enabled": _intl_scoreboard_enabled(doc),
         "subjects": subjects,
     }
+
+
+def _intl_scoreboard_enabled(doc) -> bool:
+    try:
+        if getattr(doc, "program_type", "vn") != "intl":
+            return False
+
+        if any(
+            bool(getattr(doc, flag, 0))
+            for flag in [
+                "intl_overall_mark_enabled",
+                "intl_overall_grade_enabled",
+                "intl_comment_enabled",
+            ]
+        ):
+            return True
+
+        subjects = getattr(doc, "subjects", None) or []
+        for subject in subjects:
+            cfg = subject
+            # For Frappe document child, access attributes
+            intl_config = getattr(cfg, "intl_ielts_config", None)
+            if isinstance(intl_config, str):
+                import json as _json
+                try:
+                    intl_config = _json.loads(intl_config)
+                except Exception:
+                    intl_config = None
+            if isinstance(intl_config, dict) and intl_config.get("enabled"):
+                options = intl_config.get("options")
+                if isinstance(options, list) and len(options) > 0:
+                    return True
+        return False
+    except Exception:
+        return False
 
 
 def _apply_scores(parent_doc, scores_payload: List[Dict[str, Any]]):

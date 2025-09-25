@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional, List, Union
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import success_response, error_response, validation_error_response, not_found_response, forbidden_response, single_item_response
 
+from .report_card import _intl_scoreboard_enabled
+
 
 def _campus() -> str:
     return get_current_campus_from_context() or "campus-1"
@@ -303,6 +305,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     """
     standardized = {}
     template_id = getattr(report, "template_id", "")
+    template_doc = frappe.get_doc("SIS Report Card Template", template_id) if template_id else None
     
     # === STUDENT INFO ===
     student_data = data.get("student", {})
@@ -328,6 +331,17 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     standardized["report"] = {
         "title_vn": getattr(report, "title", ""),
         "title_en": getattr(report, "title", "")  # Same for now, can enhance later
+    }
+
+    standardized["context"] = {
+        "program_type": getattr(template_doc, "program_type", "vn") if template_doc else getattr(report, "program_type", "vn"),
+        "scores_enabled": bool(getattr(template_doc, "scores_enabled", 0)) if template_doc else bool(data.get("scores")),
+        "homeroom_enabled": bool(getattr(template_doc, "homeroom_enabled", 0)) if template_doc else bool(data.get("homeroom")),
+        "subject_eval_enabled": bool(getattr(template_doc, "subject_eval_enabled", 0)) if template_doc else bool(data.get("subject_eval")),
+        "intl_overall_mark_enabled": bool(getattr(template_doc, "intl_overall_mark_enabled", 0)) if template_doc else False,
+        "intl_overall_grade_enabled": bool(getattr(template_doc, "intl_overall_grade_enabled", 0)) if template_doc else False,
+        "intl_comment_enabled": bool(getattr(template_doc, "intl_comment_enabled", 0)) if template_doc else False,
+        "intl_scoreboard_enabled": _intl_scoreboard_enabled(template_doc) if template_doc else False,
     }
     
     # === SUBJECTS STANDARDIZATION ===
