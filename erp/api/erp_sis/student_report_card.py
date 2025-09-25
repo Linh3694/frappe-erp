@@ -509,15 +509,8 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
             json_data["subject_eval"] = existing
         elif section == "intl_scores":
             # INTL Scores section handling with validation
-            normalized = _normalize_intl_scores_payload(payload)
-
-            existing = json_data.get("intl_scores")
-            if isinstance(existing, dict):
-                merged = {**existing, **normalized}
-            else:
-                merged = normalized
-
-            json_data["intl_scores"] = merged
+            processed = _normalize_intl_scores_payload(payload)
+            json_data["intl_scores"] = processed
         else:
             # Overwrite the section with provided payload for other sections (e.g., homeroom)
             json_data[section] = payload
