@@ -10,27 +10,43 @@ import json
 from erp.utils.api_response import success_response, error_response, single_item_response
 
 
-def time_to_minutes(time_str):
-    """Convert HH:MM time string to minutes since midnight"""
-    if not time_str:
+def time_to_minutes(time_input):
+    """Convert various time formats to minutes since midnight"""
+    if not time_input:
         return 0
     try:
         # Handle different input types
-        if isinstance(time_str, dict):
-            frappe.logger().error(f"❌ time_to_minutes received dict instead of string: {time_str}")
+        if isinstance(time_input, dict):
+            frappe.logger().error(f"❌ time_to_minutes received dict instead of time: {time_input}")
             return 0
         
-        # Convert to string if not already
-        time_str = str(time_str)
+        # Handle timedelta objects (from database)
+        if hasattr(time_input, 'total_seconds'):
+            total_seconds = int(time_input.total_seconds())
+            return total_seconds // 60  # Convert seconds to minutes
         
         # Handle datetime.time objects
+        if hasattr(time_input, 'hour') and hasattr(time_input, 'minute'):
+            return time_input.hour * 60 + time_input.minute
+        
+        # Handle string format
+        time_str = str(time_input).strip()
+        
+        # Remove seconds if present (HH:MM:SS -> HH:MM)
+        if time_str.count(':') == 2:
+            time_str = ':'.join(time_str.split(':')[:2])
+        
         if ':' not in time_str:
+            frappe.logger().error(f"❌ time_to_minutes: no ':' found in '{time_str}'")
             return 0
             
-        hours, minutes = map(int, time_str.split(':'))
+        parts = time_str.split(':')
+        hours = int(parts[0])
+        minutes = int(parts[1])
         return hours * 60 + minutes
+        
     except Exception as e:
-        frappe.logger().error(f"❌ Error in time_to_minutes with input '{time_str}': {str(e)}")
+        frappe.logger().error(f"❌ Error in time_to_minutes with input '{time_input}' (type: {type(time_input)}): {str(e)}")
         return 0
 
 
@@ -41,8 +57,12 @@ def time_ranges_overlap(range1, range2):
     start2 = time_to_minutes(range2.get('start_time', ''))
     end2 = time_to_minutes(range2.get('end_time', ''))
     
+    frappe.logger().info(f"🧮 [Backend] Time conversion: range1({range1.get('startTime')}->{start1}, {range1.get('endTime')}->{end1}), range2({range2.get('start_time')}->{start2}, {range2.get('end_time')}->{end2})")
+    
     # Two ranges overlap if: start1 < end2 AND start2 < end1
-    return start1 < end2 and start2 < end1
+    overlap = start1 < end2 and start2 < end1
+    frappe.logger().info(f"🧮 [Backend] Overlap calculation: {start1} < {end2} AND {start2} < {end1} = {overlap}")
+    return overlap
 
 
 def find_overlapping_schedules(event_time_range, schedules):
