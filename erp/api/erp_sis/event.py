@@ -1304,10 +1304,10 @@ def get_event_detail():
             if start_time and end_time:
                 try:
                     from datetime import datetime, timedelta
-                    import frappe.utils
+                    from frappe.utils import get_datetime
                     
-                    start_date = frappe.utils.get_datetime(start_time).date()
-                    end_date = frappe.utils.get_datetime(end_time).date()
+                    start_date = get_datetime(start_time).date()
+                    end_date = get_datetime(end_time).date()
                     
                     # Generate only start date as fallback (avoid creating too many unnecessary dates)
                     fallback_schedules = [{
@@ -1328,7 +1328,8 @@ def get_event_detail():
                     
                 except Exception as e:
                     # Last resort: use today's date
-                    today = frappe.utils.nowdate()
+                    from frappe.utils import nowdate
+                    today = nowdate()
                     result["dateSchedules"] = [{
                         "date": today,
                         "scheduleIds": [],
