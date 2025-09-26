@@ -278,11 +278,11 @@ def create_event():
             "doctype": "SIS Event",
             "campus_id": campus_id,
             "school_year_id": school_year_id,  # Auto-assign current school year
+            "status": "approved",  # Auto-approve all events (skip approval workflow)
             "title": data.get("title"),
             "description": data.get("description"),
             "create_by": teacher,  # This should be a valid SIS Teacher name
             "create_at": frappe.utils.now(),
-            "status": "approved",  # Auto-approve all events temporarily
             "approved_at": frappe.utils.now(),  # Set approved time
             "approved_by": teacher,  # Set approved by same teacher who created
         }
@@ -626,12 +626,12 @@ def create_event():
                 if not es_parts or len(es_parts) == 1:
                     es_parts = es_options_raw.splitlines()
                 es_allowed = [opt for opt in es_parts if opt]
-                pending_match = None
+                approved_match = None
                 for tok in es_allowed:
-                    if tok.strip().lower() == "pending":
-                        pending_match = tok  # keep original token
+                    if tok.strip().lower() == "approved":
+                        approved_match = tok  # keep original token
                         break
-                event_student_status_default = pending_match or (es_allowed[0] if es_allowed else None)
+                event_student_status_default = approved_match or (es_allowed[0] if es_allowed else None)
             debug_info["event_student_status_meta"] = {
                 "options_raw": es_status_field.options if es_status_field else None,
                 "chosen_default": event_student_status_default
@@ -659,7 +659,7 @@ def create_event():
                             "campus_id": campus_id,
                             "event_id": event.name,
                             "class_student_id": class_student_id,
-                            "status": event_student_status_default or "pending"
+                            "status": event_student_status_default or "approved"
                         })
                         doc.insert()
                         created_event_students.append(doc.name)
