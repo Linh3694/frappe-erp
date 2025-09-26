@@ -1296,6 +1296,45 @@ def get_event_detail():
             })
         result["dateTimes"] = processed_times
 
+        # Fallback: If no dateSchedules or dateTimes, create default dates from start_time/end_time
+        if not processed_schedules and not processed_times:
+            start_time = event_basic.get("start_time")
+            end_time = event_basic.get("end_time")
+            
+            if start_time and end_time:
+                try:
+                    from datetime import datetime, timedelta
+                    import frappe.utils
+                    
+                    start_date = frappe.utils.get_datetime(start_time).date()
+                    end_date = frappe.utils.get_datetime(end_time).date()
+                    
+                    # Generate only start date as fallback (avoid creating too many unnecessary dates)
+                    fallback_schedules = [{
+                        "date": start_date.strftime("%Y-%m-%d"),
+                        "scheduleIds": [],
+                        "schedules": []
+                    }]
+                    
+                    # If start and end are different days, add end date as well
+                    if start_date != end_date:
+                        fallback_schedules.append({
+                            "date": end_date.strftime("%Y-%m-%d"),
+                            "scheduleIds": [],
+                            "schedules": []
+                        })
+                    
+                    result["dateSchedules"] = fallback_schedules
+                    
+                except Exception as e:
+                    # Last resort: use today's date
+                    today = frappe.utils.nowdate()
+                    result["dateSchedules"] = [{
+                        "date": today,
+                        "scheduleIds": [],
+                        "schedules": []
+                    }]
+
         # Participants (event students + class/student info minimal)
         # Always return all participants for event details
         allowed_class_ids = set()  # Empty set means no filtering
