@@ -1,17 +1,16 @@
+# Copyright (c) 2025, Wellspring International School and contributors
+# For license information, please see license.txt
+
 import frappe
-from frappe import _
 from frappe.model.document import Document
 
-
 class SISEventAttendance(Document):
-	"""SIS Event Attendance document for tracking student attendance in events."""
-
 	def validate(self):
-		"""Validate the event attendance record."""
-		if self.status not in ["present", "absent", "late", "excused"]:
-			frappe.throw(_("Invalid attendance status"))
-
-	def before_save(self):
-		"""Set recorded_by if not set."""
-		if not self.recorded_by:
-			self.recorded_by = frappe.session.user
+		# Ensure the student is actually a participant in the event
+		if not frappe.db.exists("SIS Event Student", {
+			"event_id": self.event_id,
+			"class_student_id": ["in", frappe.get_all("SIS Class Student", 
+														filters={"student_id": self.student_id}, 
+														pluck="name")]
+		}):
+			frappe.throw(f"Student {self.student_id} is not a participant in event {self.event_id}")

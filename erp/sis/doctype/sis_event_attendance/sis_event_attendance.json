@@ -1,33 +1,127 @@
 {
- "doctype": "DocType",
- "name": "SIS Event Attendance",
- "module": "Sis",
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-EVENT-ATTENDANCE-{#####}",
+ "beta": 0,
+ "creation": "2025-09-26 16:00:00.000000",
  "custom": 0,
- "istable": 0,
- "track_changes": 1,
- "editable_grid": 0,
- "autoname": "format:SIS-EVENT-ATT-{#####}",
+ "description": "Event Attendance Record",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
  "field_order": [
+  "event_information",
   "event_id",
-  "class_student_id",
+  "attendance_date", 
+  "student_information",
   "student_id",
   "status",
-  "remarks",
-  "campus_id",
-  "recorded_by"
+  "recording_information",
+  "recorded_by",
+  "recorded_at"
  ],
  "fields": [
-  {"fieldname": "event_id", "label": "Event", "fieldtype": "Link", "options": "SIS Event", "reqd": 1},
-  {"fieldname": "class_student_id", "label": "Class Student", "fieldtype": "Link", "options": "SIS Class Student"},
-  {"fieldname": "student_id", "label": "Student", "fieldtype": "Link", "options": "CRM Student", "reqd": 1},
-  {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "present\nabsent\nlate\nexcused", "reqd": 1},
-  {"fieldname": "remarks", "label": "Remarks", "fieldtype": "Small Text"},
-  {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"},
-  {"fieldname": "recorded_by", "label": "Recorded By", "fieldtype": "Link", "options": "User"}
+  {
+   "fieldname": "event_information",
+   "fieldtype": "Section Break",
+   "label": "Event Information"
+  },
+  {
+   "fieldname": "event_id",
+   "fieldtype": "Link",
+   "label": "Event",
+   "options": "SIS Event",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "attendance_date",
+   "fieldtype": "Date",
+   "label": "Attendance Date",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_information",
+   "fieldtype": "Section Break",
+   "label": "Student Information"
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Attendance Status",
+   "options": "present\nabsent\nlate\nexcused",
+   "default": "present",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "recording_information",
+   "fieldtype": "Section Break",
+   "label": "Recording Information"
+  },
+  {
+   "fieldname": "recorded_by",
+   "fieldtype": "Link",
+   "label": "Recorded By",
+   "options": "SIS Teacher",
+   "reqd": 1
+  },
+  {
+   "fieldname": "recorded_at",
+   "fieldtype": "Datetime",
+   "label": "Recorded At",
+   "reqd": 1
+  }
  ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-09-26 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Event Attendance",
+ "owner": "Administrator",
  "permissions": [
-  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
-  {"role": "SIS Teacher", "read": 1, "write": 1, "create": 1}
- ]
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
 }
-

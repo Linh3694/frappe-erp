@@ -357,10 +357,21 @@ def create_event():
                         else:
                             schedule_ids_str = str(schedule_ids_value) if schedule_ids_value is not None else ''
 
-                        if not event_date or not schedule_ids_str:
-                            debug_info.setdefault("schedule_processing_warnings", []).append(f"Skipping incomplete schedule: date={event_date}, ids={schedule_ids_str}")
+                        # Allow empty schedule_ids for date-only events
+                        if not event_date:
+                            debug_info.setdefault("schedule_processing_warnings", []).append(f"Skipping schedule with missing date: {ds}")
                             continue
 
+                        # If no scheduleIds, try to create a meaningful schedule from start_time/end_time
+                        if not schedule_ids_str:
+                            start_time = ds.get('start_time')
+                            end_time = ds.get('end_time')
+                            if start_time and end_time:
+                                schedule_ids_str = f"manual-{start_time}-{end_time}"  # Temporary identifier
+                                debug_info.setdefault("schedule_processing_notes", []).append(f"Created manual schedule ID for {event_date}: {schedule_ids_str}")
+                            else:
+                                schedule_ids_str = ""  # Allow empty for date-only events
+                        
                         processed_schedules.append({
                             "event_date": event_date,
                             "schedule_ids": schedule_ids_str
@@ -504,16 +515,23 @@ def create_event():
                 # Keep tokens EXACTLY as defined in DocType (no trim) to avoid hidden char mismatch
                 allowed_statuses = [opt for opt in parts if opt]
                 forced_status = allowed_statuses[0] if len(allowed_statuses) > 0 else None
-                if forced_status:
-                    event_data["status"] = forced_status
-                    debug_info["status_applied"] = forced_status
-                    debug_info["status_value_repr"] = repr(forced_status)
-                    debug_info["allowed_statuses_repr"] = [repr(x) for x in allowed_statuses]
-                else:
-                    debug_info["status_applied_error"] = {
-                        "reason": "no_allowed_statuses",
-                        "options_raw": options_raw
-                    }
+                
+                # TEMPORARILY COMMENTED - Don't override approved status
+                # if forced_status:
+                #     event_data["status"] = forced_status
+                #     debug_info["status_applied"] = forced_status
+                #     debug_info["status_value_repr"] = repr(forced_status)
+                #     debug_info["allowed_statuses_repr"] = [repr(x) for x in allowed_statuses]
+                # else:
+                #     debug_info["status_applied_error"] = {
+                #         "reason": "no_allowed_statuses",
+                #         "options_raw": options_raw
+                #     }
+                
+                # Debug info for current status
+                debug_info["status_kept"] = event_data.get("status")
+                debug_info["status_would_be_forced_to"] = forced_status
+                debug_info["allowed_statuses_available"] = allowed_statuses
         except Exception as _e:
             debug_info["status_apply_exception"] = str(_e)
 
@@ -535,10 +553,12 @@ def create_event():
             for ds in processed_schedules:
                 try:
                     event_date = ds.get("event_date") if ds else None
-                    schedule_ids = ds.get("schedule_ids") if ds else None
-                    if not event_date or not schedule_ids:
-                        debug_info.setdefault("schedule_creation_warnings", []).append(f"Skipping schedule due to missing data: date={event_date}, ids={schedule_ids}")
+                    schedule_ids = ds.get("schedule_ids") if ds else ""
+                    if not event_date:
+                        debug_info.setdefault("schedule_creation_warnings", []).append(f"Skipping schedule due to missing date: {ds}")
                         continue
+                    
+                    # Allow empty schedule_ids - some events may be date-only
 
                     schedule_doc = frappe.get_doc({
                         "doctype": "SIS Event Date Schedule",
@@ -1275,27 +1295,17 @@ def get_event_detail():
         result["dateTimes"] = processed_times
 
         # Participants (event students + class/student info minimal)
-        # If include_all_participants=True (list tab), do NOT filter by teacher classes
-        # Otherwise, restrict to current teacher's homeroom/vice classes
-        allowed_class_ids = set()
-        if not include_all_participants:
-            try:
-                current_user = frappe.session.user
-                teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
-                if teacher:
-                    class_filters = {}
-                    if event_basic.get("campus_id"):
-                        class_filters["campus_id"] = event_basic.get("campus_id")
-                    classes = frappe.get_all(
-                        "SIS Class",
-                        filters=class_filters,
-                        or_filters=[{"homeroom_teacher": teacher}, {"vice_homeroom_teacher": teacher}],
-                        fields=["name"],
-                        limit_page_length=10000
-                    )
-                    allowed_class_ids = {c.name for c in classes}
-            except Exception:
-                allowed_class_ids = set()
+        # Always return all participants for event details
+        allowed_class_ids = set()  # Empty set means no filtering
+        include_all_participants = True  # Force include all participants
+        
+        # Get current user info for attendance permission check
+        current_user = frappe.session.user
+        current_teacher = None
+        try:
+            current_teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+        except Exception:
+            pass
 
         # Fetch event students; include student field if present (student_id or student)
         try:
@@ -1482,8 +1492,33 @@ def get_event_detail():
                 }
                 for row in event_teacher_rows
             ]
-        except Exception as _e:
-            debug_info["event_teacher_list_error"] = str(_e)
+            except Exception as _e:
+                debug_info["event_teacher_list_error"] = str(_e)
+
+        # Add attendance permission check
+        can_take_attendance = False
+        attendance_debug = {
+            "current_user": current_user,
+            "current_teacher": current_teacher,
+            "event_creator": event_basic.get("create_by"),
+            "teachers_list": [t.get("teacher_id") for t in result.get("teachers", [])],
+        }
+        
+        if current_teacher:
+            # Can take attendance if user is creator or in teachers list
+            is_creator = event_basic.get("create_by") == current_teacher
+            is_event_teacher = any(t.get("teacher_id") == current_teacher for t in result.get("teachers", []))
+            can_take_attendance = is_creator or is_event_teacher
+            
+            attendance_debug.update({
+                "is_creator": is_creator,
+                "is_event_teacher": is_event_teacher,
+                "can_take_attendance": can_take_attendance
+            })
+            
+        result["can_take_attendance"] = can_take_attendance
+        result["current_teacher_id"] = current_teacher
+        result["attendance_debug"] = attendance_debug
 
         return single_item_response(result, "Event detail fetched successfully")
     except frappe.DoesNotExistError:
@@ -1739,3 +1774,201 @@ def delete_event():
     except Exception as e:
         frappe.log_error(f"Error deleting event: {str(e)}")
         return error_response(f"Error deleting event: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_event_attendance():
+    """Get event attendance for a specific date"""
+    try:
+        data = frappe.local.form_dict
+        event_id = data.get("event_id")
+        attendance_date = data.get("date")
+        
+        if not event_id or not attendance_date:
+            return validation_error_response("Validation failed", {
+                "event_id": ["Event ID is required"] if not event_id else [],
+                "date": ["Date is required"] if not attendance_date else []
+            })
+        
+        # Get current user as teacher
+        current_user = frappe.session.user
+        current_teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+        
+        if not current_teacher:
+            return forbidden_response("Only teachers can access event attendance")
+        
+        # Verify permission to take attendance for this event
+        event = frappe.get_doc("SIS Event", event_id)
+        
+        # Check if user is creator or in teachers list
+        is_creator = event.create_by == current_teacher
+        event_teachers = frappe.get_all("SIS Event Teacher", 
+                                      filters={"event_id": event_id}, 
+                                      fields=["teacher_id"])
+        is_event_teacher = any(t.teacher_id == current_teacher for t in event_teachers)
+        
+        if not (is_creator or is_event_teacher):
+            return forbidden_response("Only event creator or assigned teachers can take attendance")
+        
+        # Get event students/participants
+        event_students = frappe.get_all("SIS Event Student",
+                                      filters={"event_id": event_id},
+                                      fields=["name", "class_student_id", "status"])
+        
+        # Build participant list with student info
+        participants = []
+        for es in event_students:
+            # Get class student info
+            try:
+                cs = frappe.get_doc("SIS Class Student", es.class_student_id)
+                student = frappe.get_doc("CRM Student", cs.student_id)
+                
+                participants.append({
+                    "event_student_id": es.name,
+                    "class_student_id": es.class_student_id,
+                    "student_id": cs.student_id,
+                    "student_name": student.student_name,
+                    "student_code": student.student_code,
+                    "user_image": getattr(student, 'user_image', None)
+                })
+            except Exception:
+                continue
+        
+        # Get existing attendance records for this date
+        attendance_records = frappe.get_all("SIS Event Attendance",
+                                          filters={
+                                              "event_id": event_id,
+                                              "attendance_date": attendance_date
+                                          },
+                                          fields=["student_id", "status"])
+        
+        attendance_map = {record.student_id: record.status for record in attendance_records}
+        
+        # Add attendance status to participants
+        for p in participants:
+            p["attendance_status"] = attendance_map.get(p["student_id"], "present")
+        
+        result = {
+            "event": {
+                "name": event.name,
+                "title": event.title,
+                "description": event.description
+            },
+            "date": attendance_date,
+            "participants": participants
+        }
+        
+        return single_item_response(result, "Event attendance fetched successfully")
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Event not found")
+    except Exception as e:
+        frappe.log_error(f"Error fetching event attendance: {str(e)}")
+        return error_response(f"Error fetching event attendance: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False) 
+def save_event_attendance():
+    """Save event attendance for a specific date"""
+    try:
+        data = frappe.local.form_dict
+        
+        # Try to get JSON data from request body
+        try:
+            request_data = frappe.local.request.get_json()
+            if request_data:
+                data.update(request_data)
+        except Exception:
+            pass
+        
+        event_id = data.get("event_id")
+        attendance_date = data.get("date")
+        attendance_data = data.get("attendance", [])
+        
+        if not event_id or not attendance_date or not attendance_data:
+            return validation_error_response("Validation failed", {
+                "event_id": ["Event ID is required"] if not event_id else [],
+                "date": ["Date is required"] if not attendance_date else [],
+                "attendance": ["Attendance data is required"] if not attendance_data else []
+            })
+        
+        # Parse attendance_data if it's a string
+        if isinstance(attendance_data, str):
+            try:
+                attendance_data = frappe.parse_json(attendance_data)
+            except Exception:
+                return validation_error_response("Validation failed", {
+                    "attendance": ["Invalid attendance data format"]
+                })
+        
+        # Get current user as teacher
+        current_user = frappe.session.user
+        current_teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+        
+        if not current_teacher:
+            return forbidden_response("Only teachers can save event attendance")
+        
+        # Verify permission
+        event = frappe.get_doc("SIS Event", event_id)
+        is_creator = event.create_by == current_teacher
+        event_teachers = frappe.get_all("SIS Event Teacher", 
+                                      filters={"event_id": event_id}, 
+                                      fields=["teacher_id"])
+        is_event_teacher = any(t.teacher_id == current_teacher for t in event_teachers)
+        
+        if not (is_creator or is_event_teacher):
+            return forbidden_response("Only event creator or assigned teachers can save attendance")
+        
+        # Save attendance records
+        saved_count = 0
+        for item in attendance_data:
+            student_id = item.get("student_id")
+            status = item.get("status", "present")
+            
+            if not student_id:
+                continue
+            
+            # Check if record exists
+            existing = frappe.get_all("SIS Event Attendance",
+                                    filters={
+                                        "event_id": event_id,
+                                        "attendance_date": attendance_date,
+                                        "student_id": student_id
+                                    },
+                                    fields=["name"])
+            
+            if existing:
+                # Update existing record
+                doc = frappe.get_doc("SIS Event Attendance", existing[0].name)
+                doc.status = status
+                doc.recorded_by = current_teacher
+                doc.recorded_at = frappe.utils.now()
+                doc.save()
+            else:
+                # Create new record
+                doc = frappe.get_doc({
+                    "doctype": "SIS Event Attendance",
+                    "event_id": event_id,
+                    "attendance_date": attendance_date,
+                    "student_id": student_id,
+                    "status": status,
+                    "recorded_by": current_teacher,
+                    "recorded_at": frappe.utils.now()
+                })
+                doc.insert()
+            
+            saved_count += 1
+        
+        frappe.db.commit()
+        
+        return single_item_response({
+            "saved_count": saved_count,
+            "event_id": event_id,
+            "date": attendance_date
+        }, "Event attendance saved successfully")
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Event not found")
+    except Exception as e:
+        frappe.log_error(f"Error saving event attendance: {str(e)}")
+        return error_response(f"Error saving event attendance: {str(e)}")
