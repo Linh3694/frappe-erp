@@ -60,8 +60,12 @@ def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None)
         # Get total count
         total_count = frappe.db.count("SIS Class Student", filters=filters)
         
+        # Ensure total_count is not None to avoid arithmetic errors
+        if total_count is None:
+            total_count = 0
+        
         # Calculate pagination
-        total_pages = (total_count + limit - 1) // limit
+        total_pages = max(1, (total_count + limit - 1) // limit)
 
         return paginated_response(
             data=class_students,
