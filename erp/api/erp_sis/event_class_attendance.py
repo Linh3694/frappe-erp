@@ -15,9 +15,22 @@ def time_to_minutes(time_str):
     if not time_str:
         return 0
     try:
+        # Handle different input types
+        if isinstance(time_str, dict):
+            frappe.logger().error(f"❌ time_to_minutes received dict instead of string: {time_str}")
+            return 0
+        
+        # Convert to string if not already
+        time_str = str(time_str)
+        
+        # Handle datetime.time objects
+        if ':' not in time_str:
+            return 0
+            
         hours, minutes = map(int, time_str.split(':'))
         return hours * 60 + minutes
-    except:
+    except Exception as e:
+        frappe.logger().error(f"❌ Error in time_to_minutes with input '{time_str}': {str(e)}")
         return 0
 
 
@@ -247,6 +260,8 @@ def get_events_by_class_period():
         events = frappe.get_all("SIS Event", 
                               fields=["name", "title", "start_time", "end_time"],
                               filters={"status": "approved"})  # Chỉ lấy sự kiện đã được approve
+        
+        frappe.logger().info(f"🔍 [Backend] Found {len(events)} approved events")
 
         # Chỉ lấy study periods matching với period requested
         schedules = frappe.get_all("SIS Timetable Column", 
@@ -260,14 +275,18 @@ def get_events_by_class_period():
                                  })
 
         if not schedules:
+            frappe.logger().info(f"🔍 [Backend] No study schedules found for period {period}")
             return success_response([])
 
         target_schedule = schedules[0]
+        frappe.logger().info(f"🔍 [Backend] Target schedule: {target_schedule}")
+        frappe.logger().info(f"🔍 [Backend] Processing {len(events)} events...")
         
         matching_events = []
 
         for event in events:
             try:
+                frappe.logger().info(f"🔍 [Backend] Processing event: {event.get('name')}")
                 event_matches_date = False
                 event_time_ranges = []
 
@@ -288,17 +307,34 @@ def get_events_by_class_period():
                 else:
                     # Fallback: Use event's main start_time/end_time
                     if event.get('start_time') and event.get('end_time'):
-                        event_start = frappe.utils.getdate(event['start_time'])
-                        if str(event_start) == date:
-                            event_matches_date = True
-                            event_time_ranges.append({
-                                'startTime': frappe.utils.get_time(event['start_time']).strftime('%H:%M'),
-                                'endTime': frappe.utils.get_time(event['end_time']).strftime('%H:%M')
-                            })
+                        try:
+                            # Handle both datetime objects and strings
+                            start_time_obj = event['start_time']
+                            end_time_obj = event['end_time']
+                            
+                            # Convert to datetime if it's a string
+                            if isinstance(start_time_obj, str):
+                                start_time_obj = frappe.utils.get_datetime(start_time_obj)
+                            if isinstance(end_time_obj, str):
+                                end_time_obj = frappe.utils.get_datetime(end_time_obj)
+                                
+                            event_start_date = start_time_obj.date() if start_time_obj else None
+                            
+                            if event_start_date and str(event_start_date) == date:
+                                event_matches_date = True
+                                event_time_ranges.append({
+                                    'startTime': start_time_obj.strftime('%H:%M') if start_time_obj else '',
+                                    'endTime': end_time_obj.strftime('%H:%M') if end_time_obj else ''
+                                })
+                        except Exception as date_parse_error:
+                            frappe.logger().error(f"❌ Error parsing event dates for {event['name']}: {str(date_parse_error)}")
+                            continue
 
                 # Check if any event time range overlaps with target schedule
                 if event_matches_date:
+                    frappe.logger().info(f"🔍 [Backend] Event {event['name']} matches date {date}, checking {len(event_time_ranges)} time ranges")
                     for event_time_range in event_time_ranges:
+                        frappe.logger().info(f"🔍 [Backend] Checking overlap: event_range={event_time_range}, target_schedule={target_schedule}")
                         if time_ranges_overlap(event_time_range, target_schedule):
                             frappe.logger().info(f"🎯 [Backend] Event {event['name']} overlaps with period {period}")
                             
