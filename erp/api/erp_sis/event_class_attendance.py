@@ -243,16 +243,16 @@ def get_events_by_class_period():
 
         frappe.logger().info(f"🔍 [Backend] Getting events by class period: {class_id}, {date}, {period}")
 
-        # Lấy tất cả sự kiện có ngày trùng với date
+        # Lấy tất cả sự kiện approved 
         events = frappe.get_all("SIS Event", 
-                              fields=["name", "title", "date_times"],
-                              filters={"docstatus": 1})  # Chỉ lấy sự kiện đã được approve
+                              fields=["name", "title", "start_time", "end_time"],
+                              filters={"status": "approved"})  # Chỉ lấy sự kiện đã được approve
 
-        # Lấy tất cả schedules để tính toán overlap
+        # Chỉ lấy study periods matching với period requested
         schedules = frappe.get_all("SIS Timetable Column", 
                                  fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
                                  filters={
-                                     "period_type": "study",
+                                     "period_type": "study",  # CHỈ LẤY STUDY PERIODS
                                      "$or": [
                                          {"period_name": period},
                                          {"period_priority": period}
@@ -268,24 +268,41 @@ def get_events_by_class_period():
 
         for event in events:
             try:
-                # Parse date_times
-                event_date_times = []
-                if event.get('date_times'):
-                    if isinstance(event.date_times, str):
-                        event_date_times = json.loads(event.date_times)
-                    else:
-                        event_date_times = event.date_times
+                event_matches_date = False
+                event_time_ranges = []
 
-                # Tìm date_time matching với date và overlap với period
-                for dt in event_date_times:
-                    if dt.get('date') == date:
-                        event_time_range = {
-                            'startTime': dt.get('startTime', ''),
-                            'endTime': dt.get('endTime', '')
-                        }
+                # Try to get date times from SIS Event Date Time table first
+                event_date_times = frappe.get_all("SIS Event Date Time",
+                                                 filters={"event_id": event['name']},
+                                                 fields=["event_date", "start_time", "end_time"])
 
+                if event_date_times:
+                    # Event has specific date-time records
+                    for dt in event_date_times:
+                        if str(dt.get('event_date')) == date:
+                            event_matches_date = True
+                            event_time_ranges.append({
+                                'startTime': str(dt.get('start_time', '')),
+                                'endTime': str(dt.get('end_time', ''))
+                            })
+                else:
+                    # Fallback: Use event's main start_time/end_time
+                    if event.get('start_time') and event.get('end_time'):
+                        event_start = frappe.utils.getdate(event['start_time'])
+                        if str(event_start) == date:
+                            event_matches_date = True
+                            event_time_ranges.append({
+                                'startTime': frappe.utils.get_time(event['start_time']).strftime('%H:%M'),
+                                'endTime': frappe.utils.get_time(event['end_time']).strftime('%H:%M')
+                            })
+
+                # Check if any event time range overlaps with target schedule
+                if event_matches_date:
+                    for event_time_range in event_time_ranges:
                         if time_ranges_overlap(event_time_range, target_schedule):
-                            # Lấy danh sách học sinh tham gia từ lớp này
+                            frappe.logger().info(f"🎯 [Backend] Event {event['name']} overlaps with period {period}")
+                            
+                            # Lấy danh sách học sinh tham gia event
                             event_students = frappe.get_all("SIS Event Student",
                                                            filters={
                                                                "parent": event['name'],
@@ -293,7 +310,7 @@ def get_events_by_class_period():
                                                            },
                                                            fields=["student_id"])
 
-                            # Filter students theo class
+                            # Lấy danh sách học sinh trong lớp
                             class_students = frappe.get_all("SIS Class Student",
                                                            filters={"class_id": class_id},
                                                            fields=["student_id"])
@@ -302,13 +319,14 @@ def get_events_by_class_period():
                             matching_student_ids = [es['student_id'] for es in event_students if es['student_id'] in class_student_ids]
 
                             if matching_student_ids:
+                                frappe.logger().info(f"✅ [Backend] Found {len(matching_student_ids)} students from class {class_id} in event {event['name']}")
                                 matching_events.append({
                                     "eventId": event['name'],
                                     "eventTitle": event['title'],
                                     "studentIds": matching_student_ids
                                 })
 
-                            break
+                            break  # Found overlap, no need to check other time ranges
 
             except Exception as e:
                 frappe.logger().error(f"❌ Error processing event {event.get('name', '')}: {str(e)}")
