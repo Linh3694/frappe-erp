@@ -2011,12 +2011,24 @@ def save_event_attendance():
         if not current_teacher:
             return forbidden_response("Only teachers can save event attendance")
         
-        # Verify permission
-        event = frappe.get_doc("SIS Event", event_id)
+        # Verify permission (use get_all to avoid child table loading issues)
+        event_rows = frappe.get_all("SIS Event", 
+                                   filters={"name": event_id},
+                                   fields=["name", "create_by"],
+                                   limit_page_length=1)
+        if not event_rows:
+            return not_found_response("Event not found")
+        
+        event = event_rows[0]
         is_creator = event.create_by == current_teacher
-        event_teachers = frappe.get_all("SIS Event Teacher", 
-                                      filters={"event_id": event_id}, 
-                                      fields=["teacher_id"])
+        
+        try:
+            event_teachers = frappe.get_all("SIS Event Teacher", 
+                                          filters={"event_id": event_id}, 
+                                          fields=["teacher_id"])
+        except Exception:
+            event_teachers = []
+            
         is_event_teacher = any(t.teacher_id == current_teacher for t in event_teachers)
         
         if not (is_creator or is_event_teacher):
@@ -2031,36 +2043,41 @@ def save_event_attendance():
             if not student_id:
                 continue
             
-            # Check if record exists
-            existing = frappe.get_all("SIS Event Attendance",
-                                    filters={
-                                        "event_id": event_id,
-                                        "attendance_date": attendance_date,
-                                        "student_id": student_id
-                                    },
-                                    fields=["name"])
-            
-            if existing:
-                # Update existing record
-                doc = frappe.get_doc("SIS Event Attendance", existing[0].name)
-                doc.status = status
-                doc.recorded_by = current_teacher
-                doc.recorded_at = frappe.utils.now()
-                doc.save()
-            else:
-                # Create new record
-                doc = frappe.get_doc({
-                    "doctype": "SIS Event Attendance",
-                    "event_id": event_id,
-                    "attendance_date": attendance_date,
-                    "student_id": student_id,
-                    "status": status,
-                    "recorded_by": current_teacher,
-                    "recorded_at": frappe.utils.now()
-                })
-                doc.insert()
-            
-            saved_count += 1
+            try:
+                # Check if record exists
+                existing = frappe.get_all("SIS Event Attendance",
+                                        filters={
+                                            "event_id": event_id,
+                                            "attendance_date": attendance_date,
+                                            "student_id": student_id
+                                        },
+                                        fields=["name"])
+                
+                if existing:
+                    # Update existing record using db.set_value to avoid loading issues
+                    frappe.db.set_value("SIS Event Attendance", existing[0].name, {
+                        "status": status,
+                        "recorded_by": current_teacher,
+                        "recorded_at": frappe.utils.now()
+                    })
+                else:
+                    # Create new record
+                    doc = frappe.get_doc({
+                        "doctype": "SIS Event Attendance",
+                        "event_id": event_id,
+                        "attendance_date": attendance_date,
+                        "student_id": student_id,
+                        "status": status,
+                        "recorded_by": current_teacher,
+                        "recorded_at": frappe.utils.now()
+                    })
+                    doc.insert()
+                
+                saved_count += 1
+                
+            except Exception as e:
+                frappe.logger().error(f"🔍 Error saving attendance for student {student_id}: {str(e)}")
+                continue
         
         frappe.db.commit()
         
