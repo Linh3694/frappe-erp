@@ -1234,7 +1234,7 @@ def get_event_detail():
         event_rows = frappe.get_all(
             "SIS Event",
             filters={"name": event_id},
-            fields=["name", "title", "description", "status", "create_by", "create_at", "campus_id"],
+            fields=["name", "title", "description", "status", "create_by", "create_at", "campus_id", "start_time", "end_time"],
             limit_page_length=1
         )
         if not event_rows:
@@ -1253,6 +1253,8 @@ def get_event_detail():
             "status": event_basic.get("status"),
             "create_by": event_basic.get("create_by"),
             "create_at": event_basic.get("create_at"),
+            "start_time": event_basic.get("start_time"),
+            "end_time": event_basic.get("end_time"),
         }
 
         # Date schedules
