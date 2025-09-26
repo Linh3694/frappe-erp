@@ -554,7 +554,7 @@ def remove_automatic_attendance():
         frappe.db.rollback()
         frappe.logger().error(f"❌ [Backend] Error removing automatic attendance: {str(e)}")
         frappe.log_error(f"remove_automatic_attendance error: {str(e)}")
-``        return error_response(f"Failed to remove attendance: {str(e)}", code="REMOVE_ATTENDANCE_ERROR")
+        return error_response(f"Failed to remove attendance: {str(e)}", code="REMOVE_ATTENDANCE_ERROR")
 
 
 @frappe.whitelist(allow_guest=False)
