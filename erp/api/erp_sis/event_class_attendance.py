@@ -357,8 +357,18 @@ def get_events_by_class_period():
                 if event_matches_date:
                     frappe.logger().info(f"🔍 [Backend] Event {event['name']} matches date {date}, checking {len(event_time_ranges)} time ranges")
                     for event_time_range in event_time_ranges:
+                        debug_logs.append(f"🔍 [Backend] Checking overlap: event_range={event_time_range}, target_schedule={target_schedule}")
                         frappe.logger().info(f"🔍 [Backend] Checking overlap: event_range={event_time_range}, target_schedule={target_schedule}")
-                        if time_ranges_overlap(event_time_range, target_schedule):
+                        try:
+                            overlap_result = time_ranges_overlap(event_time_range, target_schedule)
+                            debug_logs.append(f"🧮 [Backend] Overlap result: {overlap_result}")
+                        except Exception as overlap_error:
+                            debug_logs.append(f"❌ [Backend] Error in time_ranges_overlap: {str(overlap_error)}")
+                            debug_logs.append(f"❌ [Backend] event_time_range type: {type(event_time_range)}")
+                            debug_logs.append(f"❌ [Backend] target_schedule type: {type(target_schedule)}")
+                            return error_response(f"Failed to check overlap: {str(overlap_error)}", "OVERLAP_ERROR", debug_info={"logs": debug_logs})
+                        
+                        if overlap_result:
                             frappe.logger().info(f"🎯 [Backend] Event {event['name']} overlaps with period {period}")
                             
                             # Lấy danh sách học sinh tham gia event
@@ -388,16 +398,20 @@ def get_events_by_class_period():
                             break  # Found overlap, no need to check other time ranges
 
             except Exception as e:
-                frappe.logger().error(f"❌ Error processing event {event.get('name', '')}: {str(e)}")
+                error_msg = f"❌ Error processing event {event.get('name', '')}: {str(e)}"
+                debug_logs.append(error_msg)
+                frappe.logger().error(error_msg)
                 continue
 
+        debug_logs.append(f"✅ [Backend] Found {len(matching_events)} matching events")
         frappe.logger().info(f"✅ [Backend] Found {len(matching_events)} matching events")
-        return success_response(matching_events)
+        return success_response(matching_events, debug_info={"logs": debug_logs})
 
     except Exception as e:
+        debug_logs.append(f"❌ [Backend] Error getting events by class period: {str(e)}")
         frappe.logger().error(f"❌ [Backend] Error getting events by class period: {str(e)}")
         frappe.log_error(f"get_events_by_class_period error: {str(e)}")
-        return error_response(f"Failed to get events: {str(e)}", "GET_EVENTS_ERROR")
+        return error_response(f"Failed to get events: {str(e)}", "GET_EVENTS_ERROR", debug_info={"logs": debug_logs})
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])

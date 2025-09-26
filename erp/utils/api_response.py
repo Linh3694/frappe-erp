@@ -5,7 +5,8 @@ from typing import Dict, Any, List, Optional, Union
 def success_response(
     data: Any = None,
     message: str = "Success",
-    meta: Optional[Dict[str, Any]] = None
+    meta: Optional[Dict[str, Any]] = None,
+    debug_info: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Chuẩn hoá success response theo format cố định"""
     response = {
@@ -18,6 +19,9 @@ def success_response(
 
     if meta:
         response["meta"] = meta
+
+    if debug_info:
+        response["debug_info"] = debug_info
 
     return response
 
