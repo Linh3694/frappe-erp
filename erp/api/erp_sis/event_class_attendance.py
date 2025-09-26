@@ -75,7 +75,7 @@ def sync_event_to_class_attendance():
         event_attendance_raw = data.get('event_attendance', [])
         
         if not event_id or not event_date:
-            return error_response("Missing event_id or event_date", "MISSING_PARAMS")
+            return error_response("Missing event_id or event_date", code="MISSING_PARAMS")
 
         # Parse event_attendance if it's a string
         if isinstance(event_attendance_raw, str):
@@ -91,7 +91,7 @@ def sync_event_to_class_attendance():
         # Lấy thông tin sự kiện để tính toán các tiết bị ảnh hưởng
         event = frappe.get_doc("SIS Event", event_id)
         if not event:
-            return error_response("Event not found", "EVENT_NOT_FOUND")
+            return error_response("Event not found", code="EVENT_NOT_FOUND")
 
         # Lấy date_times của sự kiện
         event_date_times = []
@@ -238,7 +238,7 @@ def sync_event_to_class_attendance():
         frappe.db.rollback()
         frappe.logger().error(f"❌ [Backend] Error syncing event to class attendance: {str(e)}")
         frappe.log_error(f"sync_event_to_class_attendance error: {str(e)}")
-        return error_response(f"Failed to sync attendance: {str(e)}", "SYNC_ERROR")
+        return error_response(f"Failed to sync attendance: {str(e)}", code="SYNC_ERROR")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -257,7 +257,7 @@ def get_events_by_class_period():
 
         if not class_id or not date or not period:
             debug_logs.append("❌ [Backend] Missing required parameters")
-            return error_response("Missing class_id, date, or period", "MISSING_PARAMS", debug_info={"logs": debug_logs})
+            return error_response("Missing class_id, date, or period", code="MISSING_PARAMS", debug_info={"logs": debug_logs})
 
         debug_logs.append(f"🔍 [Backend] Getting events by class period: {class_id}, {date}, {period}")
         frappe.logger().info(f"🔍 [Backend] Getting events by class period: {class_id}, {date}, {period}")
@@ -273,24 +273,38 @@ def get_events_by_class_period():
             frappe.logger().info(f"🔍 [Backend] Found {len(events)} approved events")
         except Exception as events_error:
             debug_logs.append(f"❌ [Backend] Error querying events: {str(events_error)}")
-            return error_response(f"Failed to get events: {str(events_error)}", "GET_EVENTS_ERROR", debug_info={"logs": debug_logs})
+            return error_response(f"Failed to get events: {str(events_error)}", code="GET_EVENTS_ERROR", debug_info={"logs": debug_logs})
 
         # Chỉ lấy study periods matching với period requested
         try:
             debug_logs.append(f"🔍 [Backend] Querying schedules for period: {period}")
-            schedules = frappe.get_all("SIS Timetable Column", 
-                                     fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
-                                     filters={
-                                         "period_type": "study",  # CHỈ LẤY STUDY PERIODS
-                                         "$or": [
-                                             {"period_name": period},
-                                             {"period_priority": period}
-                                         ]
-                                     })
+            # Query với 2 filters riêng rồi merge
+            schedules_by_name = frappe.get_all("SIS Timetable Column", 
+                                             fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                                             filters={
+                                                 "period_type": "study",
+                                                 "period_name": period
+                                             })
+            
+            schedules_by_priority = frappe.get_all("SIS Timetable Column", 
+                                                 fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                                                 filters={
+                                                     "period_type": "study",
+                                                     "period_priority": period
+                                                 })
+            
+            # Merge và remove duplicates
+            schedule_names = set()
+            schedules = []
+            
+            for s in schedules_by_name + schedules_by_priority:
+                if s['name'] not in schedule_names:
+                    schedules.append(s)
+                    schedule_names.add(s['name'])
             debug_logs.append(f"✅ [Backend] Found {len(schedules)} matching schedules")
         except Exception as schedules_error:
             debug_logs.append(f"❌ [Backend] Error querying schedules: {str(schedules_error)}")
-            return error_response(f"Failed to get schedules: {str(schedules_error)}", "GET_SCHEDULES_ERROR", debug_info={"logs": debug_logs})
+            return error_response(f"Failed to get schedules: {str(schedules_error)}", code="GET_SCHEDULES_ERROR", debug_info={"logs": debug_logs})
 
         if not schedules:
             debug_logs.append(f"ℹ️ [Backend] No study schedules found for period {period}")
@@ -366,7 +380,7 @@ def get_events_by_class_period():
                             debug_logs.append(f"❌ [Backend] Error in time_ranges_overlap: {str(overlap_error)}")
                             debug_logs.append(f"❌ [Backend] event_time_range type: {type(event_time_range)}")
                             debug_logs.append(f"❌ [Backend] target_schedule type: {type(target_schedule)}")
-                            return error_response(f"Failed to check overlap: {str(overlap_error)}", "OVERLAP_ERROR", debug_info={"logs": debug_logs})
+                            return error_response(f"Failed to check overlap: {str(overlap_error)}", code="OVERLAP_ERROR", debug_info={"logs": debug_logs})
                         
                         if overlap_result:
                             frappe.logger().info(f"🎯 [Backend] Event {event['name']} overlaps with period {period}")
@@ -411,7 +425,7 @@ def get_events_by_class_period():
         debug_logs.append(f"❌ [Backend] Error getting events by class period: {str(e)}")
         frappe.logger().error(f"❌ [Backend] Error getting events by class period: {str(e)}")
         frappe.log_error(f"get_events_by_class_period error: {str(e)}")
-        return error_response(f"Failed to get events: {str(e)}", "GET_EVENTS_ERROR", debug_info={"logs": debug_logs})
+        return error_response(f"Failed to get events: {str(e)}", code="GET_EVENTS_ERROR", debug_info={"logs": debug_logs})
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
@@ -432,7 +446,7 @@ def remove_automatic_attendance():
         event_id = data.get('event_id')
         
         if not event_id:
-            return error_response("Missing event_id", "MISSING_PARAMS")
+            return error_response("Missing event_id", code="MISSING_PARAMS")
 
         frappe.logger().info(f"🗑️ [Backend] Removing automatic attendance for event: {event_id}")
 
@@ -440,7 +454,7 @@ def remove_automatic_attendance():
         try:
             event = frappe.get_doc("SIS Event", event_id)
         except:
-            return error_response("Event not found", "EVENT_NOT_FOUND")
+            return error_response("Event not found", code="EVENT_NOT_FOUND")
 
         # Xóa tất cả class attendance có remarks chứa tên sự kiện
         attendance_records = frappe.get_all("SIS Class Attendance",
@@ -467,4 +481,4 @@ def remove_automatic_attendance():
         frappe.db.rollback()
         frappe.logger().error(f"❌ [Backend] Error removing automatic attendance: {str(e)}")
         frappe.log_error(f"remove_automatic_attendance error: {str(e)}")
-        return error_response(f"Failed to remove attendance: {str(e)}", "REMOVE_ATTENDANCE_ERROR")
+        return error_response(f"Failed to remove attendance: {str(e)}", code="REMOVE_ATTENDANCE_ERROR")
