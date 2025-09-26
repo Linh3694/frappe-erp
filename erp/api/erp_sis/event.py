@@ -240,6 +240,24 @@ def create_event():
         campus_id = get_current_campus_from_context()
         if not campus_id:
             return validation_error_response("Validation failed", {"campus_id": ["Campus context not found"]}, debug_info=debug_info)
+        
+        # Get current school year for the campus
+        school_year_id = None
+        try:
+            current_sy = frappe.get_all(
+                "SIS School Year",
+                filters={"campus_id": campus_id, "is_enable": 1},
+                fields=["name"],
+                limit_page_length=1
+            )
+            if current_sy:
+                school_year_id = current_sy[0].name
+                debug_info["auto_assigned_school_year"] = school_year_id
+        except Exception as e:
+            debug_info["school_year_lookup_error"] = str(e)
+            
+        if not school_year_id:
+            return validation_error_response("Validation failed", {"school_year_id": ["No active school year found for campus"]}, debug_info=debug_info)
 
         # Get current user as teacher
         current_user = frappe.session.user
@@ -259,10 +277,14 @@ def create_event():
         event_data = {
             "doctype": "SIS Event",
             "campus_id": campus_id,
+            "school_year_id": school_year_id,  # Auto-assign current school year
             "title": data.get("title"),
             "description": data.get("description"),
             "create_by": teacher,  # This should be a valid SIS Teacher name
             "create_at": frappe.utils.now(),
+            "status": "approved",  # Auto-approve all events temporarily
+            "approved_at": frappe.utils.now(),  # Set approved time
+            "approved_by": teacher,  # Set approved by same teacher who created
         }
 
         # Will hold processed schedules for new format to be created after event insert
@@ -276,12 +298,41 @@ def create_event():
                 "timetable_column_id": data.get("timetable_column_id"),
             })
 
-        # Handle schedule format
+        # Handle schedule format  
         elif has_schedule_format:
-            # For schedule format, set required datetime fields to current time (they won't be used)
-            current_time = frappe.utils.now_datetime()
-            event_data["start_time"] = current_time
-            event_data["end_time"] = current_time
+            # For schedule format, use dates from schedules to set meaningful start/end times
+            if date_schedules and len(date_schedules) > 0:
+                try:
+                    # Find earliest and latest dates
+                    dates = []
+                    for ds in date_schedules:
+                        if isinstance(ds, dict) and ds.get('date'):
+                            dates.append(ds.get('date'))
+                    
+                    if dates:
+                        # Sort dates and use earliest as start, latest as end
+                        dates.sort()
+                        # Convert date strings to datetime for consistency
+                        start_date_str = dates[0] + " 08:00:00"  # Default to 8 AM
+                        end_date_str = dates[-1] + " 17:00:00"  # Default to 5 PM
+                        
+                        event_data["start_time"] = frappe.utils.get_datetime(start_date_str)
+                        event_data["end_time"] = frappe.utils.get_datetime(end_date_str)
+                    else:
+                        # Fallback if no valid dates found
+                        current_time = frappe.utils.now_datetime()
+                        event_data["start_time"] = current_time
+                        event_data["end_time"] = current_time
+                except Exception as e:
+                    debug_info["start_end_time_error"] = str(e)
+                    current_time = frappe.utils.now_datetime()
+                    event_data["start_time"] = current_time
+                    event_data["end_time"] = current_time
+            else:
+                current_time = frappe.utils.now_datetime()
+                event_data["start_time"] = current_time
+                event_data["end_time"] = current_time
+                
             event_data["timetable_column_id"] = None
 
             if date_schedules and isinstance(date_schedules, list):
@@ -320,10 +371,51 @@ def create_event():
 
         # Handle datetime format
         elif has_datetime_format:
-            # For datetime format, set required datetime fields to current time (they won't be used)
-            current_time = frappe.utils.now_datetime()
-            event_data["start_time"] = current_time
-            event_data["end_time"] = current_time
+            # For datetime format, use actual start/end times from the data
+            if date_times and len(date_times) > 0:
+                try:
+                    # Find earliest start time and latest end time
+                    earliest_start = None
+                    latest_end = None
+                    
+                    for dt in date_times:
+                        if isinstance(dt, dict):
+                            date_val = dt.get('date')
+                            start_time = dt.get('start_time') or dt.get('startTime')  
+                            end_time = dt.get('end_time') or dt.get('endTime')
+                            
+                            if date_val and start_time and end_time:
+                                # Combine date and time
+                                start_datetime_str = f"{date_val} {start_time}:00"
+                                end_datetime_str = f"{date_val} {end_time}:00"
+                                
+                                start_dt = frappe.utils.get_datetime(start_datetime_str)
+                                end_dt = frappe.utils.get_datetime(end_datetime_str)
+                                
+                                if earliest_start is None or start_dt < earliest_start:
+                                    earliest_start = start_dt
+                                if latest_end is None or end_dt > latest_end:
+                                    latest_end = end_dt
+                    
+                    if earliest_start and latest_end:
+                        event_data["start_time"] = earliest_start
+                        event_data["end_time"] = latest_end
+                    else:
+                        # Fallback
+                        current_time = frappe.utils.now_datetime()
+                        event_data["start_time"] = current_time
+                        event_data["end_time"] = current_time
+                        
+                except Exception as e:
+                    debug_info["datetime_start_end_error"] = str(e)
+                    current_time = frappe.utils.now_datetime()
+                    event_data["start_time"] = current_time
+                    event_data["end_time"] = current_time
+            else:
+                current_time = frappe.utils.now_datetime()
+                event_data["start_time"] = current_time
+                event_data["end_time"] = current_time
+                
             event_data["timetable_column_id"] = None
 
             if date_times and isinstance(date_times, list):
@@ -611,9 +703,10 @@ def create_event():
         return error_response(f"Error creating event: {str(e)}", debug_info=debug_info)
 
 
-@frappe.whitelist(allow_guest=False)
+# Temporarily commented out - auto-approve all events
+# @frappe.whitelist(allow_guest=False)
 def approve_event():
-    """Approve an event (homeroom teacher only)"""
+    """Approve an event (homeroom teacher only) - TEMPORARILY DISABLED"""
     try:
         data = frappe.local.form_dict
         event_id = data.get("event_id")
@@ -646,6 +739,7 @@ def approve_event():
                 "status": [f"Event is already {event.status}"]
             })
 
+        # Temporarily commented - auto-approve all events
         # Approve event
         event.status = "approved"
         event.approved_at = frappe.utils.now()
@@ -656,8 +750,9 @@ def approve_event():
         event.save()
         frappe.db.commit()
 
+        # Temporarily commented - skip timetable override creation
         # Create timetable override
-        create_timetable_override(event)
+        # create_timetable_override(event)
 
         return single_item_response({
             "name": event.name,
@@ -673,9 +768,10 @@ def approve_event():
         return error_response(f"Error approving event: {str(e)}")
 
 
-@frappe.whitelist(allow_guest=False)
+# Temporarily commented out - auto-approve all events  
+# @frappe.whitelist(allow_guest=False)
 def reject_event():
-    """Reject an event (homeroom teacher only)"""
+    """Reject an event (homeroom teacher only) - TEMPORARILY DISABLED"""
     try:
         data = frappe.local.form_dict
         event_id = data.get("event_id")
@@ -950,6 +1046,9 @@ def get_events():
         except (TypeError, ZeroDivisionError):
             pages_count = 1
 
+        # Debug logging can be enabled here if needed for troubleshooting
+        # frappe.log_error(f"EventService get_events: filters={filters}, total_count={total_count}, events_returned={len(events)}, page={page}", "Events Debug")
+
         result = {
             "data": events,
             "pagination": {
@@ -967,8 +1066,11 @@ def get_events():
         return error_response(f"Error fetching events: {str(e)}")
 
 
+# Temporarily disabled - skip timetable override creation
 def create_timetable_override(event):
-    """Create timetable override when event is approved"""
+    """Create timetable override when event is approved - TEMPORARILY DISABLED"""
+    # Function temporarily disabled for testing
+    return
     try:
         # Get event participants
         participants = frappe.get_all(

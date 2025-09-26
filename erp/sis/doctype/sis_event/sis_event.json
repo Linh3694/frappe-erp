@@ -18,6 +18,7 @@
  "field_order": [
   "basic_information",
   "campus_id",
+  "school_year_id",
   "title",
   "description",
   "start_time",
@@ -49,6 +50,14 @@
    "fieldtype": "Link",
    "label": "Campus",
    "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "School Year",
+   "options": "SIS School Year",
    "reqd": 1,
    "in_list_view": 1
   },
