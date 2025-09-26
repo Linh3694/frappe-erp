@@ -1971,47 +1971,29 @@ def get_event_attendance():
 def save_event_attendance():
     """Save event attendance for a specific date"""
     try:
-        # Try multiple sources for parameters (form_dict for POST, request.args for GET)
-        data = frappe.local.form_dict or {}
-        
-        # Also check request args for GET parameters
-        request_args = {}
-        if hasattr(frappe.local, 'request') and hasattr(frappe.local.request, 'args'):
-            request_args = frappe.local.request.args or {}
-        
         # Try to get JSON data from request body
+        data = {}
         try:
             request_data = frappe.local.request.get_json()
             if request_data:
-                data.update(request_data)
+                data = request_data
         except Exception:
-            pass
+            # Fallback to form_dict
+            data = frappe.local.form_dict or {}
         
-        frappe.logger().debug(f"🔍 save_event_attendance - form_dict: {data}")
-        frappe.logger().debug(f"🔍 save_event_attendance - request.args: {request_args}")
+        event_id = data.get("event_id")
+        attendance_date = data.get("date") 
+        attendance_data = data.get("attendance", [])
         
-        # Get from both sources
-        event_id = data.get("event_id") or request_args.get("event_id")
-        attendance_date = data.get("date") or request_args.get("date")
-        attendance_data = data.get("attendance") or request_args.get("attendance") or []
-        
-        frappe.logger().debug(f"🔍 save_event_attendance - extracted: event_id={event_id}, date={attendance_date}, attendance_len={len(attendance_data) if attendance_data else 0}")
+        frappe.logger().debug(f"🔍 save_event_attendance - data: {data}")
+        frappe.logger().debug(f"🔍 save_event_attendance - extracted: event_id={event_id}, date={attendance_date}, attendance_len={len(attendance_data) if isinstance(attendance_data, list) else 'not_list'}")
         
         if not event_id or not attendance_date or not attendance_data:
-            # Include debug info in validation error
-            debug_info = {
-                "form_dict": dict(data) if data else None,
-                "request_args": dict(request_args) if request_args else None,
-                "extracted_event_id": event_id,
-                "extracted_date": attendance_date,
-                "attendance_data_type": str(type(attendance_data)),
-                "attendance_data_preview": str(attendance_data)[:200] if attendance_data else None
-            }
             return validation_error_response("Validation failed", {
                 "event_id": ["Event ID is required"] if not event_id else [],
                 "date": ["Date is required"] if not attendance_date else [],
                 "attendance": ["Attendance data is required"] if not attendance_data else []
-            }, debug_info=debug_info)
+            })
         
         # Parse attendance_data if it's a string
         if isinstance(attendance_data, str):
