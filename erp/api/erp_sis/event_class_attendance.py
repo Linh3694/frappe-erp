@@ -554,4 +554,76 @@ def remove_automatic_attendance():
         frappe.db.rollback()
         frappe.logger().error(f"❌ [Backend] Error removing automatic attendance: {str(e)}")
         frappe.log_error(f"remove_automatic_attendance error: {str(e)}")
-        return error_response(f"Failed to remove attendance: {str(e)}", code="REMOVE_ATTENDANCE_ERROR")
+``        return error_response(f"Failed to remove attendance: {str(e)}", code="REMOVE_ATTENDANCE_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_event_attendance_statuses():
+    """
+    Get event attendance statuses for students in a class period
+    Returns actual attendance status (present/absent/late/excused) for each student
+    """
+    debug_logs = []
+    try:
+        debug_logs.append("🚀 [Backend] Starting get_event_attendance_statuses")
+        
+        class_id = frappe.request.args.get('class_id')
+        date = frappe.request.args.get('date')
+        period = frappe.request.args.get('period')
+        
+        debug_logs.append(f"📝 [Backend] Parameters: class_id={class_id}, date={date}, period={period}")
+
+        if not class_id or not date or not period:
+            debug_logs.append("❌ [Backend] Missing required parameters")
+            return error_response("Missing class_id, date, or period", code="MISSING_PARAMS", debug_info={"logs": debug_logs})
+
+        # Get events affecting this class/period (reuse existing logic)
+        events_response = get_events_by_class_period()
+        if not events_response.get('success') or not events_response.get('data'):
+            debug_logs.append("ℹ️ [Backend] No events found for this period")
+            return success_response({}, debug_info={"logs": debug_logs})
+
+        events = events_response['data']
+        debug_logs.append(f"🔍 [Backend] Found {len(events)} events affecting this period")
+        
+        student_statuses = {}  # student_id -> status
+        
+        for event in events:
+            event_id = event['eventId']
+            student_ids = event['studentIds']
+            
+            debug_logs.append(f"📊 [Backend] Processing event {event_id} with {len(student_ids)} students")
+            
+            # Get event attendance records for these students on this date
+            for student_id in student_ids:
+                try:
+                    attendance_records = frappe.get_all("SIS Event Attendance",
+                                                       filters={
+                                                           "event_id": event_id,
+                                                           "student_id": student_id,
+                                                           "attendance_date": date
+                                                       },
+                                                       fields=["status"],
+                                                       limit=1)
+                    
+                    if attendance_records:
+                        status = attendance_records[0].get('status', 'excused')
+                        student_statuses[student_id] = status
+                        debug_logs.append(f"✅ [Backend] Student {student_id}: {status} (from event attendance)")
+                    else:
+                        # No event attendance record found, default to excused
+                        student_statuses[student_id] = 'excused'
+                        debug_logs.append(f"⚠️ [Backend] Student {student_id}: excused (no event attendance record)")
+                        
+                except Exception as student_error:
+                    debug_logs.append(f"❌ [Backend] Error getting attendance for student {student_id}: {str(student_error)}")
+                    student_statuses[student_id] = 'excused'  # Default fallback
+        
+        debug_logs.append(f"✅ [Backend] Final student statuses: {student_statuses}")
+        return success_response(student_statuses, debug_info={"logs": debug_logs})
+        
+    except Exception as e:
+        debug_logs.append(f"❌ [Backend] Error getting event attendance statuses: {str(e)}")
+        frappe.logger().error(f"❌ [Backend] Error getting event attendance statuses: {str(e)}")
+        frappe.log_error(f"get_event_attendance_statuses error: {str(e)}")
+        return error_response(f"Failed to get event attendance statuses: {str(e)}", code="GET_EVENT_ATTENDANCE_STATUSES_ERROR", debug_info={"logs": debug_logs})
