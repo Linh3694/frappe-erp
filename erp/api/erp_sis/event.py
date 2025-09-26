@@ -1822,15 +1822,37 @@ def delete_event():
 def get_event_attendance():
     """Get event attendance for a specific date"""
     try:
-        data = frappe.local.form_dict
-        event_id = data.get("event_id")
-        attendance_date = data.get("date")
+        # Try multiple sources for parameters (form_dict for POST, request.args for GET)
+        data = frappe.local.form_dict or {}
+        
+        # Also check request args for GET parameters
+        request_args = {}
+        if hasattr(frappe.local, 'request') and hasattr(frappe.local.request, 'args'):
+            request_args = frappe.local.request.args or {}
+        
+        frappe.logger().debug(f"🔍 get_event_attendance - form_dict: {data}")
+        frappe.logger().debug(f"🔍 get_event_attendance - request.args: {request_args}")
+        
+        # Get from both sources
+        event_id = data.get("event_id") or request_args.get("event_id")
+        attendance_date = data.get("date") or request_args.get("date")
+        
+        frappe.logger().debug(f"🔍 get_event_attendance - extracted: event_id={event_id}, date={attendance_date}")
         
         if not event_id or not attendance_date:
+            # Include debug info in validation error
+            debug_info = {
+                "form_dict": dict(data) if data else None,
+                "request_args": dict(request_args) if request_args else None,
+                "extracted_event_id": event_id,
+                "extracted_date": attendance_date,
+                "form_dict_keys": list(data.keys()) if data else None,
+                "request_args_keys": list(request_args.keys()) if request_args else None
+            }
             return validation_error_response("Validation failed", {
                 "event_id": ["Event ID is required"] if not event_id else [],
                 "date": ["Date is required"] if not attendance_date else []
-            })
+            }, debug_info=debug_info)
         
         # Get current user as teacher
         current_user = frappe.session.user
