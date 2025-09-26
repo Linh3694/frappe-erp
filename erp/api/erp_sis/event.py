@@ -699,6 +699,7 @@ def get_events():
         status = frappe.local.form_dict.get("status")
         date_from = frappe.local.form_dict.get("date_from")
         date_to = frappe.local.form_dict.get("date_to")
+        school_year = frappe.local.form_dict.get("school_year")
         for_approval_raw = frappe.local.form_dict.get("for_approval")
         for_approval = str(for_approval_raw).lower() in ("true", "1", "yes")
 
@@ -712,6 +713,11 @@ def get_events():
 
         if status:
             filters["status"] = status
+            
+        # Add school year filter
+        if school_year:
+            filters["school_year_id"] = school_year
+            
         # If requesting approval list, restrict to events with participants in classes of current teacher (homeroom or vice)
         if for_approval:
             # Current user as teacher
