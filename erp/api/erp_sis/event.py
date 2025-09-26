@@ -707,6 +707,108 @@ def create_event():
         except Exception as _e:
             debug_info["event_teacher_block_error"] = str(_e)
 
+        # Automatically create class attendance for events with date_times
+        try:
+            from .event_class_attendance import (
+                time_to_minutes, 
+                time_ranges_overlap, 
+                find_overlapping_schedules
+            )
+            
+            # Only create automatic attendance if event has date_times and students
+            if (has_datetime_format and processed_schedules and 
+                created_event_students and len(created_event_students) > 0):
+                
+                frappe.logger().info(f"🚀 [Backend] Creating automatic class attendance for event: {event.name}")
+                
+                # Get all schedules (periods)
+                schedules = frappe.get_all("SIS Timetable Column", 
+                                         fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                                         filters={"period_type": "study"})
+                
+                auto_attendance_count = 0
+                
+                for dt in processed_schedules:
+                    event_date = dt.get("event_date")
+                    start_time = dt.get("start_time") 
+                    end_time = dt.get("end_time")
+                    
+                    if not event_date or not start_time or not end_time:
+                        continue
+                    
+                    # Find overlapping schedules
+                    event_time_range = {
+                        'startTime': start_time,
+                        'endTime': end_time
+                    }
+                    
+                    overlapping_schedules = find_overlapping_schedules(event_time_range, schedules)
+                    
+                    if not overlapping_schedules:
+                        continue
+                    
+                    # For each participating student
+                    for student_name in created_event_students:
+                        try:
+                            # Get student info
+                            student = frappe.get_doc("SIS Student", student_name)
+                            
+                            # Find student's class
+                            class_students = frappe.get_all("SIS Class Student",
+                                                          filters={"student_id": student_name},
+                                                          fields=["class_id"])
+                            
+                            if not class_students:
+                                continue
+                            
+                            class_id = class_students[0].get('class_id')
+                            
+                            # Create attendance record for each overlapping period
+                            for schedule in overlapping_schedules:
+                                period = schedule.get('period_name') or str(schedule.get('period_priority', ''))
+                                
+                                # Check if record already exists
+                                existing = frappe.get_all("SIS Class Attendance",
+                                                        filters={
+                                                            "student_id": student_name,
+                                                            "class_id": class_id,
+                                                            "date": event_date,
+                                                            "period": period
+                                                        },
+                                                        fields=["name"])
+                                
+                                if not existing:
+                                    # Create new attendance record
+                                    attendance_doc = frappe.get_doc({
+                                        "doctype": "SIS Class Attendance",
+                                        "student_id": student_name,
+                                        "student_code": student.student_code,
+                                        "student_name": student.student_name,
+                                        "class_id": class_id,
+                                        "date": event_date,
+                                        "period": period,
+                                        "status": "excused",  # Vắng có phép
+                                        "remarks": f"Tham gia sự kiện: {event.title}",
+                                        "recorded_by": frappe.session.user
+                                    })
+                                    attendance_doc.insert()
+                                    auto_attendance_count += 1
+                                
+                        except Exception as student_error:
+                            frappe.logger().error(f"❌ Error creating auto attendance for student {student_name}: {str(student_error)}")
+                            continue
+                
+                if auto_attendance_count > 0:
+                    frappe.db.commit()
+                    debug_info["auto_attendance_created"] = auto_attendance_count
+                    frappe.logger().info(f"✅ [Backend] Created {auto_attendance_count} automatic attendance records")
+                else:
+                    debug_info["auto_attendance_created"] = 0
+                    
+        except Exception as auto_attendance_error:
+            debug_info["auto_attendance_error"] = str(auto_attendance_error)
+            frappe.logger().error(f"❌ [Backend] Error creating automatic attendance: {str(auto_attendance_error)}")
+
         debug_info["execution_reached_success"] = True
         return single_item_response({
             "name": event.name,
