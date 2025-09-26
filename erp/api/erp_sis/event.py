@@ -1520,7 +1520,6 @@ def get_event_detail():
             
         result["can_take_attendance"] = can_take_attendance
         result["current_teacher_id"] = current_teacher
-        result["attendance_debug"] = attendance_debug
 
         return single_item_response(result, "Event detail fetched successfully")
     except frappe.DoesNotExistError:
@@ -1711,11 +1710,12 @@ def delete_event():
         if event.create_by != teacher:
             return forbidden_response("Only event creator can delete this event")
 
-        # Check if event can be deleted (not approved/in progress)
-        if event.status == "approved":
-            return validation_error_response("Validation failed", {
-                "status": ["Cannot delete approved events"]
-            })
+        # TEMPORARILY COMMENTED: Check if event can be deleted (not approved/in progress)
+        # Since we auto-approve events now, allow deletion of approved events
+        # if event.status == "approved":
+        #     return validation_error_response("Validation failed", {
+        #         "status": ["Cannot delete approved events"]
+        #     })
 
         # Delete related records first using safer approach
         try:
@@ -1785,9 +1785,6 @@ def get_event_attendance():
         data = frappe.local.form_dict
         event_id = data.get("event_id")
         attendance_date = data.get("date")
-        
-        # Debug logging
-        frappe.log_error(f"get_event_attendance params: {data}", "EventAttendance Debug")
         
         if not event_id or not attendance_date:
             return validation_error_response("Validation failed", {
