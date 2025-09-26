@@ -1898,15 +1898,20 @@ def get_event_attendance():
             except Exception:
                 continue
         
-        # Get existing attendance records for this date
-        attendance_records = frappe.get_all("SIS Event Attendance",
-                                          filters={
-                                              "event_id": event_id,
-                                              "attendance_date": attendance_date
-                                          },
-                                          fields=["student_id", "status"])
-        
-        attendance_map = {record.student_id: record.status for record in attendance_records}
+        # Get existing attendance records for this date (with fallback)
+        attendance_map = {}
+        try:
+            attendance_records = frappe.get_all("SIS Event Attendance",
+                                              filters={
+                                                  "event_id": event_id,
+                                                  "attendance_date": attendance_date
+                                              },
+                                              fields=["student_id", "status"])
+            attendance_map = {record.student_id: record.status for record in attendance_records}
+        except Exception as e:
+            frappe.logger().debug(f"🔍 Could not fetch attendance records: {str(e)}")
+            # Fallback: assume all students are present
+            attendance_map = {}
         
         # Add attendance status to participants
         for p in participants:
@@ -1914,7 +1919,7 @@ def get_event_attendance():
         
         result = {
             "event": {
-                "name": event.name,
+                "name": event_id,
                 "title": event.title,
                 "description": event.description
             },
