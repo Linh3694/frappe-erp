@@ -135,10 +135,35 @@ def sync_event_to_class_attendance():
             frappe.logger().warning(f"⚠️ No matching date_time found for event_date={event_date}")
             return success_response({"synced_count": 0}, "No matching date found")
 
-        # Lấy tất cả schedules (tiết học)
-        schedules = frappe.get_all("SIS Timetable Column", 
+        # Lấy education_stage_id của lớp để filter timetable column chính xác
+        education_stage_id = None
+        if class_id:
+            # Lấy education_grade từ class
+            class_info = frappe.get_all("SIS Class",
+                                      filters={"name": class_id},
+                                      fields=["education_grade"],
+                                      limit=1)
+
+            if class_info:
+                education_grade = class_info[0].get("education_grade")
+                if education_grade:
+                    # Lấy education_stage_id từ education_grade
+                    grade_info = frappe.get_all("SIS Education Grade",
+                                              filters={"name": education_grade},
+                                              fields=["education_stage_id"],
+                                              limit=1)
+
+                    if grade_info:
+                        education_stage_id = grade_info[0].get("education_stage_id")
+
+        # Lấy tất cả schedules (tiết học) theo education_stage_id
+        schedule_filters = {"period_type": "study"}
+        if education_stage_id:
+            schedule_filters["education_stage_id"] = education_stage_id
+
+        schedules = frappe.get_all("SIS Timetable Column",
                                  fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
-                                 filters={"period_type": "study"})
+                                 filters=schedule_filters)
 
         # Tìm các tiết bị overlap
         event_time_range = {
