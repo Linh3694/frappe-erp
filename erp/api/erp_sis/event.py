@@ -688,9 +688,14 @@ def reject_event():
 def get_events():
     """Get events with filtering"""
     try:
-        # Get query parameters
-        page = int(frappe.local.form_dict.get("page", 1))
-        limit = int(frappe.local.form_dict.get("limit", 20))
+        try:
+            page = max(1, int(frappe.local.form_dict.get("page", 1)))
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            limit = max(1, int(frappe.local.form_dict.get("limit", 20)))
+        except (ValueError, TypeError):
+            limit = 20
         status = frappe.local.form_dict.get("status")
         date_from = frappe.local.form_dict.get("date_from")
         date_to = frappe.local.form_dict.get("date_to")
@@ -787,7 +792,8 @@ def get_events():
                 filters["start_time"] = []
             filters["start_time"].append(["<=", date_to])
 
-        # Query events
+        # Query events with safe pagination calculation
+        start_offset = max(0, (page - 1) * limit)
         events = frappe.get_all(
             "SIS Event",
             fields=[
@@ -796,7 +802,7 @@ def get_events():
                 "approved_at", "approved_by", "create_by", "create_at"
             ],
             filters=filters,
-            start=(page - 1) * limit,
+            start=start_offset,
             page_length=limit,
             order_by="create_at desc"
         )
@@ -871,6 +877,9 @@ def get_events():
 
         # Get total count
         total_count = frappe.db.count("SIS Event", filters=filters)
+        # Ensure total_count is not None to avoid arithmetic errors
+        if total_count is None:
+            total_count = 0
 
         result = {
             "data": events,
@@ -878,7 +887,7 @@ def get_events():
                 "page": page,
                 "limit": limit,
                 "total": total_count,
-                "pages": (total_count + limit - 1) // limit
+                "pages": max(1, (total_count + limit - 1) // limit)
             }
         }
 
