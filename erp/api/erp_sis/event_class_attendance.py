@@ -406,12 +406,50 @@ def get_events_by_class_period():
                             frappe.logger().info(f"🎯 [Backend] Event {event['name']} overlaps with period {period}")
                             
                             # Lấy danh sách học sinh tham gia event (via class_student_id)
-                            event_students = frappe.get_all("SIS Event Student",
-                                                           filters={
-                                                               "event_id": event['name'],
-                                                               "status": "approved"
-                                                           },
-                                                           fields=["class_student_id"])
+                            # Try multiple filter approaches
+                            event_students = []
+                            
+                            # Try 1: event_id field
+                            try:
+                                event_students = frappe.get_all("SIS Event Student",
+                                                               filters={"event_id": event['name']},
+                                                               fields=["class_student_id", "status"])
+                                debug_logs.append(f"🔍 [Backend] Try 1 - event_id filter: {len(event_students)} students")
+                            except Exception as e1:
+                                debug_logs.append(f"❌ [Backend] Try 1 failed: {str(e1)}")
+                            
+                            # Try 2: parent field if first failed
+                            if not event_students:
+                                try:
+                                    event_students = frappe.get_all("SIS Event Student",
+                                                                   filters={"parent": event['name']},
+                                                                   fields=["class_student_id", "status"])
+                                    debug_logs.append(f"🔍 [Backend] Try 2 - parent filter: {len(event_students)} students")
+                                except Exception as e2:
+                                    debug_logs.append(f"❌ [Backend] Try 2 failed: {str(e2)}")
+                            
+                            # Try 3: No field filter, get all and debug
+                            if not event_students:
+                                try:
+                                    all_event_students = frappe.get_all("SIS Event Student", 
+                                                                       fields=["name", "event_id", "parent", "class_student_id", "status"],
+                                                                       limit=10)
+                                    debug_logs.append(f"🔍 [Backend] Try 3 - All event students sample: {all_event_students[:3]}")
+                                except Exception as e3:
+                                    debug_logs.append(f"❌ [Backend] Try 3 failed: {str(e3)}")
+                            
+                            # Filter by status if we found students
+                            if event_students:
+                                debug_logs.append(f"🔍 [Backend] Before status filter: {len(event_students)} students")
+                                approved_students = [es for es in event_students if es.get('status') == 'approved']
+                                debug_logs.append(f"🔍 [Backend] Approved students: {len(approved_students)}")
+                                
+                                # If no approved, try all statuses
+                                if not approved_students:
+                                    debug_logs.append(f"⚠️ [Backend] No approved students, using all statuses")
+                                    event_students = [{"class_student_id": es["class_student_id"]} for es in event_students]
+                                else:
+                                    event_students = [{"class_student_id": es["class_student_id"]} for es in approved_students]
 
                             debug_logs.append(f"🔍 [Backend] Found {len(event_students)} event students")
 
