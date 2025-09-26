@@ -276,26 +276,39 @@ def create_event():
             event_data["end_time"] = current_time
             event_data["timetable_column_id"] = None
 
-            if date_schedules:
+            if date_schedules and isinstance(date_schedules, list):
                 # Prepare date schedules for creation (do NOT attach to event doc child table)
                 for ds in date_schedules:
-                    event_date = ds.get('date') if isinstance(ds, dict) else None
-                    if not event_date and isinstance(ds, dict):
-                        event_date = ds.get('event_date')
+                    try:
+                        if not ds or not isinstance(ds, dict):
+                            debug_info.setdefault("schedule_processing_warnings", []).append(f"Skipping invalid schedule data: {ds}")
+                            continue
+                            
+                        event_date = ds.get('date') if isinstance(ds, dict) else None
+                        if not event_date and isinstance(ds, dict):
+                            event_date = ds.get('event_date')
 
-                    schedule_ids_value = []
-                    if isinstance(ds, dict):
-                        schedule_ids_value = ds.get('scheduleIds') or ds.get('schedule_ids') or []
+                        schedule_ids_value = []
+                        if isinstance(ds, dict):
+                            schedule_ids_value = ds.get('scheduleIds') or ds.get('schedule_ids') or []
 
-                    if isinstance(schedule_ids_value, list):
-                        schedule_ids_str = ','.join(schedule_ids_value)
-                    else:
-                        schedule_ids_str = str(schedule_ids_value) if schedule_ids_value else ''
+                        # Safe string conversion
+                        if isinstance(schedule_ids_value, list):
+                            schedule_ids_str = ','.join(str(x) for x in schedule_ids_value if x is not None)
+                        else:
+                            schedule_ids_str = str(schedule_ids_value) if schedule_ids_value is not None else ''
 
-                    processed_schedules.append({
-                        "event_date": event_date,
-                        "schedule_ids": schedule_ids_str
-                    })
+                        if not event_date or not schedule_ids_str:
+                            debug_info.setdefault("schedule_processing_warnings", []).append(f"Skipping incomplete schedule: date={event_date}, ids={schedule_ids_str}")
+                            continue
+
+                        processed_schedules.append({
+                            "event_date": event_date,
+                            "schedule_ids": schedule_ids_str
+                        })
+                    except Exception as se:
+                        debug_info.setdefault("schedule_processing_errors", []).append(f"Error processing schedule: {str(se)}")
+                        continue
 
         # Handle datetime format
         elif has_datetime_format:
@@ -305,24 +318,36 @@ def create_event():
             event_data["end_time"] = current_time
             event_data["timetable_column_id"] = None
 
-            if date_times:
+            if date_times and isinstance(date_times, list):
                 # Prepare date times for creation
                 for dt in date_times:
-                    event_date = dt.get('date') if isinstance(dt, dict) else None
-                    start_time = dt.get('start_time') if isinstance(dt, dict) else None
-                    end_time = dt.get('end_time') if isinstance(dt, dict) else None
+                    try:
+                        if not dt or not isinstance(dt, dict):
+                            debug_info.setdefault("datetime_processing_warnings", []).append(f"Skipping invalid datetime data: {dt}")
+                            continue
+                            
+                        event_date = dt.get('date') if isinstance(dt, dict) else None
+                        start_time = dt.get('start_time') if isinstance(dt, dict) else None
+                        end_time = dt.get('end_time') if isinstance(dt, dict) else None
 
-                    # Also support startTime/endTime naming
-                    if not start_time and isinstance(dt, dict):
-                        start_time = dt.get('startTime')
-                    if not end_time and isinstance(dt, dict):
-                        end_time = dt.get('endTime')
+                        # Also support startTime/endTime naming
+                        if not start_time and isinstance(dt, dict):
+                            start_time = dt.get('startTime')
+                        if not end_time and isinstance(dt, dict):
+                            end_time = dt.get('endTime')
 
-                    processed_schedules.append({
-                        "event_date": event_date,
-                        "start_time": start_time,
-                        "end_time": end_time
-                    })
+                        if not event_date or not start_time or not end_time:
+                            debug_info.setdefault("datetime_processing_warnings", []).append(f"Skipping incomplete datetime: date={event_date}, start={start_time}, end={end_time}")
+                            continue
+
+                        processed_schedules.append({
+                            "event_date": event_date,
+                            "start_time": start_time,
+                            "end_time": end_time
+                        })
+                    except Exception as de:
+                        debug_info.setdefault("datetime_processing_errors", []).append(f"Error processing datetime: {str(de)}")
+                        continue
 
         # Validate students are assigned to classes; build quick lookup to reuse later
         student_ids = data.get('student_ids') or []
@@ -409,9 +434,10 @@ def create_event():
             created_schedule_names = []
             for ds in processed_schedules:
                 try:
-                    event_date = ds.get("event_date")
-                    schedule_ids = ds.get("schedule_ids")
+                    event_date = ds.get("event_date") if ds else None
+                    schedule_ids = ds.get("schedule_ids") if ds else None
                     if not event_date or not schedule_ids:
+                        debug_info.setdefault("schedule_creation_warnings", []).append(f"Skipping schedule due to missing data: date={event_date}, ids={schedule_ids}")
                         continue
 
                     schedule_doc = frappe.get_doc({
@@ -438,10 +464,11 @@ def create_event():
             created_datetime_names = []
             for dt in processed_schedules:
                 try:
-                    event_date = dt.get("event_date")
-                    start_time = dt.get("start_time")
-                    end_time = dt.get("end_time")
+                    event_date = dt.get("event_date") if dt else None
+                    start_time = dt.get("start_time") if dt else None
+                    end_time = dt.get("end_time") if dt else None
                     if not event_date or not start_time or not end_time:
+                        debug_info.setdefault("datetime_creation_warnings", []).append(f"Skipping datetime due to missing data: date={event_date}, start={start_time}, end={end_time}")
                         continue
 
                     datetime_doc = frappe.get_doc({
@@ -499,8 +526,14 @@ def create_event():
                 # Resolve class_student_id for each student (pick latest assignment)
                 for sid in student_ids:
                     try:
-                        cs = class_student_lookup.get(sid)
-                        class_student_id = cs["name"] if cs else None
+                        # Safe access to student lookup data
+                        cs = class_student_lookup.get(sid) if class_student_lookup else None
+                        class_student_id = cs.get("name") if cs and isinstance(cs, dict) else None
+                        
+                        if not class_student_id:
+                            debug_info.setdefault("student_creation_warnings", []).append(f"No class assignment found for student: {sid}")
+                            continue
+                            
                         doc = frappe.get_doc({
                             "doctype": "SIS Event Student",
                             "campus_id": campus_id,
@@ -513,10 +546,12 @@ def create_event():
                     except Exception as _es:
                         if "event_student_creation_errors" not in debug_info:
                             debug_info["event_student_creation_errors"] = []
-                        debug_info["event_student_creation_errors"].append(str(_es))
+                        debug_info["event_student_creation_errors"].append(f"Error creating event student for {sid}: {str(_es)}")
+            
             if created_event_students:
                 frappe.db.commit()
                 debug_info["event_students_created"] = created_event_students
+                debug_info["event_students_count"] = len(created_event_students)
         except Exception as _e:
             debug_info["event_student_block_error"] = str(_e)
 
@@ -527,6 +562,11 @@ def create_event():
             if isinstance(teacher_ids, list) and len(teacher_ids) > 0:
                 for tid in teacher_ids:
                     try:
+                        # Validate teacher_id is not None or empty
+                        if not tid or str(tid).strip() == '':
+                            debug_info.setdefault("teacher_creation_warnings", []).append(f"Skipping empty teacher ID: {tid}")
+                            continue
+                            
                         teacher_doc = frappe.get_doc({
                             "doctype": "SIS Event Teacher",
                             "campus_id": campus_id,
@@ -538,10 +578,12 @@ def create_event():
                     except Exception as _et:
                         if "event_teacher_creation_errors" not in debug_info:
                             debug_info["event_teacher_creation_errors"] = []
-                        debug_info["event_teacher_creation_errors"].append(str(_et))
+                        debug_info["event_teacher_creation_errors"].append(f"Error creating event teacher for {tid}: {str(_et)}")
+            
             if created_event_teachers:
                 frappe.db.commit()
                 debug_info["event_teachers_created"] = created_event_teachers
+                debug_info["event_teachers_count"] = len(created_event_teachers)
         except Exception as _e:
             debug_info["event_teacher_block_error"] = str(_e)
 
@@ -881,11 +923,21 @@ def get_events():
         except Exception:
             pass
 
-        # Get total count
-        total_count = frappe.db.count("SIS Event", filters=filters)
-        # Ensure total_count is not None to avoid arithmetic errors
-        if total_count is None:
-            total_count = 0
+        # Get total count with safe handling
+        try:
+            total_count = frappe.db.count("SIS Event", filters=filters)
+            # Ensure total_count is not None to avoid arithmetic errors
+            if total_count is None:
+                total_count = 0
+        except Exception as e:
+            frappe.log_error(f"Error getting count: {str(e)}")
+            total_count = len(events)  # Fallback to current page count
+
+        # Safe pagination calculation
+        try:
+            pages_count = max(1, (total_count + limit - 1) // limit) if total_count > 0 else 1
+        except (TypeError, ZeroDivisionError):
+            pages_count = 1
 
         result = {
             "data": events,
@@ -893,7 +945,7 @@ def get_events():
                 "page": page,
                 "limit": limit,
                 "total": total_count,
-                "pages": max(1, (total_count + limit - 1) // limit)
+                "pages": pages_count
             }
         }
 
