@@ -138,11 +138,11 @@ def create_event():
 
         # Fix validation logic for date schedules
         date_schedules = data.get('date_schedules') or data.get('dateSchedules')
-        has_schedule_format = date_schedules and isinstance(date_schedules, list) and len(date_schedules) > 0
+        has_schedule_format = bool(date_schedules and isinstance(date_schedules, list) and len(date_schedules) > 0)
 
         # Check for new datetime format
         date_times = data.get('date_times') or data.get('dateTimes')
-        has_datetime_format = date_times and isinstance(date_times, list) and len(date_times) > 0
+        has_datetime_format = bool(date_times and isinstance(date_times, list) and len(date_times) > 0)
 
         debug_info["validation_check"] = {
             "has_old_format": has_old_format,
@@ -178,8 +178,16 @@ def create_event():
                 "debug_info": debug_info
             })
 
-        # Check that only one format is used at a time
-        format_count = sum([has_old_format, has_schedule_format, has_datetime_format])
+        # Check that only one format is used at a time - safe sum calculation
+        try:
+            format_count = sum([
+                1 if has_old_format else 0,
+                1 if has_schedule_format else 0, 
+                1 if has_datetime_format else 0
+            ])
+        except (TypeError, ValueError):
+            # Fallback: manual count if sum fails
+            format_count = (1 if has_old_format else 0) + (1 if has_schedule_format else 0) + (1 if has_datetime_format else 0)
         
         debug_info["validation_condition_check"] = {
             "has_old_format": has_old_format,
@@ -841,7 +849,10 @@ def get_events():
             filters["start_time"].append(["<=", date_to])
 
         # Query events with safe pagination calculation
-        start_offset = max(0, (page - 1) * limit)
+        try:
+            start_offset = max(0, (page - 1) * limit)
+        except (TypeError, ValueError):
+            start_offset = 0
         events = frappe.get_all(
             "SIS Event",
             fields=[
