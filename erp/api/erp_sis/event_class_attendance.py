@@ -405,29 +405,44 @@ def get_events_by_class_period():
                         if overlap_result:
                             frappe.logger().info(f"🎯 [Backend] Event {event['name']} overlaps with period {period}")
                             
-                            # Lấy danh sách học sinh tham gia event
+                            # Lấy danh sách học sinh tham gia event (via class_student_id)
                             event_students = frappe.get_all("SIS Event Student",
                                                            filters={
-                                                               "parent": event['name'],
+                                                               "event_id": event['name'],
                                                                "status": "approved"
                                                            },
-                                                           fields=["student_id"])
+                                                           fields=["class_student_id"])
+
+                            debug_logs.append(f"🔍 [Backend] Found {len(event_students)} event students")
 
                             # Lấy danh sách học sinh trong lớp
                             class_students = frappe.get_all("SIS Class Student",
                                                            filters={"class_id": class_id},
-                                                           fields=["student_id"])
+                                                           fields=["name", "student_id"])
 
-                            class_student_ids = [cs['student_id'] for cs in class_students]
-                            matching_student_ids = [es['student_id'] for es in event_students if es['student_id'] in class_student_ids]
+                            debug_logs.append(f"🔍 [Backend] Found {len(class_students)} class students")
+
+                            # Match event students với class students
+                            class_student_dict = {cs['name']: cs['student_id'] for cs in class_students}
+                            matching_student_ids = []
+                            
+                            for es in event_students:
+                                class_student_id = es['class_student_id']
+                                if class_student_id in class_student_dict:
+                                    student_id = class_student_dict[class_student_id]
+                                    matching_student_ids.append(student_id)
+                                    debug_logs.append(f"✅ [Backend] Matched class_student {class_student_id} → student {student_id}")
 
                             if matching_student_ids:
+                                debug_logs.append(f"✅ [Backend] Found {len(matching_student_ids)} students from class {class_id} in event {event['name']}")
                                 frappe.logger().info(f"✅ [Backend] Found {len(matching_student_ids)} students from class {class_id} in event {event['name']}")
                                 matching_events.append({
                                     "eventId": event['name'],
                                     "eventTitle": event['title'],
                                     "studentIds": matching_student_ids
                                 })
+                            else:
+                                debug_logs.append(f"⚠️ [Backend] No matching students found for event {event['name']} in class {class_id}")
 
                             break  # Found overlap, no need to check other time ranges
 
