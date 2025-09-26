@@ -95,6 +95,27 @@ def create_event():
             else:
                 parsing_info["teacher_ids"] = "already an array"
 
+        # Handle new date_times format
+        if data.get('date_times'):
+            if isinstance(data.get('date_times'), str):
+                try:
+                    data['date_times'] = frappe.parse_json(data['date_times'])
+                    parsing_info["date_times"] = "parsed from string"
+                except Exception as e:
+                    parsing_info["date_times"] = f"parse error: {str(e)}"
+            else:
+                parsing_info["date_times"] = "already an object"
+
+        if data.get('dateTimes'):
+            if isinstance(data.get('dateTimes'), str):
+                try:
+                    data['dateTimes'] = frappe.parse_json(data['dateTimes'])
+                    parsing_info["dateTimes"] = "parsed from string"
+                except Exception as e:
+                    parsing_info["dateTimes"] = f"parse error: {str(e)}"
+            else:
+                parsing_info["dateTimes"] = "already an object"
+
         debug_info["parsing_info"] = parsing_info
         try:
             debug_info["parsed_data"] = dict(data)
@@ -110,26 +131,35 @@ def create_event():
                 debug_info["parsed_data_fallback"] = str(data)
             return error_response("Error creating dict representation", debug_info=debug_info)
 
-        # Required fields validation - support both old and new format
+        # Required fields validation - support old, schedule, and datetime formats
         start_time_value = data.get('start_time')
         end_time_value = data.get('end_time')
         has_old_format = bool(start_time_value and end_time_value)
 
         # Fix validation logic for date schedules
         date_schedules = data.get('date_schedules') or data.get('dateSchedules')
-        has_new_format = date_schedules and isinstance(date_schedules, list) and len(date_schedules) > 0
+        has_schedule_format = date_schedules and isinstance(date_schedules, list) and len(date_schedules) > 0
+
+        # Check for new datetime format
+        date_times = data.get('date_times') or data.get('dateTimes')
+        has_datetime_format = date_times and isinstance(date_times, list) and len(date_times) > 0
 
         debug_info["validation_check"] = {
             "has_old_format": has_old_format,
-            "has_new_format": has_new_format,
+            "has_schedule_format": has_schedule_format,
+            "has_datetime_format": has_datetime_format,
             "start_time_value": start_time_value,
             "end_time_value": end_time_value,
             "start_time_type": str(type(start_time_value)),
             "end_time_type": str(type(end_time_value)),
             "date_schedules_value": date_schedules,
             "date_schedules_type": str(type(date_schedules)),
+            "date_times_value": date_times,
+            "date_times_type": str(type(date_times)),
             "data_date_schedules": data.get('date_schedules'),
             "data_dateSchedules": data.get('dateSchedules'),
+            "data_date_times": data.get('date_times'),
+            "data_dateTimes": data.get('dateTimes'),
             "start_time": data.get('start_time'),
             "end_time": data.get('end_time')
         }
@@ -137,37 +167,47 @@ def create_event():
         if isinstance(date_schedules, list):
             debug_info["validation_check"]["date_schedules_length"] = len(date_schedules)
 
-        if not has_old_format and not has_new_format:
-            debug_info["validation_error"] = "Neither old nor new format provided"
+        if isinstance(date_times, list):
+            debug_info["validation_check"]["date_times_length"] = len(date_times)
+
+        # At least one format must be provided
+        if not has_old_format and not has_schedule_format and not has_datetime_format:
+            debug_info["validation_error"] = "No valid time format provided"
             return validation_error_response("Validation failed", {
-                "time_info": ["Either start_time/end_time or dateSchedules must be provided"],
+                "time_info": ["Either start_time/end_time, dateSchedules, or dateTimes must be provided"],
                 "debug_info": debug_info
             })
 
+        # Check that only one format is used at a time
+        format_count = sum([has_old_format, has_schedule_format, has_datetime_format])
+        
         debug_info["validation_condition_check"] = {
-            "condition_old_and_new": has_old_format and has_new_format,
-            "condition_old_format": has_old_format,
-            "condition_new_format": has_new_format,
-            "old_and_new_evaluation": f"{has_old_format} and {has_new_format} = {has_old_format and has_new_format}"
+            "has_old_format": has_old_format,
+            "has_schedule_format": has_schedule_format,
+            "has_datetime_format": has_datetime_format,
+            "format_count": format_count
         }
 
-        if has_old_format and has_new_format:
-            debug_info["validation_error_triggered"] = "both_formats_detected"
+        if format_count > 1:
+            debug_info["validation_error_triggered"] = "multiple_formats_detected"
             return validation_error_response("Validation failed", {
-                "time_info": ["Cannot use both old format (start_time/end_time) and new format (dateSchedules) simultaneously"]
+                "time_info": ["Cannot use multiple time formats simultaneously. Use only one of: start_time/end_time, dateSchedules, or dateTimes"]
             }, debug_info=debug_info)
 
         required_fields = ['title']
         if has_old_format:
             required_fields.extend(['start_time', 'end_time'])
-        elif has_new_format:
-            # For new format, we don't require any specific field name since we accept both dateSchedules and date_schedules
+        elif has_schedule_format:
+            # For schedule format, we don't require any specific field name since we accept both dateSchedules and date_schedules
+            pass
+        elif has_datetime_format:
+            # For datetime format, we don't require any specific field name since we accept both dateTimes and date_times
             pass
 
         missing_fields = [field for field in required_fields if not data.get(field)]
 
-        # Additional validation for new format
-        if has_new_format:
+        # Additional validation for schedule and datetime formats
+        if has_schedule_format or has_datetime_format:
             student_ids = data.get('student_ids') or []
             teacher_ids = data.get('teacher_ids') or []
 
@@ -228,9 +268,9 @@ def create_event():
                 "timetable_column_id": data.get("timetable_column_id"),
             })
 
-        # Handle new format
-        elif has_new_format:
-            # For new format, set required datetime fields to current time (they won't be used)
+        # Handle schedule format
+        elif has_schedule_format:
+            # For schedule format, set required datetime fields to current time (they won't be used)
             current_time = frappe.utils.now_datetime()
             event_data["start_time"] = current_time
             event_data["end_time"] = current_time
@@ -255,6 +295,33 @@ def create_event():
                     processed_schedules.append({
                         "event_date": event_date,
                         "schedule_ids": schedule_ids_str
+                    })
+
+        # Handle datetime format
+        elif has_datetime_format:
+            # For datetime format, set required datetime fields to current time (they won't be used)
+            current_time = frappe.utils.now_datetime()
+            event_data["start_time"] = current_time
+            event_data["end_time"] = current_time
+            event_data["timetable_column_id"] = None
+
+            if date_times:
+                # Prepare date times for creation
+                for dt in date_times:
+                    event_date = dt.get('date') if isinstance(dt, dict) else None
+                    start_time = dt.get('start_time') if isinstance(dt, dict) else None
+                    end_time = dt.get('end_time') if isinstance(dt, dict) else None
+
+                    # Also support startTime/endTime naming
+                    if not start_time and isinstance(dt, dict):
+                        start_time = dt.get('startTime')
+                    if not end_time and isinstance(dt, dict):
+                        end_time = dt.get('endTime')
+
+                    processed_schedules.append({
+                        "event_date": event_date,
+                        "start_time": start_time,
+                        "end_time": end_time
                     })
 
         # Validate students are assigned to classes; build quick lookup to reuse later
@@ -337,8 +404,8 @@ def create_event():
         event.insert()
         frappe.db.commit()
 
-        # Create date schedule records separately for new format to avoid child-table mandatory issues
-        if has_new_format and processed_schedules:
+        # Create date schedule records separately for schedule format to avoid child-table mandatory issues
+        if has_schedule_format and processed_schedules:
             created_schedule_names = []
             for ds in processed_schedules:
                 try:
@@ -362,8 +429,42 @@ def create_event():
                         debug_info["schedule_creation_errors"] = []
                     debug_info["schedule_creation_errors"].append(str(e))
 
-            frappe.db.commit()
-            debug_info["schedules_created"] = created_schedule_names
+            if created_schedule_names:
+                debug_info["created_schedule_names"] = created_schedule_names
+                debug_info["schedule_creation_count"] = len(created_schedule_names)
+
+        # Create date time records separately for datetime format
+        elif has_datetime_format and processed_schedules:
+            created_datetime_names = []
+            for dt in processed_schedules:
+                try:
+                    event_date = dt.get("event_date")
+                    start_time = dt.get("start_time")
+                    end_time = dt.get("end_time")
+                    if not event_date or not start_time or not end_time:
+                        continue
+
+                    datetime_doc = frappe.get_doc({
+                        "doctype": "SIS Event Date Time",
+                        "event_id": event.name,
+                        "event_date": event_date,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "create_at": frappe.utils.now()
+                    })
+                    datetime_doc.insert()
+                    created_datetime_names.append(datetime_doc.name)
+                except Exception as e:
+                    # Collect but do not fail the whole request; these will be visible in debug_info
+                    if "datetime_creation_errors" not in debug_info:
+                        debug_info["datetime_creation_errors"] = []
+                    debug_info["datetime_creation_errors"].append(str(e))
+
+            if created_datetime_names:
+                debug_info["created_datetime_names"] = created_datetime_names
+                debug_info["datetime_creation_count"] = len(created_datetime_names)
+
+        frappe.db.commit()
 
         # Prepare normalized default status for Event Student to avoid option mismatch
         event_student_status_default = None
@@ -732,7 +833,23 @@ def get_events():
 
                 event["dateSchedules"] = processed_schedules
 
-        # Normalize status to a valid option in case options contained literal newlines
+            date_times = frappe.get_all(
+                "SIS Event Date Time",
+                filters={"event_id": event.name},
+                fields=["event_date", "start_time", "end_time"]
+            )
+
+            if date_times:
+                # Process date times
+                processed_times = []
+                for dt in date_times:
+                    processed_times.append({
+                        "date": dt.event_date,
+                        "startTime": dt.start_time,
+                        "endTime": dt.end_time
+                    })
+
+                event["dateTimes"] = processed_times
         try:
             meta = frappe.get_meta("SIS Event")
             status_field = meta.get_field("status")
@@ -961,6 +1078,21 @@ def get_event_detail():
                 "schedules": schedules
             })
         result["dateSchedules"] = processed_schedules
+
+        # Date times
+        date_times = frappe.get_all(
+            "SIS Event Date Time",
+            filters={"event_id": event_id},
+            fields=["event_date", "start_time", "end_time"]
+        )
+        processed_times = []
+        for dt in date_times:
+            processed_times.append({
+                "date": dt.event_date,
+                "startTime": dt.start_time,
+                "endTime": dt.end_time
+            })
+        result["dateTimes"] = processed_times
 
         # Participants (event students + class/student info minimal)
         # If include_all_participants=True (list tab), do NOT filter by teacher classes
@@ -1390,6 +1522,14 @@ def delete_event():
             frappe.db.sql("""DELETE FROM `tabSIS Event Date Schedule` WHERE event_id = %s""", (event_id,))
         except Exception as e:
             frappe.log_error(f"Error deleting event date schedules: {str(e)}", "Delete Event")
+            # No fallback needed - if SQL fails, continue with other deletions
+            pass
+
+        try:
+            # Delete event date times - use direct SQL to avoid parent column issues
+            frappe.db.sql("""DELETE FROM `tabSIS Event Date Time` WHERE event_id = %s""", (event_id,))
+        except Exception as e:
+            frappe.log_error(f"Error deleting event date times: {str(e)}", "Delete Event")
             # No fallback needed - if SQL fails, continue with other deletions
             pass
         
