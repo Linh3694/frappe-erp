@@ -1492,8 +1492,8 @@ def get_event_detail():
                 }
                 for row in event_teacher_rows
             ]
-            except Exception as _e:
-                debug_info["event_teacher_list_error"] = str(_e)
+        except Exception as _e:
+            debug_info["event_teacher_list_error"] = str(_e)
 
         # Add attendance permission check
         can_take_attendance = False
