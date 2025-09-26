@@ -1786,6 +1786,9 @@ def get_event_attendance():
         event_id = data.get("event_id")
         attendance_date = data.get("date")
         
+        # Debug logging
+        frappe.log_error(f"get_event_attendance params: {data}", "EventAttendance Debug")
+        
         if not event_id or not attendance_date:
             return validation_error_response("Validation failed", {
                 "event_id": ["Event ID is required"] if not event_id else [],
