@@ -407,19 +407,41 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                     except Exception as e:
                         frappe.log_error(f"map by candidate student_code {code} error: {str(e)}")
 
-            exists = frappe.db.exists("SIS Student Report Card", {
-                "template_id": template_id,
-                "class_id": class_id,
-                "student_id": resolved_student_id,
-                "school_year": template.school_year,
-                "semester_part": template.semester_part,
-                "campus_id": campus_id,
-            })
-            if exists:
-                frappe.logger().info(f"Report already exists for student {resolved_student_id}, skipping creation")
+            # Check for duplicate report based on logical attributes (not just template_id)
+            # This ensures: 1 student / 1 program_type / 1 semester_part / 1 school_year = 1 report only
+            existing_reports = frappe.get_all(
+                "SIS Student Report Card",
+                fields=["name", "template_id"],
+                filters={
+                    "student_id": resolved_student_id,
+                    "school_year": template.school_year,
+                    "semester_part": template.semester_part,
+                    "campus_id": campus_id,
+                }
+            )
+            
+            # Check if any existing report has the same program_type as current template
+            program_type_conflict = False
+            current_program_type = getattr(template, "program_type", "vn") or "vn"
+            
+            for existing_report in existing_reports:
+                try:
+                    existing_template = frappe.get_doc("SIS Report Card Template", existing_report.get("template_id"))
+                    existing_program_type = getattr(existing_template, "program_type", "vn") or "vn"
+                    
+                    if existing_program_type == current_program_type:
+                        program_type_conflict = True
+                        frappe.logger().info(f"Program type conflict: Student {resolved_student_id} already has {existing_program_type} report for {template.semester_part} {template.school_year}")
+                        break
+                except Exception as e:
+                    frappe.logger().warning(f"Error checking existing template {existing_report.get('template_id')}: {str(e)}")
+                    continue
+            
+            if program_type_conflict:
+                program_type_label = "Chương trình Việt Nam" if current_program_type == "vn" else "Chương trình Quốc tế"
                 skipped_students.append(resolved_student_id or row.get("student_id") or row.get("name"))
                 logs.append(
-                    f"Student {resolved_student_id or row.get('student_id') or row.get('name')} already has report. Skipped."
+                    f"Student {resolved_student_id or row.get('student_id') or row.get('name')} already has {program_type_label} report for {template.semester_part} {template.school_year}. Skipped."
                 )
                 continue
 

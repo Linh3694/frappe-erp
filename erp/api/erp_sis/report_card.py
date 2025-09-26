@@ -524,7 +524,7 @@ def create_template():
 
         campus_id = _current_campus_id()
 
-        # Duplicate name check within campus and school_year (optional)
+        # Duplicate name check within campus, school_year, semester_part and program_type
         existing = frappe.db.exists(
             "SIS Report Card Template",
             {
@@ -532,10 +532,15 @@ def create_template():
                 "campus_id": campus_id,
                 "school_year": data.get("school_year"),
                 "semester_part": data.get("semester_part"),
+                "program_type": (data.get("program_type") or "vn"),
             },
         )
         if existing:
-            return validation_error_response(message=_("Template already exists for this school year and semester"), errors={"template": ["Already exists"]})
+            program_type_label = "Chương trình Việt Nam" if (data.get("program_type") or "vn") == "vn" else "Chương trình Quốc tế"
+            return validation_error_response(
+                message=_("Template already exists for this school year, semester and program type"),
+                errors={"template": [f"Đã tồn tại template cho {program_type_label} - {data.get('semester_part')} - {data.get('school_year')}"]}
+            )
 
         # Create doc
         doc = frappe.get_doc(
