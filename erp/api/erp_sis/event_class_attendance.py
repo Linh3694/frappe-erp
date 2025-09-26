@@ -246,39 +246,60 @@ def get_events_by_class_period():
     """
     Lấy thông tin sự kiện ảnh hưởng đến một tiết học cụ thể
     """
+    debug_logs = []
     try:
+        debug_logs.append("🚀 [Backend] Starting get_events_by_class_period")
         class_id = frappe.request.args.get('class_id')
         date = frappe.request.args.get('date')
         period = frappe.request.args.get('period')
+        
+        debug_logs.append(f"📝 [Backend] Parameters: class_id={class_id}, date={date}, period={period}")
 
         if not class_id or not date or not period:
-            return error_response("Missing class_id, date, or period", "MISSING_PARAMS")
+            debug_logs.append("❌ [Backend] Missing required parameters")
+            return error_response("Missing class_id, date, or period", "MISSING_PARAMS", debug_info={"logs": debug_logs})
 
+        debug_logs.append(f"🔍 [Backend] Getting events by class period: {class_id}, {date}, {period}")
         frappe.logger().info(f"🔍 [Backend] Getting events by class period: {class_id}, {date}, {period}")
 
         # Lấy tất cả sự kiện approved 
-        events = frappe.get_all("SIS Event", 
-                              fields=["name", "title", "start_time", "end_time"],
-                              filters={"status": "approved"})  # Chỉ lấy sự kiện đã được approve
-        
-        frappe.logger().info(f"🔍 [Backend] Found {len(events)} approved events")
+        try:
+            debug_logs.append("🔍 [Backend] Querying SIS Event table...")
+            events = frappe.get_all("SIS Event", 
+                                  fields=["name", "title", "start_time", "end_time"],
+                                  filters={"status": "approved"})  # Chỉ lấy sự kiện đã được approve
+            
+            debug_logs.append(f"✅ [Backend] Found {len(events)} approved events")
+            frappe.logger().info(f"🔍 [Backend] Found {len(events)} approved events")
+        except Exception as events_error:
+            debug_logs.append(f"❌ [Backend] Error querying events: {str(events_error)}")
+            return error_response(f"Failed to get events: {str(events_error)}", "GET_EVENTS_ERROR", debug_info={"logs": debug_logs})
 
         # Chỉ lấy study periods matching với period requested
-        schedules = frappe.get_all("SIS Timetable Column", 
-                                 fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
-                                 filters={
-                                     "period_type": "study",  # CHỈ LẤY STUDY PERIODS
-                                     "$or": [
-                                         {"period_name": period},
-                                         {"period_priority": period}
-                                     ]
-                                 })
+        try:
+            debug_logs.append(f"🔍 [Backend] Querying schedules for period: {period}")
+            schedules = frappe.get_all("SIS Timetable Column", 
+                                     fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                                     filters={
+                                         "period_type": "study",  # CHỈ LẤY STUDY PERIODS
+                                         "$or": [
+                                             {"period_name": period},
+                                             {"period_priority": period}
+                                         ]
+                                     })
+            debug_logs.append(f"✅ [Backend] Found {len(schedules)} matching schedules")
+        except Exception as schedules_error:
+            debug_logs.append(f"❌ [Backend] Error querying schedules: {str(schedules_error)}")
+            return error_response(f"Failed to get schedules: {str(schedules_error)}", "GET_SCHEDULES_ERROR", debug_info={"logs": debug_logs})
 
         if not schedules:
+            debug_logs.append(f"ℹ️ [Backend] No study schedules found for period {period}")
             frappe.logger().info(f"🔍 [Backend] No study schedules found for period {period}")
-            return success_response([])
+            return success_response([], debug_info={"logs": debug_logs})
 
         target_schedule = schedules[0]
+        debug_logs.append(f"🎯 [Backend] Target schedule: {target_schedule}")
+        debug_logs.append(f"🔍 [Backend] Processing {len(events)} events...")
         frappe.logger().info(f"🔍 [Backend] Target schedule: {target_schedule}")
         frappe.logger().info(f"🔍 [Backend] Processing {len(events)} events...")
         
@@ -286,7 +307,9 @@ def get_events_by_class_period():
 
         for event in events:
             try:
-                frappe.logger().info(f"🔍 [Backend] Processing event: {event.get('name')}")
+                event_name = event.get('name', 'unknown')
+                debug_logs.append(f"🔍 [Backend] Processing event: {event_name}")
+                frappe.logger().info(f"🔍 [Backend] Processing event: {event_name}")
                 event_matches_date = False
                 event_time_ranges = []
 
