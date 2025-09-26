@@ -1863,7 +1863,15 @@ def get_event_attendance():
         
         # Verify permission to take attendance for this event
         try:
-            event = frappe.get_doc("SIS Event", event_id)
+            # Use get_all to avoid loading child tables that might cause parent column error
+            event_rows = frappe.get_all("SIS Event", 
+                                       filters={"name": event_id},
+                                       fields=["name", "title", "description", "create_by"],
+                                       limit_page_length=1)
+            if not event_rows:
+                return not_found_response("Event not found")
+            
+            event = event_rows[0]  # This is now a dict, not a doc object
             frappe.logger().debug(f"🔍 Successfully loaded event: {event_id}")
         except Exception as e:
             frappe.logger().error(f"🔍 Error loading event {event_id}: {str(e)}")
@@ -1942,8 +1950,8 @@ def get_event_attendance():
         result = {
             "event": {
                 "name": event_id,
-                "title": event.title,
-                "description": event.description
+                "title": event.get("title", ""),
+                "description": event.get("description", "")
             },
             "date": attendance_date,
             "participants": participants
