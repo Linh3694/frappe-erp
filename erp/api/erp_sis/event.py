@@ -1862,29 +1862,49 @@ def get_event_attendance():
             return forbidden_response("Only teachers can access event attendance")
         
         # Verify permission to take attendance for this event
-        event = frappe.get_doc("SIS Event", event_id)
+        try:
+            event = frappe.get_doc("SIS Event", event_id)
+            frappe.logger().debug(f"🔍 Successfully loaded event: {event_id}")
+        except Exception as e:
+            frappe.logger().error(f"🔍 Error loading event {event_id}: {str(e)}")
+            return error_response(f"Error loading event: {str(e)}")
         
         # Check if user is creator or in teachers list
         is_creator = event.create_by == current_teacher
-        event_teachers = frappe.get_all("SIS Event Teacher", 
-                                      filters={"event_id": event_id}, 
-                                      fields=["teacher_id"])
+        
+        try:
+            event_teachers = frappe.get_all("SIS Event Teacher", 
+                                          filters={"event_id": event_id}, 
+                                          fields=["teacher_id"])
+            frappe.logger().debug(f"🔍 Successfully loaded event teachers: {len(event_teachers)}")
+        except Exception as e:
+            frappe.logger().error(f"🔍 Error loading event teachers: {str(e)}")
+            event_teachers = []
+            
         is_event_teacher = any(t.teacher_id == current_teacher for t in event_teachers)
         
         if not (is_creator or is_event_teacher):
             return forbidden_response("Only event creator or assigned teachers can take attendance")
         
         # Get event students/participants
-        event_students = frappe.get_all("SIS Event Student",
-                                      filters={"event_id": event_id},
-                                      fields=["name", "class_student_id", "status"])
+        try:
+            event_students = frappe.get_all("SIS Event Student",
+                                          filters={"event_id": event_id},
+                                          fields=["name", "class_student_id", "status"])
+            frappe.logger().debug(f"🔍 Successfully loaded event students: {len(event_students)}")
+        except Exception as e:
+            frappe.logger().error(f"🔍 Error loading event students: {str(e)}")
+            return error_response(f"Error loading event students: {str(e)}")
         
         # Build participant list with student info
         participants = []
         for es in event_students:
             # Get class student info
             try:
+                frappe.logger().debug(f"🔍 Loading class student: {es.class_student_id}")
                 cs = frappe.get_doc("SIS Class Student", es.class_student_id)
+                
+                frappe.logger().debug(f"🔍 Loading student: {cs.student_id}")
                 student = frappe.get_doc("CRM Student", cs.student_id)
                 
                 participants.append({
@@ -1895,7 +1915,9 @@ def get_event_attendance():
                     "student_code": student.student_code,
                     "user_image": getattr(student, 'user_image', None)
                 })
-            except Exception:
+                frappe.logger().debug(f"🔍 Successfully processed student: {student.student_name}")
+            except Exception as e:
+                frappe.logger().error(f"🔍 Error processing student {es.class_student_id}: {str(e)}")
                 continue
         
         # Get existing attendance records for this date (with fallback)
@@ -1932,6 +1954,7 @@ def get_event_attendance():
     except frappe.DoesNotExistError:
         return not_found_response("Event not found")
     except Exception as e:
+        frappe.logger().error(f"🔍 get_event_attendance exception: {str(e)}")
         frappe.log_error(f"Error fetching event attendance: {str(e)}")
         return error_response(f"Error fetching event attendance: {str(e)}")
 
