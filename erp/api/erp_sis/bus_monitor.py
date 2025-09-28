@@ -76,7 +76,11 @@ def create_bus_monitor(**data):
 			message="Bus monitor created successfully"
 		)
 	except Exception as e:
-		frappe.log_error(f"Error creating bus monitor: {str(e)}")
+		error_msg = str(e)
+		# Truncate error message if too long for logging
+		if len(error_msg) > 100:
+			error_msg = error_msg[:100] + "..."
+		frappe.log_error(f"Error creating bus monitor: {error_msg}")
 		frappe.db.rollback()
 		return error_response(f"Failed to create bus monitor: {str(e)}")
 

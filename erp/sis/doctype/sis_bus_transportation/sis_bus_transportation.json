@@ -90,7 +90,7 @@
    "fieldtype": "Link",
    "label": "Năm học",
    "options": "SIS School Year",
-   "reqd": 1
+   "reqd": 0
   }
  ],
  "index_web_pages_for_search": 1,
