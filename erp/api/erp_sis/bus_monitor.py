@@ -49,9 +49,13 @@ def get_all_bus_monitors():
 		return error_response(f"Failed to get bus monitors: {str(e)}")
 
 @frappe.whitelist()
-def get_bus_monitor(name):
+def get_bus_monitor():
 	"""Get a single bus monitor by name"""
 	try:
+		name = frappe.local.form_dict.get('name')
+		if not name:
+			return error_response("Bus monitor name is required")
+
 		doc = frappe.get_doc("SIS Bus Monitor", name)
 		return success_response(
 			data=doc.as_dict(),
@@ -114,9 +118,47 @@ def create_bus_monitor():
 		return error_response(f"Failed to create bus monitor: {str(e)}")
 
 @frappe.whitelist()
-def update_bus_monitor(name, **data):
+def update_bus_monitor():
 	"""Update an existing bus monitor"""
 	try:
+		name = frappe.local.form_dict.get('name')
+		if not name:
+			return error_response("Bus monitor name is required")
+
+		# Get update data from request
+		data = {}
+
+		# First try to get JSON data from request body
+		if frappe.request.data:
+			try:
+				# Support both bytes and string payloads
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+
+				if json_data:
+					data = json_data
+					# Remove name from data if it exists
+					data.pop('name', None)
+					frappe.logger().info(f"Received JSON data for update_bus_monitor: {data}")
+				else:
+					data = frappe.local.form_dict
+					# Remove name from data
+					data.pop('name', None)
+					frappe.logger().info(f"Received form data for update_bus_monitor (empty JSON body): {data}")
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+				# If JSON parsing fails, use form_dict
+				frappe.logger().error(f"JSON parsing failed in update_bus_monitor: {str(e)}")
+				data = frappe.local.form_dict
+				data.pop('name', None)
+				frappe.logger().info(f"Using form data for update_bus_monitor after JSON failure: {data}")
+		else:
+			# Fallback to form_dict
+			data = frappe.local.form_dict
+			data.pop('name', None)
+			frappe.logger().info(f"No request data, using form_dict for update_bus_monitor: {data}")
+
 		doc = frappe.get_doc("SIS Bus Monitor", name)
 		doc.update(data)
 		doc.save()
@@ -132,9 +174,13 @@ def update_bus_monitor(name, **data):
 		return error_response(f"Failed to update bus monitor: {str(e)}")
 
 @frappe.whitelist()
-def delete_bus_monitor(name):
+def delete_bus_monitor():
 	"""Delete a bus monitor"""
 	try:
+		name = frappe.local.form_dict.get('name')
+		if not name:
+			return error_response("Bus monitor name is required")
+
 		frappe.delete_doc("SIS Bus Monitor", name)
 		frappe.db.commit()
 

@@ -49,9 +49,13 @@ def get_all_bus_drivers():
 		return error_response(f"Failed to get bus drivers: {str(e)}")
 
 @frappe.whitelist()
-def get_bus_driver(name):
+def get_bus_driver():
 	"""Get a single bus driver by name"""
 	try:
+		name = frappe.local.form_dict.get('name')
+		if not name:
+			return error_response("Bus driver name is required")
+
 		doc = frappe.get_doc("SIS Bus Driver", name)
 		return success_response(
 			data=doc.as_dict(),
@@ -110,9 +114,47 @@ def create_bus_driver():
 		return error_response(f"Failed to create bus driver: {str(e)}")
 
 @frappe.whitelist()
-def update_bus_driver(name, **data):
+def update_bus_driver():
 	"""Update an existing bus driver"""
 	try:
+		name = frappe.local.form_dict.get('name')
+		if not name:
+			return error_response("Bus driver name is required")
+
+		# Get update data from request
+		data = {}
+
+		# First try to get JSON data from request body
+		if frappe.request.data:
+			try:
+				# Support both bytes and string payloads
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+
+				if json_data:
+					data = json_data
+					# Remove name from data if it exists
+					data.pop('name', None)
+					frappe.logger().info(f"Received JSON data for update_bus_driver: {data}")
+				else:
+					data = frappe.local.form_dict
+					# Remove name from data
+					data.pop('name', None)
+					frappe.logger().info(f"Received form data for update_bus_driver (empty JSON body): {data}")
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+				# If JSON parsing fails, use form_dict
+				frappe.logger().error(f"JSON parsing failed in update_bus_driver: {str(e)}")
+				data = frappe.local.form_dict
+				data.pop('name', None)
+				frappe.logger().info(f"Using form data for update_bus_driver after JSON failure: {data}")
+		else:
+			# Fallback to form_dict
+			data = frappe.local.form_dict
+			data.pop('name', None)
+			frappe.logger().info(f"No request data, using form_dict for update_bus_driver: {data}")
+
 		doc = frappe.get_doc("SIS Bus Driver", name)
 		doc.update(data)
 		doc.save()
@@ -128,9 +170,13 @@ def update_bus_driver(name, **data):
 		return error_response(f"Failed to update bus driver: {str(e)}")
 
 @frappe.whitelist()
-def delete_bus_driver(name):
+def delete_bus_driver():
 	"""Delete a bus driver"""
 	try:
+		name = frappe.local.form_dict.get('name')
+		if not name:
+			return error_response("Bus driver name is required")
+
 		frappe.delete_doc("SIS Bus Driver", name)
 		frappe.db.commit()
 
