@@ -5,11 +5,11 @@
  "allow_guest_to_view": 0,
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:SIS_DRIVER-{#####}",
+ "autoname": "format:SIS_BUS_STU-{#####}",
  "beta": 0,
  "creation": "2025-01-28 00:00:00.000000",
  "custom": 0,
- "description": "SIS Bus Driver Management",
+ "description": "SIS Bus Student Management",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -18,12 +18,9 @@
  "field_order": [
   "basic_information",
   "full_name",
-  "driver_code",
-  "gender",
-  "citizen_id",
-  "phone_number",
-  "contractor",
-  "address",
+  "student_code",
+  "class_id",
+  "route_id",
   "status",
   "system_information",
   "campus_id",
@@ -38,61 +35,39 @@
   {
    "fieldname": "full_name",
    "fieldtype": "Data",
-   "label": "Tên đầy đủ",
+   "label": "Tên học sinh",
    "reqd": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "driver_code",
+   "fieldname": "student_code",
    "fieldtype": "Data",
-   "label": "Mã Driver",
+   "label": "Mã học sinh",
    "reqd": 1,
    "unique": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "gender",
-   "fieldtype": "Select",
-   "label": "Giới tính",
-   "options": "Nam\nNữ\nKhác",
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "label": "Lớp",
+   "options": "SIS Class",
    "reqd": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "citizen_id",
-   "fieldtype": "Data",
-   "label": "Số CCCD",
-   "reqd": 1,
-   "unique": 1,
+   "fieldname": "route_id",
+   "fieldtype": "Link",
+   "label": "Tuyến đường",
+   "options": "SIS Bus Route",
    "in_list_view": 1
-  },
-  {
-   "fieldname": "phone_number",
-   "fieldtype": "Data",
-   "label": "Số điện thoại",
-   "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "contractor",
-   "fieldtype": "Data",
-   "label": "Nhà cung cấp",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "address",
-   "fieldtype": "Data",
-   "label": "Địa chỉ",
-   "reqd": 1
   },
   {
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Trạng thái",
-   "options": "Hoạt động\nKhông hoạt động",
-   "default": "Hoạt động",
+   "options": "Active\nInactive",
+   "default": "Active",
    "reqd": 1,
    "in_list_view": 1
   },
@@ -122,7 +97,7 @@
  "modified": "2025-01-28 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "SIS",
- "name": "SIS Bus Driver",
+ "name": "SIS Bus Student",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
