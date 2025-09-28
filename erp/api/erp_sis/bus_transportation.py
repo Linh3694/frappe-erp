@@ -28,10 +28,15 @@ def get_all_bus_transportation():
 			fields=[
 				"name", "vehicle_code", "license_plate", "vehicle_type",
 				"driver_id", "status", "campus_id", "school_year_id",
-				"created_at", "updated_at"
+				"creation", "modified"
 			],
 			order_by="vehicle_code asc"
 		)
+
+		# Map field names to correct format
+		for item in transportation:
+			item['created_at'] = item.pop('creation')
+			item['updated_at'] = item.pop('modified')
 
 		# Enrich with driver information
 		for item in transportation:

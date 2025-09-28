@@ -32,6 +32,13 @@ def get_list(doctype: str, page: int = 1, limit: int = 20, filters: Optional[Dic
             limit_start=offset
         )
 
+        # Map field names to correct format
+        for item in data:
+            if 'creation' in item:
+                item['created_at'] = item.pop('creation')
+            if 'modified' in item:
+                item['updated_at'] = item.pop('modified')
+
         # Calculate total pages
         total_pages = (total_count + limit - 1) // limit
 

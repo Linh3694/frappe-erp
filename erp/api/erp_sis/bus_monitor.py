@@ -28,10 +28,15 @@ def get_all_bus_monitors():
 			fields=[
 				"name", "full_name", "monitor_code", "gender", "citizen_id",
 				"phone_number", "contractor", "address", "status",
-				"campus_id", "school_year_id", "created_at", "updated_at"
+				"campus_id", "school_year_id", "creation", "modified"
 			],
 			order_by="full_name asc"
 		)
+
+		# Map field names to correct format
+		for monitor in monitors:
+			monitor['created_at'] = monitor.pop('creation')
+			monitor['updated_at'] = monitor.pop('modified')
 
 		return success_response(
 			data=monitors,

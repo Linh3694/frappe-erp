@@ -28,10 +28,15 @@ def get_all_bus_drivers():
 			fields=[
 				"name", "full_name", "driver_code", "gender", "citizen_id",
 				"phone_number", "contractor", "address", "status",
-				"campus_id", "school_year_id", "created_at", "updated_at"
+				"campus_id", "school_year_id", "creation", "modified"
 			],
 			order_by="full_name asc"
 		)
+
+		# Map field names to correct format
+		for driver in drivers:
+			driver['created_at'] = driver.pop('creation')
+			driver['updated_at'] = driver.pop('modified')
 
 		return success_response(
 			data=drivers,
