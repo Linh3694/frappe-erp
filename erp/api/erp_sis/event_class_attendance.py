@@ -138,51 +138,32 @@ def sync_event_to_class_attendance():
         # Lấy education_stage_id của lớp để filter timetable column chính xác
         education_stage_id = None
         if class_id:
-            frappe.logger().info(f"🔍 [Backend] Getting education info for class: {class_id}")
-
             # Lấy education_grade từ class
             class_info = frappe.get_all("SIS Class",
                                       filters={"name": class_id},
-                                      fields=["education_grade", "title_vn"],
+                                      fields=["education_grade"],
                                       limit=1)
-
-            frappe.logger().info(f"🔍 [Backend] Class info query result: {class_info}")
 
             if class_info:
                 education_grade = class_info[0].get("education_grade")
-                frappe.logger().info(f"🔍 [Backend] Found education_grade: {education_grade} for class: {class_id}")
-
                 if education_grade:
                     # Lấy education_stage_id từ education_grade
                     grade_info = frappe.get_all("SIS Education Grade",
                                               filters={"name": education_grade},
-                                              fields=["education_stage_id", "title_vn"],
+                                              fields=["education_stage_id"],
                                               limit=1)
-
-                    frappe.logger().info(f"🔍 [Backend] Grade info query result: {grade_info}")
 
                     if grade_info:
                         education_stage_id = grade_info[0].get("education_stage_id")
-                        frappe.logger().info(f"✅ [Backend] Found education_stage_id: {education_stage_id} for grade: {education_grade}")
-                    else:
-                        frappe.logger().warning(f"⚠️ [Backend] No grade info found for: {education_grade}")
-                else:
-                    frappe.logger().warning(f"⚠️ [Backend] No education_grade found for class: {class_id}")
-            else:
-                frappe.logger().warning(f"⚠️ [Backend] No class info found for: {class_id}")
 
         # Lấy tất cả schedules (tiết học) theo education_stage_id
         schedule_filters = {"period_type": "study"}
         if education_stage_id:
             schedule_filters["education_stage_id"] = education_stage_id
 
-        frappe.logger().info(f"🔍 [Backend] Querying schedules with filters: {schedule_filters}")
-
         schedules = frappe.get_all("SIS Timetable Column",
-                                 fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type", "education_stage_id"],
+                                 fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
                                  filters=schedule_filters)
-
-        frappe.logger().info(f"🔍 [Backend] Found {len(schedules)} schedules for education_stage_id: {education_stage_id}")
 
         # Tìm các tiết bị overlap
         event_time_range = {
@@ -190,12 +171,7 @@ def sync_event_to_class_attendance():
             'endTime': target_date_time.get('endTime', '')
         }
 
-        frappe.logger().info(f"🔍 [Backend] Event time range: {event_time_range}")
-        frappe.logger().info(f"🔍 [Backend] Checking overlap with {len(schedules)} schedules")
-
         overlapping_schedules = find_overlapping_schedules(event_time_range, schedules)
-
-        frappe.logger().info(f"🔍 [Backend] Found {len(overlapping_schedules)} overlapping schedules")
 
         if not overlapping_schedules:
             frappe.logger().info("✅ No overlapping schedules found")
@@ -690,20 +666,13 @@ def validate_period_for_education_stage():
         if not period_name or not education_stage_id:
             return error_response("Missing period_name or education_stage_id", code="MISSING_PARAMS")
 
-        frappe.logger().info(f"🔍 [Backend] Validating period '{period_name}' for education stage '{education_stage_id}'")
-
-        # Check if period exists for this education stage
         period_exists = frappe.db.exists("SIS Timetable Column", {
             "period_name": period_name,
             "education_stage_id": education_stage_id,
             "period_type": "study"
         })
 
-        frappe.logger().info(f"🔍 [Backend] Period query result for period '{period_name}' and stage '{education_stage_id}': {period_exists}")
-
         exists = bool(period_exists)
-
-        frappe.logger().info(f"✅ [Backend] Period validation result: {exists}")
         return success_response({"exists": exists})
 
     except Exception as e:
@@ -723,27 +692,20 @@ def get_education_stage():
         if not grade_name:
             return error_response("Missing name parameter", code="MISSING_PARAMS")
 
-        frappe.logger().info(f"🔍 [Backend] Getting education_stage_id for grade '{grade_name}'")
-
         # Get education_stage_id from education_grade
         grade_info = frappe.get_all("SIS Education Grade",
                                   filters={"name": grade_name},
-                                  fields=["education_stage_id", "title_vn", "title_en"],
+                                  fields=["education_stage_id"],
                                   limit=1)
 
-        frappe.logger().info(f"🔍 [Backend] Grade info query result: {grade_info}")
-
         if not grade_info:
-            frappe.logger().warning(f"⚠️ [Backend] Education grade not found: {grade_name}")
             return error_response("Education grade not found", code="GRADE_NOT_FOUND")
 
         education_stage_id = grade_info[0].get("education_stage_id")
 
         if not education_stage_id:
-            frappe.logger().warning(f"⚠️ [Backend] No education_stage_id found for grade: {grade_name}")
             return error_response("No education_stage_id found for this grade", code="NO_STAGE_ID")
 
-        frappe.logger().info(f"✅ [Backend] Found education_stage_id: {education_stage_id} for grade: {grade_name}")
         return success_response({"education_stage_id": education_stage_id})
 
     except Exception as e:
