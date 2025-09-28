@@ -52,7 +52,7 @@ def get_all_bus_drivers():
 def get_bus_driver():
 	"""Get a single bus driver by name"""
 	try:
-		name = frappe.local.form_dict.get('name')
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
 		if not name:
 			return error_response("Bus driver name is required")
 
@@ -117,7 +117,7 @@ def create_bus_driver():
 def update_bus_driver():
 	"""Update an existing bus driver"""
 	try:
-		name = frappe.local.form_dict.get('name')
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
 		if not name:
 			return error_response("Bus driver name is required")
 
@@ -173,7 +173,7 @@ def update_bus_driver():
 def delete_bus_driver():
 	"""Delete a bus driver"""
 	try:
-		name = frappe.local.form_dict.get('name')
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
 		if not name:
 			return error_response("Bus driver name is required")
 

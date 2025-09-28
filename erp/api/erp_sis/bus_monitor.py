@@ -52,7 +52,8 @@ def get_all_bus_monitors():
 def get_bus_monitor():
 	"""Get a single bus monitor by name"""
 	try:
-		name = frappe.local.form_dict.get('name')
+		# Try to get name from form_dict (POST/PUT) or request args (GET)
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
 		if not name:
 			return error_response("Bus monitor name is required")
 
@@ -121,7 +122,7 @@ def create_bus_monitor():
 def update_bus_monitor():
 	"""Update an existing bus monitor"""
 	try:
-		name = frappe.local.form_dict.get('name')
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
 		if not name:
 			return error_response("Bus monitor name is required")
 
@@ -177,7 +178,7 @@ def update_bus_monitor():
 def delete_bus_monitor():
 	"""Delete a bus monitor"""
 	try:
-		name = frappe.local.form_dict.get('name')
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
 		if not name:
 			return error_response("Bus monitor name is required")
 
