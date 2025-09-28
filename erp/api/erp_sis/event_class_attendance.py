@@ -136,7 +136,6 @@ def sync_event_to_class_attendance():
             return success_response({"synced_count": 0}, "No matching date found")
 
         # Lấy education_stage_id của lớp để filter timetable column chính xác
-        education_stage_id = None
         if class_id:
             # Lấy education_grade từ class
             class_info = frappe.get_all("SIS Class",
