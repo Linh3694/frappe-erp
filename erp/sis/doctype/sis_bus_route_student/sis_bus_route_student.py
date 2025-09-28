@@ -13,12 +13,15 @@ class SISBusRouteStudent(Document):
 		self.validate_student_assignment_unique()
 
 	def validate_references_exist(self):
-		"""Validate that route and student exist"""
+		"""Validate that route, student, and class student exist"""
 		if self.route_id and not frappe.db.exists("SIS Bus Route", self.route_id):
 			frappe.throw("Tuyến đường không tồn tại")
 
 		if self.student_id and not frappe.db.exists("SIS Student", self.student_id):
 			frappe.throw("Học sinh không tồn tại")
+
+		if self.class_student_id and not frappe.db.exists("SIS Class Student", self.class_student_id):
+			frappe.throw("Học sinh trong lớp không tồn tại")
 
 	def validate_student_not_assigned(self):
 		"""Validate that student is not already assigned to another route"""

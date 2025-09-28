@@ -4,43 +4,109 @@
 
 import frappe
 from frappe import _
-from erp.api.utils import get_list, get_single, create_doc, update_doc, delete_doc
+from erp.utils.api_response import success_response, error_response
+from erp.utils.campus_utils import get_current_campus_from_context
 
 @frappe.whitelist()
-def get_all_bus_drivers(page=1, limit=20, **filters):
-	"""Get all bus drivers with pagination"""
-	return get_list(
-		"SIS Bus Driver",
-		page=page,
-		limit=limit,
-		filters=filters,
-		fields=[
-			"name", "full_name", "driver_code", "gender", "citizen_id",
-			"phone_number", "contractor", "address", "status",
-			"campus_id", "school_year_id", "created_at", "updated_at"
-		],
-		order_by="creation desc"
-	)
+def get_all_bus_drivers():
+	"""Get all bus drivers without pagination - always returns full dataset"""
+	try:
+		# Get current user's campus information from roles
+		campus_id = get_current_campus_from_context()
+
+		if not campus_id:
+			# Fallback to default if no campus found
+			campus_id = "campus-1"
+
+		# Apply campus filtering for data isolation
+		filters = {"campus_id": campus_id}
+
+		# Get all bus drivers
+		drivers = frappe.get_list(
+			"SIS Bus Driver",
+			filters=filters,
+			fields=[
+				"name", "full_name", "driver_code", "gender", "citizen_id",
+				"phone_number", "contractor", "address", "status",
+				"campus_id", "school_year_id", "created_at", "updated_at"
+			],
+			order_by="full_name asc"
+		)
+
+		return success_response(
+			data=drivers,
+			message="Bus drivers retrieved successfully"
+		)
+
+	except Exception as e:
+		frappe.log_error(f"Error getting bus drivers: {str(e)}")
+		return error_response(f"Failed to get bus drivers: {str(e)}")
 
 @frappe.whitelist()
 def get_bus_driver(name):
 	"""Get a single bus driver by name"""
-	return get_single("SIS Bus Driver", name)
+	try:
+		doc = frappe.get_doc("SIS Bus Driver", name)
+		return success_response(
+			data=doc.as_dict(),
+			message="Bus driver retrieved successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error getting bus driver: {str(e)}")
+		return error_response(f"Bus driver not found: {str(e)}")
 
 @frappe.whitelist()
 def create_bus_driver(**data):
 	"""Create a new bus driver"""
-	return create_doc("SIS Bus Driver", data)
+	try:
+		doc = frappe.get_doc({
+			"doctype": "SIS Bus Driver",
+			**data
+		})
+		doc.insert()
+		frappe.db.commit()
+
+		return success_response(
+			data=doc.as_dict(),
+			message="Bus driver created successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error creating bus driver: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to create bus driver: {str(e)}")
 
 @frappe.whitelist()
 def update_bus_driver(name, **data):
 	"""Update an existing bus driver"""
-	return update_doc("SIS Bus Driver", name, data)
+	try:
+		doc = frappe.get_doc("SIS Bus Driver", name)
+		doc.update(data)
+		doc.save()
+		frappe.db.commit()
+
+		return success_response(
+			data=doc.as_dict(),
+			message="Bus driver updated successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error updating bus driver: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to update bus driver: {str(e)}")
 
 @frappe.whitelist()
 def delete_bus_driver(name):
 	"""Delete a bus driver"""
-	return delete_doc("SIS Bus Driver", name)
+	try:
+		frappe.delete_doc("SIS Bus Driver", name)
+		frappe.db.commit()
+
+		return success_response(
+			message="Bus driver deleted successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error deleting bus driver: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to delete bus driver: {str(e)}")
 
 @frappe.whitelist()
 def get_available_drivers():

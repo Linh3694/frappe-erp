@@ -4,43 +4,109 @@
 
 import frappe
 from frappe import _
-from erp.api.utils import get_list, get_single, create_doc, update_doc, delete_doc
+from erp.utils.api_response import success_response, error_response
+from erp.utils.campus_utils import get_current_campus_from_context
 
 @frappe.whitelist()
-def get_all_bus_monitors(page=1, limit=20, **filters):
-	"""Get all bus monitors with pagination"""
-	return get_list(
-		"SIS Bus Monitor",
-		page=page,
-		limit=limit,
-		filters=filters,
-		fields=[
-			"name", "full_name", "monitor_code", "gender", "citizen_id",
-			"phone_number", "contractor", "address", "status",
-			"campus_id", "school_year_id", "created_at", "updated_at"
-		],
-		order_by="creation desc"
-	)
+def get_all_bus_monitors():
+	"""Get all bus monitors without pagination - always returns full dataset"""
+	try:
+		# Get current user's campus information from roles
+		campus_id = get_current_campus_from_context()
+
+		if not campus_id:
+			# Fallback to default if no campus found
+			campus_id = "campus-1"
+
+		# Apply campus filtering for data isolation
+		filters = {"campus_id": campus_id}
+
+		# Get all bus monitors
+		monitors = frappe.get_list(
+			"SIS Bus Monitor",
+			filters=filters,
+			fields=[
+				"name", "full_name", "monitor_code", "gender", "citizen_id",
+				"phone_number", "contractor", "address", "status",
+				"campus_id", "school_year_id", "created_at", "updated_at"
+			],
+			order_by="full_name asc"
+		)
+
+		return success_response(
+			data=monitors,
+			message="Bus monitors retrieved successfully"
+		)
+
+	except Exception as e:
+		frappe.log_error(f"Error getting bus monitors: {str(e)}")
+		return error_response(f"Failed to get bus monitors: {str(e)}")
 
 @frappe.whitelist()
 def get_bus_monitor(name):
 	"""Get a single bus monitor by name"""
-	return get_single("SIS Bus Monitor", name)
+	try:
+		doc = frappe.get_doc("SIS Bus Monitor", name)
+		return success_response(
+			data=doc.as_dict(),
+			message="Bus monitor retrieved successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error getting bus monitor: {str(e)}")
+		return error_response(f"Bus monitor not found: {str(e)}")
 
 @frappe.whitelist()
 def create_bus_monitor(**data):
 	"""Create a new bus monitor"""
-	return create_doc("SIS Bus Monitor", data)
+	try:
+		doc = frappe.get_doc({
+			"doctype": "SIS Bus Monitor",
+			**data
+		})
+		doc.insert()
+		frappe.db.commit()
+
+		return success_response(
+			data=doc.as_dict(),
+			message="Bus monitor created successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error creating bus monitor: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to create bus monitor: {str(e)}")
 
 @frappe.whitelist()
 def update_bus_monitor(name, **data):
 	"""Update an existing bus monitor"""
-	return update_doc("SIS Bus Monitor", name, data)
+	try:
+		doc = frappe.get_doc("SIS Bus Monitor", name)
+		doc.update(data)
+		doc.save()
+		frappe.db.commit()
+
+		return success_response(
+			data=doc.as_dict(),
+			message="Bus monitor updated successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error updating bus monitor: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to update bus monitor: {str(e)}")
 
 @frappe.whitelist()
 def delete_bus_monitor(name):
 	"""Delete a bus monitor"""
-	return delete_doc("SIS Bus Monitor", name)
+	try:
+		frappe.delete_doc("SIS Bus Monitor", name)
+		frappe.db.commit()
+
+		return success_response(
+			message="Bus monitor deleted successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error deleting bus monitor: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to delete bus monitor: {str(e)}")
 
 @frappe.whitelist()
 def get_available_monitors():
