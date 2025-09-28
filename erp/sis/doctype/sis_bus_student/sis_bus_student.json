@@ -30,19 +30,19 @@
   {
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
-   "label": "Thông tin cơ bản"
+   "label": "Basic Information"
   },
   {
    "fieldname": "full_name",
    "fieldtype": "Data",
-   "label": "Tên học sinh",
+   "label": "Full Name",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "student_code",
    "fieldtype": "Data",
-   "label": "Mã học sinh",
+   "label": "Student Code",
    "reqd": 1,
    "unique": 1,
    "in_list_view": 1
@@ -50,7 +50,7 @@
   {
    "fieldname": "class_id",
    "fieldtype": "Link",
-   "label": "Lớp",
+   "label": "Class",
    "options": "SIS Class",
    "reqd": 1,
    "in_list_view": 1
@@ -58,14 +58,14 @@
   {
    "fieldname": "route_id",
    "fieldtype": "Link",
-   "label": "Tuyến đường",
+   "label": "Route",
    "options": "SIS Bus Route",
    "in_list_view": 1
   },
   {
    "fieldname": "status",
    "fieldtype": "Select",
-   "label": "Trạng thái",
+   "label": "Status",
    "options": "Active\nInactive",
    "default": "Active",
    "reqd": 1,
@@ -74,7 +74,7 @@
   {
    "fieldname": "system_information",
    "fieldtype": "Section Break",
-   "label": "Thông tin hệ thống"
+   "label": "System Information"
   },
   {
    "fieldname": "campus_id",
@@ -86,7 +86,7 @@
   {
    "fieldname": "school_year_id",
    "fieldtype": "Link",
-   "label": "Năm học",
+   "label": "School Year",
    "options": "SIS School Year",
    "reqd": 1
   }

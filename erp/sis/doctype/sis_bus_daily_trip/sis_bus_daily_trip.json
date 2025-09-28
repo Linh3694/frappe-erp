@@ -36,12 +36,12 @@
   {
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
-   "label": "Thông tin cơ bản"
+   "label": "Basic Information"
   },
   {
    "fieldname": "route_id",
    "fieldtype": "Link",
-   "label": "Tuyến đường",
+   "label": "Route",
    "options": "SIS Bus Route",
    "reqd": 1,
    "in_list_view": 1
@@ -49,30 +49,30 @@
   {
    "fieldname": "trip_date",
    "fieldtype": "Date",
-   "label": "Ngày chạy",
+   "label": "Trip Date",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "weekday",
    "fieldtype": "Select",
-   "label": "Thứ",
-   "options": "Thứ 2\nThứ 3\nThứ 4\nThứ 5\nThứ 6\nThứ 7\nChủ nhật",
+   "label": "Weekday",
+   "options": "Monday\nTuesday\nWednesday\nThursday\nFriday\nSaturday\nSunday",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "trip_type",
    "fieldtype": "Select",
-   "label": "Loại chuyến",
-   "options": "Đón\nTrả",
+   "label": "Trip Type",
+   "options": "Pickup\nDrop-off",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "vehicle_id",
    "fieldtype": "Link",
-   "label": "Xe",
+   "label": "Vehicle",
    "options": "SIS Bus Transportation",
    "reqd": 1,
    "in_list_view": 1
@@ -80,7 +80,7 @@
   {
    "fieldname": "driver_id",
    "fieldtype": "Link",
-   "label": "Tài xế",
+   "label": "Driver",
    "options": "SIS Bus Driver",
    "reqd": 1,
    "in_list_view": 1
@@ -104,28 +104,28 @@
   {
    "fieldname": "trip_status",
    "fieldtype": "Select",
-   "label": "Trạng thái chuyến",
-   "options": "Chưa xuất phát\nĐã xuất phát\nĐã hoàn thành",
-   "default": "Chưa xuất phát",
+   "label": "Trip Status",
+   "options": "Not Started\nIn Progress\nCompleted",
+   "default": "Not Started",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "trip_students",
    "fieldtype": "Table",
-   "label": "Danh sách học sinh",
+   "label": "Student List",
    "options": "SIS Bus Daily Trip Student",
    "reqd": 1
   },
   {
    "fieldname": "notes",
    "fieldtype": "Small Text",
-   "label": "Ghi chú"
+   "label": "Notes"
   },
   {
    "fieldname": "system_information",
    "fieldtype": "Section Break",
-   "label": "Thông tin hệ thống"
+   "label": "System Information"
   },
   {
    "fieldname": "campus_id",
@@ -137,7 +137,7 @@
   {
    "fieldname": "school_year_id",
    "fieldtype": "Link",
-   "label": "Năm học",
+   "label": "School Year",
    "options": "SIS School Year",
    "reqd": 1
   }

@@ -29,7 +29,7 @@
   {
    "fieldname": "route_id",
    "fieldtype": "Link",
-   "label": "Tuyến đường",
+   "label": "Route",
    "options": "SIS Bus Route",
    "reqd": 1,
    "in_list_view": 1
@@ -37,7 +37,7 @@
   {
    "fieldname": "student_id",
    "fieldtype": "Link",
-   "label": "Học sinh",
+   "label": "Student",
    "options": "CRM Student",
    "reqd": 1,
    "in_list_view": 1
@@ -45,7 +45,7 @@
   {
    "fieldname": "class_student_id",
    "fieldtype": "Link",
-   "label": "Học sinh trong lớp",
+   "label": "Class Student",
    "options": "SIS Class Student",
    "reqd": 1,
    "in_list_view": 1
@@ -53,42 +53,42 @@
   {
    "fieldname": "weekday",
    "fieldtype": "Select",
-   "label": "Thứ",
-   "options": "Thứ 2\nThứ 3\nThứ 4\nThứ 5\nThứ 6\nThứ 7\nChủ nhật",
+   "label": "Weekday",
+   "options": "Monday\nTuesday\nWednesday\nThursday\nFriday\nSaturday\nSunday",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "trip_type",
    "fieldtype": "Select",
-   "label": "Loại chuyến",
-   "options": "Đón\nTrả",
+   "label": "Trip Type",
+   "options": "Pickup\nDrop-off",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "pickup_order",
    "fieldtype": "Int",
-   "label": "Thứ tự",
+   "label": "Order",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "pickup_location",
    "fieldtype": "Data",
-   "label": "Điểm đón",
+   "label": "Pickup Location",
    "reqd": 1
   },
   {
    "fieldname": "drop_off_location",
    "fieldtype": "Data",
-   "label": "Điểm trả",
+   "label": "Drop-off Location",
    "reqd": 1
   },
   {
    "fieldname": "notes",
    "fieldtype": "Small Text",
-   "label": "Ghi chú"
+   "label": "Notes"
   }
  ],
  "index_web_pages_for_search": 1,

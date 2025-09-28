@@ -36,7 +36,7 @@
   {
    "fieldname": "daily_trip_id",
    "fieldtype": "Link",
-   "label": "Chuyến xe",
+   "label": "Daily Trip",
    "options": "SIS Bus Daily Trip",
    "reqd": 1,
    "in_list_view": 1
@@ -44,7 +44,7 @@
   {
    "fieldname": "student_id",
    "fieldtype": "Link",
-   "label": "Học sinh",
+   "label": "Student",
    "options": "CRM Student",
    "reqd": 1,
    "in_list_view": 1
@@ -52,7 +52,7 @@
   {
    "fieldname": "class_student_id",
    "fieldtype": "Link",
-   "label": "Học sinh trong lớp",
+   "label": "Class Student",
    "options": "SIS Class Student",
    "reqd": 1,
    "in_list_view": 1
@@ -60,79 +60,79 @@
   {
    "fieldname": "student_image",
    "fieldtype": "Attach Image",
-   "label": "Ảnh học sinh",
+   "label": "Student Image",
    "in_list_view": 1
   },
   {
    "fieldname": "student_name",
    "fieldtype": "Data",
-   "label": "Tên học sinh",
+   "label": "Student Name",
    "read_only": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "student_code",
    "fieldtype": "Data",
-   "label": "Mã học sinh",
+   "label": "Student Code",
    "read_only": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "class_name",
    "fieldtype": "Data",
-   "label": "Tên lớp",
+   "label": "Class Name",
    "read_only": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "pickup_order",
    "fieldtype": "Int",
-   "label": "Thứ tự",
+   "label": "Order",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "pickup_location",
    "fieldtype": "Data",
-   "label": "Điểm đón",
+   "label": "Pickup Location",
    "reqd": 1
   },
   {
    "fieldname": "drop_off_location",
    "fieldtype": "Data",
-   "label": "Điểm trả",
+   "label": "Drop-off Location",
    "reqd": 1
   },
   {
    "fieldname": "student_status",
    "fieldtype": "Select",
-   "label": "Trạng thái học sinh",
-   "options": "Chưa lên xe\nĐã lên xe\nĐã xuống xe\nVắng",
-   "default": "Chưa lên xe",
+   "label": "Student Status",
+   "options": "Not Boarded\nBoarded\nDropped Off\nAbsent",
+   "default": "Not Boarded",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "boarding_time",
    "fieldtype": "Datetime",
-   "label": "Giờ lên xe"
+   "label": "Boarding Time"
   },
   {
    "fieldname": "drop_off_time",
    "fieldtype": "Datetime",
-   "label": "Giờ xuống xe"
+   "label": "Drop-off Time"
   },
   {
    "fieldname": "absent_reason",
    "fieldtype": "Select",
-   "label": "Lý do vắng",
-   "options": "Nghỉ học\nNghỉ ốm\nNghỉ phép\nLý do khác",
-   "depends_on": "eval:in_list(['Vắng'], doc.student_status)"
+   "label": "Absent Reason",
+   "options": "School Leave\nSick Leave\nPermission\nOther",
+   "depends_on": "eval:in_list(['Absent'], doc.student_status)"
   },
   {
    "fieldname": "notes",
    "fieldtype": "Small Text",
-   "label": "Ghi chú"
+   "label": "Notes"
   }
  ],
  "index_web_pages_for_search": 1,

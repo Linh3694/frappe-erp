@@ -32,19 +32,19 @@
   {
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
-   "label": "Thông tin cơ bản"
+   "label": "Basic Information"
   },
   {
    "fieldname": "route_name",
    "fieldtype": "Data",
-   "label": "Tên tuyến đường",
+   "label": "Route Name",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "vehicle_id",
    "fieldtype": "Link",
-   "label": "Xe",
+   "label": "Vehicle",
    "options": "SIS Bus Transportation",
    "reqd": 1,
    "in_list_view": 1
@@ -52,7 +52,7 @@
   {
    "fieldname": "driver_id",
    "fieldtype": "Link",
-   "label": "Tài xế",
+   "label": "Driver",
    "options": "SIS Bus Driver",
    "reqd": 1,
    "in_list_view": 1
@@ -76,23 +76,23 @@
   {
    "fieldname": "status",
    "fieldtype": "Select",
-   "label": "Trạng thái",
-   "options": "Hoạt động\nKhông hoạt động",
-   "default": "Hoạt động",
+   "label": "Status",
+   "options": "Active\nInactive",
+   "default": "Active",
    "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "route_students",
    "fieldtype": "Table",
-   "label": "Danh sách học sinh",
+   "label": "Student List",
    "options": "SIS Bus Route Student",
    "reqd": 1
   },
   {
    "fieldname": "system_information",
    "fieldtype": "Section Break",
-   "label": "Thông tin hệ thống"
+   "label": "System Information"
   },
   {
    "fieldname": "campus_id",
