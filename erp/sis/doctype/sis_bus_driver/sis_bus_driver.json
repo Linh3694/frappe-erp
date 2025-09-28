@@ -106,7 +106,7 @@
    "fieldtype": "Link",
    "label": "Campus",
    "options": "SIS Campus",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "school_year_id",
