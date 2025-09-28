@@ -652,3 +652,35 @@ def get_event_attendance_statuses():
         frappe.logger().error(f"❌ [Backend] Error getting event attendance statuses: {str(e)}")
         frappe.log_error(f"get_event_attendance_statuses error: {str(e)}")
         return error_response(f"Failed to get event attendance statuses: {str(e)}", code="GET_EVENT_ATTENDANCE_STATUSES_ERROR", debug_info={"logs": debug_logs})
+
+
+@frappe.whitelist(allow_guest=False)
+def validate_period_for_education_stage():
+    """
+    Validate if a period exists for a given education stage
+    """
+    try:
+        period_name = frappe.request.args.get('period_name')
+        education_stage_id = frappe.request.args.get('education_stage_id')
+
+        if not period_name or not education_stage_id:
+            return error_response("Missing period_name or education_stage_id", code="MISSING_PARAMS")
+
+        frappe.logger().info(f"🔍 [Backend] Validating period '{period_name}' for education stage '{education_stage_id}'")
+
+        # Check if period exists for this education stage
+        period_exists = frappe.db.exists("SIS Timetable Column", {
+            "period_name": period_name,
+            "education_stage_id": education_stage_id,
+            "period_type": "study"
+        })
+
+        exists = bool(period_exists)
+
+        frappe.logger().info(f"✅ [Backend] Period validation result: {exists}")
+        return success_response({"exists": exists})
+
+    except Exception as e:
+        frappe.logger().error(f"❌ [Backend] Error validating period for education stage: {str(e)}")
+        frappe.log_error(f"validate_period_for_education_stage error: {str(e)}")
+        return error_response(f"Failed to validate period: {str(e)}", code="VALIDATE_PERIOD_ERROR")
