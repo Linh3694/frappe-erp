@@ -117,12 +117,9 @@ def create_bus_driver():
 def update_bus_driver():
 	"""Update an existing bus driver"""
 	try:
-		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
-		if not name:
-			return error_response("Bus driver name is required")
-
 		# Get update data from request
 		data = {}
+		name = None
 
 		# First try to get JSON data from request body
 		if frappe.request.data:
@@ -135,25 +132,34 @@ def update_bus_driver():
 
 				if json_data:
 					data = json_data
-					# Remove name from data if it exists
-					data.pop('name', None)
-					frappe.logger().info(f"Received JSON data for update_bus_driver: {data}")
+					# Extract name from data if it exists
+					name = data.pop('name', None)
+					frappe.logger().info(f"Received JSON data for update_bus_driver: {data}, name: {name}")
 				else:
 					data = frappe.local.form_dict
-					# Remove name from data
+					name = data.get('name')
 					data.pop('name', None)
 					frappe.logger().info(f"Received form data for update_bus_driver (empty JSON body): {data}")
 			except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
 				# If JSON parsing fails, use form_dict
 				frappe.logger().error(f"JSON parsing failed in update_bus_driver: {str(e)}")
 				data = frappe.local.form_dict
+				name = data.get('name')
 				data.pop('name', None)
 				frappe.logger().info(f"Using form data for update_bus_driver after JSON failure: {data}")
 		else:
 			# Fallback to form_dict
 			data = frappe.local.form_dict
+			name = data.get('name')
 			data.pop('name', None)
 			frappe.logger().info(f"No request data, using form_dict for update_bus_driver: {data}")
+
+		# If name is still not found, try request args
+		if not name:
+			name = frappe.request.args.get('name')
+
+		if not name:
+			return error_response("Bus driver name is required")
 
 		doc = frappe.get_doc("SIS Bus Driver", name)
 		doc.update(data)
