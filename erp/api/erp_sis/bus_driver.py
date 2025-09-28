@@ -119,7 +119,7 @@ def get_available_drivers():
 	assigned_drivers = frappe.db.sql("""
 		SELECT DISTINCT driver_id
 		FROM `tabSIS Bus Transportation`
-		WHERE status = 'Hoạt động'
+		WHERE status = 'Active'
 	""", as_dict=True)
 
 	assigned_ids = [assignment.driver_id for assignment in assigned_drivers if assignment.driver_id]
@@ -129,7 +129,7 @@ def get_available_drivers():
 		return frappe.db.sql("""
 			SELECT name, full_name, phone_number, citizen_id
 			FROM `tabSIS Bus Driver`
-			WHERE status = 'Hoạt động'
+			WHERE status = 'Active'
 			ORDER BY full_name
 		""", as_dict=True)
 	else:
@@ -138,7 +138,7 @@ def get_available_drivers():
 		return frappe.db.sql(f"""
 			SELECT name, full_name, phone_number, citizen_id
 			FROM `tabSIS Bus Driver`
-			WHERE status = 'Hoạt động'
+			WHERE status = 'Active'
 			AND name NOT IN ({placeholders})
 			ORDER BY full_name
 		""", assigned_ids, as_dict=True)

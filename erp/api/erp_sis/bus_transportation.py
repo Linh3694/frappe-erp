@@ -153,6 +153,6 @@ def get_available_vehicles():
 	return frappe.db.sql("""
 		SELECT name, vehicle_code, license_plate, vehicle_type
 		FROM `tabSIS Bus Transportation`
-		WHERE status = 'Hoạt động'
+		WHERE status = 'Active'
 		ORDER BY vehicle_code
 	""", as_dict=True)

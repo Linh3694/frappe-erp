@@ -123,7 +123,7 @@ def get_available_monitors():
 	assigned_monitors = frappe.db.sql("""
 		SELECT DISTINCT monitor1_id, monitor2_id
 		FROM `tabSIS Bus Route`
-		WHERE status = 'Hoạt động'
+		WHERE status = 'Active'
 	""", as_dict=True)
 
 	assigned_ids = []
@@ -138,7 +138,7 @@ def get_available_monitors():
 		return frappe.db.sql("""
 			SELECT name, full_name, phone_number, citizen_id
 			FROM `tabSIS Bus Monitor`
-			WHERE status = 'Hoạt động'
+			WHERE status = 'Active'
 			ORDER BY full_name
 		""", as_dict=True)
 	else:
@@ -147,7 +147,7 @@ def get_available_monitors():
 		return frappe.db.sql(f"""
 			SELECT name, full_name, phone_number, citizen_id
 			FROM `tabSIS Bus Monitor`
-			WHERE status = 'Hoạt động'
+			WHERE status = 'Active'
 			AND name NOT IN ({placeholders})
 			ORDER BY full_name
 		""", assigned_ids, as_dict=True)

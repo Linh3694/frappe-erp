@@ -101,7 +101,7 @@ def create_bus_route(**data):
 			FROM `tabSIS Bus Route`
 			WHERE (monitor1_id = %s OR monitor2_id = %s)
 			AND name != %s
-			AND status = 'Hoạt động'
+			AND status = 'Active'
 		""", (monitor1_id, monitor1_id, data.get("name", "")), as_dict=True)
 
 		if existing_routes:
@@ -114,7 +114,7 @@ def create_bus_route(**data):
 			FROM `tabSIS Bus Route`
 			WHERE (monitor1_id = %s OR monitor2_id = %s)
 			AND name != %s
-			AND status = 'Hoạt động'
+			AND status = 'Active'
 		""", (monitor2_id, monitor2_id, data.get("name", "")), as_dict=True)
 
 		if existing_routes:
@@ -140,7 +140,7 @@ def update_bus_route(name, **data):
 			FROM `tabSIS Bus Route`
 			WHERE (monitor1_id = %s OR monitor2_id = %s)
 			AND name != %s
-			AND status = 'Hoạt động'
+			AND status = 'Active'
 		""", (monitor1_id, monitor1_id, name), as_dict=True)
 
 		if existing_routes:
@@ -153,7 +153,7 @@ def update_bus_route(name, **data):
 			FROM `tabSIS Bus Route`
 			WHERE (monitor1_id = %s OR monitor2_id = %s)
 			AND name != %s
-			AND status = 'Hoạt động'
+			AND status = 'Active'
 		""", (monitor2_id, monitor2_id, name), as_dict=True)
 
 		if existing_routes:
