@@ -65,17 +65,17 @@ def get_bus_route(name):
 			WHERE route_id = %s
 			ORDER BY
 				CASE weekday
-					WHEN 'Thứ 2' THEN 1
-					WHEN 'Thứ 3' THEN 2
-					WHEN 'Thứ 4' THEN 3
-					WHEN 'Thứ 5' THEN 4
-					WHEN 'Thứ 6' THEN 5
-					WHEN 'Thứ 7' THEN 6
-					WHEN 'Chủ nhật' THEN 7
+					WHEN 'Monday' THEN 1
+					WHEN 'Tuesday' THEN 2
+					WHEN 'Wednesday' THEN 3
+					WHEN 'Thursday' THEN 4
+					WHEN 'Friday' THEN 5
+					WHEN 'Saturday' THEN 6
+					WHEN 'Sunday' THEN 7
 				END,
 				CASE trip_type
-					WHEN 'Đón' THEN 1
-					WHEN 'Trả' THEN 2
+					WHEN 'Pickup' THEN 1
+					WHEN 'Drop-off' THEN 2
 				END,
 				pickup_order
 		""", (name,), as_dict=True)
@@ -300,17 +300,17 @@ def get_students_by_route(route_id):
 		WHERE route_id = %s
 		ORDER BY
 			CASE weekday
-				WHEN 'Thứ 2' THEN 1
-				WHEN 'Thứ 3' THEN 2
-				WHEN 'Thứ 4' THEN 3
-				WHEN 'Thứ 5' THEN 4
-				WHEN 'Thứ 6' THEN 5
-				WHEN 'Thứ 7' THEN 6
-				WHEN 'Chủ nhật' THEN 7
+				WHEN 'Monday' THEN 1
+				WHEN 'Tuesday' THEN 2
+				WHEN 'Wednesday' THEN 3
+				WHEN 'Thursday' THEN 4
+				WHEN 'Friday' THEN 5
+				WHEN 'Saturday' THEN 6
+				WHEN 'Sunday' THEN 7
 			END,
 			CASE trip_type
-				WHEN 'Đón' THEN 1
-				WHEN 'Trả' THEN 2
+				WHEN 'Pickup' THEN 1
+				WHEN 'Drop-off' THEN 2
 			END,
 			pickup_order
 	""", (route_id,), as_dict=True)
@@ -336,7 +336,7 @@ def get_available_monitors():
 	assigned_monitors = frappe.db.sql("""
 		SELECT DISTINCT monitor1_id, monitor2_id
 		FROM `tabSIS Bus Route`
-		WHERE status = 'Hoạt động'
+		WHERE status = 'Active'
 	""", as_dict=True)
 
 	assigned_ids = []
@@ -351,7 +351,7 @@ def get_available_monitors():
 		return frappe.db.sql("""
 			SELECT name, full_name, phone_number, citizen_id
 			FROM `tabSIS Bus Monitor`
-			WHERE status = 'Hoạt động'
+			WHERE status = 'Active'
 			ORDER BY full_name
 		""", as_dict=True)
 	else:
@@ -360,7 +360,7 @@ def get_available_monitors():
 		return frappe.db.sql(f"""
 			SELECT name, full_name, phone_number, citizen_id
 			FROM `tabSIS Bus Monitor`
-			WHERE status = 'Hoạt động'
+			WHERE status = 'Active'
 			AND name NOT IN ({placeholders})
 			ORDER BY full_name
 		""", assigned_ids, as_dict=True)
@@ -519,7 +519,7 @@ def create_daily_trip(**data):
 				"pickup_order": student_data.get("pickup_order", 0),
 				"pickup_location": student_data.get("pickup_location", ""),
 				"drop_off_location": student_data.get("drop_off_location", ""),
-				"student_status": student_data.get("student_status", "Chưa lên xe")
+				"student_status": student_data.get("student_status", "Not Boarded")
 			}
 
 			frappe.get_doc({
