@@ -2,6 +2,7 @@
 # Copyright (c) 2025, Frappe Technologies and contributors
 # For license information, please see license.txt
 
+import json
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
@@ -61,9 +62,37 @@ def get_bus_monitor(name):
 		return error_response(f"Bus monitor not found: {str(e)}")
 
 @frappe.whitelist()
-def create_bus_monitor(**data):
+def create_bus_monitor():
 	"""Create a new bus monitor"""
 	try:
+		# Get data from request
+		data = {}
+
+		# First try to get JSON data from request body
+		if frappe.request.data:
+			try:
+				# Support both bytes and string payloads
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+
+				if json_data:
+					data = json_data
+					frappe.logger().info(f"Received JSON data for create_bus_monitor: {data}")
+				else:
+					data = frappe.local.form_dict
+					frappe.logger().info(f"Received form data for create_bus_monitor (empty JSON body): {data}")
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+				# If JSON parsing fails, use form_dict
+				frappe.logger().error(f"JSON parsing failed in create_bus_monitor: {str(e)}")
+				data = frappe.local.form_dict
+				frappe.logger().info(f"Using form data for create_bus_monitor after JSON failure: {data}")
+		else:
+			# Fallback to form_dict
+			data = frappe.local.form_dict
+			frappe.logger().info(f"No request data, using form_dict for create_bus_monitor: {data}")
+
 		doc = frappe.get_doc({
 			"doctype": "SIS Bus Monitor",
 			**data

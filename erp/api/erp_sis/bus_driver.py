@@ -2,6 +2,7 @@
 # Copyright (c) 2025, Frappe Technologies and contributors
 # For license information, please see license.txt
 
+import json
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
@@ -61,9 +62,37 @@ def get_bus_driver(name):
 		return error_response(f"Bus driver not found: {str(e)}")
 
 @frappe.whitelist()
-def create_bus_driver(**data):
+def create_bus_driver():
 	"""Create a new bus driver"""
 	try:
+		# Get data from request
+		data = {}
+
+		# First try to get JSON data from request body
+		if frappe.request.data:
+			try:
+				# Support both bytes and string payloads
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+
+				if json_data:
+					data = json_data
+					frappe.logger().info(f"Received JSON data for create_bus_driver: {data}")
+				else:
+					data = frappe.local.form_dict
+					frappe.logger().info(f"Received form data for create_bus_driver (empty JSON body): {data}")
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+				# If JSON parsing fails, use form_dict
+				frappe.logger().error(f"JSON parsing failed in create_bus_driver: {str(e)}")
+				data = frappe.local.form_dict
+				frappe.logger().info(f"Using form data for create_bus_driver after JSON failure: {data}")
+		else:
+			# Fallback to form_dict
+			data = frappe.local.form_dict
+			frappe.logger().info(f"No request data, using form_dict for create_bus_driver: {data}")
+
 		doc = frappe.get_doc({
 			"doctype": "SIS Bus Driver",
 			**data
