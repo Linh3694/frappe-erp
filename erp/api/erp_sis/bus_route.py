@@ -9,11 +9,19 @@ from erp.api.utils import get_list, get_single, create_doc, update_doc, delete_d
 @frappe.whitelist()
 def get_all_bus_routes(page=1, limit=20, **filters):
 	"""Get all bus routes with pagination"""
+	# Filter out system parameters that shouldn't be used in DB queries
+	clean_filters = {}
+	system_params = {'cmd', 'method', '_'}  # Common Frappe system parameters
+	
+	for key, value in filters.items():
+		if key not in system_params:
+			clean_filters[key] = value
+	
 	return get_list(
 		"SIS Bus Route",
 		page=page,
 		limit=limit,
-		filters=filters,
+		filters=clean_filters,
 		fields=[
 			"name", "route_name", "vehicle_id", "driver_id", "monitor1_id", "monitor2_id",
 			"status", "campus_id", "school_year_id", "created_at", "updated_at"
