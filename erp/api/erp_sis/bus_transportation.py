@@ -28,7 +28,7 @@ def get_all_bus_transportation():
 			filters=filters,
 			fields=[
 				"name", "vehicle_code", "license_plate", "vehicle_type",
-				"driver_id", "status", "campus_id", "school_year_id",
+				"status", "campus_id", "school_year_id",
 				"creation", "modified"
 			],
 			order_by="vehicle_code asc"
@@ -38,15 +38,6 @@ def get_all_bus_transportation():
 		for item in transportation:
 			item['created_at'] = item.pop('creation')
 			item['updated_at'] = item.pop('modified')
-
-		# Enrich with driver information
-		for item in transportation:
-			if item.driver_id:
-				driver = frappe.get_doc("SIS Bus Driver", item.driver_id)
-				item.update({
-					"driver_name": driver.full_name,
-					"driver_phone": driver.phone_number
-				})
 
 		return success_response(
 			data=transportation,
@@ -66,14 +57,6 @@ def get_bus_transportation():
 			return error_response("Bus transportation name is required")
 			
 		doc = frappe.get_doc("SIS Bus Transportation", name)
-
-		# Enrich with driver information
-		if doc.driver_id:
-			driver = frappe.get_doc("SIS Bus Driver", doc.driver_id)
-			doc.update({
-				"driver_name": driver.full_name,
-				"driver_phone": driver.phone_number
-			})
 
 		return success_response(
 			data=doc.as_dict(),
@@ -123,25 +106,7 @@ def create_bus_transportation(**data):
 				form_data.pop('cmd', None)
 				data = form_data
 
-		# Enrich with driver information
-		if data.get("driver_id"):
-			log_info(f"Looking up driver: {data['driver_id']}")
-
-			# Check if driver exists first
-			if not frappe.db.exists("SIS Bus Driver", data["driver_id"]):
-				log_error(f"Driver {data['driver_id']} does not exist in database")
-				return error_response(f"Driver not found: {data['driver_id']}", logs=logs)
-
-			try:
-				driver = frappe.get_doc("SIS Bus Driver", data["driver_id"])
-				log_info(f"Found driver: {driver.name} - {driver.full_name}")
-				data.update({
-					"driver_name": driver.full_name,
-					"driver_phone": driver.phone_number
-				})
-			except Exception as driver_error:
-				log_error(f"Error finding driver {data['driver_id']}: {str(driver_error)}")
-				return error_response(f"Driver not found: {data['driver_id']} - {str(driver_error)}", logs=logs)
+		# No driver information needed in Bus Transportation
 
 		log_info(f"Final data before creating doc: {data}")
 
@@ -152,7 +117,6 @@ def create_bus_transportation(**data):
 		doc.vehicle_code = data.get("vehicle_code")
 		doc.license_plate = data.get("license_plate")
 		doc.vehicle_type = data.get("vehicle_type")
-		doc.driver_id = data.get("driver_id")
 		# Map frontend status (lowercase) to backend status (capitalized)
 		status = data.get("status", "active")
 		doc.status = "Active" if status == "active" else "Inactive"
@@ -199,14 +163,6 @@ def update_bus_transportation(**data):
 		if data.get("status"):
 			status = data.get("status")
 			data["status"] = "Active" if status == "active" else "Inactive"
-			
-		# Enrich with driver information
-		if data.get("driver_id"):
-			driver = frappe.get_doc("SIS Bus Driver", data["driver_id"])
-			data.update({
-				"driver_name": driver.full_name,
-				"driver_phone": driver.phone_number
-			})
 
 		doc = frappe.get_doc("SIS Bus Transportation", name)
 		doc.update(data)
