@@ -468,15 +468,11 @@ def add_student_to_route():
 		# Find class_student_id for the student
 		class_student_id = None
 		if data.get('student_id'):
-			class_student = frappe.db.get_value(
+			class_student_id = frappe.db.get_value(
 				"SIS Class Student",
 				{"student_id": data['student_id']},
-				"name",
-				order_by="creation desc",
-				limit=1
+				"name"
 			)
-			if class_student:
-				class_student_id = class_student[0]
 
 		# Create bus route student record
 		route_student = frappe.get_doc({
