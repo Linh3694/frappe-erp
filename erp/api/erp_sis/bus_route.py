@@ -426,3 +426,33 @@ def get_available_students(campus_id=None, school_year_id=None):
 		AND {where_clause}
 		ORDER BY s.full_name
 	""", params, as_dict=True)
+
+@frappe.whitelist()
+def get_available_drivers():
+	"""Get available drivers (not assigned to active bus routes)"""
+	assigned_drivers = frappe.db.sql("""
+		SELECT DISTINCT driver_id
+		FROM `tabSIS Bus Route`
+		WHERE status = 'Active' AND driver_id IS NOT NULL
+	""", as_dict=True)
+
+	assigned_ids = [assignment.driver_id for assignment in assigned_drivers if assignment.driver_id]
+
+	if not assigned_ids:
+		# Return all active drivers
+		return frappe.db.sql("""
+			SELECT name, full_name, phone_number, citizen_id
+			FROM `tabSIS Bus Driver`
+			WHERE status = 'Active'
+			ORDER BY full_name
+		""", as_dict=True)
+	else:
+		# Return drivers not in assigned_ids
+		placeholders = ','.join(['%s'] * len(assigned_ids))
+		return frappe.db.sql(f"""
+			SELECT name, full_name, phone_number, citizen_id
+			FROM `tabSIS Bus Driver`
+			WHERE status = 'Active'
+			AND name NOT IN ({placeholders})
+			ORDER BY full_name
+		""", assigned_ids, as_dict=True)

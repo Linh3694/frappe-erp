@@ -208,11 +208,11 @@ def delete_bus_driver():
 
 @frappe.whitelist()
 def get_available_drivers():
-	"""Get available drivers (not assigned to active transportation)"""
+	"""Get available drivers (not assigned to active bus routes)"""
 	assigned_drivers = frappe.db.sql("""
 		SELECT DISTINCT driver_id
-		FROM `tabSIS Bus Transportation`
-		WHERE status = 'Active'
+		FROM `tabSIS Bus Route`
+		WHERE status = 'Active' AND driver_id IS NOT NULL
 	""", as_dict=True)
 
 	assigned_ids = [assignment.driver_id for assignment in assigned_drivers if assignment.driver_id]
