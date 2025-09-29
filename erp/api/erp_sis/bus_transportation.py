@@ -2,6 +2,7 @@
 # Copyright (c) 2025, Frappe Technologies and contributors
 # For license information, please see license.txt
 
+import json
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
@@ -90,19 +91,21 @@ def create_bus_transportation(**data):
 		frappe.logger().error(msg)
 
 	try:
-		# Debug: Check if we have form data
+		# Get data from form_dict (prioritizing form data for Frappe compatibility)
 		log_info(f"All received data: {dict(frappe.form_dict)}")
 		log_info(f"Method data: {data}")
-		log_info(f"Local data: {frappe.local.form_dict}")
+		log_info(f"Request data: {frappe.request.data}")
+		log_info(f"Request method: {frappe.request.method}")
+		log_info(f"Request content type: {frappe.request.headers.get('Content-Type', 'Not set')}")
 
-		# Get data from form_dict if data is empty
+		# Use form_dict as primary source for form-encoded data
 		if not data or data.get('cmd'):
 			form_data = dict(frappe.form_dict)
 			# Remove cmd and other metadata
 			form_data.pop('cmd', None)
 			data = form_data
-			log_info(f"Using form data instead: {data}")
-
+			log_info(f"Using form data: {data}")
+		
 		log_info(f"Creating bus transportation with data: {data}")
 
 		# Enrich with driver information
@@ -135,7 +138,9 @@ def create_bus_transportation(**data):
 		doc.license_plate = data.get("license_plate")
 		doc.vehicle_type = data.get("vehicle_type")
 		doc.driver_id = data.get("driver_id")
-		doc.status = data.get("status", "Active")
+		# Map frontend status (lowercase) to backend status (capitalized)
+		status = data.get("status", "active")
+		doc.status = "Active" if status == "active" else "Inactive"
 		doc.campus_id = data.get("campus_id")
 		doc.school_year_id = data.get("school_year_id")
 
