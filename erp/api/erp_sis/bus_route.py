@@ -276,10 +276,14 @@ def create_bus_route():
 		})
 		doc.insert()
 		frappe.db.commit()
+		
+		# Log successful creation
+		frappe.logger().info(f"✅ Bus route created successfully: {doc.name} - {doc.route_name}")
 
 		return success_response(
 			data=doc.as_dict(),
-			message="Bus route created successfully"
+			message=f"Bus route created successfully: {doc.name}",
+			logs=[f"Route {doc.name} created with status {doc.status}"]
 		)
 	except Exception as e:
 		frappe.log_error(f"Error creating bus route: {str(e)}")

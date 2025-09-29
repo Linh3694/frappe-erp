@@ -43,14 +43,28 @@ class SISBusRoute(Document):
 			frappe.throw(f"Monitor đã được phân công cho tuyến: {', '.join(route_names)}")
 
 	def after_insert(self):
-		"""Create daily trips when route is created"""
+		"""Create daily trips when route is created - don't block on errors"""
 		if self.status == "Active":
-			self.create_daily_trips()
+			try:
+				# Commit the route first before creating trips
+				frappe.db.commit()
+				self.create_daily_trips()
+			except Exception as e:
+				# Log error but don't block route creation
+				frappe.log_error(f"Error creating daily trips for route {self.name}: {str(e)}", "Bus Route Daily Trips Creation")
+				frappe.logger().error(f"Failed to create daily trips for route {self.name}: {str(e)}")
 
 	def on_update(self):
-		"""Create daily trips when route is created or updated"""
+		"""Create daily trips when route is created or updated - don't block on errors"""
 		if self.has_value_changed("status") and self.status == "Active":
-			self.create_daily_trips()
+			try:
+				# Commit the route first before creating trips
+				frappe.db.commit()
+				self.create_daily_trips()
+			except Exception as e:
+				# Log error but don't block route update
+				frappe.log_error(f"Error creating daily trips for route {self.name}: {str(e)}", "Bus Route Daily Trips Creation")
+				frappe.logger().error(f"Failed to create daily trips for route {self.name}: {str(e)}")
 
 	def create_daily_trips(self):
 		"""Create daily trips for the next 30 days (weekdays only)"""
@@ -191,11 +205,8 @@ class SISBusRoute(Document):
 
 			frappe.logger().info(f"Created daily trip {daily_trip.name} for {trip_date} {weekday} {trip_type} with {students_added} students")
 			
-			# Commit after successful creation
-			frappe.db.commit()
 			return True
 			
 		except Exception as e:
 			frappe.logger().error(f"Error creating daily trip for {self.name} - {trip_date} - {weekday} - {trip_type}: {str(e)}")
-			frappe.db.rollback()
 			raise e
