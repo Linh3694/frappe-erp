@@ -184,9 +184,22 @@ def create_bus_transportation(**data):
 		return error_response(f"Failed to create bus transportation: {str(e)}", logs=logs)
 
 @frappe.whitelist()
-def update_bus_transportation(name, **data):
+def update_bus_transportation(**data):
 	"""Update an existing bus transportation"""
 	try:
+		# Get name from data (sent by frontend as part of data object)
+		name = data.get('name')
+		if not name:
+			return error_response("Bus transportation name is required")
+			
+		# Remove name from data before updating document
+		data.pop('name', None)
+		
+		# Map frontend status (lowercase) to backend status (capitalized) if present
+		if data.get("status"):
+			status = data.get("status")
+			data["status"] = "Active" if status == "active" else "Inactive"
+			
 		# Enrich with driver information
 		if data.get("driver_id"):
 			driver = frappe.get_doc("SIS Bus Driver", data["driver_id"])
@@ -210,9 +223,13 @@ def update_bus_transportation(name, **data):
 		return error_response(f"Failed to update bus transportation: {str(e)}")
 
 @frappe.whitelist()
-def delete_bus_transportation(name):
+def delete_bus_transportation():
 	"""Delete a bus transportation"""
 	try:
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
+		if not name:
+			return error_response("Bus transportation name is required")
+			
 		frappe.delete_doc("SIS Bus Transportation", name)
 		frappe.db.commit()
 
