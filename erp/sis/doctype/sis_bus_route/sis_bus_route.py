@@ -158,7 +158,6 @@ class SISBusRoute(Document):
 				return False  # Skip if already exists
 
 			# Get students for this route, weekday, and trip type with full student info
-			# Query child table directly since it's a child table
 			frappe.logger().info(f"📝 Querying students for route {self.name}, weekday={weekday}, trip_type={trip_type}")
 			students = frappe.db.sql("""
 				SELECT
@@ -170,7 +169,7 @@ class SISBusRoute(Document):
 				INNER JOIN `tabCRM Student` s ON brs.student_id = s.name
 				LEFT JOIN `tabSIS Class Student` cs ON brs.class_student_id = cs.name
 				LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
-				WHERE brs.parent = %s
+				WHERE brs.route_id = %s
 				AND brs.weekday = %s
 				AND brs.trip_type = %s
 				ORDER BY brs.pickup_order
