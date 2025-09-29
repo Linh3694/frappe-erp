@@ -115,7 +115,7 @@
    "fieldtype": "Table",
    "label": "Student List",
    "options": "SIS Bus Daily Trip Student",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "notes",
