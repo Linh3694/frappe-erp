@@ -143,6 +143,8 @@ class SISBusRoute(Document):
 	def create_daily_trip_for_date(self, trip_date, weekday, trip_type):
 		"""Create a daily trip for specific date and trip type"""
 		try:
+			frappe.logger().info(f"🔄 Creating daily trip: route={self.name}, date={trip_date}, weekday={weekday}, type={trip_type}")
+			
 			# Check if daily trip already exists
 			existing_trip = frappe.db.exists("SIS Bus Daily Trip", {
 				"route_id": self.name,
@@ -152,11 +154,12 @@ class SISBusRoute(Document):
 			})
 
 			if existing_trip:
-				frappe.logger().debug(f"Daily trip already exists: {self.name} - {trip_date} - {weekday} - {trip_type}")
+				frappe.logger().debug(f"⏭️  Daily trip already exists: {self.name} - {trip_date} - {weekday} - {trip_type}")
 				return False  # Skip if already exists
 
 			# Get students for this route, weekday, and trip type with full student info
 			# Query child table directly since it's a child table
+			frappe.logger().info(f"📝 Querying students for route {self.name}, weekday={weekday}, trip_type={trip_type}")
 			students = frappe.db.sql("""
 				SELECT
 					brs.student_id, brs.class_student_id, brs.pickup_order,
@@ -172,6 +175,8 @@ class SISBusRoute(Document):
 				AND brs.trip_type = %s
 				ORDER BY brs.pickup_order
 			""", (self.name, weekday, trip_type), as_dict=True)
+			
+			frappe.logger().info(f"👥 Found {len(students)} students for this trip")
 
 			# Create daily trip first (students can be added later)
 			daily_trip_data = {
@@ -194,12 +199,15 @@ class SISBusRoute(Document):
 			})
 
 			# Insert daily trip
+			frappe.logger().info(f"💾 Inserting daily trip document...")
 			daily_trip.insert()
+			frappe.logger().info(f"✅ Daily trip inserted: {daily_trip.name}")
 			
 			students_added = 0
 			
 			# Add students to daily trip with full information (if any)
 			if students:
+				frappe.logger().info(f"📚 Adding {len(students)} students to daily trip {daily_trip.name}")
 				for student in students:
 					try:
 						student_data = {
@@ -223,15 +231,21 @@ class SISBusRoute(Document):
 						}).insert()
 						
 						students_added += 1
+						frappe.logger().debug(f"  ✓ Added student {student.student_code} - {student.student_name}")
 						
 					except Exception as e:
-						frappe.logger().error(f"Failed to add student {student.student_id} to daily trip {daily_trip.name}: {str(e)}")
+						frappe.logger().error(f"  ❌ Failed to add student {student.student_id} to daily trip {daily_trip.name}: {str(e)}")
 						# Continue with other students
+			else:
+				frappe.logger().info(f"ℹ️  No students assigned for this trip schedule (will be added later)")
 
-			frappe.logger().info(f"Created daily trip {daily_trip.name} for {trip_date} {weekday} {trip_type} with {students_added} students")
+			frappe.logger().info(f"✅ Created daily trip {daily_trip.name} for {trip_date} {weekday} {trip_type} with {students_added} students")
 			
 			return True
 			
 		except Exception as e:
-			frappe.logger().error(f"Error creating daily trip for {self.name} - {trip_date} - {weekday} - {trip_type}: {str(e)}")
+			import traceback
+			error_msg = f"❌ Error creating daily trip for {self.name} - {trip_date} - {weekday} - {trip_type}: {str(e)}"
+			frappe.logger().error(error_msg)
+			frappe.logger().error(f"Traceback: {traceback.format_exc()}")
 			raise e
