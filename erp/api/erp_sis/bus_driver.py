@@ -20,7 +20,8 @@ def get_all_bus_drivers():
 			campus_id = "campus-1"
 
 		# Apply campus filtering for data isolation
-		filters = {"campus_id": campus_id}
+		# Include records with null/empty campus_id for backward compatibility
+		filters = {"campus_id": ["in", [campus_id, None, ""]]}
 
 		# Get all bus drivers
 		drivers = frappe.get_list(
@@ -96,6 +97,17 @@ def create_bus_driver():
 			# Fallback to form_dict
 			data = frappe.local.form_dict
 			frappe.logger().info(f"No request data, using form_dict for create_bus_driver: {data}")
+
+		# Set campus_id if not provided
+		if not data.get('campus_id'):
+			campus_id = get_current_campus_from_context()
+			if campus_id:
+				data['campus_id'] = campus_id
+				frappe.logger().info(f"Set campus_id to {campus_id} for bus driver")
+			else:
+				# Fallback to default campus
+				data['campus_id'] = "campus-1"
+				frappe.logger().info("No campus context found, using default campus-1")
 
 		doc = frappe.get_doc({
 			"doctype": "SIS Bus Driver",
