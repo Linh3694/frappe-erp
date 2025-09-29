@@ -739,7 +739,7 @@ def create_daily_trip():
 		return error_response(f"Failed to create daily trip: {str(e)}")
 
 @frappe.whitelist()
-def get_all_daily_trips():
+def get_daily_trips():
 	"""Get all daily trips with enriched information"""
 	try:
 		# Get current user's campus information from roles
