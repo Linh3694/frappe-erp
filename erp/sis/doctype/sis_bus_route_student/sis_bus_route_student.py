@@ -17,7 +17,7 @@ class SISBusRouteStudent(Document):
 		if self.route_id and not frappe.db.exists("SIS Bus Route", self.route_id):
 			frappe.throw("Tuyến đường không tồn tại")
 
-		if self.student_id and not frappe.db.exists("SIS Student", self.student_id):
+		if self.student_id and not frappe.db.exists("CRM Student", self.student_id):
 			frappe.throw("Học sinh không tồn tại")
 
 		if self.class_student_id and not frappe.db.exists("SIS Class Student", self.class_student_id):
