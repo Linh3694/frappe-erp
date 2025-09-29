@@ -1186,6 +1186,43 @@ def update_trip_status():
 		return error_response(f"Failed to update trip status: {str(e)}")
 
 @frappe.whitelist()
+def trigger_create_daily_trips():
+	"""Manually trigger daily trips creation for a route"""
+	try:
+		route_id = frappe.local.form_dict.get('route_id') or frappe.request.args.get('route_id')
+		if not route_id:
+			return error_response("Route ID is required")
+		
+		# Get the route
+		route = frappe.get_doc("SIS Bus Route", route_id)
+		
+		if route.status != "Active":
+			return error_response("Route must be Active to create daily trips")
+		
+		# Create daily trips
+		frappe.logger().info(f"📋 Starting manual daily trips creation for route {route_id}")
+		route.create_daily_trips()
+		frappe.db.commit()
+		
+		# Count created trips
+		trips_count = frappe.db.count("SIS Bus Daily Trip", {"route_id": route_id})
+		
+		frappe.logger().info(f"✅ Manual daily trips creation completed for route {route_id}, total trips: {trips_count}")
+		
+		return success_response(
+			data={"route_id": route_id, "trips_created": trips_count},
+			message=f"Daily trips created successfully. Total trips: {trips_count}",
+			logs=[
+				f"Route: {route.route_name}",
+				f"Total daily trips: {trips_count}"
+			]
+		)
+	except Exception as e:
+		frappe.log_error(f"Error triggering daily trips creation: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to create daily trips: {str(e)}")
+
+@frappe.whitelist()
 def update_student_status_in_trip():
 	"""Update student status in a daily trip"""
 	try:

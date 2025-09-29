@@ -5,6 +5,18 @@
 import frappe
 from frappe.model.document import Document
 
+def create_daily_trips_for_route(route_name):
+	"""Background job to create daily trips for a route"""
+	try:
+		route = frappe.get_doc("SIS Bus Route", route_name)
+		route.create_daily_trips()
+		frappe.db.commit()
+		frappe.logger().info(f"✅ Successfully created daily trips for route {route_name}")
+	except Exception as e:
+		frappe.log_error(f"Error creating daily trips for route {route_name}: {str(e)}", "Bus Route Daily Trips Creation")
+		frappe.logger().error(f"❌ Failed to create daily trips for route {route_name}: {str(e)}")
+		frappe.db.rollback()
+
 class SISBusRoute(Document):
 	def validate(self):
 		self.validate_references_exist()
@@ -43,28 +55,30 @@ class SISBusRoute(Document):
 			frappe.throw(f"Monitor đã được phân công cho tuyến: {', '.join(route_names)}")
 
 	def after_insert(self):
-		"""Create daily trips when route is created - don't block on errors"""
+		"""Create daily trips when route is created - enqueue to background"""
 		if self.status == "Active":
-			try:
-				# Commit the route first before creating trips
-				frappe.db.commit()
-				self.create_daily_trips()
-			except Exception as e:
-				# Log error but don't block route creation
-				frappe.log_error(f"Error creating daily trips for route {self.name}: {str(e)}", "Bus Route Daily Trips Creation")
-				frappe.logger().error(f"Failed to create daily trips for route {self.name}: {str(e)}")
+			# Enqueue to background after commit to avoid blocking
+			frappe.enqueue(
+				'erp.sis.doctype.sis_bus_route.sis_bus_route.create_daily_trips_for_route',
+				route_name=self.name,
+				queue='default',
+				timeout=600,
+				is_async=True
+			)
+			frappe.logger().info(f"Enqueued daily trips creation for route {self.name}")
 
 	def on_update(self):
-		"""Create daily trips when route is created or updated - don't block on errors"""
+		"""Create daily trips when status changes to Active - enqueue to background"""
 		if self.has_value_changed("status") and self.status == "Active":
-			try:
-				# Commit the route first before creating trips
-				frappe.db.commit()
-				self.create_daily_trips()
-			except Exception as e:
-				# Log error but don't block route update
-				frappe.log_error(f"Error creating daily trips for route {self.name}: {str(e)}", "Bus Route Daily Trips Creation")
-				frappe.logger().error(f"Failed to create daily trips for route {self.name}: {str(e)}")
+			# Enqueue to background after commit
+			frappe.enqueue(
+				'erp.sis.doctype.sis_bus_route.sis_bus_route.create_daily_trips_for_route',
+				route_name=self.name,
+				queue='default',
+				timeout=600,
+				is_async=True
+			)
+			frappe.logger().info(f"Enqueued daily trips creation for route {self.name}")
 
 	def create_daily_trips(self):
 		"""Create daily trips for the next 30 days (weekdays only)"""
