@@ -55,30 +55,32 @@ class SISBusRoute(Document):
 			frappe.throw(f"Monitor đã được phân công cho tuyến: {', '.join(route_names)}")
 
 	def after_insert(self):
-		"""Create daily trips when route is created - enqueue to background"""
+		"""Create daily trips when route is created"""
 		if self.status == "Active":
-			# Enqueue to background after commit to avoid blocking
-			frappe.enqueue(
-				'erp.sis.doctype.sis_bus_route.sis_bus_route.create_daily_trips_for_route',
-				route_name=self.name,
-				queue='default',
-				timeout=600,
-				is_async=True
-			)
-			frappe.logger().info(f"Enqueued daily trips creation for route {self.name}")
+			try:
+				frappe.logger().info(f"🚀 Starting daily trips creation for new route {self.name}")
+				self.create_daily_trips()
+				frappe.logger().info(f"✅ Daily trips creation completed for route {self.name}")
+			except Exception as e:
+				# Log error but don't block route creation
+				error_msg = f"❌ Failed to create daily trips for route {self.name}: {str(e)}"
+				frappe.log_error(error_msg, "Bus Route Daily Trips Creation Error")
+				frappe.logger().error(error_msg)
+				# Don't raise exception to avoid blocking route creation
 
 	def on_update(self):
-		"""Create daily trips when status changes to Active - enqueue to background"""
+		"""Create daily trips when status changes to Active"""
 		if self.has_value_changed("status") and self.status == "Active":
-			# Enqueue to background after commit
-			frappe.enqueue(
-				'erp.sis.doctype.sis_bus_route.sis_bus_route.create_daily_trips_for_route',
-				route_name=self.name,
-				queue='default',
-				timeout=600,
-				is_async=True
-			)
-			frappe.logger().info(f"Enqueued daily trips creation for route {self.name}")
+			try:
+				frappe.logger().info(f"🚀 Starting daily trips creation for updated route {self.name}")
+				self.create_daily_trips()
+				frappe.logger().info(f"✅ Daily trips creation completed for route {self.name}")
+			except Exception as e:
+				# Log error but don't block route update
+				error_msg = f"❌ Failed to create daily trips for route {self.name}: {str(e)}"
+				frappe.log_error(error_msg, "Bus Route Daily Trips Creation Error")
+				frappe.logger().error(error_msg)
+				# Don't raise exception to avoid blocking route update
 
 	def create_daily_trips(self):
 		"""Create daily trips for the next 30 days (weekdays only)"""
@@ -101,7 +103,8 @@ class SISBusRoute(Document):
 		total_created = 0
 		errors = []
 
-		frappe.logger().info(f"Creating daily trips for route {self.name} from {start_date} to {end_date}")
+		frappe.logger().info(f"📅 Creating daily trips for route {self.name} from {start_date} to {end_date}")
+		frappe.logger().info(f"📌 Route info: vehicle={self.vehicle_id}, driver={self.driver_id}, monitor1={self.monitor1_id}, monitor2={self.monitor2_id}")
 
 		while current_date <= end_date:
 			weekday_num = current_date.weekday()
@@ -124,10 +127,18 @@ class SISBusRoute(Document):
 
 			current_date += timedelta(days=1)
 
-		frappe.logger().info(f"Created {total_created} daily trips for route {self.name}")
+		frappe.logger().info(f"✅ Created {total_created} daily trips for route {self.name}")
 		
 		if errors:
-			frappe.logger().warning(f"Encountered {len(errors)} errors while creating daily trips: {errors[:5]}")  # Log first 5 errors
+			frappe.logger().warning(f"⚠️ Encountered {len(errors)} errors while creating daily trips")
+			for i, error in enumerate(errors[:5], 1):  # Log first 5 errors
+				frappe.logger().error(f"  Error {i}: {error}")
+		
+		# Log to Error Log for visibility
+		if total_created == 0 and not errors:
+			frappe.log_error(f"No daily trips were created for route {self.name}. Check if route has students assigned.", "Daily Trips Creation Warning")
+		elif errors:
+			frappe.log_error(f"Created {total_created} trips with {len(errors)} errors for route {self.name}", "Daily Trips Creation Partial Success")
 
 	def create_daily_trip_for_date(self, trip_date, weekday, trip_type):
 		"""Create a daily trip for specific date and trip type"""
