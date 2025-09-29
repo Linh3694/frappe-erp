@@ -749,21 +749,17 @@ def get_daily_trips():
 			# Fallback to default if no campus found
 			campus_id = "campus-1"
 
-		# Apply campus filtering for data isolation
-		filters = {"campus_id": campus_id}
-
-		# Get all daily trips
-		daily_trips = frappe.get_list(
-			"SIS Bus Daily Trip",
-			filters=filters,
-			fields=[
-				"name", "route_id", "trip_date", "weekday", "trip_type",
-				"vehicle_id", "driver_id", "monitor1_id", "monitor2_id",
-				"trip_status", "campus_id", "school_year_id",
-				"creation", "modified"
-			],
-			order_by="trip_date desc, route_id asc"
-		)
+		# Use raw SQL query to get daily trips with campus filtering
+		daily_trips = frappe.db.sql("""
+			SELECT
+				name, route_id, trip_date, weekday, trip_type,
+				vehicle_id, driver_id, monitor1_id, monitor2_id,
+				trip_status, campus_id, school_year_id,
+				creation, modified
+			FROM `tabSIS Bus Daily Trip`
+			WHERE campus_id = %s
+			ORDER BY trip_date DESC, route_id ASC
+		""", (campus_id,), as_dict=True)
 
 		# Map field names to correct format
 		for trip in daily_trips:
