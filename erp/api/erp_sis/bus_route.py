@@ -1004,17 +1004,29 @@ def get_daily_trips_by_date():
 		if school_year_id:
 			filters["school_year_id"] = school_year_id
 
-		# Get daily trips for the specified date
-		daily_trips = frappe.get_list(
-			"SIS Bus Daily Trip",
-			filters=filters,
-			fields=[
-				"name", "route_id", "trip_date", "weekday", "trip_type",
-				"vehicle_id", "driver_id", "monitor1_id", "monitor2_id",
-				"trip_status", "campus_id", "school_year_id"
-			],
-			order_by="route_id asc, trip_type asc"
-		)
+		# Use raw SQL query to get daily trips for the specified date
+		where_conditions = ["trip_date = %s"]
+		params = [trip_date]
+
+		if campus_id:
+			where_conditions.append("campus_id = %s")
+			params.append(campus_id)
+
+		if school_year_id:
+			where_conditions.append("school_year_id = %s")
+			params.append(school_year_id)
+
+		where_clause = " AND ".join(where_conditions)
+
+		daily_trips = frappe.db.sql(f"""
+			SELECT
+				name, route_id, trip_date, weekday, trip_type,
+				vehicle_id, driver_id, monitor1_id, monitor2_id,
+				trip_status, campus_id, school_year_id
+			FROM `tabSIS Bus Daily Trip`
+			WHERE {where_clause}
+			ORDER BY route_id ASC, trip_type ASC
+		""", params, as_dict=True)
 
 		# Enrich with related information
 		for trip in daily_trips:
