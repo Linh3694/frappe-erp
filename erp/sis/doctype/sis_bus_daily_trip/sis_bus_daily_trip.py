@@ -54,7 +54,7 @@ class SISBusDailyTrip(Document):
 
 	def on_update(self):
 		"""Update trip status based on current time"""
-		if self.trip_status == "Chưa xuất phát" and self.trip_date == datetime.now().date():
-			# Auto update to "Đã xuất phát" if current time is past start time
+		if self.trip_status == "Not Started" and self.trip_date == datetime.now().date():
+			# Auto update to "In Progress" if current time is past start time
 			# This could be enhanced with actual start time logic
 			pass

@@ -122,7 +122,7 @@ class SISBusRoute(Document):
 			"driver_id": self.driver_id,
 			"monitor1_id": self.monitor1_id,
 			"monitor2_id": self.monitor2_id,
-			"trip_status": "Chưa xuất phát",
+			"trip_status": "Not Started",
 			"campus_id": self.campus_id,
 			"school_year_id": self.school_year_id
 		}
@@ -147,7 +147,7 @@ class SISBusRoute(Document):
 				"pickup_order": student.pickup_order,
 				"pickup_location": student.pickup_location,
 				"drop_off_location": student.drop_off_location,
-				"student_status": "Chưa lên xe"
+				"student_status": "Not Boarded"
 			}
 
 			frappe.get_doc({
