@@ -6,7 +6,8 @@ def success_response(
     data: Any = None,
     message: str = "Success",
     meta: Optional[Dict[str, Any]] = None,
-    debug_info: Optional[Dict[str, Any]] = None
+    debug_info: Optional[Dict[str, Any]] = None,
+    logs: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """Chuẩn hoá success response theo format cố định"""
     response = {
@@ -20,8 +21,13 @@ def success_response(
     if meta:
         response["meta"] = meta
 
-    if debug_info:
-        response["debug_info"] = debug_info
+    if debug_info or logs:
+        combined_debug_info = {}
+        if debug_info:
+            combined_debug_info.update(debug_info)
+        if logs:
+            combined_debug_info["logs"] = logs
+        response["debug_info"] = combined_debug_info
 
     return response
 
@@ -30,7 +36,8 @@ def error_response(
     message: str,
     errors: Optional[Dict[str, List[str]]] = None,
     code: Optional[str] = None,
-    debug_info: Optional[Dict[str, Any]] = None
+    debug_info: Optional[Dict[str, Any]] = None,
+    logs: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """Chuẩn hoá error response theo format cố định"""
     response = {
@@ -44,10 +51,15 @@ def error_response(
     if code:
         response["code"] = code
 
-    if debug_info:
+    if debug_info or logs:
         if 'errors' not in response:
             response['errors'] = {}
-        response['errors']['debug_info'] = debug_info
+        combined_debug_info = {}
+        if debug_info:
+            combined_debug_info.update(debug_info)
+        if logs:
+            combined_debug_info["logs"] = logs
+        response['errors']['debug_info'] = combined_debug_info
 
     return response
 

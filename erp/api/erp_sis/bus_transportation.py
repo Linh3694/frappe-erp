@@ -81,30 +81,38 @@ def get_bus_transportation(name):
 @frappe.whitelist()
 def create_bus_transportation(**data):
 	"""Create a new bus transportation"""
+	logs = []
+	def log_info(msg):
+		logs.append(f"INFO: {msg}")
+		frappe.logger().info(msg)
+	def log_error(msg):
+		logs.append(f"ERROR: {msg}")
+		frappe.logger().error(msg)
+
 	try:
-		frappe.logger().info(f"Creating bus transportation with data: {data}")
+		log_info(f"Creating bus transportation with data: {data}")
 
 		# Enrich with driver information
 		if data.get("driver_id"):
-			frappe.logger().info(f"Looking up driver: {data['driver_id']}")
+			log_info(f"Looking up driver: {data['driver_id']}")
 
 			# Check if driver exists first
 			if not frappe.db.exists("SIS Bus Driver", data["driver_id"]):
-				frappe.logger().error(f"Driver {data['driver_id']} does not exist in database")
-				return error_response(f"Driver not found: {data['driver_id']}")
+				log_error(f"Driver {data['driver_id']} does not exist in database")
+				return error_response(f"Driver not found: {data['driver_id']}", logs=logs)
 
 			try:
 				driver = frappe.get_doc("SIS Bus Driver", data["driver_id"])
-				frappe.logger().info(f"Found driver: {driver.name} - {driver.full_name}")
+				log_info(f"Found driver: {driver.name} - {driver.full_name}")
 				data.update({
 					"driver_name": driver.full_name,
 					"driver_phone": driver.phone_number
 				})
 			except Exception as driver_error:
-				frappe.logger().error(f"Error finding driver {data['driver_id']}: {str(driver_error)}")
-				return error_response(f"Driver not found: {data['driver_id']} - {str(driver_error)}")
+				log_error(f"Error finding driver {data['driver_id']}: {str(driver_error)}")
+				return error_response(f"Driver not found: {data['driver_id']} - {str(driver_error)}", logs=logs)
 
-		frappe.logger().info(f"Final data before creating doc: {data}")
+		log_info(f"Final data before creating doc: {data}")
 
 		# Create document step by step to debug field mapping
 		doc = frappe.new_doc("SIS Bus Transportation")
@@ -118,28 +126,29 @@ def create_bus_transportation(**data):
 		doc.campus_id = data.get("campus_id")
 		doc.school_year_id = data.get("school_year_id")
 
-		frappe.logger().info(f"Document before insert: {doc.as_dict()}")
+		log_info(f"Document before insert: {doc.as_dict()}")
 
 		# Validate document before insert
 		try:
 			doc.validate()
-			frappe.logger().info("Document validation passed")
+			log_info("Document validation passed")
 		except Exception as validation_error:
-			frappe.logger().error(f"Document validation failed: {str(validation_error)}")
-			return error_response(f"Validation failed: {str(validation_error)}")
+			log_error(f"Document validation failed: {str(validation_error)}")
+			return error_response(f"Validation failed: {str(validation_error)}", logs=logs)
 
 		doc.insert()
-		frappe.logger().info(f"Document after insert: {doc.as_dict()}")
+		log_info(f"Document after insert: {doc.as_dict()}")
 		frappe.db.commit()
 
 		return success_response(
 			data=doc.as_dict(),
-			message="Bus transportation created successfully"
+			message="Bus transportation created successfully",
+			logs=logs
 		)
 	except Exception as e:
-		frappe.logger().error(f"Error creating bus transportation: {str(e)}")
+		log_error(f"Error creating bus transportation: {str(e)}")
 		frappe.db.rollback()
-		return error_response(f"Failed to create bus transportation: {str(e)}")
+		return error_response(f"Failed to create bus transportation: {str(e)}", logs=logs)
 
 @frappe.whitelist()
 def update_bus_transportation(name, **data):
