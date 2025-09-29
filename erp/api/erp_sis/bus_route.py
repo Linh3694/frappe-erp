@@ -428,31 +428,172 @@ def get_available_students(campus_id=None, school_year_id=None):
 	""", params, as_dict=True)
 
 @frappe.whitelist()
-def get_available_drivers():
-	"""Get available drivers (not assigned to active bus routes)"""
-	assigned_drivers = frappe.db.sql("""
-		SELECT DISTINCT driver_id
-		FROM `tabSIS Bus Route`
-		WHERE status = 'Active' AND driver_id IS NOT NULL
-	""", as_dict=True)
+def add_student_to_route():
+	"""Add a student to a bus route schedule"""
+	try:
+		# Get data from request
+		data = {}
 
-	assigned_ids = [assignment.driver_id for assignment in assigned_drivers if assignment.driver_id]
+		# First try to get JSON data from request body
+		if frappe.request.data:
+			try:
+				# Support both bytes and string payloads
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
 
-	if not assigned_ids:
-		# Return all active drivers
-		return frappe.db.sql("""
-			SELECT name, full_name, phone_number, citizen_id
-			FROM `tabSIS Bus Driver`
-			WHERE status = 'Active'
-			ORDER BY full_name
-		""", as_dict=True)
-	else:
-		# Return drivers not in assigned_ids
-		placeholders = ','.join(['%s'] * len(assigned_ids))
-		return frappe.db.sql(f"""
-			SELECT name, full_name, phone_number, citizen_id
-			FROM `tabSIS Bus Driver`
-			WHERE status = 'Active'
-			AND name NOT IN ({placeholders})
-			ORDER BY full_name
-		""", assigned_ids, as_dict=True)
+				if json_data:
+					data = json_data
+					frappe.logger().info(f"Received JSON data for add_student_to_route: {data}")
+				else:
+					data = frappe.local.form_dict
+					frappe.logger().info(f"Received form data for add_student_to_route (empty JSON body): {data}")
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+				# If JSON parsing fails, use form_dict
+				frappe.logger().error(f"JSON parsing failed in add_student_to_route: {str(e)}")
+				data = frappe.local.form_dict
+				frappe.logger().info(f"Using form data for add_student_to_route after JSON failure: {data}")
+		else:
+			# Fallback to form_dict
+			data = frappe.local.form_dict
+			frappe.logger().info(f"No request data, using form_dict for add_student_to_route: {data}")
+
+		# Validate required fields
+		required_fields = ['route_id', 'student_id', 'weekday', 'trip_type', 'pickup_order', 'pickup_location', 'drop_off_location']
+		for field in required_fields:
+			if not data.get(field):
+				return error_response(f"Field '{field}' is required")
+
+		# Find class_student_id for the student
+		class_student_id = None
+		if data.get('student_id'):
+			class_student = frappe.db.get_value(
+				"SIS Class Student",
+				{"student_id": data['student_id']},
+				"name",
+				order_by="creation desc",
+				limit=1
+			)
+			if class_student:
+				class_student_id = class_student[0]
+
+		# Create bus route student record
+		route_student = frappe.get_doc({
+			"doctype": "SIS Bus Route Student",
+			"route_id": data['route_id'],
+			"student_id": data['student_id'],
+			"class_student_id": class_student_id,
+			"weekday": data['weekday'],
+			"trip_type": data['trip_type'],
+			"pickup_order": int(data['pickup_order']),
+			"pickup_location": data['pickup_location'],
+			"drop_off_location": data['drop_off_location'],
+			"notes": data.get('notes', '')
+		})
+		route_student.insert()
+		frappe.db.commit()
+
+		return success_response(
+			data=route_student.as_dict(),
+			message="Student added to route successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error adding student to route: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to add student to route: {str(e)}")
+
+@frappe.whitelist()
+def remove_student_from_route():
+	"""Remove a student from a bus route schedule"""
+	try:
+		route_student_id = frappe.local.form_dict.get('route_student_id') or frappe.request.args.get('route_student_id')
+		if not route_student_id:
+			return error_response("Route student ID is required")
+
+		frappe.delete_doc("SIS Bus Route Student", route_student_id)
+		frappe.db.commit()
+
+		return success_response(
+			message="Student removed from route successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error removing student from route: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to remove student from route: {str(e)}")
+
+@frappe.whitelist()
+def update_student_in_route():
+	"""Update a student in a bus route schedule"""
+	try:
+		route_student_id = frappe.local.form_dict.get('route_student_id') or frappe.request.args.get('route_student_id')
+		if not route_student_id:
+			return error_response("Route student ID is required")
+
+		# Get update data
+		data = {}
+		if frappe.request.data:
+			try:
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+				if json_data:
+					data = json_data
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+				data = frappe.local.form_dict
+		else:
+			data = frappe.local.form_dict
+
+		doc = frappe.get_doc("SIS Bus Route Student", route_student_id)
+		doc.update(data)
+		doc.save()
+		frappe.db.commit()
+
+		return success_response(
+			data=doc.as_dict(),
+			message="Student updated in route successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error updating student in route: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to update student in route: {str(e)}")
+
+@frappe.whitelist()
+def get_students_by_route():
+	"""Get all students assigned to a bus route"""
+	try:
+		route_id = frappe.local.form_dict.get('route_id') or frappe.request.args.get('route_id')
+		if not route_id:
+			return error_response("Route ID is required")
+
+		students = frappe.db.sql("""
+			SELECT
+				name, route_id, student_id, weekday, trip_type, pickup_order,
+				pickup_location, drop_off_location, notes
+			FROM `tabSIS Bus Route Student`
+			WHERE route_id = %s
+			ORDER BY
+				CASE weekday
+					WHEN 'Monday' THEN 1
+					WHEN 'Tuesday' THEN 2
+					WHEN 'Wednesday' THEN 3
+					WHEN 'Thursday' THEN 4
+					WHEN 'Friday' THEN 5
+					WHEN 'Saturday' THEN 6
+					WHEN 'Sunday' THEN 7
+				END,
+				CASE trip_type
+					WHEN 'Pickup' THEN 1
+					WHEN 'Drop-off' THEN 2
+				END,
+				pickup_order
+		""", (route_id,), as_dict=True)
+
+		return success_response(
+			data=students,
+			message="Students retrieved successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error getting students by route: {str(e)}")
+		return error_response(f"Failed to get students by route: {str(e)}")
