@@ -91,21 +91,13 @@ def create_bus_transportation(**data):
 		frappe.logger().error(msg)
 
 	try:
-		# Get data from form_dict (prioritizing form data for Frappe compatibility)
-		log_info(f"All received data: {dict(frappe.form_dict)}")
-		log_info(f"Method data: {data}")
-		log_info(f"Request data: {frappe.request.data}")
-		log_info(f"Request method: {frappe.request.method}")
-		log_info(f"Request content type: {frappe.request.headers.get('Content-Type', 'Not set')}")
-
 		# Parse request body if it contains URL-encoded data
 		if not data or data.get('cmd'):
 			if frappe.request.data and isinstance(frappe.request.data, bytes):
 				try:
 					# Parse URL-encoded data from request body
-					from urllib.parse import parse_qs, unquote_plus
+					from urllib.parse import unquote_plus
 					body_string = frappe.request.data.decode('utf-8')
-					log_info(f"Parsing body string: {body_string}")
 					
 					# Parse URL-encoded data
 					parsed_data = {}
@@ -115,22 +107,17 @@ def create_bus_transportation(**data):
 							parsed_data[unquote_plus(key)] = unquote_plus(value)
 					
 					data = parsed_data
-					log_info(f"Parsed form data: {data}")
 				except Exception as parse_error:
 					log_error(f"Failed to parse request body: {str(parse_error)}")
 					# Fallback to form_dict
 					form_data = dict(frappe.form_dict)
 					form_data.pop('cmd', None)
 					data = form_data
-					log_info(f"Using fallback form data: {data}")
 			else:
 				# Fallback to form_dict
 				form_data = dict(frappe.form_dict)
 				form_data.pop('cmd', None)
 				data = form_data
-				log_info(f"Using form data: {data}")
-		
-		log_info(f"Creating bus transportation with data: {data}")
 
 		# Enrich with driver information
 		if data.get("driver_id"):
