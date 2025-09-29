@@ -90,6 +90,19 @@ def create_bus_transportation(**data):
 		frappe.logger().error(msg)
 
 	try:
+		# Debug: Check if we have form data
+		log_info(f"All received data: {dict(frappe.form_dict)}")
+		log_info(f"Method data: {data}")
+		log_info(f"Local data: {frappe.local.form_dict}")
+
+		# Get data from form_dict if data is empty
+		if not data or data.get('cmd'):
+			form_data = dict(frappe.form_dict)
+			# Remove cmd and other metadata
+			form_data.pop('cmd', None)
+			data = form_data
+			log_info(f"Using form data instead: {data}")
+
 		log_info(f"Creating bus transportation with data: {data}")
 
 		# Enrich with driver information
