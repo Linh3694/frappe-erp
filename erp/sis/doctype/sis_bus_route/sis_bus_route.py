@@ -44,7 +44,7 @@ class SISBusRoute(Document):
 
 	def on_update(self):
 		"""Create daily trips when route is created or updated"""
-		if self.has_value_changed("status") and self.status == "Hoạt động":
+		if self.has_value_changed("status") and self.status == "Active":
 			self.create_daily_trips()
 
 	def create_daily_trips(self):
