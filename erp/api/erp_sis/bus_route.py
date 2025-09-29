@@ -742,6 +742,7 @@ def create_daily_trip():
 def get_daily_trips():
 	"""Get all daily trips with enriched information"""
 	try:
+		# Temporarily disable campus filtering for testing
 		# Get current user's campus information from roles
 		campus_id = get_current_campus_from_context()
 
@@ -749,7 +750,7 @@ def get_daily_trips():
 			# Fallback to default if no campus found
 			campus_id = "campus-1"
 
-		# Use raw SQL query to get daily trips with campus filtering
+		# Use raw SQL query to get daily trips (temporarily without campus filtering)
 		daily_trips = frappe.db.sql("""
 			SELECT
 				name, route_id, trip_date, weekday, trip_type,
@@ -757,9 +758,9 @@ def get_daily_trips():
 				trip_status, campus_id, school_year_id,
 				creation, modified
 			FROM `tabSIS Bus Daily Trip`
-			WHERE campus_id = %s
 			ORDER BY trip_date DESC, route_id ASC
-		""", (campus_id,), as_dict=True)
+			LIMIT 100
+		""", as_dict=True)
 
 		# Map field names to correct format
 		for trip in daily_trips:
@@ -1046,29 +1047,17 @@ def get_daily_trips_by_date():
 		if school_year_id:
 			filters["school_year_id"] = school_year_id
 
-		# Use raw SQL query to get daily trips for the specified date
-		where_conditions = ["trip_date = %s"]
-		params = [trip_date]
-
-		if campus_id:
-			where_conditions.append("campus_id = %s")
-			params.append(campus_id)
-
-		if school_year_id:
-			where_conditions.append("school_year_id = %s")
-			params.append(school_year_id)
-
-		where_clause = " AND ".join(where_conditions)
-
-		daily_trips = frappe.db.sql(f"""
+		# Use raw SQL query to get daily trips for the specified date (temporarily without campus filtering)
+		daily_trips = frappe.db.sql("""
 			SELECT
 				name, route_id, trip_date, weekday, trip_type,
 				vehicle_id, driver_id, monitor1_id, monitor2_id,
 				trip_status, campus_id, school_year_id
 			FROM `tabSIS Bus Daily Trip`
-			WHERE {where_clause}
+			WHERE trip_date = %s
 			ORDER BY route_id ASC, trip_type ASC
-		""", params, as_dict=True)
+			LIMIT 100
+		""", (trip_date,), as_dict=True)
 
 		# Enrich with related information
 		for trip in daily_trips:
