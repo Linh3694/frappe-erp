@@ -109,10 +109,7 @@ class SISBusRoute(Document):
 			ORDER BY brs.pickup_order
 		""", (self.name, weekday, trip_type), as_dict=True)
 
-		if not students:
-			return  # No students for this route/weekday/trip_type
-
-		# Create daily trip
+		# Create daily trip first (students can be added later)
 		daily_trip_data = {
 			"route_id": self.name,
 			"trip_date": trip_date,
@@ -134,25 +131,26 @@ class SISBusRoute(Document):
 
 		daily_trip.insert()
 
-		# Add students to daily trip with full information
-		for student in students:
-			student_data = {
-				"daily_trip_id": daily_trip.name,
-				"student_id": student.student_id,
-				"class_student_id": student.class_student_id,
-				"student_image": "",
-				"student_name": student.student_name,
-				"student_code": student.student_code,
-				"class_name": student.class_name or "",
-				"pickup_order": student.pickup_order,
-				"pickup_location": student.pickup_location,
-				"drop_off_location": student.drop_off_location,
-				"student_status": "Not Boarded"
-			}
+		# Add students to daily trip with full information (if any)
+		if students:
+			for student in students:
+				student_data = {
+					"daily_trip_id": daily_trip.name,
+					"student_id": student.student_id,
+					"class_student_id": student.class_student_id,
+					"student_image": "",
+					"student_name": student.student_name,
+					"student_code": student.student_code,
+					"class_name": student.class_name or "",
+					"pickup_order": student.pickup_order,
+					"pickup_location": student.pickup_location,
+					"drop_off_location": student.drop_off_location,
+					"student_status": "Not Boarded"
+				}
 
-			frappe.get_doc({
-				"doctype": "SIS Bus Daily Trip Student",
-				**student_data
-			}).insert()
+				frappe.get_doc({
+					"doctype": "SIS Bus Daily Trip Student",
+					**student_data
+				}).insert()
 
 		frappe.db.commit()

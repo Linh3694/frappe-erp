@@ -8,6 +8,64 @@ from frappe import _
 from erp.utils.api_response import success_response, error_response
 from erp.utils.campus_utils import get_current_campus_from_context
 
+def add_student_to_daily_trips(route_id, route_student_data):
+	"""Add student to all corresponding daily trips"""
+	try:
+		# Get all daily trips for this route with matching weekday and trip_type
+		daily_trips = frappe.get_all(
+			"SIS Bus Daily Trip",
+			filters={
+				"route_id": route_id,
+				"weekday": route_student_data['weekday'],
+				"trip_type": route_student_data['trip_type']
+			},
+			fields=["name"]
+		)
+
+		# Get student info
+		student = frappe.get_doc("CRM Student", route_student_data['student_id'])
+		class_name = ""
+		if route_student_data.get('class_student_id'):
+			class_student = frappe.get_doc("SIS Class Student", route_student_data['class_student_id'])
+			if class_student.class_id:
+				class_doc = frappe.get_doc("SIS Class", class_student.class_id)
+				class_name = class_doc.title or class_doc.name
+
+		# Add student to each daily trip
+		for daily_trip in daily_trips:
+			# Check if student already exists in this daily trip
+			existing = frappe.db.exists("SIS Bus Daily Trip Student", {
+				"daily_trip_id": daily_trip.name,
+				"student_id": route_student_data['student_id']
+			})
+			
+			if not existing:
+				student_data = {
+					"daily_trip_id": daily_trip.name,
+					"student_id": route_student_data['student_id'],
+					"class_student_id": route_student_data.get('class_student_id'),
+					"student_image": "",
+					"student_name": student.student_name,
+					"student_code": student.student_code,
+					"class_name": class_name,
+					"pickup_order": route_student_data['pickup_order'],
+					"pickup_location": route_student_data['pickup_location'],
+					"drop_off_location": route_student_data['drop_off_location'],
+					"student_status": "Not Boarded"
+				}
+
+				frappe.get_doc({
+					"doctype": "SIS Bus Daily Trip Student",
+					**student_data
+				}).insert()
+
+		frappe.db.commit()
+		frappe.logger().info(f"Added student to {len(daily_trips)} daily trips")
+
+	except Exception as e:
+		frappe.log_error(f"Error adding student to daily trips: {str(e)}")
+		# Don't raise exception to avoid breaking the main flow
+
 @frappe.whitelist()
 def get_all_bus_routes():
 	"""Get all bus routes without pagination - always returns full dataset"""
@@ -489,6 +547,9 @@ def add_student_to_route():
 		})
 		route_student.insert()
 		frappe.db.commit()
+
+		# Add student to corresponding daily trips
+		add_student_to_daily_trips(data['route_id'], route_student.as_dict())
 
 		return success_response(
 			data=route_student.as_dict(),
