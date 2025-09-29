@@ -970,15 +970,36 @@ def update_daily_trip():
 		if not name:
 			return error_response("Daily trip name is required")
 
-		doc = frappe.get_doc("SIS Bus Daily Trip", name)
-		doc.update(data)
-		doc.save()
-		frappe.db.commit()
+		# Update daily trip using raw SQL
+		update_fields = []
+		update_values = []
 
-		return success_response(
-			data=doc.as_dict(),
-			message="Daily trip updated successfully"
-		)
+		for key, value in data.items():
+			update_fields.append(f"{key} = %s")
+			update_values.append(value)
+
+		update_values.append(name)
+
+		if update_fields:
+			query = f"""
+				UPDATE `tabSIS Bus Daily Trip`
+				SET {', '.join(update_fields)}
+				WHERE name = %s
+			"""
+			frappe.db.sql(query, update_values)
+			frappe.db.commit()
+
+			# Get updated data
+			updated_trip = frappe.db.sql("""
+				SELECT * FROM `tabSIS Bus Daily Trip` WHERE name = %s
+			""", (name,), as_dict=True)
+
+			return success_response(
+				data=updated_trip[0] if updated_trip else {},
+				message="Daily trip updated successfully"
+			)
+		else:
+			return error_response("No data to update")
 	except Exception as e:
 		frappe.log_error(f"Error updating daily trip: {str(e)}")
 		frappe.db.rollback()
@@ -992,7 +1013,11 @@ def delete_daily_trip():
 		if not name:
 			return error_response("Daily trip name is required")
 
-		frappe.delete_doc("SIS Bus Daily Trip", name)
+		# Delete associated students first
+		frappe.db.sql("DELETE FROM `tabSIS Bus Daily Trip Student` WHERE daily_trip_id = %s", (name,))
+
+		# Delete the daily trip
+		frappe.db.sql("DELETE FROM `tabSIS Bus Daily Trip` WHERE name = %s", (name,))
 		frappe.db.commit()
 
 		return success_response(
@@ -1119,15 +1144,29 @@ def update_trip_status():
 		if trip_status not in valid_statuses:
 			return error_response(f"Invalid trip status. Must be one of: {', '.join(valid_statuses)}")
 
-		doc = frappe.get_doc("SIS Bus Daily Trip", daily_trip_id)
-		doc.trip_status = trip_status
+		# Update trip status using raw SQL
 		if notes:
-			doc.notes = notes
-		doc.save()
+			frappe.db.sql("""
+				UPDATE `tabSIS Bus Daily Trip`
+				SET trip_status = %s, notes = %s
+				WHERE name = %s
+			""", (trip_status, notes, daily_trip_id))
+		else:
+			frappe.db.sql("""
+				UPDATE `tabSIS Bus Daily Trip`
+				SET trip_status = %s
+				WHERE name = %s
+			""", (trip_status, daily_trip_id))
+
 		frappe.db.commit()
 
+		# Get updated data
+		updated_trip = frappe.db.sql("""
+			SELECT * FROM `tabSIS Bus Daily Trip` WHERE name = %s
+		""", (daily_trip_id,), as_dict=True)
+
 		return success_response(
-			data=doc.as_dict(),
+			data=updated_trip[0] if updated_trip else {},
 			message="Trip status updated successfully"
 		)
 	except Exception as e:
