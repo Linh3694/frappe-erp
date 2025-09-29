@@ -58,9 +58,13 @@ def get_all_bus_transportation():
 		return error_response(f"Failed to get bus transportation: {str(e)}")
 
 @frappe.whitelist()
-def get_bus_transportation(name):
+def get_bus_transportation():
 	"""Get a single bus transportation by name"""
 	try:
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
+		if not name:
+			return error_response("Bus transportation name is required")
+			
 		doc = frappe.get_doc("SIS Bus Transportation", name)
 
 		# Enrich with driver information
