@@ -841,8 +841,25 @@ def get_daily_trip():
 		if not name:
 			return error_response("Daily trip name is required")
 
-		doc = frappe.get_doc("SIS Bus Daily Trip", name)
-		trip_data = doc.as_dict()
+		# Use raw SQL to get daily trip
+		trip_data = frappe.db.sql("""
+			SELECT
+				name, route_id, trip_date, weekday, trip_type,
+				vehicle_id, driver_id, monitor1_id, monitor2_id,
+				trip_status, campus_id, school_year_id,
+				creation, modified
+			FROM `tabSIS Bus Daily Trip`
+			WHERE name = %s
+		""", (name,), as_dict=True)
+
+		if not trip_data:
+			return error_response("Daily trip not found")
+
+		trip_data = trip_data[0]
+
+		# Map field names to correct format
+		trip_data['created_at'] = trip_data.pop('creation')
+		trip_data['updated_at'] = trip_data.pop('modified')
 
 		# Get related entity details
 		if trip_data.get('route_id'):
