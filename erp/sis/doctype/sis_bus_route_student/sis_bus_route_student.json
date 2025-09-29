@@ -54,7 +54,7 @@
    "fieldname": "weekday",
    "fieldtype": "Select",
    "label": "Weekday",
-   "options": "Monday\nTuesday\nWednesday\nThursday\nFriday\nSaturday\nSunday",
+   "options": "Thứ 2\nThứ 3\nThứ 4\nThứ 5\nThứ 6\nThứ 7\nChủ nhật",
    "reqd": 1,
    "in_list_view": 1
   },
@@ -62,7 +62,7 @@
    "fieldname": "trip_type",
    "fieldtype": "Select",
    "label": "Trip Type",
-   "options": "Pickup\nDrop-off",
+   "options": "Đón\nTrả",
    "reqd": 1,
    "in_list_view": 1
   },

@@ -131,17 +131,17 @@ def get_bus_route():
 			WHERE route_id = %s
 			ORDER BY
 				CASE weekday
-					WHEN 'Monday' THEN 1
-					WHEN 'Tuesday' THEN 2
-					WHEN 'Wednesday' THEN 3
-					WHEN 'Thursday' THEN 4
-					WHEN 'Friday' THEN 5
-					WHEN 'Saturday' THEN 6
-					WHEN 'Sunday' THEN 7
+					WHEN 'Thứ 2' THEN 1
+					WHEN 'Thứ 3' THEN 2
+					WHEN 'Thứ 4' THEN 3
+					WHEN 'Thứ 5' THEN 4
+					WHEN 'Thứ 6' THEN 5
+					WHEN 'Thứ 7' THEN 6
+					WHEN 'Chủ nhật' THEN 7
 				END,
 				CASE trip_type
-					WHEN 'Pickup' THEN 1
-					WHEN 'Drop-off' THEN 2
+					WHEN 'Đón' THEN 1
+					WHEN 'Trả' THEN 2
 				END,
 				pickup_order
 		""", (name,), as_dict=True)
@@ -575,17 +575,17 @@ def get_students_by_route():
 			WHERE route_id = %s
 			ORDER BY
 				CASE weekday
-					WHEN 'Monday' THEN 1
-					WHEN 'Tuesday' THEN 2
-					WHEN 'Wednesday' THEN 3
-					WHEN 'Thursday' THEN 4
-					WHEN 'Friday' THEN 5
-					WHEN 'Saturday' THEN 6
-					WHEN 'Sunday' THEN 7
+					WHEN 'Thứ 2' THEN 1
+					WHEN 'Thứ 3' THEN 2
+					WHEN 'Thứ 4' THEN 3
+					WHEN 'Thứ 5' THEN 4
+					WHEN 'Thứ 6' THEN 5
+					WHEN 'Thứ 7' THEN 6
+					WHEN 'Chủ nhật' THEN 7
 				END,
 				CASE trip_type
-					WHEN 'Pickup' THEN 1
-					WHEN 'Drop-off' THEN 2
+					WHEN 'Đón' THEN 1
+					WHEN 'Trả' THEN 2
 				END,
 				pickup_order
 		""", (route_id,), as_dict=True)
@@ -597,3 +597,86 @@ def get_students_by_route():
 	except Exception as e:
 		frappe.log_error(f"Error getting students by route: {str(e)}")
 		return error_response(f"Failed to get students by route: {str(e)}")
+
+@frappe.whitelist()
+def create_daily_trip():
+	"""Create a new daily trip"""
+	try:
+		# Get data from request
+		data = {}
+
+		# First try to get JSON data from request body
+		if frappe.request.data:
+			try:
+				# Support both bytes and string payloads
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+
+				if json_data:
+					data = json_data
+					frappe.logger().info(f"Received JSON data for create_daily_trip: {data}")
+				else:
+					data = frappe.local.form_dict
+					frappe.logger().info(f"Received form data for create_daily_trip (empty JSON body): {data}")
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+				# If JSON parsing fails, use form_dict
+				frappe.logger().error(f"JSON parsing failed in create_daily_trip: {str(e)}")
+				data = frappe.local.form_dict
+				frappe.logger().info(f"Using form data for create_daily_trip after JSON failure: {data}")
+		else:
+			# Fallback to form_dict
+			data = frappe.local.form_dict
+			frappe.logger().info(f"No request data, using form_dict for create_daily_trip: {data}")
+
+		# Validate required fields
+		required_fields = ['route_id', 'trip_date', 'weekday', 'trip_type', 'vehicle_id', 'driver_id', 'monitor1_id', 'monitor2_id', 'trip_status']
+		for field in required_fields:
+			if not data.get(field):
+				return error_response(f"Field '{field}' is required")
+
+		# Set campus_id and school_year_id if not provided
+		if not data.get('campus_id'):
+			campus_id = get_current_campus_from_context()
+			if campus_id:
+				data['campus_id'] = campus_id
+				frappe.logger().info(f"Set campus_id to {campus_id} for daily trip")
+			else:
+				# Fallback to default campus
+				data['campus_id'] = "campus-1"
+				frappe.logger().info("No campus context found, using default campus-1")
+
+		if not data.get('school_year_id'):
+			# Get school_year_id from route if available
+			route_doc = frappe.get_doc("SIS Bus Route", data['route_id'])
+			if route_doc.school_year_id:
+				data['school_year_id'] = route_doc.school_year_id
+				frappe.logger().info(f"Set school_year_id to {data['school_year_id']} from route")
+
+		# Check if daily trip already exists
+		existing_trip = frappe.db.exists("SIS Bus Daily Trip", {
+			"route_id": data['route_id'],
+			"trip_date": data['trip_date'],
+			"weekday": data['weekday'],
+			"trip_type": data['trip_type']
+		})
+
+		if existing_trip:
+			return error_response(f"Daily trip already exists for this route, date, weekday, and trip type")
+
+		doc = frappe.get_doc({
+			"doctype": "SIS Bus Daily Trip",
+			**data
+		})
+		doc.insert()
+		frappe.db.commit()
+
+		return success_response(
+			data=doc.as_dict(),
+			message="Daily trip created successfully"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error creating daily trip: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to create daily trip: {str(e)}")

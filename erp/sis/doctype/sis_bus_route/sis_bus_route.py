@@ -35,12 +35,17 @@ class SISBusRoute(Document):
 			FROM `tabSIS Bus Route`
 			WHERE (monitor1_id = %s OR monitor2_id = %s)
 			AND name != %s
-			AND status = 'Hoạt động'
+			AND status = 'Active'
 		""", (self.monitor1_id, self.monitor2_id, self.name))
 
 		if existing_routes:
 			route_names = [route[1] for route in existing_routes]
 			frappe.throw(f"Monitor đã được phân công cho tuyến: {', '.join(route_names)}")
+
+	def after_insert(self):
+		"""Create daily trips when route is created"""
+		if self.status == "Active":
+			self.create_daily_trips()
 
 	def on_update(self):
 		"""Create daily trips when route is created or updated"""
