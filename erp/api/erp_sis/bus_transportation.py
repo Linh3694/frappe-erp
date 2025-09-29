@@ -87,6 +87,12 @@ def create_bus_transportation(**data):
 		# Enrich with driver information
 		if data.get("driver_id"):
 			frappe.logger().info(f"Looking up driver: {data['driver_id']}")
+
+			# Check if driver exists first
+			if not frappe.db.exists("SIS Bus Driver", data["driver_id"]):
+				frappe.logger().error(f"Driver {data['driver_id']} does not exist in database")
+				return error_response(f"Driver not found: {data['driver_id']}")
+
 			try:
 				driver = frappe.get_doc("SIS Bus Driver", data["driver_id"])
 				frappe.logger().info(f"Found driver: {driver.name} - {driver.full_name}")
@@ -99,11 +105,29 @@ def create_bus_transportation(**data):
 				return error_response(f"Driver not found: {data['driver_id']} - {str(driver_error)}")
 
 		frappe.logger().info(f"Final data before creating doc: {data}")
-		doc = frappe.get_doc({
-			"doctype": "SIS Bus Transportation",
-			**data
-		})
+
+		# Create document step by step to debug field mapping
+		doc = frappe.new_doc("SIS Bus Transportation")
+
+		# Set fields explicitly
+		doc.vehicle_code = data.get("vehicle_code")
+		doc.license_plate = data.get("license_plate")
+		doc.vehicle_type = data.get("vehicle_type")
+		doc.driver_id = data.get("driver_id")
+		doc.status = data.get("status", "Active")
+		doc.campus_id = data.get("campus_id")
+		doc.school_year_id = data.get("school_year_id")
+
 		frappe.logger().info(f"Document before insert: {doc.as_dict()}")
+
+		# Validate document before insert
+		try:
+			doc.validate()
+			frappe.logger().info("Document validation passed")
+		except Exception as validation_error:
+			frappe.logger().error(f"Document validation failed: {str(validation_error)}")
+			return error_response(f"Validation failed: {str(validation_error)}")
+
 		doc.insert()
 		frappe.logger().info(f"Document after insert: {doc.as_dict()}")
 		frappe.db.commit()
