@@ -15,6 +15,7 @@
  "document_type": "Document",
  "editable_grid": 1,
  "engine": "InnoDB",
+ "istable": 1,
  "field_order": [
   "route_id",
   "student_id",

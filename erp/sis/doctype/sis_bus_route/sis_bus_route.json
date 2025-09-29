@@ -15,7 +15,7 @@
  "document_type": "Document",
  "editable_grid": 1,
  "engine": "InnoDB",
- "field_order": [
+  "field_order": [
   "basic_information",
   "route_name",
   "vehicle_id",
@@ -23,7 +23,6 @@
   "monitor1_id",
   "monitor2_id",
   "status",
-  "route_students",
   "system_information",
   "campus_id",
   "school_year_id"
@@ -81,13 +80,6 @@
    "default": "Active",
    "reqd": 1,
    "in_list_view": 1
-  },
-  {
-   "fieldname": "route_students",
-   "fieldtype": "Table",
-   "label": "Student List",
-   "options": "SIS Bus Route Student",
-   "reqd": 0
   },
   {
    "fieldname": "system_information",
