@@ -82,19 +82,30 @@ def get_bus_transportation(name):
 def create_bus_transportation(**data):
 	"""Create a new bus transportation"""
 	try:
+		frappe.logger().info(f"Creating bus transportation with data: {data}")
+
 		# Enrich with driver information
 		if data.get("driver_id"):
-			driver = frappe.get_doc("SIS Bus Driver", data["driver_id"])
-			data.update({
-				"driver_name": driver.full_name,
-				"driver_phone": driver.phone_number
-			})
+			frappe.logger().info(f"Looking up driver: {data['driver_id']}")
+			try:
+				driver = frappe.get_doc("SIS Bus Driver", data["driver_id"])
+				frappe.logger().info(f"Found driver: {driver.name} - {driver.full_name}")
+				data.update({
+					"driver_name": driver.full_name,
+					"driver_phone": driver.phone_number
+				})
+			except Exception as driver_error:
+				frappe.logger().error(f"Error finding driver {data['driver_id']}: {str(driver_error)}")
+				return error_response(f"Driver not found: {data['driver_id']} - {str(driver_error)}")
 
+		frappe.logger().info(f"Final data before creating doc: {data}")
 		doc = frappe.get_doc({
 			"doctype": "SIS Bus Transportation",
 			**data
 		})
+		frappe.logger().info(f"Document before insert: {doc.as_dict()}")
 		doc.insert()
+		frappe.logger().info(f"Document after insert: {doc.as_dict()}")
 		frappe.db.commit()
 
 		return success_response(
@@ -102,7 +113,7 @@ def create_bus_transportation(**data):
 			message="Bus transportation created successfully"
 		)
 	except Exception as e:
-		frappe.log_error(f"Error creating bus transportation: {str(e)}")
+		frappe.logger().error(f"Error creating bus transportation: {str(e)}")
 		frappe.db.rollback()
 		return error_response(f"Failed to create bus transportation: {str(e)}")
 
