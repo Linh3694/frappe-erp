@@ -97,11 +97,12 @@ class SISBusRoute(Document):
 			SELECT
 				brs.student_id, brs.class_student_id, brs.pickup_order,
 				brs.pickup_location, brs.drop_off_location,
-				s.full_name as student_name, s.student_code, s.image,
-				c.class_name
+				s.student_name, s.student_code,
+				c.title as class_name
 			FROM `tabSIS Bus Route Student` brs
 			INNER JOIN `tabCRM Student` s ON brs.student_id = s.name
-			LEFT JOIN `tabSIS Class` c ON s.class_id = c.name
+			LEFT JOIN `tabSIS Class Student` cs ON brs.class_student_id = cs.name
+			LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
 			WHERE brs.route_id = %s
 			AND brs.weekday = %s
 			AND brs.trip_type = %s
