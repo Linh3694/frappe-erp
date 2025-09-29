@@ -87,7 +87,7 @@
    "fieldtype": "Table",
    "label": "Student List",
    "options": "SIS Bus Route Student",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "system_information",
