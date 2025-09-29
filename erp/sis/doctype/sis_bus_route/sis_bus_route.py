@@ -117,21 +117,34 @@ class SISBusRoute(Document):
 				return False  # Skip if already exists
 
 			# Get students for this route, weekday, and trip type with full student info
-			students = frappe.db.sql("""
-				SELECT
-					brs.student_id, brs.class_student_id, brs.pickup_order,
-					brs.pickup_location, brs.drop_off_location, brs.notes,
-					s.student_name, s.student_code,
-					c.title as class_name
-				FROM `tabSIS Bus Route Student` brs
-				INNER JOIN `tabCRM Student` s ON brs.student_id = s.name
-				LEFT JOIN `tabSIS Class Student` cs ON brs.class_student_id = cs.name
-				LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
-				WHERE brs.route_id = %s
-				AND brs.weekday = %s
-				AND brs.trip_type = %s
-				ORDER BY brs.pickup_order
-			""", (self.name, weekday, trip_type), as_dict=True)
+			# Since route_students is a child table, get students directly from the route's child table
+			students = []
+			if hasattr(self, 'route_students') and self.route_students:
+				for student in self.route_students:
+					if student.weekday == weekday and student.trip_type == trip_type:
+						# Get student details
+						student_doc = frappe.get_doc("CRM Student", student.student_id)
+						class_name = ""
+						if student.class_student_id:
+							class_student = frappe.get_doc("SIS Class Student", student.class_student_id)
+							if class_student.class_id:
+								class_doc = frappe.get_doc("SIS Class", class_student.class_id)
+								class_name = class_doc.title or class_doc.name
+
+						students.append({
+							'student_id': student.student_id,
+							'class_student_id': student.class_student_id,
+							'pickup_order': student.pickup_order,
+							'pickup_location': student.pickup_location,
+							'drop_off_location': student.drop_off_location,
+							'notes': student.notes,
+							'student_name': student_doc.student_name,
+							'student_code': student_doc.student_code,
+							'class_name': class_name
+						})
+
+			# Sort by pickup_order
+			students.sort(key=lambda x: x['pickup_order'])
 
 			# Create daily trip first (students can be added later)
 			daily_trip_data = {

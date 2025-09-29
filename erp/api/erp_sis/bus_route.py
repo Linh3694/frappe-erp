@@ -180,29 +180,10 @@ def get_bus_route():
 				"monitor2_phone": monitor2.phone_number
 			})
 
-		# Get route students
-		students = frappe.db.sql("""
-			SELECT
-				name, student_id, weekday, trip_type, pickup_order,
-				pickup_location, drop_off_location, notes
-			FROM `tabSIS Bus Route Student`
-			WHERE route_id = %s
-			ORDER BY
-				CASE weekday
-					WHEN 'Thứ 2' THEN 1
-					WHEN 'Thứ 3' THEN 2
-					WHEN 'Thứ 4' THEN 3
-					WHEN 'Thứ 5' THEN 4
-					WHEN 'Thứ 6' THEN 5
-					WHEN 'Thứ 7' THEN 6
-					WHEN 'Chủ nhật' THEN 7
-				END,
-				CASE trip_type
-					WHEN 'Đón' THEN 1
-					WHEN 'Trả' THEN 2
-				END,
-				pickup_order
-		""", (name,), as_dict=True)
+		# Get route students from child table
+		students = []
+		if hasattr(doc, 'route_students') and doc.route_students:
+			students = [student.as_dict() for student in doc.route_students]
 
 		route_data.update({"route_students": students})
 
