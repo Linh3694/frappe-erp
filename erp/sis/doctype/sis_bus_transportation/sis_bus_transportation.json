@@ -50,9 +50,8 @@
   },
   {
    "fieldname": "vehicle_type",
-   "fieldtype": "Select",
+   "fieldtype": "Data",
    "label": "Vehicle Type",
-   "options": "Bus\nVan\nMinibus\nCar",
    "reqd": 1,
    "in_list_view": 1
   },
