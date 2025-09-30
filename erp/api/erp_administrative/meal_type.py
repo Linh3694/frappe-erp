@@ -16,6 +16,34 @@ from erp.utils.api_response import (
 )
 
 
+def get_request_param(param_name):
+    """Helper function to get parameter from request in order of priority"""
+    # 1. Try JSON payload (POST)
+    # 2. Try form_dict (POST)
+    # 3. Try query params (GET)
+
+    # Try JSON payload
+    if frappe.request.data:
+        try:
+            json_data = json.loads(frappe.request.data)
+            if json_data and param_name in json_data:
+                return json_data[param_name]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Try form_dict
+    value = frappe.local.form_dict.get(param_name)
+    if value:
+        return value
+
+    # Try query params
+    value = frappe.local.request.args.get(param_name)
+    if value:
+        return value
+
+    return None
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_meal_types():
     """Get all meal types with basic information"""
@@ -55,20 +83,9 @@ def get_all_meal_types():
 def get_meal_type_by_id(meal_type_id=None):
     """Get a specific meal type by ID with JSON payload support"""
     try:
-        # Get meal_type_id from parameter or from JSON payload
+        # Get meal_type_id from parameter or from request
         if not meal_type_id:
-            # Try to get from JSON payload
-            if frappe.request.data:
-                try:
-                    json_data = json.loads(frappe.request.data)
-                    if json_data and 'meal_type_id' in json_data:
-                        meal_type_id = json_data['meal_type_id']
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-            # Fallback to form_dict
-            if not meal_type_id:
-                meal_type_id = frappe.local.form_dict.get('meal_type_id')
+            meal_type_id = get_request_param('meal_type_id')
 
         if not meal_type_id:
             return validation_error_response("Meal Type ID is required", {"meal_type_id": ["Meal Type ID is required"]})
