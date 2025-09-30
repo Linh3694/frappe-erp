@@ -382,8 +382,6 @@ def update_academic_program():
 def delete_academic_program():
     """Delete an academic program"""
     try:
-        # Debug: Print request data
-
         # Get program_id from multiple sources (form data or JSON payload)
         program_id = None
 
@@ -398,7 +396,6 @@ def delete_academic_program():
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
                 pass
 
-
         if not program_id:
             return error_response(
                 message="Program ID is required",
@@ -408,26 +405,20 @@ def delete_academic_program():
         # Get campus from user context
         campus_id = get_current_campus_from_context()
 
-        frappe.logger().info(f"DEBUG DELETE: User {frappe.session.user}, program_id: {program_id}, campus_id from context: {campus_id}")
-
         if not campus_id:
             campus_id = "campus-1"
-            frappe.logger().info(f"DEBUG DELETE: Using fallback campus_id: {campus_id}")
-        
+
         # Get existing document
         try:
             academic_program_doc = frappe.get_doc("SIS Academic Program", program_id)
 
-            frappe.logger().info(f"DEBUG DELETE: Academic program campus_id: {academic_program_doc.campus_id}, user campus_id: {campus_id}")
-
             # Check campus permission
             if academic_program_doc.campus_id != campus_id:
-                frappe.logger().error(f"DEBUG DELETE: CAMPUS MISMATCH - Program campus: {academic_program_doc.campus_id}, User campus: {campus_id}")
                 return forbidden_response(
                     message="Access denied: You don't have permission to delete this academic program",
                     code="ACCESS_DENIED"
                 )
-                
+
         except frappe.DoesNotExistError:
             return not_found_response(
                 message="Academic program not found",
@@ -437,51 +428,37 @@ def delete_academic_program():
         # Check for linked documents before deletion
         linked_docs = []
         try:
-            frappe.logger().info(f"=== START DELETE CHECKS for program {program_id} ===")
-
             # Check SIS Class links (via academic_program field)
-            frappe.logger().info(f"Checking SIS Class links for program {program_id}")
             class_count = frappe.db.count("SIS Class", {"academic_program": program_id})
-            frappe.logger().info(f"SIS Class count: {class_count}")
             if class_count > 0:
                 linked_docs.append(f"{class_count} lớp học")
 
             # Check SIS Sub Curriculum Evaluation links (via academic_program_id field)
-            frappe.logger().info(f"Checking SIS Sub Curriculum Evaluation links for program {program_id}")
             sub_curriculum_evaluation_count = frappe.db.count("SIS Sub Curriculum Evaluation", {"academic_program_id": program_id})
-            frappe.logger().info(f"SIS Sub Curriculum Evaluation count: {sub_curriculum_evaluation_count}")
             if sub_curriculum_evaluation_count > 0:
                 linked_docs.append(f"{sub_curriculum_evaluation_count} đánh giá chương trình phụ")
 
             if linked_docs:
-                frappe.logger().info(f"Program {program_id} has linked docs: {linked_docs}")
                 return error_response(
                     message=f"Không thể xóa hệ học vì đang được liên kết với {', '.join(linked_docs)}. Vui lòng xóa hoặc chuyển các mục liên kết sang hệ học khác trước.",
                     code="ACADEMIC_PROGRAM_LINKED"
                 )
 
             # Delete the document
-            frappe.logger().info(f"No linked docs found, proceeding to delete program {program_id}")
             frappe.delete_doc("SIS Academic Program", program_id)
-            frappe.logger().info(f"Successfully deleted program {program_id}")
             frappe.db.commit()
-            frappe.logger().info(f"Successfully committed delete for program {program_id}")
 
             return success_response(
                 message="Academic program deleted successfully"
             )
 
         except frappe.LinkExistsError as e:
-            frappe.logger().error(f"LinkExistsError during deletion of program {program_id}: {str(e)}")
             return error_response(
                 message=f"Không thể xóa hệ học vì đang được sử dụng bởi các module khác. Chi tiết: {str(e)}",
                 code="ACADEMIC_PROGRAM_LINKED"
             )
         except Exception as e:
-            frappe.logger().error(f"Unexpected error during deletion of program {program_id}: {str(e)}")
-            frappe.logger().error(f"Exception type: {type(e).__name__}")
-            import traceback
-            frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+            frappe.log_error(f"Error deleting academic program {program_id}: {str(e)}")
             return error_response(
                 message="Lỗi không mong muốn khi xóa hệ học",
                 code="DELETE_ACADEMIC_PROGRAM_ERROR"
