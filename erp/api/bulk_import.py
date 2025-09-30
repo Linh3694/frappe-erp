@@ -888,6 +888,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 # Regular field mapping (skip already processed reference fields)
                 doc_data[field.fieldname] = row_data[field.fieldname]
 
+        # Special handling for SIS Menu Category - ensure image_url is empty string
+        if doctype == "SIS Menu Category":
+            if "image_url" not in doc_data:
+                doc_data["image_url"] = ""
+
         # Check if record exists for update
         existing_doc = None
         if update_if_exists:

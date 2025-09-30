@@ -34,6 +34,11 @@ def get_all_menu_categories():
             order_by="title_vn asc"
         )
 
+        # Ensure image_url is never null - convert to empty string
+        for category in menu_categories:
+            if category.get('image_url') is None:
+                category['image_url'] = ""
+
         return list_response(menu_categories, "Menu categories fetched successfully")
 
     except Exception as e:
@@ -87,7 +92,7 @@ def get_menu_category_by_id(menu_category_id=None):
             "title_vn": menu_category.title_vn,
             "title_en": menu_category.title_en,
             "code": menu_category.code,
-            "image_url": menu_category.image_url
+            "image_url": menu_category.image_url or ""
         }
         return single_item_response(menu_category_data, "Menu Category fetched successfully")
 
@@ -176,7 +181,7 @@ def create_menu_category():
             "title_vn": menu_category_doc.title_vn,
             "title_en": menu_category_doc.title_en,
             "code": menu_category_doc.code,
-            "image_url": menu_category_doc.image_url
+            "image_url": menu_category_doc.image_url or ""
         }
         return single_item_response(menu_category_data, "Menu Category created successfully")
 
@@ -314,7 +319,7 @@ def update_menu_category():
             "title_vn": menu_category_doc.title_vn,
             "title_en": menu_category_doc.title_en,
             "code": menu_category_doc.code,
-            "image_url": menu_category_doc.image_url
+            "image_url": menu_category_doc.image_url or ""
         }
         return single_item_response(menu_category_data, "Menu Category updated successfully")
 
@@ -398,7 +403,7 @@ def upload_menu_category_image():
             "title_vn": menu_category_doc.title_vn,
             "title_en": menu_category_doc.title_en,
             "code": menu_category_doc.code,
-            "image_url": menu_category_doc.image_url,
+            "image_url": menu_category_doc.image_url or "",
             "file_url": file_doc.file_url
         }, "Image uploaded successfully")
 
