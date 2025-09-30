@@ -34,10 +34,10 @@ def get_all_menu_categories():
             order_by="title_vn asc"
         )
 
-        # Ensure image_url is never null - convert to empty string
+        # Handle image_url - remove null values to make field optional
         for category in menu_categories:
-            if category.get('image_url') is None:
-                category['image_url'] = ""
+            if category.get('image_url') is None or category.get('image_url') == "":
+                category.pop('image_url', None)
 
         return list_response(menu_categories, "Menu categories fetched successfully")
 
@@ -91,9 +91,12 @@ def get_menu_category_by_id(menu_category_id=None):
             "name": menu_category.name,
             "title_vn": menu_category.title_vn,
             "title_en": menu_category.title_en,
-            "code": menu_category.code,
-            "image_url": menu_category.image_url or ""
+            "code": menu_category.code
         }
+
+        # Only include image_url if it has a value
+        if menu_category.image_url and menu_category.image_url.strip():
+            menu_category_data["image_url"] = menu_category.image_url
         return single_item_response(menu_category_data, "Menu Category fetched successfully")
 
     except Exception as e:
@@ -180,9 +183,12 @@ def create_menu_category():
             "name": menu_category_doc.name,
             "title_vn": menu_category_doc.title_vn,
             "title_en": menu_category_doc.title_en,
-            "code": menu_category_doc.code,
-            "image_url": menu_category_doc.image_url or ""
+            "code": menu_category_doc.code
         }
+
+        # Only include image_url if it has a value
+        if menu_category_doc.image_url and menu_category_doc.image_url.strip():
+            menu_category_data["image_url"] = menu_category_doc.image_url
         return single_item_response(menu_category_data, "Menu Category created successfully")
 
     except Exception as e:
@@ -318,9 +324,12 @@ def update_menu_category():
             "name": menu_category_doc.name,
             "title_vn": menu_category_doc.title_vn,
             "title_en": menu_category_doc.title_en,
-            "code": menu_category_doc.code,
-            "image_url": menu_category_doc.image_url or ""
+            "code": menu_category_doc.code
         }
+
+        # Only include image_url if it has a value
+        if menu_category_doc.image_url and menu_category_doc.image_url.strip():
+            menu_category_data["image_url"] = menu_category_doc.image_url
         return single_item_response(menu_category_data, "Menu Category updated successfully")
 
     except Exception as e:
@@ -398,14 +407,19 @@ def upload_menu_category_image():
         menu_category_doc.save()
         frappe.db.commit()
 
-        return single_item_response({
+        response_data = {
             "name": menu_category_doc.name,
             "title_vn": menu_category_doc.title_vn,
             "title_en": menu_category_doc.title_en,
             "code": menu_category_doc.code,
-            "image_url": menu_category_doc.image_url or "",
             "file_url": file_doc.file_url
-        }, "Image uploaded successfully")
+        }
+
+        # Only include image_url if it has a value
+        if menu_category_doc.image_url and menu_category_doc.image_url.strip():
+            response_data["image_url"] = menu_category_doc.image_url
+
+        return single_item_response(response_data, "Image uploaded successfully")
 
     except Exception as e:
         frappe.log_error(f"Error uploading menu category image: {str(e)}")
