@@ -422,8 +422,13 @@ def upload_menu_category_image():
 
         # Save file directly to file system
         file_path = os.path.join(upload_dir, new_file_name)
-        with open(file_path, 'wb') as f:
-            f.write(file_content)
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(file_content)
+            frappe.logger().info(f"Successfully saved file to: {file_path}")
+        except Exception as write_error:
+            frappe.logger().error(f"Error writing file to disk: {str(write_error)}")
+            return validation_error_response("Failed to save file", {"file": ["Error saving file to disk"]})
 
         # Create file URL
         file_url = f"/files/Menu_Categories/{new_file_name}"
@@ -537,7 +542,15 @@ def create_menu_category_with_image():
                     return validation_error_response("Invalid file type", {"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
 
                 # Read file content as bytes
-                file_content = uploaded_file.read()
+                try:
+                    file_content = uploaded_file.read()
+                    frappe.logger().info(f"Successfully read file content, size: {len(file_content)} bytes")
+                except Exception as read_error:
+                    frappe.logger().error(f"Error reading file content: {str(read_error)}")
+                    # Delete the created menu category if file read fails
+                    frappe.delete_doc("SIS Menu Category", menu_category_doc.name)
+                    frappe.db.commit()
+                    return validation_error_response("Failed to read file", {"file": ["Error reading uploaded file"]})
 
                 # Validate file size (max 10MB)
                 max_size = 10 * 1024 * 1024
