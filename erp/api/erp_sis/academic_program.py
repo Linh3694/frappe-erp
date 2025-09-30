@@ -438,35 +438,15 @@ def delete_academic_program():
         linked_docs = []
         try:
             frappe.logger().info(f"=== START DELETE CHECKS for program {program_id} ===")
-            # Check Curriculum links
-            frappe.logger().info(f"Checking Curriculum links for program {program_id}")
-            curriculum_count = frappe.db.count("SIS Curriculum", {"academic_program_id": program_id})
-            frappe.logger().info(f"Curriculum count: {curriculum_count}")
-            if curriculum_count > 0:
-                linked_docs.append(f"{curriculum_count} chương trình học")
 
-            # Check Actual Subject links
-            frappe.logger().info(f"Checking Actual Subject links for program {program_id}")
-            actual_subject_count = frappe.db.count("SIS Actual Subject", {"academic_program_id": program_id})
-            frappe.logger().info(f"Actual Subject count: {actual_subject_count}")
-            if actual_subject_count > 0:
-                linked_docs.append(f"{actual_subject_count} môn học thực tế")
-
-            # Check Subject links
-            frappe.logger().info(f"Checking Subject links for program {program_id}")
-            subject_count = frappe.db.count("SIS Subject", {"academic_program_id": program_id})
-            frappe.logger().info(f"Subject count: {subject_count}")
-            if subject_count > 0:
-                linked_docs.append(f"{subject_count} môn học")
-
-            # Check SIS Class links
+            # Check SIS Class links (via academic_program field)
             frappe.logger().info(f"Checking SIS Class links for program {program_id}")
             class_count = frappe.db.count("SIS Class", {"academic_program": program_id})
             frappe.logger().info(f"SIS Class count: {class_count}")
             if class_count > 0:
                 linked_docs.append(f"{class_count} lớp học")
 
-            # Check SIS Sub Curriculum Evaluation links
+            # Check SIS Sub Curriculum Evaluation links (via academic_program_id field)
             frappe.logger().info(f"Checking SIS Sub Curriculum Evaluation links for program {program_id}")
             sub_curriculum_evaluation_count = frappe.db.count("SIS Sub Curriculum Evaluation", {"academic_program_id": program_id})
             frappe.logger().info(f"SIS Sub Curriculum Evaluation count: {sub_curriculum_evaluation_count}")
