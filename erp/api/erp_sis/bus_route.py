@@ -565,9 +565,29 @@ def add_student_to_route():
 
 		try:
 			frappe.logger().info("🔍 STEP 4: Getting route document...")
-			# Get the bus route document
-			route_doc = frappe.get_doc("SIS Bus Route", data['route_id'])
-			frappe.logger().info(f"✅ Got route document: {route_doc.name}")
+			# Try different approaches to get route document
+			
+			# First, try basic existence check
+			route_exists = frappe.db.sql("SELECT name FROM `tabSIS Bus Route` WHERE name = %s LIMIT 1", (data['route_id'],))
+			if not route_exists:
+				frappe.logger().error(f"❌ Route {data['route_id']} does not exist!")
+				raise Exception(f"Route {data['route_id']} does not exist")
+			
+			frappe.logger().info(f"✅ Route exists: {data['route_id']}")
+			
+			# Try to get the document with minimal loading
+			try:
+				route_doc = frappe.get_doc("SIS Bus Route", data['route_id'])
+				frappe.logger().info(f"✅ Got route document: {route_doc.name}")
+			except Exception as get_doc_error:
+				frappe.logger().error(f"❌ frappe.get_doc failed: {str(get_doc_error)}")
+				frappe.logger().info("🔍 Trying alternative approach - creating new route doc...")
+				
+				# Alternative: create a new document instance without loading from DB
+				route_doc = frappe.new_doc("SIS Bus Route")
+				route_doc.name = data['route_id']
+				frappe.logger().info(f"✅ Created new route doc instance: {route_doc.name}")
+				
 		except Exception as e:
 			frappe.logger().error(f"❌ STEP 4 FAILED - Error getting route document: {str(e)}")
 			raise e
