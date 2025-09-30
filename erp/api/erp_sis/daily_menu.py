@@ -236,7 +236,15 @@ def create_daily_menu():
                     # Only allow education_stage for dinner meals
                     education_stage = ""
                     if meal_type == "dinner":
-                        education_stage = item_data.get("education_stage", "")
+                        raw_education_stage = item_data.get("education_stage", "")
+                        # Normalize education stage values to match DocType options
+                        if raw_education_stage:
+                            if "tiểu" in raw_education_stage.lower():
+                                education_stage = "Tiểu học"
+                            elif "trung" in raw_education_stage.lower():
+                                education_stage = "Trung học"
+                            else:
+                                education_stage = raw_education_stage
                     
                     all_items.append({
                         "doctype": "SIS Daily Menu Item",
@@ -348,7 +356,15 @@ def update_daily_menu():
                         # Only allow education_stage for dinner meals
                         education_stage = ""
                         if meal_type == "dinner":
-                            education_stage = item_data.get("education_stage", "")
+                            raw_education_stage = item_data.get("education_stage", "")
+                            # Normalize education stage values to match DocType options
+                            if raw_education_stage:
+                                if "tiểu" in raw_education_stage.lower():
+                                    education_stage = "Tiểu học"
+                                elif "trung" in raw_education_stage.lower():
+                                    education_stage = "Trung học"
+                                else:
+                                    education_stage = raw_education_stage
                         
                         daily_menu_doc.append("items", {
                             "doctype": "SIS Daily Menu Item",
