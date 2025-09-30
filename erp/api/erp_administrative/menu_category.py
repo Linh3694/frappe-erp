@@ -337,21 +337,31 @@ def update_menu_category():
 def upload_menu_category_image():
     """Upload image for menu category - similar to sis_photo pattern"""
     try:
-        # Get data from request
+        # IMPORTANT: Check for files first to avoid encoding issues when parsing request data
+        files = frappe.request.files
+        has_files = files and 'file' in files
+
+        # Get data from request - avoid parsing request.data when files are present
         data = {}
 
-        # First try to get JSON data from request body
-        if frappe.request.data:
+        if has_files:
+            # When files are present, use form_dict directly to avoid encoding issues
+            # Don't try to parse frappe.request.data as it contains binary data
             try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
                 data = frappe.local.form_dict
+            except UnicodeDecodeError as e:
+                frappe.logger().error(f"Unicode decode error when accessing form_dict with files: {str(e)}")
+                return error_response("Error processing form data with file upload")
         else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
+            if frappe.request.data:
+                try:
+                    json_data = json.loads(frappe.request.data)
+                    if json_data:
+                        data = json_data
+                except (json.JSONDecodeError, TypeError):
+                    data = frappe.local.form_dict
+            else:
+                data = frappe.local.form_dict
 
         menu_category_id = data.get('menu_category_id')
         if not menu_category_id:
