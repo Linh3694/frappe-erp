@@ -18,8 +18,8 @@
  "field_order": [
   "basic_information",
   "menu_date",
-  "meals_section",
-  "meals"
+  "items_section",
+  "items"
  ],
  "fields": [
   {
@@ -36,15 +36,15 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "meals_section",
+   "fieldname": "items_section",
    "fieldtype": "Section Break",
-   "label": "Các bữa ăn"
+   "label": "Danh sách món ăn"
   },
   {
-   "fieldname": "meals",
+   "fieldname": "items",
    "fieldtype": "Table",
-   "label": "Danh sách bữa ăn",
-   "options": "SIS Daily Menu Meal"
+   "label": "Danh sách món ăn theo bữa",
+   "options": "SIS Daily Menu Item"
   }
  ],
  "index_web_pages_for_search": 1,

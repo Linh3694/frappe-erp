@@ -1,0 +1,83 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 1,
+ "beta": 0,
+ "creation": "2024-12-30 10:00:00.000000",
+ "custom": 0,
+ "description": "Child table for SIS Daily Menu Items - Simplified structure",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "meal_type",
+  "meal_type_reference",
+  "menu_category_id",
+  "display_name",
+  "display_name_en",
+  "education_stage"
+ ],
+ "fields": [
+  {
+   "fieldname": "meal_type",
+   "fieldtype": "Select",
+   "label": "Loại bữa ăn",
+   "options": "breakfast\nlunch\ndinner",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "meal_type_reference",
+   "fieldtype": "Link",
+   "label": "Loại thực đơn",
+   "options": "SIS Meal Type",
+   "description": "Tham chiếu đến loại thực đơn có sẵn"
+  },
+  {
+   "fieldname": "menu_category_id",
+   "fieldtype": "Link",
+   "label": "Món ăn",
+   "options": "SIS Menu Category",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "display_name",
+   "fieldtype": "Data",
+   "label": "Tên hiển thị (VN)",
+   "description": "Để trống để sử dụng tên gốc của món ăn",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "display_name_en",
+   "fieldtype": "Data",
+   "label": "Tên hiển thị (EN)",
+   "description": "Để trống để sử dụng tên gốc của món ăn"
+  },
+  {
+   "fieldname": "education_stage",
+   "fieldtype": "Select",
+   "label": "Trường học",
+   "options": "Tiểu học\nTrung học",
+   "description": "Chỉ áp dụng cho bữa xế"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-12-30 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Daily Menu Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -8,7 +8,7 @@ class SISDailyMenu(Document):
 	def validate(self):
 		"""Validate daily menu data"""
 		self.validate_unique_date()
-		self.validate_meals()
+		self.validate_items()
 
 	def validate_unique_date(self):
 		"""Ensure menu_date is unique"""
@@ -20,25 +20,22 @@ class SISDailyMenu(Document):
 			if existing:
 				frappe.throw(f"Ngày {self.menu_date} đã có thực đơn")
 
-	def validate_meals(self):
-		"""Validate meals data"""
-		if self.meals:
-			meal_types = []
-			for meal in self.meals:
-				if meal.meal_type in meal_types:
-					frappe.throw(f"Bữa ăn '{meal.meal_type}' bị trùng lặp")
-				meal_types.append(meal.meal_type)
-
+	def validate_items(self):
+		"""Validate menu items data"""
+		if self.items:
+			# Track items per meal type to prevent duplicates
+			meal_items = {}
+			
+			for item in self.items:
+				# Initialize meal tracking
+				if item.meal_type not in meal_items:
+					meal_items[item.meal_type] = []
+				
+				# Check for duplicate menu categories within same meal
+				if item.menu_category_id in meal_items[item.meal_type]:
+					frappe.throw(f"Món ăn '{item.menu_category_id}' bị trùng lặp trong bữa {item.meal_type}")
+				meal_items[item.meal_type].append(item.menu_category_id)
+				
 				# Validate that education_stage is only set for dinner meals
-				if meal.items:
-					for item in meal.items:
-						if item.education_stage and meal.meal_type != "dinner":
-							frappe.throw(f"Trường học chỉ được đặt cho bữa xế (dinner), không phải bữa {meal.meal_type}")
-
-				# Validate meal items
-				if meal.items:
-					menu_category_ids = []
-					for item in meal.items:
-						if item.menu_category_id in menu_category_ids:
-							frappe.throw(f"Món ăn '{item.menu_category_id}' bị trùng lặp trong bữa {meal.meal_type}")
-						menu_category_ids.append(item.menu_category_id)
+				if item.education_stage and item.meal_type != "dinner":
+					frappe.throw(f"Trường học chỉ được đặt cho bữa xế (dinner), không phải bữa {item.meal_type}")

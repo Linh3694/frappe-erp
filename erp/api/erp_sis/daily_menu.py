@@ -83,40 +83,31 @@ def get_all_daily_menus():
                 order_by="menu_date desc"
             )
 
-        # Get meals for each daily menu
+        # Get items for each daily menu and convert to meals structure
         for menu in daily_menus:
-            meals = frappe.get_all(
-                "SIS Daily Menu Meal",
-                filters={
-                    "parent": menu.name
-                },
-                fields=["meal_type", "meal_type_reference", "name"],
-                order_by="idx"
-            )
-
-            # Add menu_type to each meal (for frontend compatibility)
-            for meal in meals:
-                meal["menu_type"] = "custom"  # Default to custom
-
-            # Get items for each meal using get_doc method (works with nested child tables)
-            for meal in meals:
-                try:
-                    meal_doc = frappe.get_doc("SIS Daily Menu Meal", meal.name)
-                    items = []
-                    if hasattr(meal_doc, 'items') and meal_doc.items:
-                        for item in meal_doc.items:
-                            items.append({
-                                "menu_category_id": item.menu_category_id,
-                                "display_name": item.display_name or "",
-                                "display_name_en": item.display_name_en or "",
-                                "education_stage": item.education_stage or ""
-                            })
-                except Exception:
-                    items = []
+            daily_menu_doc = frappe.get_doc("SIS Daily Menu", menu.name)
+            
+            # Convert flat items to meals structure
+            meals_result = {}
+            for item in daily_menu_doc.items:
+                meal_type = item.meal_type
+                if meal_type not in meals_result:
+                    meals_result[meal_type] = {
+                        "meal_type": meal_type,
+                        "menu_type": "custom",
+                        "meal_type_reference": item.meal_type_reference or "",
+                        "name": f"{meal_type}_{menu.name}",
+                        "items": []
+                    }
                 
-                meal["items"] = items
+                meals_result[meal_type]["items"].append({
+                    "menu_category_id": item.menu_category_id,
+                    "display_name": item.display_name or "",
+                    "display_name_en": item.display_name_en or "",
+                    "education_stage": item.education_stage or ""
+                })
 
-            menu["meals"] = meals
+            menu["meals"] = list(meals_result.values())
 
         return list_response(daily_menus, "Daily menus fetched successfully")
 
@@ -152,43 +143,33 @@ def get_daily_menu_by_id(daily_menu_id=None):
 
         menu = daily_menus[0]
 
-        # Get meals with items using direct queries (nested child tables need special handling)
-        meals = frappe.get_all(
-            "SIS Daily Menu Meal",
-            filters={
-                "parent": menu.name
-            },
-            fields=["meal_type", "meal_type_reference", "name"],
-            order_by="idx"
-        )
-
-        # Add menu_type to each meal (for frontend compatibility)
-        for meal in meals:
-            meal["menu_type"] = "custom"  # Default to custom since we don't store menu_type in backend
-
-        # Get items for each meal using get_doc method (works with nested child tables)
-        for meal in meals:
-            try:
-                meal_doc = frappe.get_doc("SIS Daily Menu Meal", meal.name)
-                items = []
-                if hasattr(meal_doc, 'items') and meal_doc.items:
-                    for item in meal_doc.items:
-                        items.append({
-                            "menu_category_id": item.menu_category_id,
-                            "display_name": item.display_name or "",
-                            "display_name_en": item.display_name_en or "",
-                            "education_stage": item.education_stage or ""
-                        })
-            except Exception as e:
-                frappe.logger().error(f"Error getting meal doc {meal.name}: {str(e)}")
-                items = []
+        # Get menu items directly (much simpler now)
+        daily_menu_doc = frappe.get_doc("SIS Daily Menu", menu.name)
+        
+        # Convert flat items to meals structure for frontend compatibility
+        meals_result = {}
+        for item in daily_menu_doc.items:
+            meal_type = item.meal_type
+            if meal_type not in meals_result:
+                meals_result[meal_type] = {
+                    "meal_type": meal_type,
+                    "menu_type": "custom",
+                    "meal_type_reference": item.meal_type_reference or "",
+                    "name": f"{meal_type}_{menu.name}",  # Generate consistent meal name for frontend
+                    "items": []
+                }
             
-            meal["items"] = items
+            meals_result[meal_type]["items"].append({
+                "menu_category_id": item.menu_category_id,
+                "display_name": item.display_name or "",
+                "display_name_en": item.display_name_en or "",
+                "education_stage": item.education_stage or ""
+            })
 
         menu_data = {
             "name": menu.name,
             "menu_date": menu.menu_date,
-            "meals": meals
+            "meals": list(meals_result.values())
         }
         return single_item_response(menu_data, "Daily Menu fetched successfully")
 
@@ -242,62 +223,69 @@ def create_daily_menu():
         if existing:
             return validation_error_response("Menu date already exists", {"menu_date": [f"Ngày {menu_date} đã có thực đơn"]})
 
-        # Create new daily menu
-        daily_menu_doc = frappe.get_doc({
-            "doctype": "SIS Daily Menu",
-            "menu_date": menu_date
-        })
-
-        # Add meals with items using proper nested structure
-        for meal_data in meals:
-            # Prepare meal items first
-            meal_items = []
-            for item_data in meal_data.get("items", []):
-                # Only allow education_stage for dinner meals
-                education_stage = ""
-                if meal_data.get("meal_type") == "dinner":
-                    education_stage = item_data.get("education_stage", "")
+        # Create new daily menu with simplified structure
+        frappe.db.begin()
+        try:
+            # Prepare all items with meal information
+            all_items = []
+            for meal_data in meals:
+                meal_type = meal_data.get("meal_type")
+                meal_type_reference = meal_data.get("meal_type_reference", "")
                 
-                meal_items.append({
-                    "menu_category_id": item_data.get("menu_category_id"),
-                    "display_name": item_data.get("display_name", ""),
-                    "display_name_en": item_data.get("display_name_en", ""),
-                    "education_stage": education_stage
-                })
-            
-            # Add meal with items to daily menu
-            daily_menu_doc.append("meals", {
-                "meal_type": meal_data.get("meal_type"),
-                "meal_type_reference": meal_data.get("meal_type_reference", ""),
-                "items": meal_items
+                for item_data in meal_data.get("items", []):
+                    # Only allow education_stage for dinner meals
+                    education_stage = ""
+                    if meal_type == "dinner":
+                        education_stage = item_data.get("education_stage", "")
+                    
+                    all_items.append({
+                        "doctype": "SIS Daily Menu Item",
+                        "meal_type": meal_type,
+                        "meal_type_reference": meal_type_reference,
+                        "menu_category_id": item_data.get("menu_category_id"),
+                        "display_name": item_data.get("display_name", ""),
+                        "display_name_en": item_data.get("display_name_en", ""),
+                        "education_stage": education_stage
+                    })
+
+            # Create daily menu document with all items
+            daily_menu_doc = frappe.get_doc({
+                "doctype": "SIS Daily Menu",
+                "menu_date": menu_date,
+                "items": all_items
             })
 
-        daily_menu_doc.insert()
-        frappe.db.commit()
+            # Insert document - much simpler now
+            daily_menu_doc.insert()
+            frappe.db.commit()
+            
+        except Exception as e:
+            frappe.db.rollback()
+            raise e
 
-        # Return the created data
-        meals_result = []
-        for meal in daily_menu_doc.meals:
-            items_result = []
-            for item in meal.items:
-                items_result.append({
-                    "menu_category_id": item.menu_category_id,
-                    "display_name": item.display_name,
-                    "display_name_en": item.display_name_en,
-                    "education_stage": item.education_stage
-                })
-
-            meals_result.append({
-                "meal_type": meal.meal_type,
-                "menu_type": "custom",  # Default to custom since we don't store menu_type in backend
-                "meal_type_reference": meal.meal_type_reference,
-                "items": items_result
+        # Convert flat items back to meals structure for frontend compatibility
+        meals_result = {}
+        for item in daily_menu_doc.items:
+            meal_type = item.meal_type
+            if meal_type not in meals_result:
+                meals_result[meal_type] = {
+                    "meal_type": meal_type,
+                    "menu_type": "custom",
+                    "meal_type_reference": item.meal_type_reference or "",
+                    "items": []
+                }
+            
+            meals_result[meal_type]["items"].append({
+                "menu_category_id": item.menu_category_id,
+                "display_name": item.display_name or "",
+                "display_name_en": item.display_name_en or "",
+                "education_stage": item.education_stage or ""
             })
 
         daily_menu_data = {
             "name": daily_menu_doc.name,
             "menu_date": daily_menu_doc.menu_date,
-            "meals": meals_result
+            "meals": list(meals_result.values())
         }
         return single_item_response(daily_menu_data, "Daily Menu created successfully")
 
@@ -344,61 +332,65 @@ def update_daily_menu():
         if menu_date and menu_date != daily_menu_doc.menu_date:
             daily_menu_doc.menu_date = menu_date
 
-        # Update meals if provided
+        # Update items with optimized transaction
         if meals is not None:
-            # Clear existing meals
-            daily_menu_doc.meals = []
+            frappe.db.begin()
+            try:
+                # Clear existing items
+                daily_menu_doc.items = []
 
-            # Add new meals with proper nested structure
-            for meal_data in meals:
-                # Prepare meal items first
-                meal_items = []
-                for item_data in meal_data.get("items", []):
-                    # Only allow education_stage for dinner meals
-                    education_stage = ""
-                    if meal_data.get("meal_type") == "dinner":
-                        education_stage = item_data.get("education_stage", "")
+                # Prepare all items with meal information
+                for meal_data in meals:
+                    meal_type = meal_data.get("meal_type")
+                    meal_type_reference = meal_data.get("meal_type_reference", "")
                     
-                    meal_items.append({
-                        "menu_category_id": item_data.get("menu_category_id"),
-                        "display_name": item_data.get("display_name", ""),
-                        "display_name_en": item_data.get("display_name_en", ""),
-                        "education_stage": education_stage
-                    })
+                    for item_data in meal_data.get("items", []):
+                        # Only allow education_stage for dinner meals
+                        education_stage = ""
+                        if meal_type == "dinner":
+                            education_stage = item_data.get("education_stage", "")
+                        
+                        daily_menu_doc.append("items", {
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": meal_type_reference,
+                            "menu_category_id": item_data.get("menu_category_id"),
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": education_stage
+                        })
+
+                # Save all changes in one transaction
+                daily_menu_doc.save()
+                frappe.db.commit()
                 
-                # Add meal with items to daily menu
-                daily_menu_doc.append("meals", {
-                    "meal_type": meal_data.get("meal_type"),
-                    "meal_type_reference": meal_data.get("meal_type_reference", ""),
-                    "items": meal_items
-                })
+            except Exception as e:
+                frappe.db.rollback()
+                raise e
 
-        daily_menu_doc.save()
-        frappe.db.commit()
-
-        # Get updated data for response
-        meals_result = []
-        for meal in daily_menu_doc.meals:
-            items_result = []
-            for item in meal.items:
-                items_result.append({
-                    "menu_category_id": item.menu_category_id,
-                    "display_name": item.display_name,
-                    "display_name_en": item.display_name_en,
-                    "education_stage": item.education_stage
-                })
-
-            meals_result.append({
-                "meal_type": meal.meal_type,
-                "menu_type": "custom",  # Default to custom
-                "meal_type_reference": meal.meal_type_reference,
-                "items": items_result
+        # Convert flat items back to meals structure for frontend compatibility
+        meals_result = {}
+        for item in daily_menu_doc.items:
+            meal_type = item.meal_type
+            if meal_type not in meals_result:
+                meals_result[meal_type] = {
+                    "meal_type": meal_type,
+                    "menu_type": "custom",
+                    "meal_type_reference": item.meal_type_reference or "",
+                    "items": []
+                }
+            
+            meals_result[meal_type]["items"].append({
+                "menu_category_id": item.menu_category_id,
+                "display_name": item.display_name or "",
+                "display_name_en": item.display_name_en or "",
+                "education_stage": item.education_stage or ""
             })
 
         daily_menu_data = {
             "name": daily_menu_doc.name,
             "menu_date": daily_menu_doc.menu_date,
-            "meals": meals_result
+            "meals": list(meals_result.values())
         }
         return single_item_response(daily_menu_data, "Daily Menu updated successfully")
 
@@ -512,40 +504,31 @@ def get_daily_menus_by_month(month=None):
             order_by="menu_date asc"
         )
 
-        # Get meals for each daily menu
+        # Get items for each daily menu and convert to meals structure
         for menu in daily_menus:
-            meals = frappe.get_all(
-                "SIS Daily Menu Meal",
-                filters={
-                    "parent": menu.name
-                },
-                fields=["meal_type", "meal_type_reference", "name"],
-                order_by="idx"
-            )
-
-            # Add menu_type to each meal (for frontend compatibility)
-            for meal in meals:
-                meal["menu_type"] = "custom"  # Default to custom
-
-            # Get items for each meal using get_doc method (works with nested child tables)
-            for meal in meals:
-                try:
-                    meal_doc = frappe.get_doc("SIS Daily Menu Meal", meal.name)
-                    items = []
-                    if hasattr(meal_doc, 'items') and meal_doc.items:
-                        for item in meal_doc.items:
-                            items.append({
-                                "menu_category_id": item.menu_category_id,
-                                "display_name": item.display_name or "",
-                                "display_name_en": item.display_name_en or "",
-                                "education_stage": item.education_stage or ""
-                            })
-                except Exception:
-                    items = []
+            daily_menu_doc = frappe.get_doc("SIS Daily Menu", menu.name)
+            
+            # Convert flat items to meals structure
+            meals_result = {}
+            for item in daily_menu_doc.items:
+                meal_type = item.meal_type
+                if meal_type not in meals_result:
+                    meals_result[meal_type] = {
+                        "meal_type": meal_type,
+                        "menu_type": "custom",
+                        "meal_type_reference": item.meal_type_reference or "",
+                        "name": f"{meal_type}_{menu.name}",
+                        "items": []
+                    }
                 
-                meal["items"] = items
+                meals_result[meal_type]["items"].append({
+                    "menu_category_id": item.menu_category_id,
+                    "display_name": item.display_name or "",
+                    "display_name_en": item.display_name_en or "",
+                    "education_stage": item.education_stage or ""
+                })
 
-            menu["meals"] = meals
+            menu["meals"] = list(meals_result.values())
 
         return list_response(daily_menus, "Daily menus for month fetched successfully")
 
