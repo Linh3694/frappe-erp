@@ -126,12 +126,13 @@ def create_menu_category():
         title_vn = data.get("title_vn")
         title_en = data.get("title_en")
         code = data.get("code")
-        image_url = data.get("image_url")
+        image_url = data.get("image_url") or None
 
         # Input validation
-        if not title_vn or not code:
+        if not title_vn or not title_en or not code:
             return validation_error_response({
                 "title_vn": ["Title VN is required"] if not title_vn else [],
+                "title_en": ["Title EN is required"] if not title_en else [],
                 "code": ["Code is required"] if not code else []
             })
 
@@ -291,7 +292,7 @@ def update_menu_category():
         title_vn = data.get('title_vn')
         title_en = data.get('title_en')
         code = data.get('code')
-        image_url = data.get('image_url')
+        image_url = data.get('image_url') or None
 
         if title_vn and title_vn != menu_category_doc.title_vn:
             menu_category_doc.title_vn = title_vn

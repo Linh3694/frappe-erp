@@ -526,9 +526,15 @@ def _process_excel_file(job):
                 "curriculum": "curriculum_id"
             },
             "SIS Actual Subject": {
-                "education_stage": "education_stage_id", 
+                "education_stage": "education_stage_id",
                 "curriculum": "curriculum_id",
                 "timetable_subject": "timetable_subject_id"
+            },
+            "SIS Menu Category": {
+                # Simple direct mapping - Excel columns match field names
+                "title_vn": "title_vn",
+                "title_en": "title_en",
+                "code": "code"
             }
         }
 
