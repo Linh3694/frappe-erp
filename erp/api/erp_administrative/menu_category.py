@@ -382,18 +382,21 @@ def upload_menu_category_image():
         if uploaded_file.size > max_size:
             return validation_error_response({"file": ["File size must be less than 10MB"]})
 
-        # Save file to Frappe File Manager
-        file_doc = frappe.get_doc({
-            "doctype": "File",
-            "file_name": uploaded_file.filename,
-            "is_private": 0,
-            "content": uploaded_file.stream.read(),
-            "attached_to_doctype": "SIS Menu Category",
-            "attached_to_name": menu_category_id,
-        })
+        # Save file to Frappe File Manager using save_file utility
+        from frappe.utils.file_manager import save_file
 
-        file_doc.save()
-        frappe.db.commit()
+        # Reset stream position to beginning in case it was read before
+        if hasattr(uploaded_file.stream, 'seek'):
+            uploaded_file.stream.seek(0)
+
+        file_doc = save_file(
+            fname=uploaded_file.filename,
+            content=uploaded_file.stream,
+            dt="SIS Menu Category",
+            dn=menu_category_id,
+            folder="Home/Menu Categories",
+            is_private=0
+        )
 
         # Update menu category with image URL
         menu_category_doc.image_url = file_doc.file_url
