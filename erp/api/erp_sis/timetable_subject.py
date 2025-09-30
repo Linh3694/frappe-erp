@@ -139,11 +139,27 @@ def create_timetable_subject():
         title_en = data.get("title_en")
         education_stage_id = data.get("education_stage_id")
         curriculum_id = data.get("curriculum_id")
-        
+
         # Input validation
         if not title_vn:
             frappe.throw(_("Title VN is required"))
-        
+
+        if not education_stage_id:
+            frappe.throw(_("Education stage is required"))
+
+        # Check for duplicate subject name within the same education stage
+        existing_subject = frappe.db.exists(
+            "SIS Timetable Subject",
+            {
+                "title_vn": title_vn,
+                "education_stage_id": education_stage_id,
+                "campus_id": campus_id
+            }
+        )
+
+        if existing_subject:
+            frappe.throw(_("Môn học '{0}' đã tồn tại trong cấp học này. Không được trùng tên môn học trong cùng một cấp học.").format(title_vn))
+
         # Get campus from user context - simplified
         try:
             campus_id = get_current_campus_from_context()
