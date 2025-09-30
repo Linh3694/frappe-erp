@@ -431,30 +431,41 @@ def delete_academic_program():
         # Check for linked documents before deletion
         linked_docs = []
         try:
+            frappe.logger().info(f"=== START DELETE CHECKS for program {program_id} ===")
             # Check Curriculum links
+            frappe.logger().info(f"Checking Curriculum links for program {program_id}")
             curriculum_count = frappe.db.count("SIS Curriculum", {"academic_program_id": program_id})
+            frappe.logger().info(f"Curriculum count: {curriculum_count}")
             if curriculum_count > 0:
                 linked_docs.append(f"{curriculum_count} chương trình học")
 
             # Check Actual Subject links
+            frappe.logger().info(f"Checking Actual Subject links for program {program_id}")
             actual_subject_count = frappe.db.count("SIS Actual Subject", {"academic_program_id": program_id})
+            frappe.logger().info(f"Actual Subject count: {actual_subject_count}")
             if actual_subject_count > 0:
                 linked_docs.append(f"{actual_subject_count} môn học thực tế")
 
             # Check Subject links
+            frappe.logger().info(f"Checking Subject links for program {program_id}")
             subject_count = frappe.db.count("SIS Subject", {"academic_program_id": program_id})
+            frappe.logger().info(f"Subject count: {subject_count}")
             if subject_count > 0:
                 linked_docs.append(f"{subject_count} môn học")
 
             if linked_docs:
+                frappe.logger().info(f"Program {program_id} has linked docs: {linked_docs}")
                 return error_response(
                     message=f"Không thể xóa hệ học vì đang được liên kết với {', '.join(linked_docs)}. Vui lòng xóa hoặc chuyển các mục liên kết sang hệ học khác trước.",
                     code="ACADEMIC_PROGRAM_LINKED"
                 )
 
             # Delete the document
+            frappe.logger().info(f"No linked docs found, proceeding to delete program {program_id}")
             frappe.delete_doc("SIS Academic Program", program_id)
+            frappe.logger().info(f"Successfully deleted program {program_id}")
             frappe.db.commit()
+            frappe.logger().info(f"Successfully committed delete for program {program_id}")
 
             return success_response(
                 message="Academic program deleted successfully"
