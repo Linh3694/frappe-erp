@@ -342,17 +342,20 @@ def upload_menu_category_image():
         has_files = files and 'file' in files
 
         # Get data from request - avoid parsing request.data when files are present
-        data = {}
+        menu_category_id = None
 
         if has_files:
-            # When files are present, use form_dict directly to avoid encoding issues
+            # When files are present, access individual form fields to avoid encoding issues
             # Don't try to parse frappe.request.data as it contains binary data
             try:
-                data = frappe.local.form_dict
+                menu_category_id = frappe.local.form_dict.get('menu_category_id')
+                frappe.logger().info(f"Got menu_category_id from form_dict with files: {menu_category_id}")
             except UnicodeDecodeError as e:
                 frappe.logger().error(f"Unicode decode error when accessing form_dict with files: {str(e)}")
                 return error_response("Error processing form data with file upload")
         else:
+            # No files, safe to parse request data
+            data = {}
             if frappe.request.data:
                 try:
                     json_data = json.loads(frappe.request.data)
@@ -362,8 +365,8 @@ def upload_menu_category_image():
                     data = frappe.local.form_dict
             else:
                 data = frappe.local.form_dict
+            menu_category_id = data.get('menu_category_id')
 
-        menu_category_id = data.get('menu_category_id')
         if not menu_category_id:
             return validation_error_response("Menu Category ID is required", {"menu_category_id": ["Menu Category ID is required"]})
 
