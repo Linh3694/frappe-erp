@@ -46,10 +46,12 @@ def add_student_to_daily_trips(route_id, route_student_data):
 		
 		for daily_trip in daily_trips:
 			# Check if student already exists in this daily trip
-			existing = frappe.db.exists("SIS Bus Daily Trip Student", {
-				"daily_trip_id": daily_trip.name,
-				"student_id": route_student_data['student_id']
-			})
+			existing = frappe.db.sql("""
+				SELECT name FROM `tabSIS Bus Daily Trip Student`
+				WHERE daily_trip_id = %s AND student_id = %s
+				LIMIT 1
+			""", (daily_trip.name, route_student_data['student_id']))
+			existing = existing[0][0] if existing else None
 			
 			if existing:
 				logs.append(f"   ⏭️ Bỏ qua {daily_trip.name} ({daily_trip.trip_date}) - student đã tồn tại")
@@ -1164,7 +1166,10 @@ def get_daily_trips_by_date():
 				})
 
 			# Get trip students count
-			student_count = frappe.db.count("SIS Bus Daily Trip Student", {"daily_trip_id": trip.name})
+			student_count = frappe.db.sql("""
+				SELECT COUNT(*) FROM `tabSIS Bus Daily Trip Student`
+				WHERE daily_trip_id = %s
+			""", (trip.name,))[0][0]
 			trip.update({
 				"total_students": student_count
 			})
