@@ -1073,32 +1073,35 @@ def get_daily_trip():
 
 		if trip_data.get('driver_id'):
 			driver_data = frappe.db.sql("""
-				SELECT full_name, phone_number FROM `tabSIS Bus Driver` WHERE name = %s
+				SELECT full_name, phone_number, citizen_id FROM `tabSIS Bus Driver` WHERE name = %s
 			""", (trip_data['driver_id'],), as_dict=True)
 			if driver_data:
 				trip_data.update({
 					"driver_name": driver_data[0].full_name,
-					"driver_phone": driver_data[0].phone_number
+					"driver_phone": driver_data[0].phone_number,
+					"driver_can_cuoc": driver_data[0].citizen_id
 				})
 
 		if trip_data.get('monitor1_id'):
 			monitor1_data = frappe.db.sql("""
-				SELECT full_name, phone_number FROM `tabSIS Bus Monitor` WHERE name = %s
+				SELECT full_name, phone_number, citizen_id FROM `tabSIS Bus Monitor` WHERE name = %s
 			""", (trip_data['monitor1_id'],), as_dict=True)
 			if monitor1_data:
 				trip_data.update({
 					"monitor1_name": monitor1_data[0].full_name,
-					"monitor1_phone": monitor1_data[0].phone_number
+					"monitor1_phone": monitor1_data[0].phone_number,
+					"monitor1_can_cuoc": monitor1_data[0].citizen_id
 				})
 
 		if trip_data.get('monitor2_id'):
 			monitor2_data = frappe.db.sql("""
-				SELECT full_name, phone_number FROM `tabSIS Bus Monitor` WHERE name = %s
+				SELECT full_name, phone_number, citizen_id FROM `tabSIS Bus Monitor` WHERE name = %s
 			""", (trip_data['monitor2_id'],), as_dict=True)
 			if monitor2_data:
 				trip_data.update({
 					"monitor2_name": monitor2_data[0].full_name,
-					"monitor2_phone": monitor2_data[0].phone_number
+					"monitor2_phone": monitor2_data[0].phone_number,
+					"monitor2_can_cuoc": monitor2_data[0].citizen_id
 				})
 
 		# Get trip students
