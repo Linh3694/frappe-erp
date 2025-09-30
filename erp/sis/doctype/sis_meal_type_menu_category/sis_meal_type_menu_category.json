@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 1,
+ "beta": 0,
+ "creation": "2024-12-30 10:00:00.000000",
+ "custom": 0,
+ "description": "Child table for SIS Meal Type Menu Categories",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "menu_category_id",
+  "display_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "menu_category_id",
+   "fieldtype": "Link",
+   "label": "Món ăn",
+   "options": "SIS Menu Category",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "display_name",
+   "fieldtype": "Data",
+   "label": "Tên hiển thị",
+   "description": "Để trống để sử dụng tên gốc của món ăn",
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-12-30 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Meal Type Menu Category",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
