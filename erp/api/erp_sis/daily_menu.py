@@ -243,11 +243,16 @@ def create_daily_menu():
 
             # Add items to meal
             for item_data in meal_data.get("items", []):
+                # Only allow education_stage for dinner meals
+                education_stage = ""
+                if meal_data.get("meal_type") == "dinner":
+                    education_stage = item_data.get("education_stage", "")
+                
                 meal_doc.append("items", {
                     "menu_category_id": item_data.get("menu_category_id"),
                     "display_name": item_data.get("display_name", ""),
                     "display_name_en": item_data.get("display_name_en", ""),
-                    "education_stage": item_data.get("education_stage", "")
+                    "education_stage": education_stage
                 })
 
         daily_menu_doc.insert()
@@ -336,11 +341,16 @@ def update_daily_menu():
 
                 # Add items to meal
                 for item_data in meal_data.get("items", []):
+                    # Only allow education_stage for dinner meals
+                    education_stage = ""
+                    if meal_data.get("meal_type") == "dinner":
+                        education_stage = item_data.get("education_stage", "")
+                    
                     meal_doc.append("items", {
                         "menu_category_id": item_data.get("menu_category_id"),
                         "display_name": item_data.get("display_name", ""),
                         "display_name_en": item_data.get("display_name_en", ""),
-                        "education_stage": item_data.get("education_stage", "")
+                        "education_stage": education_stage
                     })
 
         daily_menu_doc.save()
