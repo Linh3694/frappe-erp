@@ -28,12 +28,12 @@ class SISBusRouteStudent(Document):
 		if not self.route_id or not self.student_id:
 			return
 
-		existing_assignment = frappe.db.exists("SIS Bus Route Student", {
-			"student_id": self.student_id,
-			"route_id": ("!=", self.route_id),
-			"name": ("!=", self.name)
-		})
-
+		existing_assignment = frappe.db.sql("""
+			SELECT name FROM `tabSIS Bus Route Student`
+			WHERE student_id = %s AND route_id != %s AND name != %s
+			LIMIT 1
+		""", (self.student_id, self.route_id, self.name or ""))
+		
 		if existing_assignment:
 			frappe.throw("Học sinh đã được phân công cho tuyến khác")
 
@@ -42,13 +42,12 @@ class SISBusRouteStudent(Document):
 		if not self.route_id or not self.pickup_order or not self.weekday or not self.trip_type:
 			return
 
-		existing_order = frappe.db.exists("SIS Bus Route Student", {
-			"route_id": self.route_id,
-			"pickup_order": self.pickup_order,
-			"weekday": self.weekday,
-			"trip_type": self.trip_type,
-			"name": ("!=", self.name)
-		})
+		existing_order = frappe.db.sql("""
+			SELECT name FROM `tabSIS Bus Route Student`
+			WHERE route_id = %s AND pickup_order = %s 
+			AND weekday = %s AND trip_type = %s AND name != %s
+			LIMIT 1
+		""", (self.route_id, self.pickup_order, self.weekday, self.trip_type, self.name or ""))
 
 		if existing_order:
 			frappe.throw(f"Thứ tự {self.pickup_order} đã tồn tại trong tuyến này cho {self.weekday} - {self.trip_type}")
@@ -58,13 +57,12 @@ class SISBusRouteStudent(Document):
 		if not self.route_id or not self.student_id or not self.weekday or not self.trip_type:
 			return
 
-		existing_assignment = frappe.db.exists("SIS Bus Route Student", {
-			"route_id": self.route_id,
-			"student_id": self.student_id,
-			"weekday": self.weekday,
-			"trip_type": self.trip_type,
-			"name": ("!=", self.name)
-		})
+		existing_assignment = frappe.db.sql("""
+			SELECT name FROM `tabSIS Bus Route Student`
+			WHERE route_id = %s AND student_id = %s 
+			AND weekday = %s AND trip_type = %s AND name != %s
+			LIMIT 1
+		""", (self.route_id, self.student_id, self.weekday, self.trip_type, self.name or ""))
 
 		if existing_assignment:
 			frappe.throw(f"Học sinh đã được phân công cho tuyến này vào {self.weekday} - {self.trip_type}")
