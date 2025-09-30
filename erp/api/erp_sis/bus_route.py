@@ -636,9 +636,11 @@ def add_student_to_route():
 			raise e
 		
 		try:
-			frappe.logger().info("🔍 STEP 5: Appending student to child table...")
-			# Add student to the child table (parent field is auto-set by Frappe)
-			route_student = route_doc.append("route_students", {
+			frappe.logger().info("🔍 STEP 5: Creating standalone route student document...")
+			# Create standalone route student document (no longer child table)
+			route_student_data = {
+				"doctype": "SIS Bus Route Student",
+				"route_id": data['route_id'],
 				"student_id": data['student_id'],
 				"class_student_id": class_student_id,
 				"weekday": data['weekday'],
@@ -647,21 +649,22 @@ def add_student_to_route():
 				"pickup_location": data['pickup_location'],
 				"drop_off_location": data['drop_off_location'],
 				"notes": data.get('notes', '')
-			})
-			frappe.logger().info(f"✅ Appended student to child table: {route_student.name}")
+			}
+			
+			route_student = frappe.get_doc(route_student_data)
+			route_student.insert()
+			frappe.logger().info(f"✅ Created standalone route student document: {route_student.name}")
 		except Exception as e:
-			frappe.logger().error(f"❌ STEP 5 FAILED - Error appending student to child table: {str(e)}")
+			frappe.logger().error(f"❌ STEP 5 FAILED - Error creating route student document: {str(e)}")
 			raise e
 		
 		try:
-			frappe.logger().info("🔍 STEP 6: Saving route document...")
-			# Save the parent document to persist the child table changes
-			route_doc.save()
+			frappe.logger().info("🔍 STEP 6: Committing changes...")
+			# No need to save route doc anymore since we're using standalone documents
 			frappe.db.commit()
-			frappe.logger().info("✅ Route document saved and committed")
+			frappe.logger().info("✅ Changes committed successfully")
 		except Exception as e:
-			frappe.logger().error(f"❌ STEP 6 FAILED - Error saving route document: {str(e)}")
-			frappe.logger().error(f"❌ This is likely where the 'parent' column error occurs!")
+			frappe.logger().error(f"❌ STEP 6 FAILED - Error committing changes: {str(e)}")
 			raise e
 
 		try:
