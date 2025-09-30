@@ -345,13 +345,14 @@ def upload_menu_category_image():
         menu_category_id = None
 
         if has_files:
-            # When files are present, access individual form fields to avoid encoding issues
-            # Don't try to parse frappe.request.data as it contains binary data
+            # When files are present, parse multipart data manually to avoid encoding issues
             try:
-                menu_category_id = frappe.local.form_dict.get('menu_category_id')
-                frappe.logger().info(f"Got menu_category_id from form_dict with files: {menu_category_id}")
-            except UnicodeDecodeError as e:
-                frappe.logger().error(f"Unicode decode error when accessing form_dict with files: {str(e)}")
+                from werkzeug.formparser import parse_form_data
+                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
+                menu_category_id = form.get('menu_category_id')
+                frappe.logger().info(f"Parsed menu_category_id from werkzeug: {menu_category_id}")
+            except Exception as e:
+                frappe.logger().error(f"Error parsing multipart data: {str(e)}")
                 return error_response("Error processing form data with file upload")
         else:
             # No files, safe to parse request data
