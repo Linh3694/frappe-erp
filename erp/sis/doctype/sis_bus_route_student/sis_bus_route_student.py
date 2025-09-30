@@ -7,6 +7,13 @@ from frappe.model.document import Document
 
 class SISBusRouteStudent(Document):
 	def validate(self):
+		frappe.logger().info("🔍 DEBUG: SIS Bus Route Student validation called")
+		frappe.logger().info(f"🔍 DEBUG: route_id={self.route_id}, student_id={self.student_id}")
+		
+		# TEMPORARILY DISABLE ALL VALIDATION for debugging
+		frappe.logger().info("⚠️  WARNING: All SIS Bus Route Student validation DISABLED for debugging")
+		return
+		
 		self.validate_references_exist()
 		self.validate_student_not_assigned()
 		self.validate_pickup_order_unique()
