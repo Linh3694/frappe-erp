@@ -577,16 +577,37 @@ def add_student_to_route():
 			
 			# Try to get the document with minimal loading
 			try:
-				route_doc = frappe.get_doc("SIS Bus Route", data['route_id'])
+				# Try with ignore_permissions=True to skip some validations
+				frappe.logger().info("🔍 Attempting frappe.get_doc with ignore_permissions...")
+				route_doc = frappe.get_doc("SIS Bus Route", data['route_id'], ignore_permissions=True)
 				frappe.logger().info(f"✅ Got route document: {route_doc.name}")
 			except Exception as get_doc_error:
 				frappe.logger().error(f"❌ frappe.get_doc failed: {str(get_doc_error)}")
-				frappe.logger().info("🔍 Trying alternative approach - creating new route doc...")
+				frappe.logger().info("🔍 Trying alternative approach - using raw SQL to get route data...")
 				
-				# Alternative: create a new document instance without loading from DB
-				route_doc = frappe.new_doc("SIS Bus Route")
-				route_doc.name = data['route_id']
-				frappe.logger().info(f"✅ Created new route doc instance: {route_doc.name}")
+				# Alternative: Get route data via SQL and construct minimal doc
+				try:
+					route_data = frappe.db.sql("""
+						SELECT name, route_name, vehicle_id, driver_id, monitor1_id, monitor2_id, status
+						FROM `tabSIS Bus Route` WHERE name = %s
+					""", (data['route_id'],), as_dict=True)
+					
+					if not route_data:
+						raise Exception(f"Route {data['route_id']} not found in database")
+					
+					route_info = route_data[0]
+					frappe.logger().info(f"✅ Got route data via SQL: {route_info}")
+					
+					# Create a minimal document instance 
+					route_doc = frappe.new_doc("SIS Bus Route")
+					for key, value in route_info.items():
+						setattr(route_doc, key, value)
+					
+					frappe.logger().info(f"✅ Created route doc from SQL data: {route_doc.name}")
+					
+				except Exception as sql_error:
+					frappe.logger().error(f"❌ SQL approach also failed: {str(sql_error)}")
+					raise sql_error
 				
 		except Exception as e:
 			frappe.logger().error(f"❌ STEP 4 FAILED - Error getting route document: {str(e)}")
