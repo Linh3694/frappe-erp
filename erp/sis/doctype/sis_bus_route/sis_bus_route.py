@@ -24,17 +24,25 @@ class SISBusRoute(Document):
 
 	def validate_references_exist(self):
 		"""Validate that all referenced entities exist"""
-		if self.vehicle_id and not frappe.db.exists("SIS Bus Transportation", self.vehicle_id):
-			frappe.throw("Xe không tồn tại")
+		if self.vehicle_id:
+			vehicle_exists = frappe.db.sql("SELECT name FROM `tabSIS Bus Transportation` WHERE name = %s LIMIT 1", (self.vehicle_id,))
+			if not vehicle_exists:
+				frappe.throw("Xe không tồn tại")
 
-		if self.driver_id and not frappe.db.exists("SIS Bus Driver", self.driver_id):
-			frappe.throw("Tài xế không tồn tại")
+		if self.driver_id:
+			driver_exists = frappe.db.sql("SELECT name FROM `tabSIS Bus Driver` WHERE name = %s LIMIT 1", (self.driver_id,))
+			if not driver_exists:
+				frappe.throw("Tài xế không tồn tại")
 
-		if self.monitor1_id and not frappe.db.exists("SIS Bus Monitor", self.monitor1_id):
-			frappe.throw("Monitor 1 không tồn tại")
+		if self.monitor1_id:
+			monitor1_exists = frappe.db.sql("SELECT name FROM `tabSIS Bus Monitor` WHERE name = %s LIMIT 1", (self.monitor1_id,))
+			if not monitor1_exists:
+				frappe.throw("Monitor 1 không tồn tại")
 
-		if self.monitor2_id and not frappe.db.exists("SIS Bus Monitor", self.monitor2_id):
-			frappe.throw("Monitor 2 không tồn tại")
+		if self.monitor2_id:
+			monitor2_exists = frappe.db.sql("SELECT name FROM `tabSIS Bus Monitor` WHERE name = %s LIMIT 1", (self.monitor2_id,))
+			if not monitor2_exists:
+				frappe.throw("Monitor 2 không tồn tại")
 
 	def validate_monitor_assignment(self):
 		"""Validate that monitors are not assigned to multiple routes"""
@@ -107,7 +115,10 @@ class SISBusRoute(Document):
 		frappe.logger().info(f"📌 Route info: vehicle={self.vehicle_id}, driver={self.driver_id}, monitor1={self.monitor1_id}, monitor2={self.monitor2_id}")
 
 		# Check if route has any students assigned before creating trips
-		total_route_students = frappe.db.count("SIS Bus Route Student", {"route_id": self.name})
+		total_route_students = frappe.db.sql("""
+			SELECT COUNT(*) FROM `tabSIS Bus Route Student`
+			WHERE route_id = %s
+		""", (self.name,))[0][0]
 		frappe.logger().info(f"📊 Route {self.name} has {total_route_students} total students assigned")
 
 		if total_route_students == 0:
@@ -126,11 +137,10 @@ class SISBusRoute(Document):
 				for trip_type in ["Đón", "Trả"]:
 					try:
 						# Check if there are students for this specific weekday and trip_type
-						students_for_trip = frappe.db.count("SIS Bus Route Student", {
-							"route_id": self.name,
-							"weekday": weekday,
-							"trip_type": trip_type
-						})
+						students_for_trip = frappe.db.sql("""
+							SELECT COUNT(*) FROM `tabSIS Bus Route Student`
+							WHERE route_id = %s AND weekday = %s AND trip_type = %s
+						""", (self.name, weekday, trip_type))[0][0]
 
 						frappe.logger().info(f"  📋 {trip_type} trip: {students_for_trip} students assigned")
 
@@ -169,12 +179,12 @@ class SISBusRoute(Document):
 			frappe.logger().info(f"🔄 Creating daily trip: route={self.name}, date={trip_date}, weekday={weekday}, type={trip_type}")
 
 			# Check if daily trip already exists
-			existing_trip = frappe.db.exists("SIS Bus Daily Trip", {
-				"route_id": self.name,
-				"trip_date": trip_date,
-				"weekday": weekday,
-				"trip_type": trip_type
-			})
+			existing_trip = frappe.db.sql("""
+				SELECT name FROM `tabSIS Bus Daily Trip`
+				WHERE route_id = %s AND trip_date = %s AND weekday = %s AND trip_type = %s
+				LIMIT 1
+			""", (self.name, trip_date, weekday, trip_type))
+			existing_trip = existing_trip[0][0] if existing_trip else None
 
 			if existing_trip:
 				frappe.logger().debug(f"⏭️  Daily trip already exists: {self.name} - {trip_date} - {weekday} - {trip_type}")
@@ -184,11 +194,10 @@ class SISBusRoute(Document):
 			frappe.logger().info(f"📝 Querying students for route {self.name}, weekday={weekday}, trip_type={trip_type}")
 
 			# First, check if there are any route students for this route
-			route_students_count = frappe.db.count("SIS Bus Route Student", {
-				"route_id": self.name,
-				"weekday": weekday,
-				"trip_type": trip_type
-			})
+			route_students_count = frappe.db.sql("""
+				SELECT COUNT(*) FROM `tabSIS Bus Route Student`
+				WHERE route_id = %s AND weekday = %s AND trip_type = %s
+			""", (self.name, weekday, trip_type))[0][0]
 
 			frappe.logger().info(f"📊 Found {route_students_count} route students for route {self.name}, weekday={weekday}, trip_type={trip_type}")
 
