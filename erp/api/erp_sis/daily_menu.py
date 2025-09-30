@@ -98,18 +98,31 @@ def get_all_daily_menus():
             for meal in meals:
                 meal["menu_type"] = "custom"  # Default to custom
 
-            # Get items for each meal using direct query approach
+            # Get items for each meal 
             for meal in meals:
-                items = frappe.db.sql("""
-                    SELECT 
-                        menu_category_id,
-                        COALESCE(display_name, '') as display_name,
-                        COALESCE(display_name_en, '') as display_name_en,
-                        COALESCE(education_stage, '') as education_stage
-                    FROM `tabSIS Daily Menu Meal Item`
-                    WHERE parent = %s
-                    ORDER BY idx
-                """, (meal.name,), as_dict=True)
+                items = frappe.get_all(
+                    "SIS Daily Menu Meal Item",
+                    filters={
+                        "parent": meal.name
+                    },
+                    fields=["menu_category_id", "display_name", "display_name_en", "education_stage"],
+                    order_by="idx"
+                )
+                
+                # Fallback to get_doc if get_all doesn't work
+                if not items:
+                    try:
+                        meal_doc = frappe.get_doc("SIS Daily Menu Meal", meal.name)
+                        if hasattr(meal_doc, 'items') and meal_doc.items:
+                            for item in meal_doc.items:
+                                items.append({
+                                    "menu_category_id": item.menu_category_id,
+                                    "display_name": item.display_name or "",
+                                    "display_name_en": item.display_name_en or "",
+                                    "education_stage": item.education_stage or ""
+                                })
+                    except Exception:
+                        pass
                 
                 meal["items"] = items
 
@@ -163,19 +176,44 @@ def get_daily_menu_by_id(daily_menu_id=None):
         for meal in meals:
             meal["menu_type"] = "custom"  # Default to custom since we don't store menu_type in backend
 
-        # Get items for each meal using direct query approach
+        # Get items for each meal 
         for meal in meals:
-            # Query items directly using SQL to ensure nested child tables are loaded
-            items = frappe.db.sql("""
-                SELECT 
-                    menu_category_id,
-                    COALESCE(display_name, '') as display_name,
-                    COALESCE(display_name_en, '') as display_name_en,
-                    COALESCE(education_stage, '') as education_stage
-                FROM `tabSIS Daily Menu Meal Item`
-                WHERE parent = %s
-                ORDER BY idx
-            """, (meal.name,), as_dict=True)
+            # Debug: Log the meal name we're querying
+            frappe.logger().info(f"Querying items for meal: {meal.name}")
+            
+            # Try frappe.get_all first
+            items = frappe.get_all(
+                "SIS Daily Menu Meal Item",
+                filters={
+                    "parent": meal.name
+                },
+                fields=["menu_category_id", "display_name", "display_name_en", "education_stage"],
+                order_by="idx"
+            )
+            
+            # Debug: Log what we found with get_all
+            frappe.logger().info(f"get_all found {len(items)} items for meal {meal.name}: {items}")
+            
+            # Also try to get the parent document to see if items exist there
+            try:
+                meal_doc = frappe.get_doc("SIS Daily Menu Meal", meal.name)
+                doc_items = []
+                if hasattr(meal_doc, 'items') and meal_doc.items:
+                    for item in meal_doc.items:
+                        doc_items.append({
+                            "menu_category_id": item.menu_category_id,
+                            "display_name": item.display_name or "",
+                            "display_name_en": item.display_name_en or "",
+                            "education_stage": item.education_stage or ""
+                        })
+                frappe.logger().info(f"get_doc found {len(doc_items)} items for meal {meal.name}: {doc_items}")
+                
+                # Use doc_items if get_all returned empty but doc has items
+                if not items and doc_items:
+                    items = doc_items
+                    
+            except Exception as e:
+                frappe.logger().error(f"Error getting meal doc {meal.name}: {str(e)}")
             
             meal["items"] = items
 
@@ -518,18 +556,31 @@ def get_daily_menus_by_month(month=None):
             for meal in meals:
                 meal["menu_type"] = "custom"  # Default to custom
 
-            # Get items for each meal using direct query approach
+            # Get items for each meal 
             for meal in meals:
-                items = frappe.db.sql("""
-                    SELECT 
-                        menu_category_id,
-                        COALESCE(display_name, '') as display_name,
-                        COALESCE(display_name_en, '') as display_name_en,
-                        COALESCE(education_stage, '') as education_stage
-                    FROM `tabSIS Daily Menu Meal Item`
-                    WHERE parent = %s
-                    ORDER BY idx
-                """, (meal.name,), as_dict=True)
+                items = frappe.get_all(
+                    "SIS Daily Menu Meal Item",
+                    filters={
+                        "parent": meal.name
+                    },
+                    fields=["menu_category_id", "display_name", "display_name_en", "education_stage"],
+                    order_by="idx"
+                )
+                
+                # Fallback to get_doc if get_all doesn't work
+                if not items:
+                    try:
+                        meal_doc = frappe.get_doc("SIS Daily Menu Meal", meal.name)
+                        if hasattr(meal_doc, 'items') and meal_doc.items:
+                            for item in meal_doc.items:
+                                items.append({
+                                    "menu_category_id": item.menu_category_id,
+                                    "display_name": item.display_name or "",
+                                    "display_name_en": item.display_name_en or "",
+                                    "education_stage": item.education_stage or ""
+                                })
+                    except Exception:
+                        pass
                 
                 meal["items"] = items
 
