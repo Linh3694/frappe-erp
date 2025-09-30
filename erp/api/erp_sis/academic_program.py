@@ -404,19 +404,25 @@ def delete_academic_program():
                 message="Program ID is required",
                 code="MISSING_PROGRAM_ID"
             )
-        
+
         # Get campus from user context
         campus_id = get_current_campus_from_context()
-        
+
+        frappe.logger().info(f"DEBUG DELETE: User {frappe.session.user}, program_id: {program_id}, campus_id from context: {campus_id}")
+
         if not campus_id:
             campus_id = "campus-1"
+            frappe.logger().info(f"DEBUG DELETE: Using fallback campus_id: {campus_id}")
         
         # Get existing document
         try:
             academic_program_doc = frappe.get_doc("SIS Academic Program", program_id)
-            
+
+            frappe.logger().info(f"DEBUG DELETE: Academic program campus_id: {academic_program_doc.campus_id}, user campus_id: {campus_id}")
+
             # Check campus permission
             if academic_program_doc.campus_id != campus_id:
+                frappe.logger().error(f"DEBUG DELETE: CAMPUS MISMATCH - Program campus: {academic_program_doc.campus_id}, User campus: {campus_id}")
                 return forbidden_response(
                     message="Access denied: You don't have permission to delete this academic program",
                     code="ACCESS_DENIED"
@@ -472,12 +478,16 @@ def delete_academic_program():
             )
 
         except frappe.LinkExistsError as e:
+            frappe.logger().error(f"LinkExistsError during deletion of program {program_id}: {str(e)}")
             return error_response(
                 message=f"Không thể xóa hệ học vì đang được sử dụng bởi các module khác. Chi tiết: {str(e)}",
                 code="ACADEMIC_PROGRAM_LINKED"
             )
         except Exception as e:
-            frappe.log_error(f"Unexpected error during deletion: {str(e)}")
+            frappe.logger().error(f"Unexpected error during deletion of program {program_id}: {str(e)}")
+            frappe.logger().error(f"Exception type: {type(e).__name__}")
+            import traceback
+            frappe.logger().error(f"Traceback: {traceback.format_exc()}")
             return error_response(
                 message="Lỗi không mong muốn khi xóa hệ học",
                 code="DELETE_ACADEMIC_PROGRAM_ERROR"
