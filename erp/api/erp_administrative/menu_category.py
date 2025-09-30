@@ -389,9 +389,33 @@ def upload_menu_category_image():
 
         # Save file to Frappe File Manager using save_file utility (same as bulk_import)
         from frappe.utils.file_manager import save_file
+        import os
+
+        # Generate new filename based on menu category code
+        original_extension = os.path.splitext(file_name)[1] if file_name else '.jpg'
+        if not original_extension:
+            # Fallback to determine extension from content type if available
+            if uploaded_file and hasattr(uploaded_file, 'content_type'):
+                if 'jpeg' in uploaded_file.content_type or 'jpg' in uploaded_file.content_type:
+                    original_extension = '.jpg'
+                elif 'png' in uploaded_file.content_type:
+                    original_extension = '.png'
+                elif 'gif' in uploaded_file.content_type:
+                    original_extension = '.gif'
+                elif 'bmp' in uploaded_file.content_type:
+                    original_extension = '.bmp'
+                elif 'webp' in uploaded_file.content_type:
+                    original_extension = '.webp'
+                else:
+                    original_extension = '.jpg'
+
+        # Create new filename using menu category code
+        new_file_name = f"{menu_category_doc.code}{original_extension}"
+        
+        frappe.logger().info(f"Original filename: {file_name}, New filename: {new_file_name}")
 
         file_doc = save_file(
-            fname=file_name,
+            fname=new_file_name,
             content=file_obj,
             dt="SIS Menu Category",
             dn=menu_category_id,
@@ -418,3 +442,166 @@ def upload_menu_category_image():
     except Exception as e:
         frappe.log_error(f"Error uploading menu category image: {str(e)}")
         return error_response(f"Error uploading image: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def create_menu_category_with_image():
+    """Create a new menu category with image upload - for AddMenuCategory form"""
+    try:
+        # Get data from form_dict (FormData from frontend)
+        data = frappe.local.form_dict
+
+        # Extract values from data
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en") 
+        code = data.get("code")
+
+        # Input validation
+        if not title_vn or not title_en or not code:
+            return validation_error_response({
+                "title_vn": ["Title VN is required"] if not title_vn else [],
+                "title_en": ["Title EN is required"] if not title_en else [],
+                "code": ["Code is required"] if not code else []
+            })
+
+        # Check if menu category title already exists
+        existing = frappe.db.exists(
+            "SIS Menu Category",
+            {
+                "title_vn": title_vn
+            }
+        )
+
+        if existing:
+            return validation_error_response({
+                "title_vn": ["Menu category with this Vietnamese title already exists"]
+            })
+
+        # Check if code already exists
+        existing_code = frappe.db.exists(
+            "SIS Menu Category",
+            {
+                "code": code
+            }
+        )
+
+        if existing_code:
+            return validation_error_response({
+                "code": ["Menu category with this code already exists"]
+            })
+
+        # Create menu category document first
+        menu_category_doc = frappe.get_doc({
+            "doctype": "SIS Menu Category",
+            "title_vn": title_vn,
+            "title_en": title_en,
+            "code": code,
+            "image_url": None  # Will be updated after image upload
+        })
+
+        menu_category_doc.insert()
+        frappe.db.commit()
+
+        frappe.logger().info(f"Created menu category: {menu_category_doc.name} with code: {code}")
+
+        # Handle image upload if file is provided
+        image_url = ""
+        if "file" in frappe.form_dict or "file" in frappe.local.form_dict:
+            try:
+                # Get file from form_dict
+                file_obj = frappe.form_dict.get("file") or frappe.local.form_dict.get("file")
+                file_name = frappe.form_dict.get("file_name") or "image.jpg"
+
+                if file_obj:
+                    # For file validation, we need to check the uploaded file object
+                    files = frappe.request.files
+                    uploaded_file = None
+                    if files and len(files) > 0:
+                        file_key = list(files.keys())[0]
+                        uploaded_file = files[file_key]
+
+                        if uploaded_file:
+                            # Validate file type
+                            allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp']
+                            if uploaded_file.content_type not in allowed_types:
+                                # Delete the created menu category if image validation fails
+                                frappe.delete_doc("SIS Menu Category", menu_category_doc.name)
+                                frappe.db.commit()
+                                return validation_error_response({"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
+
+                            # Validate file size (max 10MB)
+                            max_size = 10 * 1024 * 1024
+                            if uploaded_file.size > max_size:
+                                # Delete the created menu category if image validation fails
+                                frappe.delete_doc("SIS Menu Category", menu_category_doc.name)
+                                frappe.db.commit()
+                                return validation_error_response({"file": ["File size must be less than 10MB"]})
+
+                            file_name = uploaded_file.filename
+
+                    # Save file with filename based on menu category code
+                    from frappe.utils.file_manager import save_file
+                    import os
+
+                    # Generate new filename based on menu category code
+                    original_extension = os.path.splitext(file_name)[1] if file_name else '.jpg'
+                    if not original_extension:
+                        # Fallback to determine extension from content type if available
+                        if uploaded_file and hasattr(uploaded_file, 'content_type'):
+                            if 'jpeg' in uploaded_file.content_type or 'jpg' in uploaded_file.content_type:
+                                original_extension = '.jpg'
+                            elif 'png' in uploaded_file.content_type:
+                                original_extension = '.png'
+                            elif 'gif' in uploaded_file.content_type:
+                                original_extension = '.gif'
+                            elif 'bmp' in uploaded_file.content_type:
+                                original_extension = '.bmp'
+                            elif 'webp' in uploaded_file.content_type:
+                                original_extension = '.webp'
+                            else:
+                                original_extension = '.jpg'
+
+                    # Create new filename using menu category code
+                    new_file_name = f"{menu_category_doc.code}{original_extension}"
+                    
+                    frappe.logger().info(f"Uploading image with filename: {new_file_name}")
+
+                    file_doc = save_file(
+                        fname=new_file_name,
+                        content=file_obj,
+                        dt="SIS Menu Category",
+                        dn=menu_category_doc.name,
+                        folder="Home/Menu Categories",
+                        is_private=0
+                    )
+
+                    # Update menu category with image URL
+                    menu_category_doc.image_url = file_doc.file_url
+                    menu_category_doc.save()
+                    frappe.db.commit()
+                    image_url = file_doc.file_url
+
+                    frappe.logger().info(f"Image uploaded successfully: {image_url}")
+
+            except Exception as image_error:
+                # If image upload fails, still return success for menu category creation
+                # but log the image error
+                frappe.log_error(f"Error uploading image during menu category creation: {str(image_error)}")
+                frappe.logger().warning(f"Image upload failed but menu category created: {str(image_error)}")
+
+        # Prepare response data
+        response_data = {
+            "name": menu_category_doc.name,
+            "title_vn": menu_category_doc.title_vn,
+            "title_en": menu_category_doc.title_en,
+            "code": menu_category_doc.code,
+            "image_url": image_url or "",
+            "creation": str(menu_category_doc.creation),
+            "modified": str(menu_category_doc.modified)
+        }
+
+        return single_item_response(response_data, "Menu category created successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error creating menu category with image: {str(e)}")
+        return error_response(f"Error creating menu category: {str(e)}")
