@@ -593,8 +593,16 @@ def create_menu_category_with_image():
 
                 # Save file directly to file system
                 file_path = os.path.join(upload_dir, new_file_name)
-                with open(file_path, 'wb') as f:
-                    f.write(file_content)
+                try:
+                    with open(file_path, 'wb') as f:
+                        f.write(file_content)
+                    frappe.logger().info(f"Successfully saved file to: {file_path}")
+                except Exception as write_error:
+                    frappe.logger().error(f"Error writing file to disk: {str(write_error)}")
+                    # Delete the created menu category if file save fails
+                    frappe.delete_doc("SIS Menu Category", menu_category_doc.name)
+                    frappe.db.commit()
+                    return validation_error_response("Failed to save file", {"file": ["Error saving file to disk"]})
 
                 # Create file URL
                 file_url = f"/files/Menu_Categories/{new_file_name}"
