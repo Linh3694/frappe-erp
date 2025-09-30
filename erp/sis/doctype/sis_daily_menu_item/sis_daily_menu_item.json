@@ -63,7 +63,7 @@
    "fieldname": "education_stage",
    "fieldtype": "Select",
    "label": "Trường học",
-   "options": "Tiểu học\nTrung học",
+   "options": "Tiểu Học\nTrung Học",
    "description": "Chỉ áp dụng cho bữa xế"
   }
  ],
