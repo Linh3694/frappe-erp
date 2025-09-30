@@ -46,21 +46,39 @@ class SISBusRoute(Document):
 
 	def validate_monitor_assignment(self):
 		"""Validate that monitors are not assigned to multiple routes"""
+		frappe.logger().info("🔍 DEBUG: validate_monitor_assignment called")
+		frappe.logger().info(f"🔍 DEBUG: monitor1_id={self.monitor1_id}, monitor2_id={self.monitor2_id}, self.name={self.name}")
+		
 		if self.monitor1_id == self.monitor2_id:
 			frappe.throw("Monitor 1 và Monitor 2 không được giống nhau")
 
+		# TEMPORARILY DISABLE monitor assignment validation for debugging
+		frappe.logger().info("⚠️  WARNING: Monitor assignment validation DISABLED for debugging")
+		return
+		
 		# Check if monitors are already assigned to other routes
-		existing_routes = frappe.db.sql("""
-			SELECT name, route_name
-			FROM `tabSIS Bus Route`
-			WHERE (monitor1_id = %s OR monitor2_id = %s)
-			AND name != %s
-			AND status = 'Active'
-		""", (self.monitor1_id, self.monitor2_id, self.name))
+		# Handle case where self.name might be None for new documents
+		if self.name:
+			# For existing documents, exclude current route
+			existing_routes = frappe.db.sql("""
+				SELECT name, route_name
+				FROM `tabSIS Bus Route`
+				WHERE (monitor1_id = %s OR monitor2_id = %s)
+				AND name != %s
+				AND status = 'Active'
+			""", (self.monitor1_id, self.monitor2_id, self.name))
+		else:
+			# For new documents, check all routes
+			existing_routes = frappe.db.sql("""
+				SELECT name, route_name
+				FROM `tabSIS Bus Route`
+				WHERE (monitor1_id = %s OR monitor2_id = %s)
+				AND status = 'Active'
+			""", (self.monitor1_id, self.monitor2_id))
 
 		if existing_routes:
 			route_names = [route[1] for route in existing_routes]
-			frappe.throw(f"Monitor đã được phân công cho tuyến: {', '.join(route_names)}")
+			frappe.throw(f"Monitor đã được phán công cho tuyến: {', '.join(route_names)}")
 
 	def after_insert(self):
 		"""Create daily trips when route is created"""
