@@ -182,12 +182,9 @@ def create_menu_category():
             "name": menu_category_doc.name,
             "title_vn": menu_category_doc.title_vn,
             "title_en": menu_category_doc.title_en,
-            "code": menu_category_doc.code
+            "code": menu_category_doc.code,
+            "image_url": menu_category_doc.image_url or ""
         }
-
-        # Only include image_url if it has a value
-        if menu_category_doc.image_url and menu_category_doc.image_url.strip():
-            menu_category_data["image_url"] = menu_category_doc.image_url
         return single_item_response(menu_category_data, "Menu Category created successfully")
 
     except Exception as e:
