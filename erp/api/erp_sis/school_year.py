@@ -262,7 +262,34 @@ def create_school_year():
         
     except Exception as e:
         frappe.log_error(f"Error creating school year: {str(e)}")
-        frappe.throw(_(f"Error creating school year: {str(e)}"))
+        import traceback
+        frappe.log_error(f"Traceback: {traceback.format_exc()}")
+
+        # Check if school year was actually created despite the exception
+        if title_vn and campus_id:
+            created_school_year = frappe.db.exists("SIS School Year", {
+                "title_vn": title_vn,
+                "campus_id": campus_id
+            })
+            if created_school_year:
+                frappe.logger().info(f"School year was actually created despite exception: {created_school_year}")
+                # Return success response if school year exists
+                school_year_doc = frappe.get_doc("SIS School Year", created_school_year)
+                school_year_data = {
+                    "name": school_year_doc.name,
+                    "title_vn": school_year_doc.title_vn,
+                    "title_en": school_year_doc.title_en,
+                    "start_date": str(school_year_doc.start_date),
+                    "end_date": str(school_year_doc.end_date),
+                    "is_enable": bool(school_year_doc.is_enable),
+                    "campus_id": school_year_doc.campus_id
+                }
+                return single_item_response(school_year_data, "School year created successfully")
+
+        return error_response(
+            message=f"Error creating school year: {str(e)}",
+            code="CREATE_SCHOOL_YEAR_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
