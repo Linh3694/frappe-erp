@@ -1,0 +1,406 @@
+# Copyright (c) 2024, Wellspring International School and contributors
+# For license information, please see license.txt
+
+import frappe
+from frappe import _
+from frappe.utils import nowdate, get_datetime
+import json
+from erp.utils.api_response import (
+    success_response,
+    error_response,
+    list_response,
+    single_item_response,
+    validation_error_response,
+    not_found_response,
+    forbidden_response
+)
+
+
+@frappe.whitelist(allow_guest=False)
+def get_all_menu_categories():
+    """Get all menu categories with basic information - SIMPLE VERSION"""
+    try:
+        menu_categories = frappe.get_all(
+            "SIS Menu Category",
+            fields=[
+                "name",
+                "title_vn",
+                "title_en",
+                "code",
+                "image_url",
+                "creation",
+                "modified"
+            ],
+            order_by="title_vn asc"
+        )
+
+        return list_response(menu_categories, "Menu categories fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching menu categories: {str(e)}")
+        return error_response(f"Error fetching menu categories: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_menu_category_by_id(menu_category_id=None):
+    """Get a specific menu category by ID - SIMPLE VERSION with JSON payload support"""
+    try:
+        # Get menu_category_id from parameter or from JSON payload
+        if not menu_category_id:
+            # Try to get from JSON payload
+            if frappe.request.data:
+                try:
+                    json_data = json.loads(frappe.request.data)
+                    if json_data and 'menu_category_id' in json_data:
+                        menu_category_id = json_data['menu_category_id']
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Fallback to form_dict
+            if not menu_category_id:
+                menu_category_id = frappe.local.form_dict.get('menu_category_id')
+
+        if not menu_category_id:
+            return validation_error_response({"menu_category_id": ["Menu Category ID is required"]})
+
+        menu_categories = frappe.get_all(
+            "SIS Menu Category",
+            filters={
+                "name": menu_category_id
+            },
+            fields=[
+                "name", "title_vn", "title_en", "code", "image_url",
+                "creation", "modified"
+            ]
+        )
+
+        if not menu_categories:
+            return not_found_response("Menu Category not found")
+
+        menu_category = menu_categories[0]
+
+        if not menu_category:
+            return not_found_response("Menu Category not found or access denied")
+
+        menu_category_data = {
+            "name": menu_category.name,
+            "title_vn": menu_category.title_vn,
+            "title_en": menu_category.title_en,
+            "code": menu_category.code,
+            "image_url": menu_category.image_url
+        }
+        return single_item_response(menu_category_data, "Menu Category fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching menu category {menu_category_id}: {str(e)}")
+        return error_response(f"Error fetching menu category: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def create_menu_category():
+    """Create a new menu category - SIMPLE VERSION"""
+    try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                    frappe.logger().info(f"Received JSON data for create_menu_category: {data}")
+                else:
+                    data = frappe.local.form_dict
+                    frappe.logger().info(f"Received form data for create_menu_category: {data}")
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+                frappe.logger().info(f"JSON parsing failed, using form data for create_menu_category: {data}")
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+            frappe.logger().info(f"No request data, using form_dict for create_menu_category: {data}")
+
+        # Extract values from data
+        title_vn = data.get("title_vn")
+        title_en = data.get("title_en")
+        code = data.get("code")
+        image_url = data.get("image_url")
+
+        # Input validation
+        if not title_vn or not code:
+            return validation_error_response({
+                "title_vn": ["Title VN is required"] if not title_vn else [],
+                "code": ["Code is required"] if not code else []
+            })
+
+        # Check if menu category title already exists
+        existing = frappe.db.exists(
+            "SIS Menu Category",
+            {
+                "title_vn": title_vn
+            }
+        )
+
+        if existing:
+            return validation_error_response({"title_vn": [f"Menu Category with title '{title_vn}' already exists"]})
+
+        # Check if code already exists
+        existing_code = frappe.db.exists(
+            "SIS Menu Category",
+            {
+                "code": code
+            }
+        )
+
+        if existing_code:
+            return validation_error_response({"code": [f"Menu Category with code '{code}' already exists"]})
+
+        # Create new menu category
+        menu_category_doc = frappe.get_doc({
+            "doctype": "SIS Menu Category",
+            "title_vn": title_vn,
+            "title_en": title_en,
+            "code": code,
+            "image_url": image_url
+        })
+
+        menu_category_doc.insert()
+        frappe.db.commit()
+
+        # Return the created data - follow Frappe pattern like other services
+        menu_category_data = {
+            "name": menu_category_doc.name,
+            "title_vn": menu_category_doc.title_vn,
+            "title_en": menu_category_doc.title_en,
+            "code": menu_category_doc.code,
+            "image_url": menu_category_doc.image_url
+        }
+        return single_item_response(menu_category_data, "Menu Category created successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error creating menu category: {str(e)}")
+        return error_response(f"Error creating menu category: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_menu_category():
+    """Delete a menu category"""
+    try:
+        # Get data from request - follow update_building pattern
+        data = {}
+
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+
+        menu_category_id = data.get('menu_category_id')
+        if not menu_category_id:
+            return validation_error_response({"menu_category_id": ["Menu Category ID is required"]})
+
+        # Get existing document
+        try:
+            menu_category_doc = frappe.get_doc("SIS Menu Category", menu_category_id)
+
+        except frappe.DoesNotExistError:
+            return not_found_response("Menu Category not found")
+
+        # Delete the document
+        frappe.delete_doc("SIS Menu Category", menu_category_id)
+        frappe.db.commit()
+
+        return success_response(message="Menu Category deleted successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error deleting menu category: {str(e)}")
+        return error_response(f"Error deleting menu category: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def check_code_availability(code, menu_category_id=None):
+    """Check if code is available"""
+    try:
+        if not code:
+            return validation_error_response({"code": ["Code is required"]})
+
+        filters = {
+            "code": code
+        }
+
+        # If updating existing menu category, exclude it from check
+        if menu_category_id:
+            filters["name"] = ["!=", menu_category_id]
+
+        existing = frappe.db.exists("SIS Menu Category", filters)
+
+        is_available = not bool(existing)
+
+        return success_response({
+            "is_available": is_available,
+            "code": code,
+            "message": "Available" if is_available else "Code already exists"
+        })
+
+    except Exception as e:
+        frappe.log_error(f"Error checking code availability: {str(e)}")
+        return error_response(f"Error checking code availability: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def update_menu_category():
+    """Update an existing menu category - SIMPLE VERSION with JSON payload support"""
+    try:
+        # Get data from request - follow Education Stage pattern
+        data = {}
+
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+
+        menu_category_id = data.get('menu_category_id')
+        if not menu_category_id:
+            return validation_error_response({"menu_category_id": ["Menu Category ID is required"]})
+
+        # Get existing document
+        try:
+            menu_category_doc = frappe.get_doc("SIS Menu Category", menu_category_id)
+
+        except frappe.DoesNotExistError:
+            return not_found_response("Menu Category not found")
+
+        # Update fields if provided
+        title_vn = data.get('title_vn')
+        title_en = data.get('title_en')
+        code = data.get('code')
+        image_url = data.get('image_url')
+
+        if title_vn and title_vn != menu_category_doc.title_vn:
+            menu_category_doc.title_vn = title_vn
+
+        if title_en is not None and title_en != menu_category_doc.title_en:
+            menu_category_doc.title_en = title_en
+
+        if code and code != menu_category_doc.code:
+            menu_category_doc.code = code
+
+        if image_url is not None and image_url != menu_category_doc.image_url:
+            menu_category_doc.image_url = image_url
+
+        menu_category_doc.save()
+        frappe.db.commit()
+
+        menu_category_data = {
+            "name": menu_category_doc.name,
+            "title_vn": menu_category_doc.title_vn,
+            "title_en": menu_category_doc.title_en,
+            "code": menu_category_doc.code,
+            "image_url": menu_category_doc.image_url
+        }
+        return single_item_response(menu_category_data, "Menu Category updated successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error updating menu category: {str(e)}")
+        return error_response(f"Error updating menu category: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def upload_menu_category_image():
+    """Upload image for menu category - similar to sis_photo pattern"""
+    try:
+        # Get data from request
+        data = {}
+
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+
+        menu_category_id = data.get('menu_category_id')
+        if not menu_category_id:
+            return validation_error_response({"menu_category_id": ["Menu Category ID is required"]})
+
+        # Get existing menu category document
+        try:
+            menu_category_doc = frappe.get_doc("SIS Menu Category", menu_category_id)
+        except frappe.DoesNotExistError:
+            return not_found_response("Menu Category not found")
+
+        # Check if there are files in the request
+        files = frappe.request.files
+        if not files or len(files) == 0:
+            return validation_error_response({"file": ["No file uploaded"]})
+
+        # Get the first file (should be only one)
+        file_key = list(files.keys())[0]
+        uploaded_file = files[file_key]
+
+        if not uploaded_file:
+            return validation_error_response({"file": ["Invalid file"]})
+
+        # Validate file type
+        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp']
+        if uploaded_file.content_type not in allowed_types:
+            return validation_error_response({"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
+
+        # Validate file size (max 10MB)
+        max_size = 10 * 1024 * 1024  # 10MB
+        if uploaded_file.size > max_size:
+            return validation_error_response({"file": ["File size must be less than 10MB"]})
+
+        # Save file to Frappe File Manager
+        file_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": uploaded_file.filename,
+            "is_private": 0,
+            "content": uploaded_file.stream.read(),
+            "attached_to_doctype": "SIS Menu Category",
+            "attached_to_name": menu_category_id,
+        })
+
+        file_doc.save()
+        frappe.db.commit()
+
+        # Update menu category with image URL
+        menu_category_doc.image_url = file_doc.file_url
+        menu_category_doc.save()
+        frappe.db.commit()
+
+        return single_item_response({
+            "name": menu_category_doc.name,
+            "title_vn": menu_category_doc.title_vn,
+            "title_en": menu_category_doc.title_en,
+            "code": menu_category_doc.code,
+            "image_url": menu_category_doc.image_url,
+            "file_url": file_doc.file_url
+        }, "Image uploaded successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error uploading menu category image: {str(e)}")
+        return error_response(f"Error uploading image: {str(e)}")
