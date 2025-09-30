@@ -459,6 +459,20 @@ def delete_academic_program():
             if subject_count > 0:
                 linked_docs.append(f"{subject_count} môn học")
 
+            # Check SIS Class links
+            frappe.logger().info(f"Checking SIS Class links for program {program_id}")
+            class_count = frappe.db.count("SIS Class", {"academic_program": program_id})
+            frappe.logger().info(f"SIS Class count: {class_count}")
+            if class_count > 0:
+                linked_docs.append(f"{class_count} lớp học")
+
+            # Check SIS Sub Curriculum Evaluation links
+            frappe.logger().info(f"Checking SIS Sub Curriculum Evaluation links for program {program_id}")
+            sub_curriculum_evaluation_count = frappe.db.count("SIS Sub Curriculum Evaluation", {"academic_program_id": program_id})
+            frappe.logger().info(f"SIS Sub Curriculum Evaluation count: {sub_curriculum_evaluation_count}")
+            if sub_curriculum_evaluation_count > 0:
+                linked_docs.append(f"{sub_curriculum_evaluation_count} đánh giá chương trình phụ")
+
             if linked_docs:
                 frappe.logger().info(f"Program {program_id} has linked docs: {linked_docs}")
                 return error_response(
