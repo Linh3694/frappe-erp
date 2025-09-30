@@ -558,32 +558,32 @@ def add_student_to_route():
 			"notes": data.get('notes', '')
 		})
 		
-	# Save the parent document to persist the child table changes
-	route_doc.save()
-	frappe.db.commit()
+		# Save the parent document to persist the child table changes
+		route_doc.save()
+		frappe.db.commit()
 
-	# Add student to corresponding daily trips
-	daily_trips_result = add_student_to_daily_trips(data['route_id'], route_student.as_dict())
+		# Add student to corresponding daily trips
+		daily_trips_result = add_student_to_daily_trips(data['route_id'], route_student.as_dict())
 
-	# Prepare response with detailed logs
-	response_logs = [
-		f"✅ Đã thêm student {data['student_id']} vào route {data['route_id']}",
-		f"📋 Weekday: {data['weekday']}, Trip Type: {data['trip_type']}"
-	]
-	response_logs.extend(daily_trips_result.get('logs', []))
-	
-	message = "Student added to route successfully"
-	if daily_trips_result.get('success'):
-		added_count = daily_trips_result.get('added_count', 0)
-		message += f" and added to {added_count} daily trips"
-	else:
-		message += " but failed to add to daily trips"
+		# Prepare response with detailed logs
+		response_logs = [
+			f"✅ Đã thêm student {data['student_id']} vào route {data['route_id']}",
+			f"📋 Weekday: {data['weekday']}, Trip Type: {data['trip_type']}"
+		]
+		response_logs.extend(daily_trips_result.get('logs', []))
+		
+		message = "Student added to route successfully"
+		if daily_trips_result.get('success'):
+			added_count = daily_trips_result.get('added_count', 0)
+			message += f" and added to {added_count} daily trips"
+		else:
+			message += " but failed to add to daily trips"
 
-	return success_response(
-		data=route_student.as_dict(),
-		message=message,
-		logs=response_logs
-	)
+		return success_response(
+			data=route_student.as_dict(),
+			message=message,
+			logs=response_logs
+		)
 	except Exception as e:
 		frappe.log_error(f"Error adding student to route: {str(e)}")
 		frappe.db.rollback()
