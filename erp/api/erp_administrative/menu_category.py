@@ -360,38 +360,39 @@ def upload_menu_category_image():
         except frappe.DoesNotExistError:
             return not_found_response("Menu Category not found")
 
-        # Check if there are files in the request
-        files = frappe.request.files
-        if not files or len(files) == 0:
+        # Get file from form_dict (same way as bulk_import)
+        file_obj = frappe.form_dict.get("file")
+        file_name = frappe.form_dict.get("file_name") or "image.jpg"
+
+        if not file_obj:
             return validation_error_response({"file": ["No file uploaded"]})
 
-        # Get the first file (should be only one)
-        file_key = list(files.keys())[0]
-        uploaded_file = files[file_key]
+        # For file validation, we need to check the uploaded file object
+        files = frappe.request.files
+        uploaded_file = None
+        if files and len(files) > 0:
+            file_key = list(files.keys())[0]
+            uploaded_file = files[file_key]
 
-        if not uploaded_file:
-            return validation_error_response({"file": ["Invalid file"]})
+            if uploaded_file:
+                # Validate file type
+                allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp']
+                if uploaded_file.content_type not in allowed_types:
+                    return validation_error_response({"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
 
-        # Validate file type
-        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp']
-        if uploaded_file.content_type not in allowed_types:
-            return validation_error_response({"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
+                # Validate file size (max 10MB)
+                max_size = 10 * 1024 * 1024  # 10MB
+                if uploaded_file.size > max_size:
+                    return validation_error_response({"file": ["File size must be less than 10MB"]})
 
-        # Validate file size (max 10MB)
-        max_size = 10 * 1024 * 1024  # 10MB
-        if uploaded_file.size > max_size:
-            return validation_error_response({"file": ["File size must be less than 10MB"]})
+                file_name = uploaded_file.filename
 
-        # Save file to Frappe File Manager using save_file utility
+        # Save file to Frappe File Manager using save_file utility (same as bulk_import)
         from frappe.utils.file_manager import save_file
 
-        # Reset stream position to beginning in case it was read before
-        if hasattr(uploaded_file.stream, 'seek'):
-            uploaded_file.stream.seek(0)
-
         file_doc = save_file(
-            fname=uploaded_file.filename,
-            content=uploaded_file.stream,
+            fname=file_name,
+            content=file_obj,
             dt="SIS Menu Category",
             dn=menu_category_id,
             folder="Home/Menu Categories",
