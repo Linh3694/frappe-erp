@@ -152,6 +152,10 @@ def get_daily_menu_by_id(daily_menu_id=None):
             order_by="idx"
         )
 
+        # Add menu_type to each meal (for frontend compatibility)
+        for meal in meals:
+            meal["menu_type"] = "custom"  # Default to custom since we don't store menu_type in backend
+
         # Get items for each meal
         for meal in meals:
             items = frappe.get_all(
