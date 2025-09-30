@@ -1,0 +1,64 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 1,
+ "beta": 0,
+ "creation": "2024-12-30 10:00:00.000000",
+ "custom": 0,
+ "description": "Child table for SIS Daily Menu Meals",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "meal_type",
+  "meal_type_reference",
+  "items_section",
+  "items"
+ ],
+ "fields": [
+  {
+   "fieldname": "meal_type",
+   "fieldtype": "Select",
+   "label": "Loại bữa ăn",
+   "options": "breakfast\nlunch\ndinner",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "meal_type_reference",
+   "fieldtype": "Link",
+   "label": "Loại thực đơn",
+   "options": "SIS Meal Type",
+   "description": "Chọn loại thực đơn để tự động thêm món ăn"
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Món ăn"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Danh sách món ăn",
+   "options": "SIS Daily Menu Meal Item"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-12-30 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Daily Menu Meal",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
