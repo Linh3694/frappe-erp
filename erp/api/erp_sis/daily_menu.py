@@ -18,36 +18,41 @@ from erp.utils.api_response import (
 
 @frappe.whitelist(allow_guest=False)
 def get_all_daily_menus():
-    """Get all daily menus with basic information"""
+    """Get all daily menus with pagination support"""
     try:
-        # Get filter parameters
-        month = frappe.local.form_dict.get('month')
+        # Check if fetch_all is requested
+        fetch_all = frappe.local.form_dict.get('fetch_all') == '1'
 
-        filters = {}
-        if month:
-            # Parse month (format: yyyy-MM)
-            try:
-                year, month_num = month.split('-')
-                start_date = f"{year}-{month_num}-01"
-                # Calculate end date of month
-                import calendar
-                last_day = calendar.monthrange(int(year), int(month_num))[1]
-                end_date = f"{year}-{month_num}-{last_day:02d}"
-                filters["menu_date"] = ["between", [start_date, end_date]]
-            except:
-                pass
+        if fetch_all:
+            # Return all records without pagination
+            daily_menus = frappe.get_all(
+                "SIS Daily Menu",
+                fields=[
+                    "name",
+                    "menu_date",
+                    "creation",
+                    "modified"
+                ],
+                order_by="menu_date desc"
+            )
+        else:
+            # Use pagination (existing logic)
+            page = int(frappe.local.form_dict.get('page', 1))
+            page_size = int(frappe.local.form_dict.get('page_size', 20))
+            start = (page - 1) * page_size
 
-        daily_menus = frappe.get_all(
-            "SIS Daily Menu",
-            fields=[
-                "name",
-                "menu_date",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="menu_date desc"
-        )
+            daily_menus = frappe.get_all(
+                "SIS Daily Menu",
+                fields=[
+                    "name",
+                    "menu_date",
+                    "creation",
+                    "modified"
+                ],
+                limit_start=start,
+                limit_page_length=page_size,
+                order_by="menu_date desc"
+            )
 
         # Get meals for each daily menu
         for menu in daily_menus:
@@ -496,3 +501,4 @@ def get_daily_menus_by_month(month=None):
     except Exception as e:
         frappe.log_error(f"Error fetching daily menus for month {month}: {str(e)}")
         return error_response(f"Error fetching daily menus for month: {str(e)}")
+
