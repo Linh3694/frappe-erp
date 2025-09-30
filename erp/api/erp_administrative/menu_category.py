@@ -341,19 +341,36 @@ def upload_menu_category_image():
         files = frappe.request.files
         has_files = files and 'file' in files
 
-        # Get data from request - avoid parsing request.data when files are present
+        # Get data from request - improved parsing for multipart form data
         menu_category_id = None
 
         if has_files:
-            # When files are present, parse multipart data manually to avoid encoding issues
+            # When files are present, try multiple methods to get menu_category_id
             try:
-                from werkzeug.formparser import parse_form_data
-                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
-                menu_category_id = form.get('menu_category_id')
-                frappe.logger().info(f"Parsed menu_category_id from werkzeug: {menu_category_id}")
+                # Method 1: Try form_dict first (most common case)
+                menu_category_id = frappe.local.form_dict.get('menu_category_id')
+                frappe.logger().info(f"Method 1 - form_dict menu_category_id: {menu_category_id}")
+                
+                # Method 2: If form_dict fails, try werkzeug parser
+                if not menu_category_id:
+                    from werkzeug.formparser import parse_form_data
+                    stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
+                    menu_category_id = form.get('menu_category_id')
+                    frappe.logger().info(f"Method 2 - werkzeug menu_category_id: {menu_category_id}")
+                
+                # Method 3: Try to get from request.form if available
+                if not menu_category_id and hasattr(frappe.request, 'form'):
+                    menu_category_id = frappe.request.form.get('menu_category_id')
+                    frappe.logger().info(f"Method 3 - request.form menu_category_id: {menu_category_id}")
+                    
             except Exception as e:
                 frappe.logger().error(f"Error parsing multipart data: {str(e)}")
-                return error_response("Error processing form data with file upload")
+                # Try fallback method
+                try:
+                    menu_category_id = frappe.local.form_dict.get('menu_category_id')
+                    frappe.logger().info(f"Fallback method - form_dict menu_category_id: {menu_category_id}")
+                except:
+                    return error_response("Error processing form data with file upload")
         else:
             # No files, safe to parse request data
             data = {}
