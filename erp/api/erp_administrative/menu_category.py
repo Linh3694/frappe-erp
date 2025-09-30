@@ -405,12 +405,9 @@ def upload_menu_category_image():
             "title_vn": menu_category_doc.title_vn,
             "title_en": menu_category_doc.title_en,
             "code": menu_category_doc.code,
+            "image_url": menu_category_doc.image_url or "",
             "file_url": file_doc.file_url
         }
-
-        # Only include image_url if it has a value
-        if menu_category_doc.image_url and menu_category_doc.image_url.strip():
-            response_data["image_url"] = menu_category_doc.image_url
 
         return single_item_response(response_data, "Image uploaded successfully")
 
