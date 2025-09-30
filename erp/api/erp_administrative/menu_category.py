@@ -422,20 +422,8 @@ def upload_menu_category_image():
         
         frappe.logger().info(f"File saved to: {file_path}, URL: {file_url}")
 
-        # Create Frappe File document for record keeping
-        file_doc = frappe.get_doc({
-            "doctype": "File",
-            "file_name": new_file_name,
-            "file_url": file_url,
-            "attached_to_doctype": "SIS Menu Category",
-            "attached_to_name": menu_category_id,
-            "folder": "Home/Menu Categories",
-            "is_private": 0
-        })
-        file_doc.insert(ignore_permissions=True)
-
-        # Update menu category with image URL
-        menu_category_doc.image_url = file_doc.file_url
+        # Update menu category with image URL (directly use file_url, no Frappe File document needed)
+        menu_category_doc.image_url = file_url
         menu_category_doc.save()
         frappe.db.commit()
 
@@ -445,7 +433,7 @@ def upload_menu_category_image():
             "title_en": menu_category_doc.title_en,
             "code": menu_category_doc.code,
             "image_url": menu_category_doc.image_url or "",
-            "file_url": file_doc.file_url
+            "file_url": file_url
         }
 
         return single_item_response(response_data, "Image uploaded successfully")
@@ -583,23 +571,10 @@ def create_menu_category_with_image():
                 
                 frappe.logger().info(f"File saved to: {file_path}, URL: {file_url}")
 
-                # Create Frappe File document for record keeping
-                file_doc = frappe.get_doc({
-                    "doctype": "File",
-                    "file_name": new_file_name,
-                    "file_url": file_url,
-                    "attached_to_doctype": "SIS Menu Category",
-                    "attached_to_name": menu_category_doc.name,
-                    "folder": "Home/Menu Categories",
-                    "is_private": 0
-                })
-                file_doc.insert(ignore_permissions=True)
-
-                # Update menu category with image URL
-                menu_category_doc.image_url = file_doc.file_url
+                menu_category_doc.image_url = file_url
                 menu_category_doc.save()
                 frappe.db.commit()
-                image_url = file_doc.file_url
+                image_url = file_url
 
                 frappe.logger().info(f"Image uploaded successfully: {image_url}")
 
