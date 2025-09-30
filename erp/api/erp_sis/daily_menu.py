@@ -56,7 +56,7 @@ def get_all_daily_menus():
                 filters={
                     "parent": menu.name
                 },
-                fields=["meal_type", "name"],
+                fields=["meal_type", "meal_type_reference", "name"],
                 order_by="idx"
             )
 
@@ -446,7 +446,7 @@ def get_daily_menus_by_month(month=None):
                 filters={
                     "parent": menu.name
                 },
-                fields=["meal_type", "name"],
+                fields=["meal_type", "meal_type_reference", "name"],
                 order_by="idx"
             )
 

@@ -29,6 +29,12 @@ class SISDailyMenu(Document):
 					frappe.throw(f"Bữa ăn '{meal.meal_type}' bị trùng lặp")
 				meal_types.append(meal.meal_type)
 
+				# Validate that education_stage is only set for dinner meals
+				if meal.items:
+					for item in meal.items:
+						if item.education_stage and meal.meal_type != "dinner":
+							frappe.throw(f"Trường học chỉ được đặt cho bữa xế (dinner), không phải bữa {meal.meal_type}")
+
 				# Validate meal items
 				if meal.items:
 					menu_category_ids = []
