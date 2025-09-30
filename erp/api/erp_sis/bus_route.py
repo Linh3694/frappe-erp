@@ -778,12 +778,13 @@ def create_daily_trip():
 				frappe.logger().info(f"Set school_year_id to {data['school_year_id']} from route")
 
 		# Check if daily trip already exists
-		existing_trip = frappe.db.exists("SIS Bus Daily Trip", {
-			"route_id": data['route_id'],
-			"trip_date": data['trip_date'],
-			"weekday": data['weekday'],
-			"trip_type": data['trip_type']
-		})
+		existing_trip = frappe.db.sql("""
+			SELECT name FROM `tabSIS Bus Daily Trip`
+			WHERE route_id = %s AND trip_date = %s 
+			AND weekday = %s AND trip_type = %s
+			LIMIT 1
+		""", (data['route_id'], data['trip_date'], data['weekday'], data['trip_type']))
+		existing_trip = existing_trip[0][0] if existing_trip else None
 
 		if existing_trip:
 			return error_response(f"Daily trip already exists for this route, date, weekday, and trip type")
@@ -1252,7 +1253,10 @@ def trigger_create_daily_trips():
 		frappe.db.commit()
 		
 		# Count created trips
-		trips_count = frappe.db.count("SIS Bus Daily Trip", {"route_id": route_id})
+		trips_count = frappe.db.sql("""
+			SELECT COUNT(*) FROM `tabSIS Bus Daily Trip`
+			WHERE route_id = %s
+		""", (route_id,))[0][0]
 		
 		frappe.logger().info(f"✅ Manual daily trips creation completed for route {route_id}, total trips: {trips_count}")
 		
