@@ -938,46 +938,62 @@ def get_daily_trips():
 			trip['created_at'] = trip.pop('creation')
 			trip['updated_at'] = trip.pop('modified')
 
-		# Enrich with related information
+		# Enrich with related information using SQL queries instead of frappe.get_doc
 		for trip in daily_trips:
 			# Get route information
 			if trip.route_id:
-				route = frappe.get_doc("SIS Bus Route", trip.route_id)
-				trip.update({
-					"route_name": route.route_name
-				})
+				route_data = frappe.db.sql("""
+					SELECT route_name FROM `tabSIS Bus Route` WHERE name = %s
+				""", (trip.route_id,), as_dict=True)
+				if route_data:
+					trip.update({
+						"route_name": route_data[0].route_name
+					})
 
 			# Get vehicle information
 			if trip.vehicle_id:
-				vehicle = frappe.get_doc("SIS Bus Transportation", trip.vehicle_id)
-				trip.update({
-					"vehicle_code": vehicle.vehicle_code,
-					"license_plate": vehicle.license_plate,
-					"vehicle_type": vehicle.vehicle_type
-				})
+				vehicle_data = frappe.db.sql("""
+					SELECT vehicle_code, license_plate, vehicle_type 
+					FROM `tabSIS Bus Transportation` WHERE name = %s
+				""", (trip.vehicle_id,), as_dict=True)
+				if vehicle_data:
+					trip.update({
+						"vehicle_code": vehicle_data[0].vehicle_code,
+						"license_plate": vehicle_data[0].license_plate,
+						"vehicle_type": vehicle_data[0].vehicle_type
+					})
 
 			# Get driver information
 			if trip.driver_id:
-				driver = frappe.get_doc("SIS Bus Driver", trip.driver_id)
-				trip.update({
-					"driver_name": driver.full_name,
-					"driver_phone": driver.phone_number
-				})
+				driver_data = frappe.db.sql("""
+					SELECT full_name, phone_number FROM `tabSIS Bus Driver` WHERE name = %s
+				""", (trip.driver_id,), as_dict=True)
+				if driver_data:
+					trip.update({
+						"driver_name": driver_data[0].full_name,
+						"driver_phone": driver_data[0].phone_number
+					})
 
 			# Get monitor information
 			if trip.monitor1_id:
-				monitor1 = frappe.get_doc("SIS Bus Monitor", trip.monitor1_id)
-				trip.update({
-					"monitor1_name": monitor1.full_name,
-					"monitor1_phone": monitor1.phone_number
-				})
+				monitor1_data = frappe.db.sql("""
+					SELECT full_name, phone_number FROM `tabSIS Bus Monitor` WHERE name = %s
+				""", (trip.monitor1_id,), as_dict=True)
+				if monitor1_data:
+					trip.update({
+						"monitor1_name": monitor1_data[0].full_name,
+						"monitor1_phone": monitor1_data[0].phone_number
+					})
 
 			if trip.monitor2_id:
-				monitor2 = frappe.get_doc("SIS Bus Monitor", trip.monitor2_id)
-				trip.update({
-					"monitor2_name": monitor2.full_name,
-					"monitor2_phone": monitor2.phone_number
-				})
+				monitor2_data = frappe.db.sql("""
+					SELECT full_name, phone_number FROM `tabSIS Bus Monitor` WHERE name = %s
+				""", (trip.monitor2_id,), as_dict=True)
+				if monitor2_data:
+					trip.update({
+						"monitor2_name": monitor2_data[0].full_name,
+						"monitor2_phone": monitor2_data[0].phone_number
+					})
 
 			# Get trip students count and details
 			students = frappe.db.sql("""
