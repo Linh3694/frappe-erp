@@ -393,6 +393,33 @@ def delete_daily_menu():
 
 
 @frappe.whitelist(allow_guest=False)
+def get_available_months():
+    """Get all available months that have daily menus"""
+    try:
+        # Get distinct months from menu_date
+        months_data = frappe.db.sql("""
+            SELECT DISTINCT DATE_FORMAT(menu_date, '%Y-%m') as month_value,
+                   DATE_FORMAT(menu_date, '%m/%Y') as month_label
+            FROM `tabSIS Daily Menu`
+            WHERE docstatus = 0
+            ORDER BY month_value DESC
+        """, as_dict=True)
+
+        # If no data, return current month
+        if not months_data:
+            current_month = frappe.utils.nowdate()[:7]  # yyyy-MM format
+            current_date = frappe.utils.getdate(frappe.utils.nowdate())
+            month_label = current_date.strftime('%m/%Y')
+            months_data = [{"month_value": current_month, "month_label": month_label}]
+
+        return list_response(months_data, "Available months fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching available months: {str(e)}")
+        return error_response(f"Error fetching available months: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
 def get_daily_menus_by_month(month=None):
     """Get daily menus for a specific month"""
     try:
