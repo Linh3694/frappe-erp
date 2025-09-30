@@ -14,14 +14,20 @@ class SISBusRouteStudent(Document):
 
 	def validate_references_exist(self):
 		"""Validate that route, student, and class student exist"""
-		if self.route_id and not frappe.db.exists("SIS Bus Route", self.route_id):
-			frappe.throw("Tuyến đường không tồn tại")
+		if self.route_id:
+			route_exists = frappe.db.sql("SELECT name FROM `tabSIS Bus Route` WHERE name = %s LIMIT 1", (self.route_id,))
+			if not route_exists:
+				frappe.throw("Tuyến đường không tồn tại")
 
-		if self.student_id and not frappe.db.exists("CRM Student", self.student_id):
-			frappe.throw("Học sinh không tồn tại")
+		if self.student_id:
+			student_exists = frappe.db.sql("SELECT name FROM `tabCRM Student` WHERE name = %s LIMIT 1", (self.student_id,))
+			if not student_exists:
+				frappe.throw("Học sinh không tồn tại")
 
-		if self.class_student_id and not frappe.db.exists("SIS Class Student", self.class_student_id):
-			frappe.throw("Học sinh trong lớp không tồn tại")
+		if self.class_student_id:
+			class_student_exists = frappe.db.sql("SELECT name FROM `tabSIS Class Student` WHERE name = %s LIMIT 1", (self.class_student_id,))
+			if not class_student_exists:
+				frappe.throw("Học sinh trong lớp không tồn tại")
 
 	def validate_student_not_assigned(self):
 		"""Validate that student is not already assigned to another route"""
