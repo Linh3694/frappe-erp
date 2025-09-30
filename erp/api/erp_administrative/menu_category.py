@@ -460,14 +460,6 @@ def upload_menu_category_image():
 def create_menu_category_with_image():
     """Create a new menu category with image upload - for AddMenuCategory form"""
     try:
-        # Get data from form_dict (FormData from frontend)
-        data = frappe.local.form_dict
-
-        # Extract values from data
-        title_vn = data.get("title_vn")
-        title_en = data.get("title_en") 
-        code = data.get("code")
-
         # Input validation
         if not title_vn or not title_en or not code:
             return validation_error_response(
