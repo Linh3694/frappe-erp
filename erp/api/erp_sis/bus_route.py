@@ -610,22 +610,15 @@ def add_student_to_route():
 					if not route_doc.school_year_id:
 						route_doc.school_year_id = "2024-2025"  
 					
-					# Load existing child table data
+					# Load existing students count for info (no longer needed in document)
 					existing_students = frappe.db.sql("""
-						SELECT * FROM `tabSIS Bus Route Student` 
+						SELECT COUNT(*) as count FROM `tabSIS Bus Route Student` 
 						WHERE route_id = %s
-					""", (data['route_id'],), as_dict=True)
+					""", (data['route_id'],))[0][0]
 					
-					frappe.logger().info(f"✅ Found {len(existing_students)} existing students for route")
+					frappe.logger().info(f"✅ Found {existing_students} existing students for route")
 					
-					# Add existing students to the document
-					for student_data in existing_students:
-						# Remove parent-related fields that might cause issues
-						clean_student_data = {k: v for k, v in student_data.items() 
-											if k not in ['parent', 'parenttype', 'parentfield']}
-						route_doc.append("route_students", clean_student_data)
-					
-					frappe.logger().info(f"✅ Created route doc from SQL data with {len(existing_students)} students: {route_doc.name}")
+					frappe.logger().info(f"✅ Created route doc from SQL data with {existing_students} students: {route_doc.name}")
 					
 				except Exception as sql_error:
 					frappe.logger().error(f"❌ SQL approach also failed: {str(sql_error)}")
