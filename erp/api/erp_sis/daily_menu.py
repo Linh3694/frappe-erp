@@ -16,6 +16,35 @@ from erp.utils.api_response import (
 )
 
 
+def get_request_param(param_name):
+    """Helper function to get parameter from request in order of priority"""
+    # 1. Try function parameter
+    # 2. Try JSON payload (POST)
+    # 3. Try form_dict (POST)
+    # 4. Try query params (GET)
+
+    # Try JSON payload
+    if frappe.request.data:
+        try:
+            json_data = json.loads(frappe.request.data)
+            if json_data and param_name in json_data:
+                return json_data[param_name]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Try form_dict
+    value = frappe.local.form_dict.get(param_name)
+    if value:
+        return value
+
+    # Try query params
+    value = frappe.local.request.args.get(param_name)
+    if value:
+        return value
+
+    return None
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_daily_menus():
     """Get all daily menus with pagination support"""
@@ -90,20 +119,9 @@ def get_all_daily_menus():
 def get_daily_menu_by_id(daily_menu_id=None):
     """Get a specific daily menu by ID"""
     try:
-        # Get daily_menu_id from parameter or from JSON payload
+        # Get daily_menu_id from parameter or from request
         if not daily_menu_id:
-            # Try to get from JSON payload
-            if frappe.request.data:
-                try:
-                    json_data = json.loads(frappe.request.data)
-                    if json_data and 'daily_menu_id' in json_data:
-                        daily_menu_id = json_data['daily_menu_id']
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-            # Fallback to form_dict
-            if not daily_menu_id:
-                daily_menu_id = frappe.local.form_dict.get('daily_menu_id')
+            daily_menu_id = get_request_param('daily_menu_id')
 
         if not daily_menu_id:
             return validation_error_response("Daily Menu ID is required", {"daily_menu_id": ["Daily Menu ID is required"]})
@@ -428,20 +446,9 @@ def get_available_months():
 def get_daily_menus_by_month(month=None):
     """Get daily menus for a specific month"""
     try:
-        # Get month from parameter or from JSON payload
+        # Get month from parameter or from request
         if not month:
-            # Try to get from JSON payload
-            if frappe.request.data:
-                try:
-                    json_data = json.loads(frappe.request.data)
-                    if json_data and 'month' in json_data:
-                        month = json_data['month']
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-            # Fallback to form_dict
-            if not month:
-                month = frappe.local.form_dict.get('month')
+            month = get_request_param('month')
 
         if not month:
             return validation_error_response("Month is required", {"month": ["Month is required"]})
