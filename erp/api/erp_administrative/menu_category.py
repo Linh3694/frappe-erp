@@ -34,10 +34,12 @@ def get_all_menu_categories():
             order_by="title_vn asc"
         )
 
-        # Handle image_url - remove null values to make field optional
+        # Ensure image_url is always a string (never null)
         for category in menu_categories:
-            if category.get('image_url') is None or category.get('image_url') == "":
-                category.pop('image_url', None)
+            if category.get('image_url') is None:
+                category['image_url'] = ""
+            elif not isinstance(category.get('image_url'), str):
+                category['image_url'] = str(category.get('image_url', ""))
 
         return list_response(menu_categories, "Menu categories fetched successfully")
 
