@@ -93,12 +93,9 @@ def get_menu_category_by_id(menu_category_id=None):
             "name": menu_category.name,
             "title_vn": menu_category.title_vn,
             "title_en": menu_category.title_en,
-            "code": menu_category.code
+            "code": menu_category.code,
+            "image_url": menu_category.image_url or ""
         }
-
-        # Only include image_url if it has a value
-        if menu_category.image_url and menu_category.image_url.strip():
-            menu_category_data["image_url"] = menu_category.image_url
         return single_item_response(menu_category_data, "Menu Category fetched successfully")
 
     except Exception as e:
