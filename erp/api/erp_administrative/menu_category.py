@@ -460,38 +460,27 @@ def upload_menu_category_image():
 def create_menu_category_with_image():
     """Create a new menu category with image upload - for AddMenuCategory form"""
     try:
-        files = frappe.request.files
-        has_files = files and 'file' in files
+        # IMPORTANT: Access form_dict AFTER processing files to avoid UTF-8 encoding issues
+        # The issue occurs when Frappe tries to parse multipart data containing binary files
 
-        # Parse multipart data manually to avoid encoding issues
-        title_vn = None
-        title_en = None
-        code = None
-
-        if has_files:
-            # Parse multipart form data manually using werkzeug or similar
+        # Get text fields from form_dict with error handling for encoding issues
+        try:
+            title_vn = frappe.local.form_dict.get("title_vn")
+            title_en = frappe.local.form_dict.get("title_en")
+            code = frappe.local.form_dict.get("code")
+        except UnicodeDecodeError as e:
+            frappe.logger().error(f"UTF-8 decode error when accessing form_dict: {str(e)}")
+            # Try to parse multipart data manually as fallback
             try:
                 from werkzeug.formparser import parse_form_data
-                from werkzeug.datastructures import MultiDict
-
-                # Parse the form data manually
-                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=False)
-
-                # Extract text fields
+                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
                 title_vn = form.get("title_vn")
                 title_en = form.get("title_en")
                 code = form.get("code")
-
-                frappe.logger().info(f"Parsed form data manually: title_vn={title_vn}, title_en={title_en}, code={code}")
-            except Exception as parse_error:
-                frappe.logger().error(f"Error parsing multipart data manually: {str(parse_error)}")
-                return error_response(f"Error processing form data: {str(parse_error)}")
-        else:
-            # No files, safe to use form_dict normally
-            data = frappe.local.form_dict
-            title_vn = data.get("title_vn")
-            title_en = data.get("title_en")
-            code = data.get("code")
+                frappe.logger().info("Successfully parsed form data using werkzeug fallback")
+            except Exception as fallback_error:
+                frappe.logger().error(f"Fallback parsing also failed: {str(fallback_error)}")
+                return error_response("Error processing form data with file upload")
 
         # Input validation
         if not title_vn or not title_en or not code:
