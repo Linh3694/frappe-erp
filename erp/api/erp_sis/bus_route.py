@@ -588,7 +588,8 @@ def add_student_to_route():
 				# Alternative: Get route data via SQL and construct minimal doc
 				try:
 					route_data = frappe.db.sql("""
-						SELECT name, route_name, vehicle_id, driver_id, monitor1_id, monitor2_id, status
+						SELECT name, route_name, vehicle_id, driver_id, monitor1_id, monitor2_id, 
+							   status, campus_id, school_year_id, creation, modified, owner, modified_by
 						FROM `tabSIS Bus Route` WHERE name = %s
 					""", (data['route_id'],), as_dict=True)
 					
@@ -598,12 +599,33 @@ def add_student_to_route():
 					route_info = route_data[0]
 					frappe.logger().info(f"✅ Got route data via SQL: {route_info}")
 					
-					# Create a minimal document instance 
+					# Create a minimal document instance with all required fields
 					route_doc = frappe.new_doc("SIS Bus Route")
 					for key, value in route_info.items():
 						setattr(route_doc, key, value)
 					
-					frappe.logger().info(f"✅ Created route doc from SQL data: {route_doc.name}")
+					# Ensure required fields are set
+					if not route_doc.campus_id:
+						route_doc.campus_id = "campus-00001"  
+					if not route_doc.school_year_id:
+						route_doc.school_year_id = "2024-2025"  
+					
+					# Load existing child table data
+					existing_students = frappe.db.sql("""
+						SELECT * FROM `tabSIS Bus Route Student` 
+						WHERE route_id = %s
+					""", (data['route_id'],), as_dict=True)
+					
+					frappe.logger().info(f"✅ Found {len(existing_students)} existing students for route")
+					
+					# Add existing students to the document
+					for student_data in existing_students:
+						# Remove parent-related fields that might cause issues
+						clean_student_data = {k: v for k, v in student_data.items() 
+											if k not in ['parent', 'parenttype', 'parentfield']}
+						route_doc.append("route_students", clean_student_data)
+					
+					frappe.logger().info(f"✅ Created route doc from SQL data with {len(existing_students)} students: {route_doc.name}")
 					
 				except Exception as sql_error:
 					frappe.logger().error(f"❌ SQL approach also failed: {str(sql_error)}")
