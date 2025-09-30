@@ -505,83 +505,128 @@ def add_student_to_route():
 		# Get data from request
 		data = {}
 
-		# First try to get JSON data from request body
-		if frappe.request.data:
-			try:
-				# Support both bytes and string payloads
-				if isinstance(frappe.request.data, bytes):
-					json_data = json.loads(frappe.request.data.decode('utf-8'))
-				else:
-					json_data = json.loads(frappe.request.data)
+		try:
+			frappe.logger().info("🔍 STEP 1: Parsing request data...")
+			# First try to get JSON data from request body
+			if frappe.request.data:
+				try:
+					# Support both bytes and string payloads
+					if isinstance(frappe.request.data, bytes):
+						json_data = json.loads(frappe.request.data.decode('utf-8'))
+					else:
+						json_data = json.loads(frappe.request.data)
 
-				if json_data:
-					data = json_data
-					frappe.logger().info(f"Received JSON data for add_student_to_route: {data}")
-				else:
+					if json_data:
+						data = json_data
+						frappe.logger().info(f"✅ Received JSON data for add_student_to_route: {data}")
+					else:
+						data = frappe.local.form_dict
+						frappe.logger().info(f"✅ Received form data for add_student_to_route (empty JSON body): {data}")
+				except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
+					# If JSON parsing fails, use form_dict
+					frappe.logger().error(f"❌ JSON parsing failed in add_student_to_route: {str(e)}")
 					data = frappe.local.form_dict
-					frappe.logger().info(f"Received form data for add_student_to_route (empty JSON body): {data}")
-			except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
-				# If JSON parsing fails, use form_dict
-				frappe.logger().error(f"JSON parsing failed in add_student_to_route: {str(e)}")
+					frappe.logger().info(f"✅ Using form data for add_student_to_route after JSON failure: {data}")
+			else:
+				# Fallback to form_dict
 				data = frappe.local.form_dict
-				frappe.logger().info(f"Using form data for add_student_to_route after JSON failure: {data}")
-		else:
-			# Fallback to form_dict
-			data = frappe.local.form_dict
-			frappe.logger().info(f"No request data, using form_dict for add_student_to_route: {data}")
+				frappe.logger().info(f"✅ No request data, using form_dict for add_student_to_route: {data}")
+		except Exception as e:
+			frappe.logger().error(f"❌ STEP 1 FAILED: {str(e)}")
+			raise e
 
-		# Validate required fields
-		required_fields = ['route_id', 'student_id', 'weekday', 'trip_type', 'pickup_order', 'pickup_location', 'drop_off_location']
-		for field in required_fields:
-			if not data.get(field):
-				return error_response(f"Field '{field}' is required")
+		try:
+			frappe.logger().info("🔍 STEP 2: Validating required fields...")
+			# Validate required fields
+			required_fields = ['route_id', 'student_id', 'weekday', 'trip_type', 'pickup_order', 'pickup_location', 'drop_off_location']
+			for field in required_fields:
+				if not data.get(field):
+					return error_response(f"Field '{field}' is required")
+			frappe.logger().info("✅ All required fields validated")
+		except Exception as e:
+			frappe.logger().error(f"❌ STEP 2 FAILED: {str(e)}")
+			raise e
 
-		# Find class_student_id for the student
-		class_student_id = None
-		if data.get('student_id'):
-			result = frappe.db.sql("""
-				SELECT name FROM `tabSIS Class Student`
-				WHERE student_id = %s
-				LIMIT 1
-			""", (data['student_id'],))
-			class_student_id = result[0][0] if result else None
+		try:
+			frappe.logger().info("🔍 STEP 3: Finding class_student_id...")
+			# Find class_student_id for the student
+			class_student_id = None
+			if data.get('student_id'):
+				result = frappe.db.sql("""
+					SELECT name FROM `tabSIS Class Student`
+					WHERE student_id = %s
+					LIMIT 1
+				""", (data['student_id'],))
+				class_student_id = result[0][0] if result else None
+			frappe.logger().info(f"✅ Found class_student_id: {class_student_id}")
+		except Exception as e:
+			frappe.logger().error(f"❌ STEP 3 FAILED - Error finding class_student_id: {str(e)}")
+			raise e
 
-		# Get the bus route document
-		route_doc = frappe.get_doc("SIS Bus Route", data['route_id'])
+		try:
+			frappe.logger().info("🔍 STEP 4: Getting route document...")
+			# Get the bus route document
+			route_doc = frappe.get_doc("SIS Bus Route", data['route_id'])
+			frappe.logger().info(f"✅ Got route document: {route_doc.name}")
+		except Exception as e:
+			frappe.logger().error(f"❌ STEP 4 FAILED - Error getting route document: {str(e)}")
+			raise e
 		
-		# Add student to the child table (parent field is auto-set by Frappe)
-		route_student = route_doc.append("route_students", {
-			"student_id": data['student_id'],
-			"class_student_id": class_student_id,
-			"weekday": data['weekday'],
-			"trip_type": data['trip_type'],
-			"pickup_order": int(data['pickup_order']),
-			"pickup_location": data['pickup_location'],
-			"drop_off_location": data['drop_off_location'],
-			"notes": data.get('notes', '')
-		})
+		try:
+			frappe.logger().info("🔍 STEP 5: Appending student to child table...")
+			# Add student to the child table (parent field is auto-set by Frappe)
+			route_student = route_doc.append("route_students", {
+				"student_id": data['student_id'],
+				"class_student_id": class_student_id,
+				"weekday": data['weekday'],
+				"trip_type": data['trip_type'],
+				"pickup_order": int(data['pickup_order']),
+				"pickup_location": data['pickup_location'],
+				"drop_off_location": data['drop_off_location'],
+				"notes": data.get('notes', '')
+			})
+			frappe.logger().info(f"✅ Appended student to child table: {route_student.name}")
+		except Exception as e:
+			frappe.logger().error(f"❌ STEP 5 FAILED - Error appending student to child table: {str(e)}")
+			raise e
 		
-		# Save the parent document to persist the child table changes
-		route_doc.save()
-		frappe.db.commit()
+		try:
+			frappe.logger().info("🔍 STEP 6: Saving route document...")
+			# Save the parent document to persist the child table changes
+			route_doc.save()
+			frappe.db.commit()
+			frappe.logger().info("✅ Route document saved and committed")
+		except Exception as e:
+			frappe.logger().error(f"❌ STEP 6 FAILED - Error saving route document: {str(e)}")
+			frappe.logger().error(f"❌ This is likely where the 'parent' column error occurs!")
+			raise e
 
-		# Add student to corresponding daily trips
-		daily_trips_result = add_student_to_daily_trips(data['route_id'], route_student.as_dict())
+		try:
+			frappe.logger().info("🔍 STEP 7: Adding student to daily trips...")
+			# Add student to corresponding daily trips
+			daily_trips_result = add_student_to_daily_trips(data['route_id'], route_student.as_dict())
+			frappe.logger().info("✅ Student added to daily trips")
+		except Exception as e:
+			frappe.logger().error(f"❌ STEP 7 FAILED - Error adding student to daily trips: {str(e)}")
+			# Don't re-raise this error - route student was already saved
+			daily_trips_result = {"success": False, "logs": [f"❌ Error: {str(e)}"]}
 
 		# Prepare response with detailed logs
 		response_logs = [
 			f"✅ Đã thêm student {data['student_id']} vào route {data['route_id']}",
 			f"📋 Weekday: {data['weekday']}, Trip Type: {data['trip_type']}"
 		]
-		response_logs.extend(daily_trips_result.get('logs', []))
+		if daily_trips_result and daily_trips_result.get('logs'):
+			response_logs.extend(daily_trips_result.get('logs', []))
 		
 		message = "Student added to route successfully"
-		if daily_trips_result.get('success'):
+		if daily_trips_result and daily_trips_result.get('success'):
 			added_count = daily_trips_result.get('added_count', 0)
 			message += f" and added to {added_count} daily trips"
 		else:
 			message += " but failed to add to daily trips"
 
+		frappe.logger().info("✅ ALL STEPS COMPLETED - Returning success response")
 		return success_response(
 			data=route_student.as_dict(),
 			message=message,
