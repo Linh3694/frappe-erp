@@ -381,8 +381,7 @@ def upload_menu_category_image():
         if len(file_content) > max_size:
             return validation_error_response({"file": ["File size must be less than 10MB"]})
 
-        # Save file to Frappe File Manager using save_file utility (same as bulk_import)
-        from frappe.utils.file_manager import save_file
+        # Save file directly to avoid encoding issues
         import os
 
         # Generate new filename based on menu category code
@@ -408,14 +407,32 @@ def upload_menu_category_image():
         
         frappe.logger().info(f"Original filename: {file_name}, New filename: {new_file_name}")
 
-        file_doc = save_file(
-            fname=new_file_name,
-            content=file_content,
-            dt="SIS Menu Category",
-            dn=menu_category_id,
-            folder="Home/Menu Categories",
-            is_private=0
-        )
+        # Create Menu Categories directory if it doesn't exist
+        upload_dir = frappe.get_site_path("public", "files", "Menu_Categories")
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir, exist_ok=True)
+
+        # Save file directly to file system
+        file_path = os.path.join(upload_dir, new_file_name)
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+
+        # Create file URL
+        file_url = f"/files/Menu_Categories/{new_file_name}"
+        
+        frappe.logger().info(f"File saved to: {file_path}, URL: {file_url}")
+
+        # Create Frappe File document for record keeping
+        file_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": new_file_name,
+            "file_url": file_url,
+            "attached_to_doctype": "SIS Menu Category",
+            "attached_to_name": menu_category_id,
+            "folder": "Home/Menu Categories",
+            "is_private": 0
+        })
+        file_doc.insert(ignore_permissions=True)
 
         # Update menu category with image URL
         menu_category_doc.image_url = file_doc.file_url
@@ -525,8 +542,7 @@ def create_menu_category_with_image():
                     frappe.db.commit()
                     return validation_error_response({"file": ["File size must be less than 10MB"]})
 
-                # Save file with filename based on menu category code
-                from frappe.utils.file_manager import save_file
+                # Save file directly to avoid encoding issues
                 import os
 
                 # Generate new filename based on menu category code
@@ -552,14 +568,32 @@ def create_menu_category_with_image():
                 
                 frappe.logger().info(f"Uploading image with filename: {new_file_name}")
 
-                file_doc = save_file(
-                    fname=new_file_name,
-                    content=file_content,
-                    dt="SIS Menu Category",
-                    dn=menu_category_doc.name,
-                    folder="Home/Menu Categories",
-                    is_private=0
-                )
+                # Create Menu Categories directory if it doesn't exist
+                upload_dir = frappe.get_site_path("public", "files", "Menu_Categories")
+                if not os.path.exists(upload_dir):
+                    os.makedirs(upload_dir, exist_ok=True)
+
+                # Save file directly to file system
+                file_path = os.path.join(upload_dir, new_file_name)
+                with open(file_path, 'wb') as f:
+                    f.write(file_content)
+
+                # Create file URL
+                file_url = f"/files/Menu_Categories/{new_file_name}"
+                
+                frappe.logger().info(f"File saved to: {file_path}, URL: {file_url}")
+
+                # Create Frappe File document for record keeping
+                file_doc = frappe.get_doc({
+                    "doctype": "File",
+                    "file_name": new_file_name,
+                    "file_url": file_url,
+                    "attached_to_doctype": "SIS Menu Category",
+                    "attached_to_name": menu_category_doc.name,
+                    "folder": "Home/Menu Categories",
+                    "is_private": 0
+                })
+                file_doc.insert(ignore_permissions=True)
 
                 # Update menu category with image URL
                 menu_category_doc.image_url = file_doc.file_url
