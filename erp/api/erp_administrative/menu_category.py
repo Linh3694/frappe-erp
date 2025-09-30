@@ -68,7 +68,7 @@ def get_menu_category_by_id(menu_category_id=None):
                 menu_category_id = frappe.local.form_dict.get('menu_category_id')
 
         if not menu_category_id:
-            return validation_error_response({"menu_category_id": ["Menu Category ID is required"]})
+            return validation_error_response("Menu Category ID is required", {"menu_category_id": ["Menu Category ID is required"]})
 
         menu_categories = frappe.get_all(
             "SIS Menu Category",
@@ -137,11 +137,14 @@ def create_menu_category():
 
         # Input validation
         if not title_vn or not title_en or not code:
-            return validation_error_response({
-                "title_vn": ["Title VN is required"] if not title_vn else [],
-                "title_en": ["Title EN is required"] if not title_en else [],
-                "code": ["Code is required"] if not code else []
-            })
+            return validation_error_response(
+                "Validation failed",
+                {
+                    "title_vn": ["Title VN is required"] if not title_vn else [],
+                    "title_en": ["Title EN is required"] if not title_en else [],
+                    "code": ["Code is required"] if not code else []
+                }
+            )
 
         # Check if menu category title already exists
         existing = frappe.db.exists(
@@ -152,7 +155,7 @@ def create_menu_category():
         )
 
         if existing:
-            return validation_error_response({"title_vn": [f"Menu Category with title '{title_vn}' already exists"]})
+            return validation_error_response("Menu category title already exists", {"title_vn": [f"Menu Category with title '{title_vn}' already exists"]})
 
         # Check if code already exists
         existing_code = frappe.db.exists(
@@ -163,7 +166,7 @@ def create_menu_category():
         )
 
         if existing_code:
-            return validation_error_response({"code": [f"Menu Category with code '{code}' already exists"]})
+            return validation_error_response("Menu category code already exists", {"code": [f"Menu Category with code '{code}' already exists"]})
 
         # Create new menu category
         menu_category_doc = frappe.get_doc({
@@ -214,7 +217,7 @@ def delete_menu_category():
 
         menu_category_id = data.get('menu_category_id')
         if not menu_category_id:
-            return validation_error_response({"menu_category_id": ["Menu Category ID is required"]})
+            return validation_error_response("Menu Category ID is required", {"menu_category_id": ["Menu Category ID is required"]})
 
         # Get existing document
         try:
@@ -239,7 +242,7 @@ def check_code_availability(code, menu_category_id=None):
     """Check if code is available"""
     try:
         if not code:
-            return validation_error_response({"code": ["Code is required"]})
+            return validation_error_response("Code is required", {"code": ["Code is required"]})
 
         filters = {
             "code": code
@@ -286,7 +289,7 @@ def update_menu_category():
 
         menu_category_id = data.get('menu_category_id')
         if not menu_category_id:
-            return validation_error_response({"menu_category_id": ["Menu Category ID is required"]})
+            return validation_error_response("Menu Category ID is required", {"menu_category_id": ["Menu Category ID is required"]})
 
         # Get existing document
         try:
@@ -352,7 +355,7 @@ def upload_menu_category_image():
 
         menu_category_id = data.get('menu_category_id')
         if not menu_category_id:
-            return validation_error_response({"menu_category_id": ["Menu Category ID is required"]})
+            return validation_error_response("Menu Category ID is required", {"menu_category_id": ["Menu Category ID is required"]})
 
         # Get existing menu category document
         try:
@@ -363,7 +366,7 @@ def upload_menu_category_image():
         # Get file from request.files (proper way to handle file uploads)
         files = frappe.request.files
         if not files or 'file' not in files:
-            return validation_error_response({"file": ["No file uploaded"]})
+            return validation_error_response("No file uploaded", {"file": ["No file uploaded"]})
 
         uploaded_file = files['file']
         file_name = uploaded_file.filename or "image.jpg"
@@ -371,15 +374,20 @@ def upload_menu_category_image():
         # Validate file type
         allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp']
         if uploaded_file.content_type not in allowed_types:
-            return validation_error_response({"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
+            return validation_error_response("Invalid file type", {"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
 
         # Read file content as bytes
-        file_content = uploaded_file.read()
+        try:
+            file_content = uploaded_file.read()
+            frappe.logger().info(f"Successfully read file content, size: {len(file_content)} bytes")
+        except Exception as read_error:
+            frappe.logger().error(f"Error reading file content: {str(read_error)}")
+            return validation_error_response("Failed to read file", {"file": ["Error reading uploaded file"]})
 
         # Validate file size (max 10MB)
         max_size = 10 * 1024 * 1024  # 10MB
         if len(file_content) > max_size:
-            return validation_error_response({"file": ["File size must be less than 10MB"]})
+            return validation_error_response("File too large", {"file": ["File size must be less than 10MB"]})
 
         # Save file directly to avoid encoding issues
         import os
@@ -457,11 +465,14 @@ def create_menu_category_with_image():
 
         # Input validation
         if not title_vn or not title_en or not code:
-            return validation_error_response({
-                "title_vn": ["Title VN is required"] if not title_vn else [],
-                "title_en": ["Title EN is required"] if not title_en else [],
-                "code": ["Code is required"] if not code else []
-            })
+            return validation_error_response(
+                "Validation failed",
+                {
+                    "title_vn": ["Title VN is required"] if not title_vn else [],
+                    "title_en": ["Title EN is required"] if not title_en else [],
+                    "code": ["Code is required"] if not code else []
+                }
+            )
 
         # Check if menu category title already exists
         existing = frappe.db.exists(
@@ -472,9 +483,12 @@ def create_menu_category_with_image():
         )
 
         if existing:
-            return validation_error_response({
-                "title_vn": ["Menu category with this Vietnamese title already exists"]
-            })
+            return validation_error_response(
+                "Menu category title already exists",
+                {
+                    "title_vn": ["Menu category with this Vietnamese title already exists"]
+                }
+            )
 
         # Check if code already exists
         existing_code = frappe.db.exists(
@@ -485,9 +499,12 @@ def create_menu_category_with_image():
         )
 
         if existing_code:
-            return validation_error_response({
-                "code": ["Menu category with this code already exists"]
-            })
+            return validation_error_response(
+                "Menu category code already exists",
+                {
+                    "code": ["Menu category with this code already exists"]
+                }
+            )
 
         # Create menu category document first
         menu_category_doc = frappe.get_doc({
@@ -517,7 +534,7 @@ def create_menu_category_with_image():
                     # Delete the created menu category if image validation fails
                     frappe.delete_doc("SIS Menu Category", menu_category_doc.name)
                     frappe.db.commit()
-                    return validation_error_response({"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
+                    return validation_error_response("Invalid file type", {"file": ["Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed"]})
 
                 # Read file content as bytes
                 file_content = uploaded_file.read()
@@ -528,7 +545,7 @@ def create_menu_category_with_image():
                     # Delete the created menu category if image validation fails
                     frappe.delete_doc("SIS Menu Category", menu_category_doc.name)
                     frappe.db.commit()
-                    return validation_error_response({"file": ["File size must be less than 10MB"]})
+                    return validation_error_response("File too large", {"file": ["File size must be less than 10MB"]})
 
                 # Save file directly to avoid encoding issues
                 import os
