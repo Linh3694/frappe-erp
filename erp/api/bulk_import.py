@@ -475,58 +475,80 @@ def _process_excel_file(job):
                 "message": f"Failed to read Excel file: {str(e)}"
             }
 
+        # Debug: Log initial dataframe info
+        frappe.logger().info(f"Initial DataFrame shape: {df.shape}")
+        frappe.logger().info(f"DataFrame columns: {list(df.columns)}")
+        if len(df) > 0:
+            frappe.logger().info(f"First few rows preview: {df.head(3).to_dict() if len(df) <= 3 else df.head(3).to_string()}")
+
         # Smart row detection: Skip header row, then check if next row contains real data
         if len(df) <= 1:
+            debug_info = f"File has only {len(df)} rows. Expected at least header + 1 data row."
+            frappe.logger().error(f"File too short: {debug_info}")
             return {
                 "success": False,
-                "message": "File appears to be too short. Please use the downloaded template and fill data starting from row 2."
+                "message": "File appears to be too short. Please use the downloaded template and fill data starting from row 2.",
+                "debug_info": debug_info
             }
 
         # Always skip header row (row 1) first
         df_after_header = df.iloc[1:].reset_index(drop=True)
         skipped_rows = 1
+        frappe.logger().info(f"After skipping header: {len(df_after_header)} rows remaining")
 
-        # Check if the next row (row 2) contains real data or is just sample/instruction
-        if len(df_after_header) > 0:
-            first_data_row = df_after_header.iloc[0]
+        # Simplified logic: Always try to start from row 2, but skip if it's clearly sample data
+        df = df.iloc[1:]  # Start from row 2
+        skipped_rows = 1
 
-            # Check if this row looks like sample/instruction data
-            # Sample data often has placeholder text or specific patterns
-            is_sample_row = False
-            for val in first_data_row.values:
-                if pd.notna(val):
-                    val_str = str(val).strip()
+        if len(df) > 0:
+            first_row = df.iloc[0]
+
+            # Check if this is clearly sample/instruction data
+            # Only skip if ALL non-empty cells contain sample indicators
+            non_empty_count = 0
+            sample_indicators_count = 0
+
+            for val in first_row.values:
+                if pd.notna(val) and str(val).strip():
+                    non_empty_count += 1
+                    val_str = str(val).strip().lower()
                     if ('←' in val_str or
-                        'fill your data' in val_str.lower() or
-                        'sample' in val_str.lower() or
-                        'ví dụ' in val_str.lower() or
-                        val_str.lower() == 'nam' or
-                        val_str.lower() == 'nữ' or
-                        val_str.lower() == 'khác'):
-                        is_sample_row = True
-                        break
+                        'fill your data' in val_str or
+                        'sample' in val_str or
+                        'ví dụ' in val_str or
+                        val_str in ['nam', 'nữ', 'khác'] or
+                        val_str.startswith('student_') or  # sample student code
+                        '@example.com' in val_str):  # sample email
+                        sample_indicators_count += 1
 
-            if is_sample_row and len(df_after_header) > 1:
-                # Skip sample/instruction row too, start from row 3
-                df = df.iloc[2:]
-                skipped_rows = 2
-            else:
-                # Row 2 contains real data, start from row 2
+            # Only consider it sample row if ALL non-empty cells are sample indicators
+            is_sample_row = non_empty_count > 0 and sample_indicators_count == non_empty_count
+
+            frappe.logger().info(f"Row analysis: non_empty={non_empty_count}, sample_indicators={sample_indicators_count}, is_sample={is_sample_row}")
+
+            if is_sample_row and len(df) > 1:
+                # Skip this row and start from next row
                 df = df.iloc[1:]
-                skipped_rows = 1
-        else:
-            # No data after header
-            df = df_after_header
-            skipped_rows = 1
+                skipped_rows = 2
+                frappe.logger().info("Detected sample row, skipping to row 3")
+            else:
+                frappe.logger().info("Row 2 contains real data or mixed content, starting from row 2")
 
         # Remove completely empty rows
+        frappe.logger().info(f"Before dropna: {len(df)} rows")
         df = df.dropna(how='all')
+        frappe.logger().info(f"After dropna: {len(df)} rows")
 
         total_rows = len(df)
+        frappe.logger().info(f"Final total_rows: {total_rows}")
+
         if total_rows == 0:
+            debug_info = f"After processing: {len(df)} rows before dropna, {len(df.dropna(how='all'))} rows after dropna. No valid data rows found."
+            frappe.logger().error(f"No data rows found: {debug_info}")
             return {
                 "success": False,
-                "message": "No data found in file. Please fill data starting from row 2 or 3 in the template."
+                "message": "No data found in file. Please fill data starting from row 2 or 3 in the template.",
+                "debug_info": debug_info
             }
 
         job.total_rows = total_rows
