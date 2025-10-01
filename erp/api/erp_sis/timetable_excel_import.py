@@ -589,7 +589,7 @@ class TimetableExcelImporter:
                             # Class not found -> warning and skip this cell
                             continue
                         cell_value = row.iloc[ci]
-                        subject_cell = str(cell_value).strip() if cell_value is not None else ''
+                        subject_cell = str(cell_value).strip() if cell_value is not None and not pd.isna(cell_value) else ''
                         if not subject_cell:
                             continue
 
