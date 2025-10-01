@@ -793,6 +793,10 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
         campus_id = row_data.get("campus_id")
         if not campus_id:
             campus_id = job.campus_id
+        
+        # Normalize campus_id - handle case variations (convert to uppercase to match DB format)
+        if campus_id:
+            campus_id = campus_id.upper()
 
         # Build document data
         doc_data = {
@@ -1002,6 +1006,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             # Collect all resolution errors for better user feedback
             resolution_errors = []
 
+            # Normalize campus_id - handle case variations
+            if campus_id:
+                campus_id = campus_id.upper()  # Convert to uppercase to match DB format
+                frappe.logger().info(f"Row {row_num} - [SIS Class] Normalized campus_id: '{campus_id}'")
+
             # Handle school year lookup first (required field)
             school_year_name = None
             for key in ["school_year_id", "school_year", "year", "năm học"]:
@@ -1013,7 +1022,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             if school_year_name:
                 # Normalize and clean the school year name
                 school_year_name = ' '.join(school_year_name.split())  # Remove extra spaces
-                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up school year: '{school_year_name}'")
+                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up school year: '{school_year_name}' for campus: '{campus_id}'")
 
                 # Try to find by name first, then title_vn, title_en
                 # Filter by campus_id for school years
@@ -1066,7 +1075,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["school_year_id"] = school_year_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year ID: {school_year_id}")
                 else:
-                    resolution_errors.append(f"School Year: '{school_year_name}'")
+                    resolution_errors.append(f"School Year: '{school_year_name}' for campus '{campus_id}'")
 
             # Handle education grade lookup
             education_grade_name = None
@@ -1079,7 +1088,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             if education_grade_name:
                 # Normalize and clean the education grade name
                 education_grade_name = ' '.join(education_grade_name.split())  # Remove extra spaces
-                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up education grade: '{education_grade_name}'")
+                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up education grade: '{education_grade_name}' for campus: '{campus_id}'")
 
                 # Try to find by title_vn first, then grade_name, then title_en
                 # Filter by campus_id for education grades
@@ -1132,7 +1141,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["education_grade"] = education_grade_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade ID: {education_grade_id}")
                 else:
-                    resolution_errors.append(f"Education Grade: '{education_grade_name}'")
+                    resolution_errors.append(f"Education Grade: '{education_grade_name}' for campus '{campus_id}'")
 
             # Handle academic program lookup
             academic_program_name = None
@@ -1145,7 +1154,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             if academic_program_name:
                 # Normalize and clean the academic program name
                 academic_program_name = ' '.join(academic_program_name.split())  # Remove extra spaces
-                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up academic program: '{academic_program_name}'")
+                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up academic program: '{academic_program_name}' for campus: '{campus_id}'")
 
                 # Try to find by title_vn first, then title_en
                 # Filter by campus_id for academic programs
@@ -1185,7 +1194,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["academic_program"] = academic_program_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program ID: {academic_program_id}")
                 else:
-                    resolution_errors.append(f"Academic Program: '{academic_program_name}'")
+                    resolution_errors.append(f"Academic Program: '{academic_program_name}' for campus '{campus_id}'")
 
             # If there are resolution errors, raise a comprehensive error
             if resolution_errors:
