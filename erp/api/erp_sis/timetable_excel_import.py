@@ -960,20 +960,49 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         else:
                             logs.append(f"   ℹ️  Timetable date range unchanged")
 
-                        # DELETE LOGIC: Xóa tất cả instances có start_date >= upload_start_date
-                        # Đây là phần quan trọng cho update in-place
-                        logs.append(f"🗑️  DELETE PHASE: Removing instances from {upload_start_date} onwards")
+                        # DELETE LOGIC: Xóa TẤT CẢ instances có date range overlap với upload range
+                        # Overlap condition: instance_start <= upload_end AND instance_end >= upload_start
+                        logs.append(f"🗑️  DELETE PHASE: Removing ALL instances with date overlap")
+                        logs.append(f"   Upload range: {upload_start_date} to {upload_end_date}")
+                        
                         try:
-                            overlapping_instances = frappe.get_all(
+                            # Get ALL instances of this timetable first
+                            all_instances = frappe.get_all(
                                 "SIS Timetable Instance",
-                                filters={
-                                    "timetable_id": timetable_id,
-                                    "start_date": [">=", upload_start_date]
-                                }
+                                fields=["name", "start_date", "end_date", "class_id"],
+                                filters={"timetable_id": timetable_id}
                             )
-                            logs.append(f"   📊 Found {len(overlapping_instances)} instances to delete (start_date >= {upload_start_date})")
+                            
+                            logs.append(f"   📋 Total instances in timetable: {len(all_instances)}")
+                            
+                            # Filter instances that overlap with upload range
+                            overlapping_instances = []
+                            non_overlapping_instances = []
+                            for instance in all_instances:
+                                # Overlap: instance_start <= upload_end AND instance_end >= upload_start
+                                if instance.start_date <= upload_end and instance.end_date >= upload_start:
+                                    overlapping_instances.append(instance)
+                                else:
+                                    non_overlapping_instances.append(instance)
+                            
+                            # Log chi tiết cho first 3 overlapping và first 3 non-overlapping
+                            if overlapping_instances:
+                                logs.append(f"   ⚠️  Overlapping instances (will DELETE): {len(overlapping_instances)} total")
+                                for instance in overlapping_instances[:3]:
+                                    logs.append(f"      • {instance.name}: {instance.start_date} to {instance.end_date} (class: {instance.class_id})")
+                                if len(overlapping_instances) > 3:
+                                    logs.append(f"      ... and {len(overlapping_instances) - 3} more")
+                            
+                            if non_overlapping_instances:
+                                logs.append(f"   ✅ Non-overlapping instances (will KEEP): {len(non_overlapping_instances)} total")
+                                for instance in non_overlapping_instances[:3]:
+                                    logs.append(f"      • {instance.name}: {instance.start_date} to {instance.end_date} (class: {instance.class_id})")
+                                if len(non_overlapping_instances) > 3:
+                                    logs.append(f"      ... and {len(non_overlapping_instances) - 3} more")
+                            
+                            logs.append(f"   📊 Summary: {len(overlapping_instances)} to delete, {len(non_overlapping_instances)} to keep")
                             if len(overlapping_instances) == 0:
-                                logs.append(f"   ℹ️  No instances found to delete - this is first upload or upload date is after all existing instances")
+                                logs.append(f"   ℹ️  No instances overlap with upload range")
                         except Exception as query_error:
                             logs.append(f"   ❌ Error querying instances: {str(query_error)}")
                             overlapping_instances = []
