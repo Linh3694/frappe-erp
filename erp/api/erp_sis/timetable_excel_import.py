@@ -1676,7 +1676,7 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
         instance_rows = frappe.get_all(
             "SIS Timetable Instance Row",
             fields=["name", "day_of_week", "timetable_column_id", "subject_id", "teacher_1_id", "teacher_2_id"],
-            filters={"parent": instance_id}
+            filters={"parent_timetable_instance": instance_id}
         )
         
         if not instance_rows:
