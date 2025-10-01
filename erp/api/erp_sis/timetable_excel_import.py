@@ -892,55 +892,99 @@ def process_excel_import_with_metadata_v2(import_data: dict):
 
             # If not dry run, create the actual records (only if validation passed)
             if not dry_run and ok:
-                # Delete existing timetables that overlap with upload date range (from start_date onwards)
+                upload_start_date = import_data.get("start_date")
+                upload_end_date = import_data.get("end_date")
+
+                # UPDATE IN-PLACE LOGIC: Find existing timetables with date range overlap
                 try:
-                    upload_start_date = import_data.get("start_date")
-                    
-                    # Find existing timetables that overlap with the new timetable period
                     existing_timetables = frappe.get_all(
                         "SIS Timetable",
                         fields=["name", "start_date", "end_date", "title_vn"],
                         filters={
                             "campus_id": campus_id,
                             "school_year_id": import_data.get("school_year_id"),
-                            "education_stage_id": import_data.get("education_stage_id"),
-                            "start_date": [">=", upload_start_date]  # Only delete timetables from upload date onwards
+                            "education_stage_id": import_data.get("education_stage_id")
                         }
                     )
-                    
-                    deleted_count = 0
-                    for existing in existing_timetables:
-                        try:
-                            frappe.delete_doc("SIS Timetable", existing.name)
-                            logs.append(f"Deleted existing timetable: {existing.name} ({existing.title_vn}) - Start: {existing.start_date}")
-                            deleted_count += 1
-                        except Exception as single_delete_error:
-                            logs.append(f"Warning: Could not delete timetable {existing.name}: {str(single_delete_error)}")
-                            
-                    if deleted_count > 0:
-                        logs.append(f"Total deleted timetables: {deleted_count}")
-                        frappe.db.commit()
-                    else:
-                        logs.append(f"No existing timetables found to delete from {upload_start_date} onwards")
-                    
-                except Exception as delete_error:
-                    logs.append(f"Warning: Could not delete existing timetables: {str(delete_error)}")
-                    
-                # Create new SIS Timetable record
-                timetable_doc = frappe.get_doc({
-                    "doctype": "SIS Timetable",
-                    "title_vn": title_vn,
-                    "title_en": import_data.get("title_en", ""),
-                    "campus_id": campus_id,
-                    "school_year_id": import_data.get("school_year_id"),
-                    "education_stage_id": import_data.get("education_stage_id"),
-                    "start_date": import_data.get("start_date"),
-                    "end_date": import_data.get("end_date"),
-                    "upload_source": file_path
-                })
-                timetable_doc.insert()
 
-                timetable_id = timetable_doc.name
+                    overlapping_timetable = None
+                    for timetable in existing_timetables:
+                        # Check date range overlap: upload_start <= existing_end AND upload_end >= existing_start
+                        if (upload_start_date <= timetable.end_date and upload_end_date >= timetable.start_date):
+                            overlapping_timetable = timetable
+                            break
+
+                    if overlapping_timetable:
+                        # Use existing timetable and update its date range if needed
+                        timetable_id = overlapping_timetable.name
+                        logs.append(f"Found overlapping timetable: {timetable_id} ({overlapping_timetable.title_vn})")
+
+                        # Update end_date if upload range extends beyond existing range
+                        if upload_end_date > overlapping_timetable.end_date:
+                            frappe.db.set_value("SIS Timetable", timetable_id, "end_date", upload_end_date)
+                            logs.append(f"Extended timetable end_date to {upload_end_date}")
+
+                        # Delete overlapping instances (instances that start on or after upload_start_date)
+                        overlapping_instances = frappe.get_all(
+                            "SIS Timetable Instance",
+                            filters={
+                                "timetable_id": timetable_id,
+                                "start_date": [">=", upload_start_date]
+                            }
+                        )
+
+                        deleted_instances = 0
+                        for instance in overlapping_instances:
+                            try:
+                                # Manual deletion to avoid cascade issues
+                                frappe.db.sql("""
+                                    DELETE FROM `tabSIS Timetable Instance Row`
+                                    WHERE parent = %s
+                                """, (instance.name,))
+                                frappe.delete_doc("SIS Timetable Instance", instance.name, ignore_permissions=True)
+                                deleted_instances += 1
+                            except Exception as instance_error:
+                                logs.append(f"Warning: Could not delete instance {instance.name}: {str(instance_error)}")
+
+                        if deleted_instances > 0:
+                            logs.append(f"Deleted {deleted_instances} overlapping instances from {upload_start_date} onwards")
+                            frappe.db.commit()
+
+                    else:
+                        # No overlapping timetable found, create new one
+                        logs.append(f"No overlapping timetable found, creating new timetable from {upload_start_date}")
+                        timetable_doc = frappe.get_doc({
+                            "doctype": "SIS Timetable",
+                            "title_vn": title_vn,
+                            "title_en": import_data.get("title_en", ""),
+                            "campus_id": campus_id,
+                            "school_year_id": import_data.get("school_year_id"),
+                            "education_stage_id": import_data.get("education_stage_id"),
+                            "start_date": upload_start_date,
+                            "end_date": upload_end_date,
+                            "upload_source": file_path
+                        })
+                        timetable_doc.insert()
+                        timetable_id = timetable_doc.name
+                        logs.append(f"Created new timetable: {timetable_id}")
+
+                except Exception as timetable_error:
+                    logs.append(f"Warning: Error handling timetable overlap: {str(timetable_error)}")
+                    # Fallback: create new timetable
+                    timetable_doc = frappe.get_doc({
+                        "doctype": "SIS Timetable",
+                        "title_vn": title_vn,
+                        "title_en": import_data.get("title_en", ""),
+                        "campus_id": campus_id,
+                        "school_year_id": import_data.get("school_year_id"),
+                        "education_stage_id": import_data.get("education_stage_id"),
+                        "start_date": upload_start_date,
+                        "end_date": upload_end_date,
+                        "upload_source": file_path
+                    })
+                    timetable_doc.insert()
+                    timetable_id = timetable_doc.name
+                    logs.append(f"Fallback: Created new timetable: {timetable_id}")
 
                 # Group rows per class and create instances + rows
                 from collections import defaultdict
