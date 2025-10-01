@@ -609,6 +609,19 @@ def _process_excel_file(job):
                 "title_vn": "title_vn",
                 "title_en": "title_en",
                 "code": "code"
+            },
+            "SIS Class": {
+                # Map Excel columns to SIS Class fields
+                "title": "title",
+                "short_title": "short_title",
+                "education_grade": "education_grade",
+                "academic_program": "academic_program",
+                "homeroom_teacher": "homeroom_teacher",
+                "vice_homeroom_teacher": "vice_homeroom_teacher",
+                "room": "room",
+                "class_type": "class_type",
+                "school_year_id": "school_year_id",
+                "campus_id": "campus_id"
             }
         }
 
@@ -1020,6 +1033,10 @@ def _find_existing_record(doctype, doc_data):
         return frappe.get_doc(doctype, name) if name else None
 
     if doctype == "SIS Subject" and doc_data.get("title"):
+        name = frappe.db.exists(doctype, {"title": doc_data["title"]})
+        return frappe.get_doc(doctype, name) if name else None
+
+    if doctype == "SIS Class" and doc_data.get("title"):
         name = frappe.db.exists(doctype, {"title": doc_data["title"]})
         return frappe.get_doc(doctype, name) if name else None
 

@@ -487,6 +487,65 @@ def create_class():
         if not campus_id:
             return not_found_response("Campus not found")
 
+        # Resolve education_grade and academic_program robustly
+        # These are required fields, so validate they can be resolved
+        education_grade_input = data.get("education_grade")
+        education_grade = None
+        if education_grade_input and frappe.db.exists("SIS Education Grade", education_grade_input):
+            education_grade = education_grade_input
+        else:
+            # Try resolve by grade_name or titles
+            try:
+                hit = frappe.get_all(
+                    "SIS Education Grade",
+                    filters={"grade_name": education_grade_input},
+                    fields=["name"],
+                    limit=1,
+                ) or frappe.get_all(
+                    "SIS Education Grade",
+                    filters={"title_vn": education_grade_input},
+                    fields=["name"],
+                    limit=1,
+                ) or frappe.get_all(
+                    "SIS Education Grade",
+                    filters={"title_en": education_grade_input},
+                    fields=["name"],
+                    limit=1,
+                )
+                if hit:
+                    education_grade = hit[0].name
+            except Exception:
+                pass
+
+        academic_program_input = data.get("academic_program")
+        academic_program = None
+        if academic_program_input and frappe.db.exists("SIS Academic Program", academic_program_input):
+            academic_program = academic_program_input
+        else:
+            # Try resolve by titles
+            try:
+                hit = frappe.get_all(
+                    "SIS Academic Program",
+                    filters={"title_vn": academic_program_input},
+                    fields=["name"],
+                    limit=1,
+                ) or frappe.get_all(
+                    "SIS Academic Program",
+                    filters={"title_en": academic_program_input},
+                    fields=["name"],
+                    limit=1,
+                )
+                if hit:
+                    academic_program = hit[0].name
+            except Exception:
+                pass
+
+        # Validate required resolved fields
+        if not education_grade:
+            return validation_error_response({"education_grade": ["Education grade not found or invalid"]})
+        if not academic_program:
+            return validation_error_response({"academic_program": ["Academic program not found or invalid"]})
+
         # Sanitize select-type fields to avoid validation edge-cases
         raw_class_type = (data.get("class_type") or "").strip()
 
@@ -496,8 +555,8 @@ def create_class():
             "short_title": data.get("short_title"),
             "campus_id": campus_id,
             "school_year_id": data.get("school_year_id"),
-            "education_grade": data.get("education_grade"),
-            "academic_program": data.get("academic_program"),
+            "education_grade": education_grade,
+            "academic_program": academic_program,
             "homeroom_teacher": data.get("homeroom_teacher"),
             "vice_homeroom_teacher": data.get("vice_homeroom_teacher"),
             "room": data.get("room"),
@@ -509,7 +568,20 @@ def create_class():
         try:
             if raw_class_type:
                 allowed_ct = ["regular", "mixed", "club"]
-                if raw_class_type not in allowed_ct:
+                class_type_mapping = {
+                    "lớp chính quy": "regular",
+                    "lớp chạy": "mixed",
+                    "câu lạc bộ": "club",
+                    "regular class": "regular",
+                    "mixed class": "mixed",
+                    "club": "club"
+                }
+
+                # First try direct mapping for Vietnamese terms
+                if raw_class_type.lower() in class_type_mapping:
+                    raw_class_type = class_type_mapping[raw_class_type.lower()]
+                elif raw_class_type not in allowed_ct:
+                    # Fallback to existing logic
                     for opt in allowed_ct:
                         if opt.lower() == raw_class_type.lower():
                             raw_class_type = opt
@@ -677,12 +749,28 @@ def update_class(class_id: str = None):
         # Handle class_type
         if raw_class_type:
             allowed_ct = ["regular", "mixed", "club"]
-            normalized_ct = raw_class_type
-            if raw_class_type not in allowed_ct:
+            class_type_mapping = {
+                "lớp chính quy": "regular",
+                "lớp chạy": "mixed",
+                "câu lạc bộ": "club",
+                "regular class": "regular",
+                "mixed class": "mixed",
+                "club": "club"
+            }
+
+            # First try direct mapping for Vietnamese terms
+            if raw_class_type.lower() in class_type_mapping:
+                normalized_ct = class_type_mapping[raw_class_type.lower()]
+            elif raw_class_type not in allowed_ct:
+                # Fallback to existing logic
+                normalized_ct = raw_class_type
                 for opt in allowed_ct:
                     if opt.lower() == raw_class_type.lower():
                         normalized_ct = opt
                         break
+            else:
+                normalized_ct = raw_class_type
+
             frappe.db.set_value("SIS Class", class_id, "class_type", normalized_ct)
         
         frappe.db.commit()
