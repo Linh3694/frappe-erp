@@ -614,6 +614,19 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
             )
 
         family_doc = frappe.get_doc("CRM Family", family_id)
+        # Validate key person: must have exactly 1
+        key_person_count = sum(1 for rel in relationships if rel.get("key_person"))
+        if key_person_count == 0:
+            return validation_error_response(
+                message="Phải chọn ít nhất 1 người liên lạc chính",
+                errors={"key_person": ["Required"]}
+            )
+        if key_person_count > 1:
+            return validation_error_response(
+                message="Chỉ được chọn 1 người liên lạc chính",
+                errors={"key_person": ["Only one key person allowed"]}
+            )
+        
         # Reset relationships
         family_doc.set("relationships", [])
         for rel in relationships:
@@ -982,6 +995,19 @@ def create_family():
                     message=f"Guardian '{guardian_id}' not found",
                     code="GUARDIAN_NOT_FOUND"
                 )
+        
+        # Validate key person: must have exactly 1
+        key_person_count = sum(1 for rel in relationships if rel.get("key_person"))
+        if key_person_count == 0:
+            return validation_error_response(
+                message="Phải chọn ít nhất 1 người liên lạc chính",
+                errors={"key_person": ["Required"]}
+            )
+        if key_person_count > 1:
+            return validation_error_response(
+                message="Chỉ được chọn 1 người liên lạc chính",
+                errors={"key_person": ["Only one key person allowed"]}
+            )
         
         # Add relationships to the existing family_doc
         for rel in relationships:
