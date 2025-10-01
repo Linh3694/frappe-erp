@@ -520,6 +520,34 @@ def _process_excel_file(job):
                         "success": False,
                         "message": "File contains only header row. Please add student data starting from row 2."
                     }
+            elif job.doctype_target == "SIS Class":
+                # Special logic for class data
+                row_data = dict(df.iloc[0])
+
+                # Check if this row looks like actual class data rather than headers
+                has_class_data = False
+                for col, value in row_data.items():
+                    if pd.notna(value):
+                        val_str = str(value).strip()
+                        # Check for class data patterns - if column name is in our mapping and value doesn't look like header
+                        if (col.lower() in ['title', 'short_title', 'education_grade', 'academic_program', 'class_type', 'school_year_id', 'campus_id'] and
+                            val_str and
+                            not val_str.lower().startswith(('title', 'short_title', 'education_grade', 'academic_program', 'class_type', 'school_year_id', 'campus_id')) and
+                            not val_str.lower() in ['regular', 'mixed', 'club', 'lớp chính quy', 'lớp chạy', 'câu lạc bộ']):
+                            has_class_data = True
+                            break
+
+                if has_class_data:
+                    # This is actually data, not header - treat the single row as data
+                    df = pd.DataFrame([row_data])
+                    # Skip the header skipping logic below since this is already data
+                    skipped_rows = 0
+                else:
+                    # This is just header row
+                    return {
+                        "success": False,
+                        "message": "File contains only header row. Please add class data starting from row 2."
+                    }
             else:
                 # For other doctypes, single row is likely header only
                 return {
