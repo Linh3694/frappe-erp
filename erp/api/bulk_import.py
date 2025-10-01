@@ -486,37 +486,45 @@ def _process_excel_file(job):
             }
 
         if len(df) == 1:
-            # File has only 1 row - check if it's header or data
-            row_data = dict(df.iloc[0])
+            # File has only 1 row - special handling for single-row files
+            if job.doctype_target == "CRM Student":
+                # Special logic for student data
+                row_data = dict(df.iloc[0])
 
-            # Check if this row looks like actual student data rather than headers
-            has_student_data = False
-            for col, value in row_data.items():
-                if pd.notna(value):
-                    val_str = str(value).strip()
-                    # Check for student data patterns
-                    if (col.lower() in ['student name', 'student code', 'gender'] and val_str and
-                        not val_str.lower().startswith('student') and
-                        not val_str.lower().startswith('gender') and
-                        val_str.lower() not in ['male', 'female', 'others', 'nam', 'nữ', 'khác']):
-                        has_student_data = True
-                        break
+                # Check if this row looks like actual student data rather than headers
+                has_student_data = False
+                for col, value in row_data.items():
+                    if pd.notna(value):
+                        val_str = str(value).strip()
+                        # Check for student data patterns
+                        if (col.lower() in ['student name', 'student code', 'gender'] and val_str and
+                            not val_str.lower().startswith('student') and
+                            not val_str.lower().startswith('gender') and
+                            val_str.lower() not in ['male', 'female', 'others', 'nam', 'nữ', 'khác']):
+                            has_student_data = True
+                            break
 
-            if has_student_data:
-                # This is actually data, not header - treat the single row as data
-                df = pd.DataFrame([{
-                    'Student Name': row_data.get('Student Name', ''),
-                    'Student Code': row_data.get('Student Code', ''),
-                    'Date of Birth': row_data.get('Date of Birth', ''),
-                    'Gender': row_data.get('Gender', '')
-                }])
-                # Skip the header skipping logic below since this is already data
-                skipped_rows = 0
+                if has_student_data:
+                    # This is actually data, not header - treat the single row as data
+                    df = pd.DataFrame([{
+                        'Student Name': row_data.get('Student Name', ''),
+                        'Student Code': row_data.get('Student Code', ''),
+                        'Date of Birth': row_data.get('Date of Birth', ''),
+                        'Gender': row_data.get('Gender', '')
+                    }])
+                    # Skip the header skipping logic below since this is already data
+                    skipped_rows = 0
+                else:
+                    # This is just header row
+                    return {
+                        "success": False,
+                        "message": "File contains only header row. Please add student data starting from row 2."
+                    }
             else:
-                # This is just header row
+                # For other doctypes, single row is likely header only
                 return {
                     "success": False,
-                    "message": "File contains only header row. Please add student data starting from row 2."
+                    "message": "File contains only header row. Please add data starting from row 2."
                 }
 
         # Row processing logic - handle both cases: with header and without header
