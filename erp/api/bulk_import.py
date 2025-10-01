@@ -1016,17 +1016,30 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up school year: '{school_year_name}'")
 
                 # Try to find by name first, then title_vn, title_en
+                # Filter by campus_id for school years
                 school_year_id = None
                 try:
+                    base_filters = {"campus_id": campus_id} if campus_id else {}
+
                     # Try direct name match
-                    if frappe.db.exists("SIS School Year", school_year_name):
-                        school_year_id = school_year_name
+                    name_filters = base_filters.copy()
+                    name_filters["name"] = school_year_name
+                    name_hit = frappe.get_all(
+                        "SIS School Year",
+                        filters=name_filters,
+                        fields=["name"],
+                        limit=1
+                    )
+                    if name_hit:
+                        school_year_id = name_hit[0].name
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year by name: {school_year_id}")
                     else:
                         # Try title_vn
+                        title_filters = base_filters.copy()
+                        title_filters["title_vn"] = school_year_name
                         title_hit = frappe.get_all(
                             "SIS School Year",
-                            filters={"title_vn": school_year_name},
+                            filters=title_filters,
                             fields=["name"],
                             limit=1
                         )
@@ -1035,9 +1048,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year by title_vn: {school_year_id}")
                         else:
                             # Try title_en
+                            title_en_filters = base_filters.copy()
+                            title_en_filters["title_en"] = school_year_name
                             title_en_hit = frappe.get_all(
                                 "SIS School Year",
-                                filters={"title_en": school_year_name},
+                                filters=title_en_filters,
                                 fields=["name"],
                                 limit=1
                             )
@@ -1067,12 +1082,17 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up education grade: '{education_grade_name}'")
 
                 # Try to find by title_vn first, then grade_name, then title_en
+                # Filter by campus_id for education grades
                 education_grade_id = None
                 try:
+                    base_filters = {"campus_id": campus_id} if campus_id else {}
+
                     # Try title_vn first (most likely for Vietnamese data)
+                    title_filters = base_filters.copy()
+                    title_filters["title_vn"] = education_grade_name
                     title_hit = frappe.get_all(
                         "SIS Education Grade",
-                        filters={"title_vn": education_grade_name},
+                        filters=title_filters,
                         fields=["name"],
                         limit=1
                     )
@@ -1081,9 +1101,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn: {education_grade_id}")
                     else:
                         # Try grade_name
+                        grade_filters = base_filters.copy()
+                        grade_filters["grade_name"] = education_grade_name
                         grade_hit = frappe.get_all(
                             "SIS Education Grade",
-                            filters={"grade_name": education_grade_name},
+                            filters=grade_filters,
                             fields=["name"],
                             limit=1
                         )
@@ -1092,9 +1114,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by grade_name: {education_grade_id}")
                         else:
                             # Try title_en
+                            title_en_filters = base_filters.copy()
+                            title_en_filters["title_en"] = education_grade_name
                             title_en_hit = frappe.get_all(
                                 "SIS Education Grade",
-                                filters={"title_en": education_grade_name},
+                                filters=title_en_filters,
                                 fields=["name"],
                                 limit=1
                             )
@@ -1124,12 +1148,17 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up academic program: '{academic_program_name}'")
 
                 # Try to find by title_vn first, then title_en
+                # Filter by campus_id for academic programs
                 academic_program_id = None
                 try:
+                    base_filters = {"campus_id": campus_id} if campus_id else {}
+
                     # Try title_vn
+                    title_filters = base_filters.copy()
+                    title_filters["title_vn"] = academic_program_name
                     title_hit = frappe.get_all(
                         "SIS Academic Program",
-                        filters={"title_vn": academic_program_name},
+                        filters=title_filters,
                         fields=["name"],
                         limit=1
                     )
@@ -1138,9 +1167,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn: {academic_program_id}")
                     else:
                         # Try title_en
+                        title_en_filters = base_filters.copy()
+                        title_en_filters["title_en"] = academic_program_name
                         title_en_hit = frappe.get_all(
                             "SIS Academic Program",
-                            filters={"title_en": academic_program_name},
+                            filters=title_en_filters,
                             fields=["name"],
                             limit=1
                         )
