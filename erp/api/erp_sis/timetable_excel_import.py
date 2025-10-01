@@ -910,9 +910,18 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     overlapping_timetable = None
                     for timetable in existing_timetables:
                         # Check date range overlap: upload_start <= existing_end AND upload_end >= existing_start
-                        if (upload_start_date <= timetable.end_date and upload_end_date >= timetable.start_date):
-                            overlapping_timetable = timetable
-                            break
+                        # Convert string dates to datetime for comparison
+                        try:
+                            from datetime import datetime
+                            upload_start = datetime.strptime(upload_start_date, "%Y-%m-%d").date() if isinstance(upload_start_date, str) else upload_start_date
+                            upload_end = datetime.strptime(upload_end_date, "%Y-%m-%d").date() if isinstance(upload_end_date, str) else upload_end_date
+
+                            if (upload_start <= timetable.end_date and upload_end >= timetable.start_date):
+                                overlapping_timetable = timetable
+                                break
+                        except Exception as date_parse_error:
+                            logs.append(f"Warning: Could not parse dates for overlap check: {str(date_parse_error)}")
+                            continue
 
                     if overlapping_timetable:
                         # Use existing timetable and update its date range if needed
@@ -920,7 +929,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         logs.append(f"Found overlapping timetable: {timetable_id} ({overlapping_timetable.title_vn})")
 
                         # Update end_date if upload range extends beyond existing range
-                        if upload_end_date > overlapping_timetable.end_date:
+                        if upload_end > overlapping_timetable.end_date:
                             frappe.db.set_value("SIS Timetable", timetable_id, "end_date", upload_end_date)
                             logs.append(f"Extended timetable end_date to {upload_end_date}")
 
