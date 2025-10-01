@@ -307,16 +307,19 @@ def create_guardian():
             guardian_id = re.sub(r'[^a-z0-9]', '-', guardian_id)
             guardian_id = re.sub(r'-+', '-', guardian_id).strip('-') + '-' + str(nowdate().replace('-', ''))[-4:]
         
-        # Format phone number for Vietnam if needed
-        if phone_number and not phone_number.startswith('+'):
-            # Add Vietnam country code if phone starts with 0
-            if phone_number.startswith('0'):
-                phone_number = '+84' + phone_number[1:]
-            # Add + if it's just numbers
-            elif phone_number.isdigit() and len(phone_number) >= 9:
-                phone_number = '+84' + phone_number
+        # Validate and format phone number if provided
+        formatted_phone = None
+        if phone_number:
+            try:
+                formatted_phone = validate_vietnamese_phone_number(phone_number)
+                frappe.logger().info(f"Phone validated and formatted: '{phone_number}' -> '{formatted_phone}'")
+            except ValueError as ve:
+                return validation_error_response(
+                    message=f"Số điện thoại không hợp lệ: {str(ve)}",
+                    errors={"phone_number": [str(ve)]}
+                )
         
-        frappe.logger().info(f"Extracted values - Name: {guardian_name}, Phone: {phone_number}, Email: {email}")
+        frappe.logger().info(f"Extracted values - Name: {guardian_name}, Phone: {formatted_phone}, Email: {email}")
         
         # Input validation with detailed debugging
         if not guardian_name:
@@ -340,9 +343,18 @@ def create_guardian():
         existing_name = frappe.db.exists("CRM Guardian", {"guardian_name": guardian_name})
         if existing_name:
             return error_response(
-                message=f"Guardian with name '{guardian_name}' already exists",
+                message=f"Giám hộ với tên '{guardian_name}' đã tồn tại",
                 code="GUARDIAN_NAME_EXISTS"
             )
+        
+        # Check if phone number already exists
+        if formatted_phone:
+            existing_phone = frappe.db.exists("CRM Guardian", {"phone_number": formatted_phone})
+            if existing_phone:
+                return error_response(
+                    message=f"Số điện thoại '{formatted_phone}' đã được sử dụng bởi giám hộ khác",
+                    code="GUARDIAN_PHONE_EXISTS"
+                )
         
         frappe.logger().info(f"Creating guardian with Name: {guardian_name}")
         
@@ -351,7 +363,7 @@ def create_guardian():
             "doctype": "CRM Guardian",
             "guardian_id": guardian_id,
             "guardian_name": guardian_name,
-            "phone_number": phone_number or "",
+            "phone_number": formatted_phone or "",
             "email": email or ""
         })
         
@@ -367,7 +379,7 @@ def create_guardian():
         # Force persist critical fields in case of server scripts altering values
         try:
             frappe.db.set_value("CRM Guardian", guardian_doc.name, {
-                "phone_number": guardian_doc.phone_number or (phone_number or ""),
+                "phone_number": guardian_doc.phone_number or (formatted_phone or ""),
                 "email": guardian_doc.email or (email or ""),
             })
         except Exception as e:
@@ -776,6 +788,8 @@ def validate_vietnamese_phone_number(phone):
     1. If starts with (+84) -> keep as is
     2. If starts with 0 (e.g., 0987627212) -> replace 0 with (+84)
     3. Otherwise -> add (+84) at the beginning
+    
+    Valid Vietnamese phone numbers have 9-10 digits after country code +84.
     """
     if not phone or str(phone).strip() == '':
         return None
@@ -806,21 +820,21 @@ def validate_vietnamese_phone_number(phone):
     if clean_phone.startswith('(+84)'):
         result = clean_phone.replace('(+84)', '+84')
         frappe.logger().info(f"Rule 1 applied: {clean_phone} -> {result}")
-        # Validate final format
-        if re.match(r'^\+84[0-9]{7,10}$', result):
+        # Validate final format - Vietnamese mobile/landline requires 9-10 digits
+        if re.match(r'^\+84[0-9]{9,10}$', result):
             return result
         else:
             frappe.logger().error(f"Invalid format after Rule 1: {result}")
-            raise ValueError(f"Invalid phone number format after processing. Got: {result}")
+            raise ValueError(f"Số điện thoại phải có 9-10 chữ số sau +84. Nhận được: {result}")
     
     # Rule 2: If starts with 0 -> replace 0 with (+84)
-    if clean_phone.startswith('0') and re.match(r'^0[0-9]{8,10}$', clean_phone):
+    if clean_phone.startswith('0') and re.match(r'^0[0-9]{9,10}$', clean_phone):
         result = f"+84{clean_phone[1:]}"
         frappe.logger().info(f"Rule 2 applied: {clean_phone} -> {result}")
-        if re.match(r'^\+84[0-9]{7,10}$', result):
+        if re.match(r'^\+84[0-9]{9,10}$', result):
             return result
         frappe.logger().error(f"Invalid final format after Rule 2: Original='{phone}', Result='{result}'")
-        raise ValueError(f"Invalid phone number format. Expected Vietnamese mobile format. Got: {phone}")
+        raise ValueError(f"Số điện thoại không hợp lệ. Số điện thoại VN cần 10-11 chữ số (bắt đầu bằng 0). Nhận được: {phone}")
     
     # Rule 3: Otherwise -> add (+84) at the beginning
     # First remove any existing +84 or 84 prefix to avoid duplication
@@ -833,12 +847,12 @@ def validate_vietnamese_phone_number(phone):
     result = f"+84{clean_phone}"
     frappe.logger().info(f"Rule 3 applied: {phone_str} -> {result}")
     
-    # Final validation - must be +84 followed by 7-10 digits (support landline formats and missing leading zeros)
-    if re.match(r'^\+84[0-9]{7,10}$', result):
+    # Final validation - must be +84 followed by 9-10 digits (Vietnamese mobile/landline standard)
+    if re.match(r'^\+84[0-9]{9,10}$', result):
         return result
     else:
         frappe.logger().error(f"Invalid final format: Original='{phone}', Result='{result}'")
-        raise ValueError(f"Invalid phone number format. Expected Vietnamese mobile format. Got: {phone}")
+        raise ValueError(f"Số điện thoại không hợp lệ. Số điện thoại VN cần có 9-10 chữ số sau mã quốc gia. Nhận được: {phone}")
 
 
 @frappe.whitelist(allow_guest=False)
