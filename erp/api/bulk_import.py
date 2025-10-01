@@ -1058,27 +1058,28 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 education_grade_name = ' '.join(education_grade_name.split())  # Remove extra spaces
                 frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up education grade: '{education_grade_name}'")
 
-                # Try to find by grade_name first, then title_vn, title_en
+                # Try to find by title_vn first, then grade_name, then title_en
                 education_grade_id = None
                 try:
-                    grade_hit = frappe.get_all(
+                    # Try title_vn first (most likely for Vietnamese data)
+                    title_hit = frappe.get_all(
                         "SIS Education Grade",
-                        filters={"grade_name": education_grade_name},
+                        filters={"title_vn": education_grade_name},
                         fields=["name"],
                         limit=1
                     )
-                    if grade_hit:
-                        education_grade_id = grade_hit[0].name
+                    if title_hit:
+                        education_grade_id = title_hit[0].name
                     else:
-                        # Try title_vn
-                        title_hit = frappe.get_all(
+                        # Try grade_name
+                        grade_hit = frappe.get_all(
                             "SIS Education Grade",
-                            filters={"title_vn": education_grade_name},
+                            filters={"grade_name": education_grade_name},
                             fields=["name"],
                             limit=1
                         )
-                        if title_hit:
-                            education_grade_id = title_hit[0].name
+                        if grade_hit:
+                            education_grade_id = grade_hit[0].name
                         else:
                             # Try title_en
                             title_en_hit = frappe.get_all(
