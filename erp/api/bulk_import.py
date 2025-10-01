@@ -793,10 +793,15 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
         campus_id = row_data.get("campus_id")
         if not campus_id:
             campus_id = job.campus_id
+            frappe.logger().info(f"Row {row_num} - Using job campus_id: '{campus_id}'")
+        else:
+            frappe.logger().info(f"Row {row_num} - Using campus_id from Excel: '{campus_id}'")
         
         # Normalize campus_id - handle case variations (convert to uppercase to match DB format)
         if campus_id:
+            original_campus_id = campus_id
             campus_id = campus_id.upper()
+            frappe.logger().info(f"Row {row_num} - Normalized campus_id: '{original_campus_id}' -> '{campus_id}'")
 
         # Build document data
         doc_data = {
@@ -1005,11 +1010,6 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
             # Collect all resolution errors for better user feedback
             resolution_errors = []
-
-            # Normalize campus_id - handle case variations
-            if campus_id:
-                campus_id = campus_id.upper()  # Convert to uppercase to match DB format
-                frappe.logger().info(f"Row {row_num} - [SIS Class] Normalized campus_id: '{campus_id}'")
 
             # Handle school year lookup first (required field)
             school_year_name = None
