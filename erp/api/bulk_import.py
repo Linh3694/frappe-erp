@@ -999,11 +999,15 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
         elif doctype == "SIS Class":
 
+            # Collect all resolution errors for better user feedback
+            resolution_errors = []
+
             # Handle school year lookup first (required field)
             school_year_name = None
             for key in ["school_year_id", "school_year", "year", "năm học"]:
                 if key in row_data and row_data[key] and str(row_data[key]).strip():
                     school_year_name = str(row_data[key]).strip()
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year key '{key}' with value: '{school_year_name}'")
                     break
 
             if school_year_name:
@@ -1017,6 +1021,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     # Try direct name match
                     if frappe.db.exists("SIS School Year", school_year_name):
                         school_year_id = school_year_name
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year by name: {school_year_id}")
                     else:
                         # Try title_vn
                         title_hit = frappe.get_all(
@@ -1027,6 +1032,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if title_hit:
                             school_year_id = title_hit[0].name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year by title_vn: {school_year_id}")
                         else:
                             # Try title_en
                             title_en_hit = frappe.get_all(
@@ -1037,6 +1043,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             )
                             if title_en_hit:
                                 school_year_id = title_en_hit[0].name
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year by title_en: {school_year_id}")
                 except Exception as e:
                     frappe.logger().error(f"Error looking up school year '{school_year_name}': {str(e)}")
 
@@ -1044,13 +1051,14 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["school_year_id"] = school_year_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year ID: {school_year_id}")
                 else:
-                    raise frappe.ValidationError(f"[SIS Class] Không thể tìm thấy School Year: '{school_year_name}'")
+                    resolution_errors.append(f"School Year: '{school_year_name}'")
 
             # Handle education grade lookup
             education_grade_name = None
             for key in ["education_grade", "grade", "khối"]:
                 if key in row_data and row_data[key] and str(row_data[key]).strip():
                     education_grade_name = str(row_data[key]).strip()
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade key '{key}' with value: '{education_grade_name}'")
                     break
 
             if education_grade_name:
@@ -1070,6 +1078,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     )
                     if title_hit:
                         education_grade_id = title_hit[0].name
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn: {education_grade_id}")
                     else:
                         # Try grade_name
                         grade_hit = frappe.get_all(
@@ -1080,6 +1089,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if grade_hit:
                             education_grade_id = grade_hit[0].name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by grade_name: {education_grade_id}")
                         else:
                             # Try title_en
                             title_en_hit = frappe.get_all(
@@ -1090,6 +1100,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             )
                             if title_en_hit:
                                 education_grade_id = title_en_hit[0].name
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_en: {education_grade_id}")
                 except Exception as e:
                     frappe.logger().error(f"Error looking up education grade '{education_grade_name}': {str(e)}")
 
@@ -1097,13 +1108,14 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["education_grade"] = education_grade_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade ID: {education_grade_id}")
                 else:
-                    raise frappe.ValidationError(f"[SIS Class] Không thể tìm thấy Education Grade: '{education_grade_name}'")
+                    resolution_errors.append(f"Education Grade: '{education_grade_name}'")
 
             # Handle academic program lookup
             academic_program_name = None
             for key in ["academic_program", "program", "hệ"]:
                 if key in row_data and row_data[key] and str(row_data[key]).strip():
                     academic_program_name = str(row_data[key]).strip()
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program key '{key}' with value: '{academic_program_name}'")
                     break
 
             if academic_program_name:
@@ -1123,6 +1135,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     )
                     if title_hit:
                         academic_program_id = title_hit[0].name
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn: {academic_program_id}")
                     else:
                         # Try title_en
                         title_en_hit = frappe.get_all(
@@ -1133,6 +1146,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if title_en_hit:
                             academic_program_id = title_en_hit[0].name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_en: {academic_program_id}")
                 except Exception as e:
                     frappe.logger().error(f"Error looking up academic program '{academic_program_name}': {str(e)}")
 
@@ -1140,7 +1154,12 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["academic_program"] = academic_program_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program ID: {academic_program_id}")
                 else:
-                    raise frappe.ValidationError(f"[SIS Class] Không thể tìm thấy Academic Program: '{academic_program_name}'")
+                    resolution_errors.append(f"Academic Program: '{academic_program_name}'")
+
+            # If there are resolution errors, raise a comprehensive error
+            if resolution_errors:
+                error_msg = f"Không thể tìm thấy {', '.join(resolution_errors)}"
+                raise frappe.ValidationError(error_msg)
 
         # Special field processing before mapping
         # Convert gender values to lowercase for proper validation
