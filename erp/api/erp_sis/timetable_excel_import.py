@@ -1132,15 +1132,16 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 
                 logs.append(f"   📊 Will create {len(rows_by_class)} instances (one per class)")
                 
-                # CRITICAL FIX: Xóa TẤT CẢ instances cũ của các classes này (bất kể thuộc timetable nào)
-                # để tránh duplicate/conflict instances
+                # CRITICAL FIX: Xóa instances từ upload_start_date trở đi
+                # Logic: CHỈ xóa instances có start_date >= upload_start_date
+                # Giữ lại instances hoàn toàn trước upload_start_date để không làm mất timetable hiện tại
                 logs.append(f"")
-                logs.append(f"🧹 CLEANUP: Removing ALL old instances for these classes (any timetable)")
+                logs.append(f"🧹 CLEANUP: Removing instances from {upload_start_date} onwards for these classes")
                 try:
                     class_list = list(rows_by_class.keys())
                     logs.append(f"   Classes to cleanup: {len(class_list)}")
                     
-                    # Query tất cả instances của các classes này với date overlap
+                    # Query tất cả instances của các classes này
                     cleanup_instances = frappe.get_all(
                         "SIS Timetable Instance",
                         fields=["name", "timetable_id", "class_id", "start_date", "end_date"],
@@ -1152,27 +1153,47 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     
                     logs.append(f"   📋 Found {len(cleanup_instances)} existing instances across ALL timetables")
                     
-                    # Filter instances that overlap with upload range
-                    cleanup_overlapping = []
+                    # Filter instances: CHỈ xóa instances có start_date >= upload_start_date
+                    # Giữ lại instances có start_date < upload_start_date (không ảnh hưởng timetable hiện tại)
+                    cleanup_to_delete = []
+                    cleanup_to_keep = []
+                    
                     for inst in cleanup_instances:
-                        if inst.start_date <= upload_end and inst.end_date >= upload_start:
-                            cleanup_overlapping.append(inst)
+                        if inst.start_date >= upload_start:
+                            cleanup_to_delete.append(inst)
+                        else:
+                            cleanup_to_keep.append(inst)
                     
-                    logs.append(f"   ⚠️  {len(cleanup_overlapping)} instances overlap with upload range - will delete")
+                    logs.append(f"   ⚠️  {len(cleanup_to_delete)} instances start from {upload_start_date} onwards - will DELETE")
+                    logs.append(f"   ✅ {len(cleanup_to_keep)} instances start before {upload_start_date} - will KEEP")
                     
-                    if cleanup_overlapping:
-                        # Show sample
-                        timetable_counts = {}
-                        for inst in cleanup_overlapping:
-                            timetable_counts[inst.timetable_id] = timetable_counts.get(inst.timetable_id, 0) + 1
+                    if cleanup_to_delete:
+                        # Show sample của instances sẽ xóa
+                        timetable_counts_delete = {}
+                        for inst in cleanup_to_delete:
+                            timetable_counts_delete[inst.timetable_id] = timetable_counts_delete.get(inst.timetable_id, 0) + 1
                         
-                        logs.append(f"   🔍 Instances by timetable:")
-                        for tt_id, count in sorted(timetable_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
+                        logs.append(f"   🔍 Instances to DELETE (by timetable):")
+                        for tt_id, count in sorted(timetable_counts_delete.items(), key=lambda x: x[1], reverse=True)[:5]:
                             logs.append(f"      • {tt_id}: {count} instances")
                         
-                        # Delete all overlapping instances
+                        # Show sample của instances sẽ giữ
+                        if cleanup_to_keep:
+                            timetable_counts_keep = {}
+                            for inst in cleanup_to_keep:
+                                timetable_counts_keep[inst.timetable_id] = timetable_counts_keep.get(inst.timetable_id, 0) + 1
+                            
+                            logs.append(f"   🔍 Instances to KEEP (by timetable):")
+                            for tt_id, count in sorted(timetable_counts_keep.items(), key=lambda x: x[1], reverse=True)[:3]:
+                                # Show date range của instances giữ lại
+                                kept_instances = [i for i in cleanup_to_keep if i.timetable_id == tt_id]
+                                min_date = min(i.start_date for i in kept_instances)
+                                max_date = max(i.end_date for i in kept_instances)
+                                logs.append(f"      • {tt_id}: {count} instances ({min_date} to {max_date})")
+                        
+                        # Delete instances from upload_start_date onwards
                         deleted_cleanup = 0
-                        for inst in cleanup_overlapping:
+                        for inst in cleanup_to_delete:
                             try:
                                 # Delete related records
                                 frappe.db.sql("DELETE FROM `tabSIS Teacher Timetable` WHERE timetable_instance_id = %s", (inst.name,))
@@ -1183,10 +1204,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             except Exception:
                                 pass
                         
-                        logs.append(f"   ✅ Deleted {deleted_cleanup} instances from ALL timetables")
+                        logs.append(f"   ✅ Deleted {deleted_cleanup} instances from {upload_start_date} onwards")
                         frappe.db.commit()
                     else:
-                        logs.append(f"   ℹ️  No cleanup needed")
+                        logs.append(f"   ℹ️  No instances to delete (all existing instances are before {upload_start_date})")
                         
                 except Exception as cleanup_error:
                     logs.append(f"   ⚠️  Cleanup warning: {str(cleanup_error)}")
