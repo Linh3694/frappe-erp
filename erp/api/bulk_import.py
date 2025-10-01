@@ -135,6 +135,15 @@ def get_bulk_import_status():
         progress_percentage = job.get_progress_percentage()
 
         # Build response
+        job_message = job.message or ""
+        debug_info = None
+
+        # Extract debug info from message if present
+        if job_message and " | DEBUG: " in job_message:
+            parts = job_message.split(" | DEBUG: ", 1)
+            job_message = parts[0]
+            debug_info = parts[1]
+
         response_data = {
             "job_id": job.name,
             "status": job.status,
@@ -146,7 +155,8 @@ def get_bulk_import_status():
             "progress_percentage": progress_percentage,
             "started_at": job.started_at,
             "finished_at": job.finished_at,
-            "message": job.message,
+            "message": job_message,
+            "debug_info": debug_info,
             "error_file_url": job.error_file_url
         }
 
