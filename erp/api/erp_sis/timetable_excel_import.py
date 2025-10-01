@@ -719,8 +719,10 @@ def process_excel_import():
 
 def process_excel_import_with_metadata_v2(import_data: dict):
     """Process Excel import with metadata (title, dates, etc.) - Simplified version"""
+    # Initialize logs FIRST before any other code
+    logs = []
+    
     try:
-
         # Extract parameters with defaults
         file_path = import_data.get("file_path", "")
         title_vn = import_data.get("title_vn", "")
@@ -796,8 +798,6 @@ def process_excel_import_with_metadata_v2(import_data: dict):
             importer = TimetableExcelImporter(campus_id)
             # Normalize columns upfront for downstream processing
             df = importer.normalize_columns(df)
-            # Initialize logs collector
-            logs = []
             
             # Auto-calculate end_date from school_year_id if not provided
             if not import_data.get("end_date") and import_data.get("school_year_id"):
