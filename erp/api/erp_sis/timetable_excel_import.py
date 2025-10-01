@@ -1173,6 +1173,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
             # Prepare detailed result with created records info
             created_records = {}
             if not dry_run and 'timetable_id' in locals():
+                # Load timetable_doc if not already available (for update in-place case)
+                if 'timetable_doc' not in locals():
+                    timetable_doc = frappe.get_doc("SIS Timetable", timetable_id)
+
                 created_records = {
                     "timetable": {
                         "id": timetable_id,
