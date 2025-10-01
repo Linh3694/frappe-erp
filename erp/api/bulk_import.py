@@ -997,6 +997,150 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 else:
                     raise frappe.ValidationError(f"[{doctype}] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
 
+        elif doctype == "SIS Class":
+
+            # Handle school year lookup first (required field)
+            school_year_name = None
+            for key in ["school_year_id", "school_year", "year", "năm học"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    school_year_name = str(row_data[key]).strip()
+                    break
+
+            if school_year_name:
+                # Normalize and clean the school year name
+                school_year_name = ' '.join(school_year_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up school year: '{school_year_name}'")
+
+                # Try to find by name first, then title_vn, title_en
+                school_year_id = None
+                try:
+                    # Try direct name match
+                    if frappe.db.exists("SIS School Year", school_year_name):
+                        school_year_id = school_year_name
+                    else:
+                        # Try title_vn
+                        title_hit = frappe.get_all(
+                            "SIS School Year",
+                            filters={"title_vn": school_year_name},
+                            fields=["name"],
+                            limit=1
+                        )
+                        if title_hit:
+                            school_year_id = title_hit[0].name
+                        else:
+                            # Try title_en
+                            title_en_hit = frappe.get_all(
+                                "SIS School Year",
+                                filters={"title_en": school_year_name},
+                                fields=["name"],
+                                limit=1
+                            )
+                            if title_en_hit:
+                                school_year_id = title_en_hit[0].name
+                except Exception as e:
+                    frappe.logger().error(f"Error looking up school year '{school_year_name}': {str(e)}")
+
+                if school_year_id:
+                    doc_data["school_year_id"] = school_year_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year ID: {school_year_id}")
+                else:
+                    raise frappe.ValidationError(f"[SIS Class] Không thể tìm thấy School Year: '{school_year_name}'")
+
+            # Handle education grade lookup
+            education_grade_name = None
+            for key in ["education_grade", "grade", "khối"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    education_grade_name = str(row_data[key]).strip()
+                    break
+
+            if education_grade_name:
+                # Normalize and clean the education grade name
+                education_grade_name = ' '.join(education_grade_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up education grade: '{education_grade_name}'")
+
+                # Try to find by grade_name first, then title_vn, title_en
+                education_grade_id = None
+                try:
+                    grade_hit = frappe.get_all(
+                        "SIS Education Grade",
+                        filters={"grade_name": education_grade_name},
+                        fields=["name"],
+                        limit=1
+                    )
+                    if grade_hit:
+                        education_grade_id = grade_hit[0].name
+                    else:
+                        # Try title_vn
+                        title_hit = frappe.get_all(
+                            "SIS Education Grade",
+                            filters={"title_vn": education_grade_name},
+                            fields=["name"],
+                            limit=1
+                        )
+                        if title_hit:
+                            education_grade_id = title_hit[0].name
+                        else:
+                            # Try title_en
+                            title_en_hit = frappe.get_all(
+                                "SIS Education Grade",
+                                filters={"title_en": education_grade_name},
+                                fields=["name"],
+                                limit=1
+                            )
+                            if title_en_hit:
+                                education_grade_id = title_en_hit[0].name
+                except Exception as e:
+                    frappe.logger().error(f"Error looking up education grade '{education_grade_name}': {str(e)}")
+
+                if education_grade_id:
+                    doc_data["education_grade"] = education_grade_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade ID: {education_grade_id}")
+                else:
+                    raise frappe.ValidationError(f"[SIS Class] Không thể tìm thấy Education Grade: '{education_grade_name}'")
+
+            # Handle academic program lookup
+            academic_program_name = None
+            for key in ["academic_program", "program", "hệ"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    academic_program_name = str(row_data[key]).strip()
+                    break
+
+            if academic_program_name:
+                # Normalize and clean the academic program name
+                academic_program_name = ' '.join(academic_program_name.split())  # Remove extra spaces
+                frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up academic program: '{academic_program_name}'")
+
+                # Try to find by title_vn first, then title_en
+                academic_program_id = None
+                try:
+                    # Try title_vn
+                    title_hit = frappe.get_all(
+                        "SIS Academic Program",
+                        filters={"title_vn": academic_program_name},
+                        fields=["name"],
+                        limit=1
+                    )
+                    if title_hit:
+                        academic_program_id = title_hit[0].name
+                    else:
+                        # Try title_en
+                        title_en_hit = frappe.get_all(
+                            "SIS Academic Program",
+                            filters={"title_en": academic_program_name},
+                            fields=["name"],
+                            limit=1
+                        )
+                        if title_en_hit:
+                            academic_program_id = title_en_hit[0].name
+                except Exception as e:
+                    frappe.logger().error(f"Error looking up academic program '{academic_program_name}': {str(e)}")
+
+                if academic_program_id:
+                    doc_data["academic_program"] = academic_program_id
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program ID: {academic_program_id}")
+                else:
+                    raise frappe.ValidationError(f"[SIS Class] Không thể tìm thấy Academic Program: '{academic_program_name}'")
+
         # Special field processing before mapping
         # Convert gender values to lowercase for proper validation
         if 'gender' in row_data and row_data['gender']:
