@@ -978,9 +978,30 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             # Filter instances that overlap with upload range
                             overlapping_instances = []
                             non_overlapping_instances = []
-                            for instance in all_instances:
+                            
+                            # Debug: Log types and values for comparison
+                            logs.append(f"   🔬 DEBUG: upload_start type={type(upload_start)}, value={upload_start}")
+                            logs.append(f"   🔬 DEBUG: upload_end type={type(upload_end)}, value={upload_end}")
+                            
+                            for idx, instance in enumerate(all_instances):
+                                # Debug first instance to see data types
+                                if idx == 0:
+                                    logs.append(f"   🔬 DEBUG: instance.start_date type={type(instance.start_date)}, value={instance.start_date}")
+                                    logs.append(f"   🔬 DEBUG: instance.end_date type={type(instance.end_date)}, value={instance.end_date}")
+                                
                                 # Overlap: instance_start <= upload_end AND instance_end >= upload_start
-                                if instance.start_date <= upload_end and instance.end_date >= upload_start:
+                                condition1 = instance.start_date <= upload_end
+                                condition2 = instance.end_date >= upload_start
+                                is_overlap = condition1 and condition2
+                                
+                                # Debug first 2 instances
+                                if idx < 2:
+                                    logs.append(f"   🔬 DEBUG instance {instance.name}:")
+                                    logs.append(f"      - instance.start_date ({instance.start_date}) <= upload_end ({upload_end}) = {condition1}")
+                                    logs.append(f"      - instance.end_date ({instance.end_date}) >= upload_start ({upload_start}) = {condition2}")
+                                    logs.append(f"      - OVERLAP = {is_overlap}")
+                                
+                                if is_overlap:
                                     overlapping_instances.append(instance)
                                 else:
                                     non_overlapping_instances.append(instance)
@@ -1119,12 +1140,17 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     for i, row in enumerate(class_rows[:3]):  # Show first 3 rows for debugging
                         import_logs.append(f"Row {i+1}: day={row.get('day_of_week')}, period={row.get('period_priority')}, subject={row.get('subject_name')}")
 
+                    # Log để debug date range
+                    instance_start = import_data.get("start_date")
+                    instance_end = import_data.get("end_date")
+                    import_logs.append(f"Creating instance for {class_id}: start={instance_start}, end={instance_end}")
+                    
                     instance_doc = frappe.get_doc({
                         "doctype": "SIS Timetable Instance",
                         "timetable_id": timetable_id,
                         "class_id": class_id,
-                        "start_date": import_data.get("start_date"),
-                        "end_date": import_data.get("end_date"),
+                        "start_date": instance_start,
+                        "end_date": instance_end,
                         "campus_id": campus_id
                     })
                     try:
@@ -1276,6 +1302,13 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         logs.append(f"   ❌ Failed to create instance for class {class_id}: {str(e)}")
                         continue
                 
+                # Commit all changes
+                try:
+                    frappe.db.commit()
+                    logs.append(f"   ✅ Committed all database changes")
+                except Exception as commit_error:
+                    logs.append(f"   ⚠️  Commit warning: {str(commit_error)}")
+                
                 # Summary
                 logs.append(f"")
                 logs.append(f"📊 SUMMARY:")
@@ -1284,6 +1317,16 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 logs.append(f"   • Instances created: {instances_created}")
                 logs.append(f"   • Total rows created: {rows_created}")
                 logs.append(f"   • Classes: {len(rows_by_class)}")
+                
+                # Add import_logs to main logs for debugging
+                if import_logs:
+                    logs.append(f"")
+                    logs.append(f"🔍 DETAILED INSTANCE CREATION LOGS:")
+                    # Show first 10 logs
+                    for log in import_logs[:10]:
+                        logs.append(f"   {log}")
+                    if len(import_logs) > 10:
+                        logs.append(f"   ... and {len(import_logs) - 10} more lines")
 
             # Prepare detailed result with created records info
             created_records = {}
