@@ -515,57 +515,100 @@ def _process_excel_file(job):
             }
 
         if len(df) == 1:
-            # File has only header row
-            debug_info = f"File has only 1 row (header). No data rows found. Row content: {dict(df.iloc[0]) if len(df) > 0 else 'N/A'}"
-            frappe.logger().error(f"Only header: {debug_info}")
-            return {
-                "success": False,
-                "message": "File contains only header row. Please add student data starting from row 2.",
-                "debug_info": debug_info
-            }
+            # File has only 1 row - check if it's header or data
+            row_data = dict(df.iloc[0])
+            frappe.logger().info(f"Single row content: {row_data}")
 
-        # Always skip header row (row 1) first
-        df_after_header = df.iloc[1:].reset_index(drop=True)
-        skipped_rows = 1
-        frappe.logger().info(f"After skipping header: {len(df_after_header)} rows remaining")
+            # Check if this row looks like actual student data rather than headers
+            has_student_data = False
+            data_indicators = []
 
-        # Simplified logic: Always try to start from row 2, but skip if it's clearly sample data
-        df = df.iloc[1:]  # Start from row 2
-        skipped_rows = 1
+            for col, value in row_data.items():
+                if pd.notna(value):
+                    val_str = str(value).strip()
+                    data_indicators.append(f"{col}: {val_str}")
 
-        if len(df) > 0:
-            first_row = df.iloc[0]
+                    # Check for student data patterns
+                    if (col.lower() in ['student name', 'student code', 'gender'] and val_str and
+                        not val_str.lower().startswith('student') and
+                        not val_str.lower().startswith('gender') and
+                        val_str.lower() not in ['male', 'female', 'others', 'nam', 'nữ', 'khác']):
+                        has_student_data = True
+                        frappe.logger().info(f"Found student data in column {col}: {val_str}")
+                        break
 
-            # Check if this is clearly sample/instruction data
-            # Only skip if ALL non-empty cells contain sample indicators
-            non_empty_count = 0
-            sample_indicators_count = 0
-
-            for val in first_row.values:
-                if pd.notna(val) and str(val).strip():
-                    non_empty_count += 1
-                    val_str = str(val).strip().lower()
-                    if ('←' in val_str or
-                        'fill your data' in val_str or
-                        'sample' in val_str or
-                        'ví dụ' in val_str or
-                        val_str in ['nam', 'nữ', 'khác'] or
-                        val_str.startswith('student_') or  # sample student code
-                        '@example.com' in val_str):  # sample email
-                        sample_indicators_count += 1
-
-            # Only consider it sample row if ALL non-empty cells are sample indicators
-            is_sample_row = non_empty_count > 0 and sample_indicators_count == non_empty_count
-
-            frappe.logger().info(f"Row analysis: non_empty={non_empty_count}, sample_indicators={sample_indicators_count}, is_sample={is_sample_row}")
-
-            if is_sample_row and len(df) > 1:
-                # Skip this row and start from next row
-                df = df.iloc[1:]
-                skipped_rows = 2
-                frappe.logger().info("Detected sample row, skipping to row 3")
+            if has_student_data:
+                # This is actually data, not header - treat the single row as data
+                frappe.logger().info("Single row contains student data, processing as data row")
+                df = pd.DataFrame([{
+                    'Student Name': row_data.get('Student Name', ''),
+                    'Student Code': row_data.get('Student Code', ''),
+                    'Date of Birth': row_data.get('Date of Birth', ''),
+                    'Gender': row_data.get('Gender', '')
+                }])
+                frappe.logger().info(f"Converted to data DataFrame: {df}")
+                # Skip the header skipping logic below since this is already data
+                skipped_rows = 0
+                # Jump to processing logic
+                frappe.logger().info("Jumping to processing logic for single data row")
             else:
-                frappe.logger().info("Row 2 contains real data or mixed content, starting from row 2")
+                # This is just header row
+                debug_info = f"File has only 1 row (header). No data rows found. Row content: {row_data}"
+                frappe.logger().error(f"Only header: {debug_info}")
+                return {
+                    "success": False,
+                    "message": "File contains only header row. Please add student data starting from row 2.",
+                    "debug_info": debug_info
+                }
+
+        # Row processing logic - handle both cases: with header and without header
+        if skipped_rows == 0:
+            # Already processed single data row case, df is ready
+            frappe.logger().info("Using pre-processed single data row DataFrame")
+        else:
+            # Normal case: skip header and check for sample data
+            # Always skip header row (row 1) first
+            df_after_header = df.iloc[1:].reset_index(drop=True)
+            skipped_rows = 1
+            frappe.logger().info(f"After skipping header: {len(df_after_header)} rows remaining")
+
+            # Simplified logic: Always try to start from row 2, but skip if it's clearly sample data
+            df = df.iloc[1:]  # Start from row 2
+            skipped_rows = 1
+
+            if len(df) > 0:
+                first_row = df.iloc[0]
+
+                # Check if this is clearly sample/instruction data
+                # Only skip if ALL non-empty cells contain sample indicators
+                non_empty_count = 0
+                sample_indicators_count = 0
+
+                for val in first_row.values:
+                    if pd.notna(val) and str(val).strip():
+                        non_empty_count += 1
+                        val_str = str(val).strip().lower()
+                        if ('←' in val_str or
+                            'fill your data' in val_str or
+                            'sample' in val_str or
+                            'ví dụ' in val_str or
+                            val_str in ['nam', 'nữ', 'khác'] or
+                            val_str.startswith('student_') or  # sample student code
+                            '@example.com' in val_str):  # sample email
+                            sample_indicators_count += 1
+
+                # Only consider it sample row if ALL non-empty cells are sample indicators
+                is_sample_row = non_empty_count > 0 and sample_indicators_count == non_empty_count
+
+                frappe.logger().info(f"Row analysis: non_empty={non_empty_count}, sample_indicators={sample_indicators_count}, is_sample={is_sample_row}")
+
+                if is_sample_row and len(df) > 1:
+                    # Skip this row and start from next row
+                    df = df.iloc[1:]
+                    skipped_rows = 2
+                    frappe.logger().info("Detected sample row, skipping to row 3")
+                else:
+                    frappe.logger().info("Row 2 contains real data or mixed content, starting from row 2")
 
         # Remove completely empty rows
         frappe.logger().info(f"Before dropna: {len(df)} rows")
