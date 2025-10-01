@@ -783,10 +783,13 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 return final_response
 
             # Read Excel file
+            logs.append(f"📄 Reading Excel file from: {file_path}")
             try:
                 df = pd.read_excel(file_path, header=0)  # First row is header
                 total_rows = len(df)
+                logs.append(f"✅ Successfully read Excel file - {total_rows} rows found")
             except Exception as excel_error:
+                logs.append(f"❌ Failed to read Excel file: {str(excel_error)}")
                 raise Exception(f"Failed to read Excel file: {str(excel_error)}")
 
             # Initialize importer for validation
@@ -841,8 +844,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 return single_item_response(result, "Timetable import validation failed")
 
             # Parse to schedule_data with mapping validations (supports new layout)
+            logs.append(f"🔄 Starting to process Excel data for education stage: {import_data.get('education_stage_id')}")
             education_stage_id = import_data.get("education_stage_id")
             schedule_data, ok = importer.process_excel_data(df, education_stage_id)
+            logs.append(f"✅ Excel data processing completed - {len(schedule_data)} schedule entries generated, validation {'passed' if ok else 'failed'}")
             if not ok:
                 # Categorize errors for better user experience
                 critical_errors = []
@@ -934,51 +939,84 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             logs.append(f"Extended timetable end_date to {upload_end_date}")
 
                         # Delete overlapping instances (instances that start on or after upload_start_date)
-                        overlapping_instances = frappe.get_all(
-                            "SIS Timetable Instance",
-                            filters={
-                                "timetable_id": timetable_id,
-                                "start_date": [">=", upload_start_date]
-                            }
-                        )
+                        logs.append(f"🔍 Step 1: Querying overlapping instances for timetable {timetable_id}")
+                        try:
+                            overlapping_instances = frappe.get_all(
+                                "SIS Timetable Instance",
+                                filters={
+                                    "timetable_id": timetable_id,
+                                    "start_date": [">=", upload_start_date]
+                                }
+                            )
+                            logs.append(f"✅ Found {len(overlapping_instances)} overlapping instances")
+                        except Exception as query_error:
+                            logs.append(f"❌ Error querying SIS Timetable Instance: {str(query_error)}")
+                            overlapping_instances = []
 
                         deleted_instances = 0
                         for instance in overlapping_instances:
                             try:
+                                logs.append(f"🔍 Step 2: Deleting related records for instance {instance.name}")
                                 # Delete related teacher and student timetables first to avoid foreign key constraints
                                 # Delete SIS Teacher Timetable entries
-                                teacher_timetables = frappe.get_all(
-                                    "SIS Teacher Timetable",
-                                    filters={"timetable_instance_id": instance.name}
-                                )
-                                for tt in teacher_timetables:
-                                    try:
-                                        frappe.delete_doc("SIS Teacher Timetable", tt.name, ignore_permissions=True)
-                                    except Exception:
-                                        pass  # Continue even if some deletions fail
+                                try:
+                                    teacher_timetables = frappe.get_all(
+                                        "SIS Teacher Timetable",
+                                        filters={"timetable_instance_id": instance.name}
+                                    )
+                                    logs.append(f"✅ Found {len(teacher_timetables)} teacher timetables to delete")
+                                    for tt in teacher_timetables:
+                                        try:
+                                            frappe.delete_doc("SIS Teacher Timetable", tt.name, ignore_permissions=True)
+                                        except Exception as tt_error:
+                                            logs.append(f"⚠️  Could not delete teacher timetable {tt.name}: {str(tt_error)}")
+                                except Exception as tt_query_error:
+                                    logs.append(f"❌ Error querying SIS Teacher Timetable: {str(tt_query_error)}")
 
                                 # Delete SIS Student Timetable entries
-                                student_timetables = frappe.get_all(
-                                    "SIS Student Timetable",
-                                    filters={"timetable_instance_id": instance.name}
-                                )
-                                for st in student_timetables:
-                                    try:
-                                        frappe.delete_doc("SIS Student Timetable", st.name, ignore_permissions=True)
-                                    except Exception:
-                                        pass  # Continue even if some deletions fail
+                                try:
+                                    student_timetables = frappe.get_all(
+                                        "SIS Student Timetable",
+                                        filters={"timetable_instance_id": instance.name}
+                                    )
+                                    logs.append(f"✅ Found {len(student_timetables)} student timetables to delete")
+                                    for st in student_timetables:
+                                        try:
+                                            frappe.delete_doc("SIS Student Timetable", st.name, ignore_permissions=True)
+                                        except Exception as st_error:
+                                            logs.append(f"⚠️  Could not delete student timetable {st.name}: {str(st_error)}")
+                                except Exception as st_query_error:
+                                    logs.append(f"❌ Error querying SIS Student Timetable: {str(st_query_error)}")
 
                                 # Now delete the instance rows and instance
-                                frappe.db.sql("""
-                                    DELETE FROM `tabSIS Timetable Instance Row`
-                                    WHERE parent = %s
-                                """, (instance.name,))
+                                logs.append(f"🔍 Step 3: Deleting instance rows using SQL for instance {instance.name}")
+                                try:
+                                    # Check if 'parent' column exists in child table
+                                    frappe.db.sql("""
+                                        DELETE FROM `tabSIS Timetable Instance Row`
+                                        WHERE parent = %s
+                                    """, (instance.name,))
+                                    logs.append(f"✅ Deleted instance rows for {instance.name}")
+                                except Exception as sql_error:
+                                    logs.append(f"❌ SQL DELETE error for child rows: {str(sql_error)}")
+                                    # Try alternative approach using parent_timetable_instance field
+                                    try:
+                                        logs.append(f"🔄 Trying alternative: deleting via parent_timetable_instance field")
+                                        frappe.db.sql("""
+                                            DELETE FROM `tabSIS Timetable Instance Row`
+                                            WHERE parent_timetable_instance = %s
+                                        """, (instance.name,))
+                                        logs.append(f"✅ Deleted instance rows using parent_timetable_instance")
+                                    except Exception as alt_error:
+                                        logs.append(f"❌ Alternative DELETE also failed: {str(alt_error)}")
 
+                                logs.append(f"🔍 Step 4: Deleting instance document {instance.name}")
                                 frappe.delete_doc("SIS Timetable Instance", instance.name, ignore_permissions=True)
                                 deleted_instances += 1
+                                logs.append(f"✅ Successfully deleted instance {instance.name}")
 
                             except Exception as instance_error:
-                                logs.append(f"Warning: Could not delete instance {instance.name}: {str(instance_error)}")
+                                logs.append(f"❌ Error deleting instance {instance.name}: {str(instance_error)}")
 
                         if deleted_instances > 0:
                             logs.append(f"Deleted {deleted_instances} overlapping instances from {upload_start_date} onwards")
@@ -1234,6 +1272,10 @@ def process_excel_import_with_metadata_v2(import_data: dict):
             return final_response
 
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            logs.append(f"❌ Exception in main processing block: {str(e)}")
+            logs.append(f"📜 Traceback: {error_trace}")
             result = {
                 "dry_run": dry_run,
                 "title_vn": title_vn,
@@ -1244,29 +1286,15 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "valid_rows": 0,
                 "errors": [str(e)],
                 "warnings": [],
-                "logs": []
-            }
-            final_response = single_item_response(result, "Timetable import failed")
-            return final_response
-
-        except Exception as e:
-            result = {
-                "dry_run": dry_run,
-                "title_vn": title_vn,
-                "campus_id": campus_id,
-                "file_path": file_path,
-                "message": f"Error processing Excel file: {str(e)}",
-                "total_rows": 0,
-                "valid_rows": 0,
-                "errors": [str(e)],
-                "warnings": [],
-                "logs": []
+                "logs": logs
             }
             final_response = single_item_response(result, "Timetable import failed")
             return final_response
 
     except Exception as e:
         # Try to return error response
+        import traceback
+        error_trace = traceback.format_exc()
         try:
             result = {
                 "dry_run": import_data.get("dry_run", True),
@@ -1278,7 +1306,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 "valid_rows": 0,
                 "errors": [str(e)],
                 "warnings": [],
-                "logs": []
+                "logs": [f"❌ Critical error at top level: {str(e)}", f"📜 Traceback: {error_trace}"]
             }
             return single_item_response(result, "Timetable import critical error")
         except:
@@ -1481,20 +1509,40 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
     """
     try:
         # 1. Get all rows for this instance
-        instance_rows = frappe.get_all(
-            "SIS Timetable Instance Row",
-            fields=[
-                "name", "parent", "day_of_week", "timetable_column_id",
-                "subject_id", "teacher_1_id", "teacher_2_id", "room_id"
-            ],
-            filters={"parent": instance_id}
-        )
+        logs.append(f"🔍 [sync_materialized_views] Querying instance rows for {instance_id}")
+        try:
+            instance_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=[
+                    "name", "parent", "day_of_week", "timetable_column_id",
+                    "subject_id", "teacher_1_id", "teacher_2_id", "room_id"
+                ],
+                filters={"parent": instance_id}
+            )
+            logs.append(f"✅ [sync_materialized_views] Successfully queried using 'parent' field - found {len(instance_rows)} rows")
+        except Exception as parent_error:
+            logs.append(f"❌ [sync_materialized_views] Error querying with 'parent' field: {str(parent_error)}")
+            # Try alternative with parent_timetable_instance
+            try:
+                logs.append(f"🔄 [sync_materialized_views] Trying alternative: parent_timetable_instance field")
+                instance_rows = frappe.get_all(
+                    "SIS Timetable Instance Row",
+                    fields=[
+                        "name", "parent_timetable_instance", "day_of_week", "timetable_column_id",
+                        "subject_id", "teacher_1_id", "teacher_2_id", "room_id"
+                    ],
+                    filters={"parent_timetable_instance": instance_id}
+                )
+                logs.append(f"✅ [sync_materialized_views] Successfully queried using 'parent_timetable_instance' - found {len(instance_rows)} rows")
+            except Exception as alt_error:
+                logs.append(f"❌ [sync_materialized_views] Alternative query also failed: {str(alt_error)}")
+                return 0, 0
         
         if not instance_rows:
-            logs.append(f"No instance rows found for {instance_id}")
+            logs.append(f"⚠️  [sync_materialized_views] No instance rows found for {instance_id}")
             return 0, 0
             
-        logs.append(f"Processing {len(instance_rows)} instance rows for materialized view sync")
+        logs.append(f"📊 [sync_materialized_views] Processing {len(instance_rows)} instance rows")
         
         # 2. Generate Teacher Timetable entries
         teacher_timetable_count = 0
@@ -1669,17 +1717,32 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
 
 def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_id: str, logs: list) -> tuple:
     try:
-        logs.append(f"Starting simplified materialized view sync for instance {instance_id}")
+        logs.append(f"🔍 [simplified_sync] Starting for instance {instance_id}")
         
         # Get instance rows with minimal validation
-        instance_rows = frappe.get_all(
-            "SIS Timetable Instance Row",
-            fields=["name", "day_of_week", "timetable_column_id", "subject_id", "teacher_1_id", "teacher_2_id"],
-            filters={"parent": instance_id}
-        )
+        try:
+            instance_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name", "day_of_week", "timetable_column_id", "subject_id", "teacher_1_id", "teacher_2_id"],
+                filters={"parent": instance_id}
+            )
+            logs.append(f"✅ [simplified_sync] Queried with 'parent' - found {len(instance_rows)} rows")
+        except Exception as parent_error:
+            logs.append(f"❌ [simplified_sync] Error with 'parent' field: {str(parent_error)}")
+            try:
+                logs.append(f"🔄 [simplified_sync] Trying parent_timetable_instance")
+                instance_rows = frappe.get_all(
+                    "SIS Timetable Instance Row",
+                    fields=["name", "day_of_week", "timetable_column_id", "subject_id", "teacher_1_id", "teacher_2_id"],
+                    filters={"parent_timetable_instance": instance_id}
+                )
+                logs.append(f"✅ [simplified_sync] Queried with 'parent_timetable_instance' - found {len(instance_rows)} rows")
+            except Exception as alt_error:
+                logs.append(f"❌ [simplified_sync] Alternative also failed: {str(alt_error)}")
+                return 0, 0
         
         if not instance_rows:
-            logs.append("No instance rows found for simplified sync")
+            logs.append("⚠️  [simplified_sync] No instance rows found")
             return 0, 0
         
         teacher_count = 0
