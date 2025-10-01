@@ -1013,6 +1013,26 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 else:
                     raise frappe.ValidationError(f"[{doctype}] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
 
+        # Special field processing before mapping
+        # Convert gender values to lowercase for proper validation
+        if 'gender' in row_data and row_data['gender']:
+            gender_value = str(row_data['gender']).strip().lower()
+            # Map common variations to standard values
+            gender_mapping = {
+                'male': 'male',
+                'nam': 'male',
+                'm': 'male',
+                'female': 'female',
+                'nữ': 'female',
+                'f': 'female',
+                'others': 'others',
+                'khác': 'others',
+                'other': 'others',
+                'o': 'others'
+            }
+            row_data['gender'] = gender_mapping.get(gender_value, gender_value)
+            frappe.logger().info(f"Converted gender '{row_data['gender']}' to lowercase")
+
         # Map Excel columns to DocType fields (regular fields)
         meta = frappe.get_meta(doctype)
         excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id", "education_stage"]
