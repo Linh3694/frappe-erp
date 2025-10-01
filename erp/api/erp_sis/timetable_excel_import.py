@@ -945,13 +945,38 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         deleted_instances = 0
                         for instance in overlapping_instances:
                             try:
-                                # Manual deletion to avoid cascade issues
+                                # Delete related teacher and student timetables first to avoid foreign key constraints
+                                # Delete SIS Teacher Timetable entries
+                                teacher_timetables = frappe.get_all(
+                                    "SIS Teacher Timetable",
+                                    filters={"timetable_instance_id": instance.name}
+                                )
+                                for tt in teacher_timetables:
+                                    try:
+                                        frappe.delete_doc("SIS Teacher Timetable", tt.name, ignore_permissions=True)
+                                    except Exception:
+                                        pass  # Continue even if some deletions fail
+
+                                # Delete SIS Student Timetable entries
+                                student_timetables = frappe.get_all(
+                                    "SIS Student Timetable",
+                                    filters={"timetable_instance_id": instance.name}
+                                )
+                                for st in student_timetables:
+                                    try:
+                                        frappe.delete_doc("SIS Student Timetable", st.name, ignore_permissions=True)
+                                    except Exception:
+                                        pass  # Continue even if some deletions fail
+
+                                # Now delete the instance rows and instance
                                 frappe.db.sql("""
                                     DELETE FROM `tabSIS Timetable Instance Row`
-                                    WHERE parent = %s
+                                    WHERE parent_timetable_instance = %s
                                 """, (instance.name,))
+
                                 frappe.delete_doc("SIS Timetable Instance", instance.name, ignore_permissions=True)
                                 deleted_instances += 1
+
                             except Exception as instance_error:
                                 logs.append(f"Warning: Could not delete instance {instance.name}: {str(instance_error)}")
 
