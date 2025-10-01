@@ -135,15 +135,6 @@ def get_bulk_import_status():
         progress_percentage = job.get_progress_percentage()
 
         # Build response
-        job_message = job.message or ""
-        debug_info = None
-
-        # Extract debug info from message if present
-        if job_message and " | DEBUG: " in job_message:
-            parts = job_message.split(" | DEBUG: ", 1)
-            job_message = parts[0]
-            debug_info = parts[1]
-
         response_data = {
             "job_id": job.name,
             "status": job.status,
@@ -155,8 +146,7 @@ def get_bulk_import_status():
             "progress_percentage": progress_percentage,
             "started_at": job.started_at,
             "finished_at": job.finished_at,
-            "message": job_message,
-            "debug_info": debug_info,
+            "message": job.message,
             "error_file_url": job.error_file_url
         }
 
@@ -420,12 +410,8 @@ def process_bulk_import(job_id):
                 error_file_url=result.get("error_file_url")
             )
         else:
-            # Include debug info in error message if available
-            error_message = result["message"]
-            if result.get("debug_info"):
-                error_message += f" | DEBUG: {result['debug_info']}"
             job.mark_failed(
-                message=error_message,
+                message=result["message"],
                 error_file_url=result.get("error_file_url")
             )
 
@@ -489,91 +475,57 @@ def _process_excel_file(job):
                 "message": f"Failed to read Excel file: {str(e)}"
             }
 
-        # Debug: Log initial dataframe info
-        frappe.logger().info(f"Initial DataFrame shape: {df.shape}")
-        frappe.logger().info(f"DataFrame columns: {list(df.columns)}")
-        frappe.logger().info(f"DataFrame index: {list(df.index)}")
-        frappe.logger().info(f"DataFrame info: {df.info()}")
-        frappe.logger().info(f"Raw DataFrame content:\n{df}")
-
-        if len(df) > 0:
-            frappe.logger().info(f"First few rows preview: {df.head(3).to_dict() if len(df) <= 3 else df.head(3).to_string()}")
-            # Log each row individually
-            for i, row in df.iterrows():
-                frappe.logger().info(f"Row {i}: {dict(row)}")
-        else:
-            frappe.logger().error("DataFrame is empty!")
+        # Log basic dataframe info for troubleshooting
+        frappe.logger().info(f"Processing Excel file with {len(df)} rows, columns: {list(df.columns)}")
 
         # Check if file has enough rows (at least header + 1 data row)
         if len(df) == 0:
-            debug_info = "File is completely empty - no rows at all."
-            frappe.logger().error(f"Empty file: {debug_info}")
             return {
                 "success": False,
-                "message": "File is empty. Please add data to the template.",
-                "debug_info": debug_info
+                "message": "File is empty. Please add data to the template."
             }
 
         if len(df) == 1:
             # File has only 1 row - check if it's header or data
             row_data = dict(df.iloc[0])
-            frappe.logger().info(f"Single row content: {row_data}")
 
             # Check if this row looks like actual student data rather than headers
             has_student_data = False
-            data_indicators = []
-
             for col, value in row_data.items():
                 if pd.notna(value):
                     val_str = str(value).strip()
-                    data_indicators.append(f"{col}: {val_str}")
-
                     # Check for student data patterns
                     if (col.lower() in ['student name', 'student code', 'gender'] and val_str and
                         not val_str.lower().startswith('student') and
                         not val_str.lower().startswith('gender') and
                         val_str.lower() not in ['male', 'female', 'others', 'nam', 'nữ', 'khác']):
                         has_student_data = True
-                        frappe.logger().info(f"Found student data in column {col}: {val_str}")
                         break
 
             if has_student_data:
                 # This is actually data, not header - treat the single row as data
-                frappe.logger().info("Single row contains student data, processing as data row")
                 df = pd.DataFrame([{
                     'Student Name': row_data.get('Student Name', ''),
                     'Student Code': row_data.get('Student Code', ''),
                     'Date of Birth': row_data.get('Date of Birth', ''),
                     'Gender': row_data.get('Gender', '')
                 }])
-                frappe.logger().info(f"Converted to data DataFrame: {df}")
                 # Skip the header skipping logic below since this is already data
                 skipped_rows = 0
-                # Jump to processing logic
-                frappe.logger().info("Jumping to processing logic for single data row")
             else:
                 # This is just header row
-                debug_info = f"File has only 1 row (header). No data rows found. Row content: {row_data}"
-                frappe.logger().error(f"Only header: {debug_info}")
                 return {
                     "success": False,
-                    "message": "File contains only header row. Please add student data starting from row 2.",
-                    "debug_info": debug_info
+                    "message": "File contains only header row. Please add student data starting from row 2."
                 }
 
         # Row processing logic - handle both cases: with header and without header
         if skipped_rows == 0:
             # Already processed single data row case, df is ready
-            frappe.logger().info("Using pre-processed single data row DataFrame")
+            pass
         else:
             # Normal case: skip header and check for sample data
-            # Always skip header row (row 1) first
-            df_after_header = df.iloc[1:].reset_index(drop=True)
-            skipped_rows = 1
-            frappe.logger().info(f"After skipping header: {len(df_after_header)} rows remaining")
-
-            # Simplified logic: Always try to start from row 2, but skip if it's clearly sample data
-            df = df.iloc[1:]  # Start from row 2
+            df = df.iloc[1:]  # Skip header row, start from row 2
             skipped_rows = 1
 
             if len(df) > 0:
@@ -593,38 +545,27 @@ def _process_excel_file(job):
                             'sample' in val_str or
                             'ví dụ' in val_str or
                             val_str in ['nam', 'nữ', 'khác'] or
-                            val_str.startswith('student_') or  # sample student code
-                            '@example.com' in val_str):  # sample email
+                            val_str.startswith('student_') or
+                            '@example.com' in val_str):
                             sample_indicators_count += 1
 
                 # Only consider it sample row if ALL non-empty cells are sample indicators
                 is_sample_row = non_empty_count > 0 and sample_indicators_count == non_empty_count
 
-                frappe.logger().info(f"Row analysis: non_empty={non_empty_count}, sample_indicators={sample_indicators_count}, is_sample={is_sample_row}")
-
                 if is_sample_row and len(df) > 1:
                     # Skip this row and start from next row
                     df = df.iloc[1:]
                     skipped_rows = 2
-                    frappe.logger().info("Detected sample row, skipping to row 3")
-                else:
-                    frappe.logger().info("Row 2 contains real data or mixed content, starting from row 2")
 
         # Remove completely empty rows
-        frappe.logger().info(f"Before dropna: {len(df)} rows")
         df = df.dropna(how='all')
-        frappe.logger().info(f"After dropna: {len(df)} rows")
 
         total_rows = len(df)
-        frappe.logger().info(f"Final total_rows: {total_rows}")
 
         if total_rows == 0:
-            debug_info = f"After processing: {len(df)} rows before dropna, {len(df.dropna(how='all'))} rows after dropna. No valid data rows found."
-            frappe.logger().error(f"No data rows found: {debug_info}")
             return {
                 "success": False,
-                "message": "No data found in file. Please fill data starting from row 2 or 3 in the template.",
-                "debug_info": debug_info
+                "message": "No data found in file. Please fill data starting from row 2 or 3 in the template."
             }
 
         job.total_rows = total_rows
@@ -772,25 +713,19 @@ def _process_batch(job, batch_df, start_index, update_if_exists, dry_run, label_
                 success_count += 1
             else:
                 error_count += 1
-                
-                # Add debug info to error
-                debug_info = f"DEBUG - DocType: {job.doctype_target} | Column mapping: {debug_mapping} | Row data: {row_data}"
-                enhanced_error = f"{result['error']} | {debug_info}"
-                
+
                 errors.append({
                     "row": row_num,
                     "data": row_data,
-                    "error": enhanced_error
+                    "error": result["error"]
                 })
 
         except Exception as e:
             error_count += 1
-            debug_info = f"DEBUG - DocType: {job.doctype_target} | Column mapping: {debug_mapping} | Exception in batch processing"
-            enhanced_error = f"{str(e)} | {debug_info}"
             errors.append({
                 "row": row_num,
                 "data": str(row.to_dict())[:500],  # Limit data size
-                "error": enhanced_error
+                "error": str(e)
             })
 
     return {
@@ -1031,7 +966,6 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 'o': 'others'
             }
             row_data['gender'] = gender_mapping.get(gender_value, gender_value)
-            frappe.logger().info(f"Converted gender '{row_data['gender']}' to lowercase")
 
         # Map Excel columns to DocType fields (regular fields)
         meta = frappe.get_meta(doctype)
