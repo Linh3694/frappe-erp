@@ -1131,6 +1131,67 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 rows_created = 0
                 
                 logs.append(f"   📊 Will create {len(rows_by_class)} instances (one per class)")
+                
+                # CRITICAL FIX: Xóa TẤT CẢ instances cũ của các classes này (bất kể thuộc timetable nào)
+                # để tránh duplicate/conflict instances
+                logs.append(f"")
+                logs.append(f"🧹 CLEANUP: Removing ALL old instances for these classes (any timetable)")
+                try:
+                    class_list = list(rows_by_class.keys())
+                    logs.append(f"   Classes to cleanup: {len(class_list)}")
+                    
+                    # Query tất cả instances của các classes này với date overlap
+                    cleanup_instances = frappe.get_all(
+                        "SIS Timetable Instance",
+                        fields=["name", "timetable_id", "class_id", "start_date", "end_date"],
+                        filters={
+                            "class_id": ["in", class_list],
+                            "campus_id": campus_id
+                        }
+                    )
+                    
+                    logs.append(f"   📋 Found {len(cleanup_instances)} existing instances across ALL timetables")
+                    
+                    # Filter instances that overlap with upload range
+                    cleanup_overlapping = []
+                    for inst in cleanup_instances:
+                        if inst.start_date <= upload_end and inst.end_date >= upload_start:
+                            cleanup_overlapping.append(inst)
+                    
+                    logs.append(f"   ⚠️  {len(cleanup_overlapping)} instances overlap with upload range - will delete")
+                    
+                    if cleanup_overlapping:
+                        # Show sample
+                        timetable_counts = {}
+                        for inst in cleanup_overlapping:
+                            timetable_counts[inst.timetable_id] = timetable_counts.get(inst.timetable_id, 0) + 1
+                        
+                        logs.append(f"   🔍 Instances by timetable:")
+                        for tt_id, count in sorted(timetable_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
+                            logs.append(f"      • {tt_id}: {count} instances")
+                        
+                        # Delete all overlapping instances
+                        deleted_cleanup = 0
+                        for inst in cleanup_overlapping:
+                            try:
+                                # Delete related records
+                                frappe.db.sql("DELETE FROM `tabSIS Teacher Timetable` WHERE timetable_instance_id = %s", (inst.name,))
+                                frappe.db.sql("DELETE FROM `tabSIS Student Timetable` WHERE timetable_instance_id = %s", (inst.name,))
+                                frappe.db.sql("DELETE FROM `tabSIS Timetable Instance Row` WHERE parent = %s", (inst.name,))
+                                frappe.delete_doc("SIS Timetable Instance", inst.name, ignore_permissions=True)
+                                deleted_cleanup += 1
+                            except Exception:
+                                pass
+                        
+                        logs.append(f"   ✅ Deleted {deleted_cleanup} instances from ALL timetables")
+                        frappe.db.commit()
+                    else:
+                        logs.append(f"   ℹ️  No cleanup needed")
+                        
+                except Exception as cleanup_error:
+                    logs.append(f"   ⚠️  Cleanup warning: {str(cleanup_error)}")
+                
+                logs.append(f"")
 
                 # Collect debug logs
                 import_logs = []
