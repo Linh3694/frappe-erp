@@ -504,13 +504,23 @@ def _process_excel_file(job):
         else:
             frappe.logger().error("DataFrame is empty!")
 
-        # Smart row detection: Skip header row, then check if next row contains real data
-        if len(df) <= 1:
-            debug_info = f"File has only {len(df)} rows. Expected at least header + 1 data row."
-            frappe.logger().error(f"File too short: {debug_info}")
+        # Check if file has enough rows (at least header + 1 data row)
+        if len(df) == 0:
+            debug_info = "File is completely empty - no rows at all."
+            frappe.logger().error(f"Empty file: {debug_info}")
             return {
                 "success": False,
-                "message": "File appears to be too short. Please use the downloaded template and fill data starting from row 2.",
+                "message": "File is empty. Please add data to the template.",
+                "debug_info": debug_info
+            }
+
+        if len(df) == 1:
+            # File has only header row
+            debug_info = f"File has only 1 row (header). No data rows found. Row content: {dict(df.iloc[0]) if len(df) > 0 else 'N/A'}"
+            frappe.logger().error(f"Only header: {debug_info}")
+            return {
+                "success": False,
+                "message": "File contains only header row. Please add student data starting from row 2.",
                 "debug_info": debug_info
             }
 
