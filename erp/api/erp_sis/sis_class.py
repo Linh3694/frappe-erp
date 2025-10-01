@@ -1,7 +1,6 @@
 import frappe
 from frappe import _
 import json
-import pymysql
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
     success_response,
@@ -12,7 +11,6 @@ from erp.utils.api_response import (
     not_found_response,
     forbidden_response
 )
-from frappe.database.mariadb.database import MariaDBDatabase
 
 
 @frappe.whitelist(allow_guest=False)
@@ -617,33 +615,29 @@ def create_class():
                             pass
 
         return single_item_response(response_data, "Class created successfully")
-    except pymysql.IntegrityError as e:
-        # Handle duplicate entry error specifically
-        if MariaDBDatabase.is_duplicate_entry(e):
-            error_message = "Tên lớp đã tồn tại. Vui lòng chọn tên khác."
-            debug_info = f"Duplicate entry error: {str(e)}"
-            frappe.log_error(f"Error creating class (duplicate): {debug_info}")
+    except Exception as e:
+        error_str = str(e)
+        frappe.log_error(f"Error creating class: {error_str}")
+
+        # Check for duplicate entry errors
+        if "Duplicate entry" in error_str and "for key 'title'" in error_str:
             return error_response(
-                message=error_message,
+                message="Tên lớp đã tồn tại. Vui lòng chọn tên khác.",
                 code="DUPLICATE_CLASS_TITLE",
-                debug_info={"original_error": debug_info}
+                debug_info={"original_error": error_str}
+            )
+        elif "IntegrityError" in error_str or "1062" in error_str:
+            return error_response(
+                message="Lỗi dữ liệu không hợp lệ khi tạo lớp",
+                code="INTEGRITY_ERROR",
+                debug_info={"original_error": error_str}
             )
         else:
-            # Other integrity errors
-            error_message = "Lỗi dữ liệu không hợp lệ khi tạo lớp"
-            frappe.log_error(f"Error creating class (integrity): {str(e)}")
             return error_response(
-                message=error_message,
-                code="INTEGRITY_ERROR",
-                debug_info={"original_error": str(e)}
+                message="Không thể tạo lớp. Vui lòng thử lại.",
+                code="CLASS_CREATION_FAILED",
+                debug_info={"original_error": error_str}
             )
-    except Exception as e:
-        frappe.log_error(f"Error creating class: {str(e)}")
-        return error_response(
-            message="Không thể tạo lớp. Vui lòng thử lại.",
-            code="CLASS_CREATION_FAILED",
-            debug_info={"original_error": str(e)}
-        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -791,33 +785,29 @@ def update_class(class_id: str = None):
 
         return single_item_response(response_data, "Class updated successfully")
 
-    except pymysql.IntegrityError as e:
-        # Handle duplicate entry error specifically
-        if MariaDBDatabase.is_duplicate_entry(e):
-            error_message = "Tên lớp đã tồn tại. Vui lòng chọn tên khác."
-            debug_info = f"Duplicate entry error: {str(e)}"
-            frappe.log_error(f"Error updating class (duplicate): {debug_info}")
+    except Exception as e:
+        error_str = str(e)
+        frappe.log_error(f"Error updating class: {error_str}")
+
+        # Check for duplicate entry errors
+        if "Duplicate entry" in error_str and "for key 'title'" in error_str:
             return error_response(
-                message=error_message,
+                message="Tên lớp đã tồn tại. Vui lòng chọn tên khác.",
                 code="DUPLICATE_CLASS_TITLE",
-                debug_info={"original_error": debug_info}
+                debug_info={"original_error": error_str}
+            )
+        elif "IntegrityError" in error_str or "1062" in error_str:
+            return error_response(
+                message="Lỗi dữ liệu không hợp lệ khi cập nhật lớp",
+                code="INTEGRITY_ERROR",
+                debug_info={"original_error": error_str}
             )
         else:
-            # Other integrity errors
-            error_message = "Lỗi dữ liệu không hợp lệ khi cập nhật lớp"
-            frappe.log_error(f"Error updating class (integrity): {str(e)}")
             return error_response(
-                message=error_message,
-                code="INTEGRITY_ERROR",
-                debug_info={"original_error": str(e)}
+                message="Không thể cập nhật lớp. Vui lòng thử lại.",
+                code="CLASS_UPDATE_FAILED",
+                debug_info={"original_error": error_str}
             )
-    except Exception as e:
-        frappe.log_error(f"Error updating class: {str(e)}")
-        return error_response(
-            message="Không thể cập nhật lớp. Vui lòng thử lại.",
-            code="CLASS_UPDATE_FAILED",
-            debug_info={"original_error": str(e)}
-        )
 
 
 @frappe.whitelist(allow_guest=False)
