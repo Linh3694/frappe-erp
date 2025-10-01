@@ -1082,6 +1082,34 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 except Exception as e:
                     frappe.logger().error(f"Error looking up school year '{school_year_name}': {str(e)}")
 
+                # Fallback: try without campus filter if not found
+                if not school_year_id:
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] School year not found with campus filter, trying without campus filter...")
+                    try:
+                        # Try title_vn without campus filter
+                        fallback_hit = frappe.get_all(
+                            "SIS School Year",
+                            filters={"title_vn": school_year_name},
+                            fields=["name", "campus_id"],
+                            limit=1
+                        )
+                        if fallback_hit:
+                            school_year_id = fallback_hit[0].name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year by title_vn (no campus filter): {school_year_id} (campus: {fallback_hit[0].get('campus_id')})")
+                        else:
+                            # Try title_en without campus filter
+                            fallback_en_hit = frappe.get_all(
+                                "SIS School Year",
+                                filters={"title_en": school_year_name},
+                                fields=["name", "campus_id"],
+                                limit=1
+                            )
+                            if fallback_en_hit:
+                                school_year_id = fallback_en_hit[0].name
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year by title_en (no campus filter): {school_year_id} (campus: {fallback_en_hit[0].get('campus_id')})")
+                    except Exception as e:
+                        frappe.logger().error(f"Error in fallback school year lookup: {str(e)}")
+
                 if school_year_id:
                     doc_data["school_year_id"] = school_year_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year ID: {school_year_id}")
@@ -1145,6 +1173,34 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 except Exception as e:
                     frappe.logger().error(f"Error looking up education grade '{education_grade_name}': {str(e)}")
 
+                # Fallback: try without campus filter if not found
+                if not education_grade_id:
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] Education grade not found with campus filter, trying without campus filter...")
+                    try:
+                        # Try title_vn without campus filter
+                        fallback_hit = frappe.get_all(
+                            "SIS Education Grade",
+                            filters={"title_vn": education_grade_name},
+                            fields=["name", "campus_id"],
+                            limit=1
+                        )
+                        if fallback_hit:
+                            education_grade_id = fallback_hit[0].name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn (no campus filter): {education_grade_id} (campus: {fallback_hit[0].get('campus_id')})")
+                        else:
+                            # Try title_en without campus filter
+                            fallback_en_hit = frappe.get_all(
+                                "SIS Education Grade",
+                                filters={"title_en": education_grade_name},
+                                fields=["name", "campus_id"],
+                                limit=1
+                            )
+                            if fallback_en_hit:
+                                education_grade_id = fallback_en_hit[0].name
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_en (no campus filter): {education_grade_id} (campus: {fallback_en_hit[0].get('campus_id')})")
+                    except Exception as e:
+                        frappe.logger().error(f"Error in fallback education grade lookup: {str(e)}")
+
                 if education_grade_id:
                     doc_data["education_grade"] = education_grade_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade ID: {education_grade_id}")
@@ -1207,6 +1263,34 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_en: {academic_program_id} (campus: {title_en_hit[0].get('campus_id')})")
                 except Exception as e:
                     frappe.logger().error(f"Error looking up academic program '{academic_program_name}': {str(e)}")
+
+                # Fallback: try without campus filter if not found
+                if not academic_program_id:
+                    frappe.logger().info(f"Row {row_num} - [SIS Class] Academic program not found with campus filter, trying without campus filter...")
+                    try:
+                        # Try title_vn without campus filter
+                        fallback_hit = frappe.get_all(
+                            "SIS Academic Program",
+                            filters={"title_vn": academic_program_name},
+                            fields=["name", "campus_id"],
+                            limit=1
+                        )
+                        if fallback_hit:
+                            academic_program_id = fallback_hit[0].name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn (no campus filter): {academic_program_id} (campus: {fallback_hit[0].get('campus_id')})")
+                        else:
+                            # Try title_en without campus filter
+                            fallback_en_hit = frappe.get_all(
+                                "SIS Academic Program",
+                                filters={"title_en": academic_program_name},
+                                fields=["name", "campus_id"],
+                                limit=1
+                            )
+                            if fallback_en_hit:
+                                academic_program_id = fallback_en_hit[0].name
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_en (no campus filter): {academic_program_id} (campus: {fallback_en_hit[0].get('campus_id')})")
+                    except Exception as e:
+                        frappe.logger().error(f"Error in fallback academic program lookup: {str(e)}")
 
                 if academic_program_id:
                     doc_data["academic_program"] = academic_program_id
