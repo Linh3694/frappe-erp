@@ -1130,12 +1130,16 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 
                 logs.append(f"   📊 Will create {len(rows_by_class)} instances (one per class)")
                 
-                # CRITICAL CLEANUP: Xóa TẤT CẢ instances có OVERLAP để tránh merge/conflict
-                # Đây là cleanup toàn diện - xóa instances từ TẤT CẢ timetables có conflict
-                # Logic: Nếu instance overlap với upload range → XÓA (để tránh frontend merge)
+                # SMART CLEANUP: SPLIT instances có overlap thay vì xóa hoàn toàn
+                # Logic:
+                #   - Instance BẮT ĐẦU trong upload range → DELETE (replace hoàn toàn)
+                #   - Instance BẮT ĐẦU trước upload range:
+                #       + Nếu KẾT THÚC trước upload_start → KEEP (không conflict)
+                #       + Nếu KẾT THÚC sau upload_start → SPLIT (giữ phần trước, xóa phần sau)
                 logs.append(f"")
-                logs.append(f"🧹 CLEANUP: Removing ALL overlapping instances (prevent merge/conflict)")
+                logs.append(f"🧹 CLEANUP: Smart split/delete instances to prevent conflict")
                 try:
+                    from datetime import timedelta
                     class_list = list(rows_by_class.keys())
                     logs.append(f"   Classes to cleanup: {len(class_list)}")
                     logs.append(f"   Upload range: {upload_start_date} to {upload_end_date}")
@@ -1152,21 +1156,44 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     
                     logs.append(f"   📋 Found {len(cleanup_instances)} existing instances across ALL timetables")
                     
-                    # Filter: Xóa TẤT CẢ instances có OVERLAP với upload range
-                    # Overlap = instance.start_date <= upload_end AND instance.end_date >= upload_start
-                    cleanup_to_delete = []
-                    cleanup_to_keep = []
+                    # Categorize instances
+                    cleanup_to_delete = []  # Xóa hoàn toàn
+                    cleanup_to_split = []   # Cần split (rút ngắn end_date)
+                    cleanup_to_keep = []    # Giữ nguyên
                     
                     for inst in cleanup_instances:
-                        has_overlap = (inst.start_date <= upload_end and inst.end_date >= upload_start)
-                        
-                        if has_overlap:
+                        if inst.start_date >= upload_start:
+                            # Instance bắt đầu trong/sau upload range → DELETE
                             cleanup_to_delete.append(inst)
+                        elif inst.end_date >= upload_start:
+                            # Instance bắt đầu trước nhưng kéo dài vào upload range → SPLIT
+                            cleanup_to_split.append(inst)
                         else:
+                            # Instance hoàn toàn trước upload range → KEEP
                             cleanup_to_keep.append(inst)
                     
-                    logs.append(f"   ⚠️  {len(cleanup_to_delete)} instances OVERLAP - will DELETE (to prevent merge)")
-                    logs.append(f"   ✅ {len(cleanup_to_keep)} instances NO overlap - will KEEP")
+                    logs.append(f"   ❌ {len(cleanup_to_delete)} instances to DELETE (start >= {upload_start_date})")
+                    logs.append(f"   ✂️  {len(cleanup_to_split)} instances to SPLIT (extend into upload range)")
+                    logs.append(f"   ✅ {len(cleanup_to_keep)} instances to KEEP (no conflict)")
+                    
+                    # SPLIT instances: Rút ngắn end_date về 1 ngày trước upload_start
+                    split_count = 0
+                    if cleanup_to_split:
+                        logs.append(f"   🔧 SPLITTING instances:")
+                        for inst in cleanup_to_split:
+                            try:
+                                # Rút ngắn end_date về ngày trước upload_start
+                                new_end_date = upload_start - timedelta(days=1)
+                                logs.append(f"      • {inst.name}: {inst.start_date} to {inst.end_date} → SPLIT to {new_end_date}")
+                                
+                                frappe.db.set_value("SIS Timetable Instance", inst.name, "end_date", new_end_date)
+                                split_count += 1
+                            except Exception as split_error:
+                                logs.append(f"      ⚠️  Failed to split {inst.name}: {str(split_error)}")
+                        
+                        if split_count > 0:
+                            logs.append(f"   ✅ Split {split_count} instances successfully")
+                            frappe.db.commit()
                     
                     if cleanup_to_delete:
                         # Show sample của instances sẽ xóa
