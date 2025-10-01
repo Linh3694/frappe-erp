@@ -476,40 +476,48 @@ def _process_excel_file(job):
             }
 
         # Smart row detection: Skip header row, then check if next row contains real data
-        skipped_rows = 1  # Always skip header row (row 1)
-        if len(df) > 1:
-            # Skip header row first
-            df_after_header = df.iloc[1:].reset_index(drop=True)
-
-            # Check if the first data row (row 2 in Excel) contains real data or is just sample/instruction
-            first_data_row = df_after_header.iloc[0] if len(df_after_header) > 0 else None
-            if first_data_row is not None:
-                # Check if this row looks like sample/instruction data
-                # Sample data often has placeholder text or specific patterns
-                row_values = [str(val).strip().lower() for val in first_data_row.values if pd.notna(val)]
-                is_sample_row = any(
-                    '←' in str(val) or 'fill your data' in str(val).lower() or
-                    'sample' in str(val).lower() or 'ví dụ' in str(val).lower() or
-                    str(val).strip() == 'nam' or str(val).strip() == 'nữ'  # common sample gender values
-                    for val in first_data_row.values if pd.notna(val)
-                )
-
-                if is_sample_row and len(df_after_header) > 1:
-                    # Skip sample/instruction row too, start from row 3
-                    df = df.iloc[2:]
-                    skipped_rows = 2
-                else:
-                    # Row 2 contains real data, start from there
-                    df = df.iloc[1:]
-                    skipped_rows = 1
-            else:
-                df = df.iloc[1:]
-                skipped_rows = 1
-        else:
+        if len(df) <= 1:
             return {
                 "success": False,
                 "message": "File appears to be too short. Please use the downloaded template and fill data starting from row 2."
             }
+
+        # Always skip header row (row 1) first
+        df_after_header = df.iloc[1:].reset_index(drop=True)
+        skipped_rows = 1
+
+        # Check if the next row (row 2) contains real data or is just sample/instruction
+        if len(df_after_header) > 0:
+            first_data_row = df_after_header.iloc[0]
+
+            # Check if this row looks like sample/instruction data
+            # Sample data often has placeholder text or specific patterns
+            is_sample_row = False
+            for val in first_data_row.values:
+                if pd.notna(val):
+                    val_str = str(val).strip()
+                    if ('←' in val_str or
+                        'fill your data' in val_str.lower() or
+                        'sample' in val_str.lower() or
+                        'ví dụ' in val_str.lower() or
+                        val_str.lower() == 'nam' or
+                        val_str.lower() == 'nữ' or
+                        val_str.lower() == 'khác'):
+                        is_sample_row = True
+                        break
+
+            if is_sample_row and len(df_after_header) > 1:
+                # Skip sample/instruction row too, start from row 3
+                df = df.iloc[2:]
+                skipped_rows = 2
+            else:
+                # Row 2 contains real data, start from row 2
+                df = df.iloc[1:]
+                skipped_rows = 1
+        else:
+            # No data after header
+            df = df_after_header
+            skipped_rows = 1
 
         # Remove completely empty rows
         df = df.dropna(how='all')
