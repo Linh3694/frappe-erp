@@ -1130,16 +1130,17 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 
                 logs.append(f"   📊 Will create {len(rows_by_class)} instances (one per class)")
                 
-                # CRITICAL FIX: Xóa instances BẮT ĐẦU từ upload_start_date trở đi
-                # Logic: Giữ timetable hiện tại, chỉ xóa instances bắt đầu từ upload range
+                # CRITICAL CLEANUP: Xóa TẤT CẢ instances có OVERLAP để tránh merge/conflict
+                # Đây là cleanup toàn diện - xóa instances từ TẤT CẢ timetables có conflict
+                # Logic: Nếu instance overlap với upload range → XÓA (để tránh frontend merge)
                 logs.append(f"")
-                logs.append(f"🧹 CLEANUP: Removing instances starting from {upload_start_date} for these classes")
+                logs.append(f"🧹 CLEANUP: Removing ALL overlapping instances (prevent merge/conflict)")
                 try:
                     class_list = list(rows_by_class.keys())
                     logs.append(f"   Classes to cleanup: {len(class_list)}")
                     logs.append(f"   Upload range: {upload_start_date} to {upload_end_date}")
                     
-                    # Query tất cả instances của các classes này
+                    # Query tất cả instances của các classes này từ MỌI timetable
                     cleanup_instances = frappe.get_all(
                         "SIS Timetable Instance",
                         fields=["name", "timetable_id", "class_id", "start_date", "end_date"],
@@ -1151,18 +1152,21 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     
                     logs.append(f"   📋 Found {len(cleanup_instances)} existing instances across ALL timetables")
                     
-                    # Filter: Xóa instances BẮT ĐẦU từ upload_start trở đi
+                    # Filter: Xóa TẤT CẢ instances có OVERLAP với upload range
+                    # Overlap = instance.start_date <= upload_end AND instance.end_date >= upload_start
                     cleanup_to_delete = []
                     cleanup_to_keep = []
                     
                     for inst in cleanup_instances:
-                        if inst.start_date >= upload_start:
+                        has_overlap = (inst.start_date <= upload_end and inst.end_date >= upload_start)
+                        
+                        if has_overlap:
                             cleanup_to_delete.append(inst)
                         else:
                             cleanup_to_keep.append(inst)
                     
-                    logs.append(f"   ⚠️  {len(cleanup_to_delete)} instances start from {upload_start_date} - will DELETE")
-                    logs.append(f"   ✅ {len(cleanup_to_keep)} instances start before {upload_start_date} - will KEEP")
+                    logs.append(f"   ⚠️  {len(cleanup_to_delete)} instances OVERLAP - will DELETE (to prevent merge)")
+                    logs.append(f"   ✅ {len(cleanup_to_keep)} instances NO overlap - will KEEP")
                     
                     if cleanup_to_delete:
                         # Show sample của instances sẽ xóa
