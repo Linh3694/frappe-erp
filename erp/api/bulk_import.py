@@ -492,8 +492,17 @@ def _process_excel_file(job):
         # Debug: Log initial dataframe info
         frappe.logger().info(f"Initial DataFrame shape: {df.shape}")
         frappe.logger().info(f"DataFrame columns: {list(df.columns)}")
+        frappe.logger().info(f"DataFrame index: {list(df.index)}")
+        frappe.logger().info(f"DataFrame info: {df.info()}")
+        frappe.logger().info(f"Raw DataFrame content:\n{df}")
+
         if len(df) > 0:
             frappe.logger().info(f"First few rows preview: {df.head(3).to_dict() if len(df) <= 3 else df.head(3).to_string()}")
+            # Log each row individually
+            for i, row in df.iterrows():
+                frappe.logger().info(f"Row {i}: {dict(row)}")
+        else:
+            frappe.logger().error("DataFrame is empty!")
 
         # Smart row detection: Skip header row, then check if next row contains real data
         if len(df) <= 1:
