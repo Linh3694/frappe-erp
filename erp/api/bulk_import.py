@@ -410,8 +410,12 @@ def process_bulk_import(job_id):
                 error_file_url=result.get("error_file_url")
             )
         else:
+            # Include debug info in error message if available
+            error_message = result["message"]
+            if result.get("debug_info"):
+                error_message += f" | DEBUG: {result['debug_info']}"
             job.mark_failed(
-                message=result["message"],
+                message=error_message,
                 error_file_url=result.get("error_file_url")
             )
 
