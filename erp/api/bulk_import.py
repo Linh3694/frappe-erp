@@ -475,9 +475,36 @@ def _process_excel_file(job):
                 "message": f"Failed to read Excel file: {str(e)}"
             }
 
-        # Skip first row (header) for Excel template files
+        # Smart row detection: Skip header row, then check if next row contains real data
+        skipped_rows = 1  # Always skip header row (row 1)
         if len(df) > 1:
-            df = df.iloc[1:]  # Skip first row (header), keep data from row 2 onwards
+            # Skip header row first
+            df_after_header = df.iloc[1:].reset_index(drop=True)
+
+            # Check if the first data row (row 2 in Excel) contains real data or is just sample/instruction
+            first_data_row = df_after_header.iloc[0] if len(df_after_header) > 0 else None
+            if first_data_row is not None:
+                # Check if this row looks like sample/instruction data
+                # Sample data often has placeholder text or specific patterns
+                row_values = [str(val).strip().lower() for val in first_data_row.values if pd.notna(val)]
+                is_sample_row = any(
+                    '←' in str(val) or 'fill your data' in str(val).lower() or
+                    'sample' in str(val).lower() or 'ví dụ' in str(val).lower() or
+                    str(val).strip() == 'nam' or str(val).strip() == 'nữ'  # common sample gender values
+                    for val in first_data_row.values if pd.notna(val)
+                )
+
+                if is_sample_row and len(df_after_header) > 1:
+                    # Skip sample/instruction row too, start from row 3
+                    df = df.iloc[2:]
+                    skipped_rows = 2
+                else:
+                    # Row 2 contains real data, start from there
+                    df = df.iloc[1:]
+                    skipped_rows = 1
+            else:
+                df = df.iloc[1:]
+                skipped_rows = 1
         else:
             return {
                 "success": False,
@@ -491,7 +518,7 @@ def _process_excel_file(job):
         if total_rows == 0:
             return {
                 "success": False,
-                "message": "No data found in file. Please fill data starting from row 2 in the template."
+                "message": "No data found in file. Please fill data starting from row 2 or 3 in the template."
             }
 
         job.total_rows = total_rows
@@ -565,7 +592,7 @@ def _process_excel_file(job):
         # Process data in batches, accounting for skipped rows
         for i in range(0, total_rows, batch_size):
             batch_df = df.iloc[i:i+batch_size]
-            original_start_index = i + 1 + 1  # +1 for skipped header row, +1 for Excel 1-indexing
+            original_start_index = i + skipped_rows + 1  # +skipped_rows for header/sample rows, +1 for Excel 1-indexing
             batch_result = _process_batch(job, batch_df, original_start_index, update_if_exists, dry_run, label_map, debug_mapping)
 
             success_count += batch_result["success_count"]
