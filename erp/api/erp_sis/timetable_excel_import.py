@@ -902,8 +902,16 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 upload_start_date = import_data.get("start_date")
                 upload_end_date = import_data.get("end_date")
 
-                # UPDATE IN-PLACE LOGIC: Find existing timetables with date range overlap
+                # UPDATE IN-PLACE LOGIC: Tìm timetable hiện tại để update
+                # Logic: Nếu đã có timetable cho school_year + education_stage này, update in-place
+                # Xóa tất cả instances từ upload_start_date trở đi, rồi insert instances mới
                 try:
+                    from datetime import datetime
+                    upload_start = datetime.strptime(upload_start_date, "%Y-%m-%d").date() if isinstance(upload_start_date, str) else upload_start_date
+                    upload_end = datetime.strptime(upload_end_date, "%Y-%m-%d").date() if isinstance(upload_end_date, str) else upload_end_date
+                    
+                    logs.append(f"📅 Upload date range: {upload_start} to {upload_end}")
+                    
                     existing_timetables = frappe.get_all(
                         "SIS Timetable",
                         fields=["name", "start_date", "end_date", "title_vn"],
@@ -911,37 +919,50 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             "campus_id": campus_id,
                             "school_year_id": import_data.get("school_year_id"),
                             "education_stage_id": import_data.get("education_stage_id")
-                        }
+                        },
+                        order_by="creation desc"
                     )
+                    
+                    logs.append(f"🔍 Found {len(existing_timetables)} existing timetables for this school year + education stage")
 
+                    # Tìm timetable để update: bất kỳ timetable nào có end_date >= upload_start
+                    # (nghĩa là nó vẫn còn active vào thời điểm upload)
                     overlapping_timetable = None
                     for timetable in existing_timetables:
-                        # Check date range overlap: upload_start <= existing_end AND upload_end >= existing_start
-                        # Convert string dates to datetime for comparison
-                        try:
-                            from datetime import datetime
-                            upload_start = datetime.strptime(upload_start_date, "%Y-%m-%d").date() if isinstance(upload_start_date, str) else upload_start_date
-                            upload_end = datetime.strptime(upload_end_date, "%Y-%m-%d").date() if isinstance(upload_end_date, str) else upload_end_date
-
-                            if (upload_start <= timetable.end_date and upload_end >= timetable.start_date):
-                                overlapping_timetable = timetable
-                                break
-                        except Exception as date_parse_error:
-                            logs.append(f"Warning: Could not parse dates for overlap check: {str(date_parse_error)}")
-                            continue
+                        logs.append(f"   - Checking timetable {timetable.name}: {timetable.start_date} to {timetable.end_date}")
+                        # Nếu end_date của timetable cũ >= upload_start, nghĩa là cần update
+                        if timetable.end_date >= upload_start:
+                            overlapping_timetable = timetable
+                            logs.append(f"   ✅ Selected for update (end_date {timetable.end_date} >= upload_start {upload_start})")
+                            break
+                        else:
+                            logs.append(f"   ⏭️  Skipped (end_date {timetable.end_date} < upload_start {upload_start})")
 
                     if overlapping_timetable:
                         # Use existing timetable and update its date range if needed
                         timetable_id = overlapping_timetable.name
-                        logs.append(f"Found overlapping timetable: {timetable_id} ({overlapping_timetable.title_vn})")
+                        logs.append(f"📝 UPDATE IN-PLACE: Using existing timetable {timetable_id} ({overlapping_timetable.title_vn})")
 
-                        # Update end_date if upload range extends beyond existing range
+                        # Update date range để bao gồm cả upload range
+                        updates = {}
+                        if upload_start < overlapping_timetable.start_date:
+                            updates["start_date"] = upload_start_date
+                            logs.append(f"   🔄 Updating start_date: {overlapping_timetable.start_date} → {upload_start_date}")
+                        
                         if upload_end > overlapping_timetable.end_date:
-                            frappe.db.set_value("SIS Timetable", timetable_id, "end_date", upload_end_date)
-                            logs.append(f"Extended timetable end_date to {upload_end_date}")
+                            updates["end_date"] = upload_end_date
+                            logs.append(f"   🔄 Updating end_date: {overlapping_timetable.end_date} → {upload_end_date}")
+                        
+                        if updates:
+                            for field, value in updates.items():
+                                frappe.db.set_value("SIS Timetable", timetable_id, field, value)
+                            logs.append(f"   ✅ Updated timetable date range")
+                        else:
+                            logs.append(f"   ℹ️  Timetable date range unchanged")
 
-                        # Delete overlapping instances (instances that start on or after upload_start_date)
-                        logs.append(f"🔍 Step 1: Querying overlapping instances for timetable {timetable_id}")
+                        # DELETE LOGIC: Xóa tất cả instances có start_date >= upload_start_date
+                        # Đây là phần quan trọng cho update in-place
+                        logs.append(f"🗑️  DELETE PHASE: Removing instances from {upload_start_date} onwards")
                         try:
                             overlapping_instances = frappe.get_all(
                                 "SIS Timetable Instance",
@@ -950,83 +971,71 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                                     "start_date": [">=", upload_start_date]
                                 }
                             )
-                            logs.append(f"✅ Found {len(overlapping_instances)} overlapping instances")
+                            logs.append(f"   📊 Found {len(overlapping_instances)} instances to delete (start_date >= {upload_start_date})")
+                            if len(overlapping_instances) == 0:
+                                logs.append(f"   ℹ️  No instances found to delete - this is first upload or upload date is after all existing instances")
                         except Exception as query_error:
-                            logs.append(f"❌ Error querying SIS Timetable Instance: {str(query_error)}")
+                            logs.append(f"   ❌ Error querying instances: {str(query_error)}")
                             overlapping_instances = []
 
                         deleted_instances = 0
                         for instance in overlapping_instances:
                             try:
-                                logs.append(f"🔍 Step 2: Deleting related records for instance {instance.name}")
+                                logs.append(f"   🔍 Deleting instance {instance.name} and related records")
                                 # Delete related teacher and student timetables first to avoid foreign key constraints
-                                # Delete SIS Teacher Timetable entries
                                 try:
                                     teacher_timetables = frappe.get_all(
                                         "SIS Teacher Timetable",
                                         filters={"timetable_instance_id": instance.name}
                                     )
-                                    logs.append(f"✅ Found {len(teacher_timetables)} teacher timetables to delete")
                                     for tt in teacher_timetables:
-                                        try:
-                                            frappe.delete_doc("SIS Teacher Timetable", tt.name, ignore_permissions=True)
-                                        except Exception as tt_error:
-                                            logs.append(f"⚠️  Could not delete teacher timetable {tt.name}: {str(tt_error)}")
-                                except Exception as tt_query_error:
-                                    logs.append(f"❌ Error querying SIS Teacher Timetable: {str(tt_query_error)}")
+                                        frappe.delete_doc("SIS Teacher Timetable", tt.name, ignore_permissions=True)
+                                except Exception:
+                                    pass
 
-                                # Delete SIS Student Timetable entries
                                 try:
                                     student_timetables = frappe.get_all(
                                         "SIS Student Timetable",
                                         filters={"timetable_instance_id": instance.name}
                                     )
-                                    logs.append(f"✅ Found {len(student_timetables)} student timetables to delete")
                                     for st in student_timetables:
-                                        try:
-                                            frappe.delete_doc("SIS Student Timetable", st.name, ignore_permissions=True)
-                                        except Exception as st_error:
-                                            logs.append(f"⚠️  Could not delete student timetable {st.name}: {str(st_error)}")
-                                except Exception as st_query_error:
-                                    logs.append(f"❌ Error querying SIS Student Timetable: {str(st_query_error)}")
+                                        frappe.delete_doc("SIS Student Timetable", st.name, ignore_permissions=True)
+                                except Exception:
+                                    pass
 
-                                # Now delete the instance rows and instance
-                                logs.append(f"🔍 Step 3: Deleting instance rows using SQL for instance {instance.name}")
+                                # Delete instance rows using SQL
                                 try:
-                                    # Check if 'parent' column exists in child table
                                     frappe.db.sql("""
                                         DELETE FROM `tabSIS Timetable Instance Row`
                                         WHERE parent = %s
                                     """, (instance.name,))
-                                    logs.append(f"✅ Deleted instance rows for {instance.name}")
-                                except Exception as sql_error:
-                                    logs.append(f"❌ SQL DELETE error for child rows: {str(sql_error)}")
-                                    # Try alternative approach using parent_timetable_instance field
+                                except Exception:
+                                    # Fallback to parent_timetable_instance field
                                     try:
-                                        logs.append(f"🔄 Trying alternative: deleting via parent_timetable_instance field")
                                         frappe.db.sql("""
                                             DELETE FROM `tabSIS Timetable Instance Row`
                                             WHERE parent_timetable_instance = %s
                                         """, (instance.name,))
-                                        logs.append(f"✅ Deleted instance rows using parent_timetable_instance")
-                                    except Exception as alt_error:
-                                        logs.append(f"❌ Alternative DELETE also failed: {str(alt_error)}")
+                                    except Exception:
+                                        pass
 
-                                logs.append(f"🔍 Step 4: Deleting instance document {instance.name}")
+                                # Delete the instance document
                                 frappe.delete_doc("SIS Timetable Instance", instance.name, ignore_permissions=True)
                                 deleted_instances += 1
-                                logs.append(f"✅ Successfully deleted instance {instance.name}")
 
                             except Exception as instance_error:
-                                logs.append(f"❌ Error deleting instance {instance.name}: {str(instance_error)}")
+                                logs.append(f"   ❌ Failed to delete instance {instance.name}: {str(instance_error)}")
 
                         if deleted_instances > 0:
-                            logs.append(f"Deleted {deleted_instances} overlapping instances from {upload_start_date} onwards")
+                            logs.append(f"   ✅ Deleted {deleted_instances} instances from {upload_start_date} onwards")
                             frappe.db.commit()
+                        else:
+                            logs.append(f"   ℹ️  No instances were deleted")
 
                     else:
                         # No overlapping timetable found, create new one
-                        logs.append(f"No overlapping timetable found, creating new timetable from {upload_start_date}")
+                        logs.append(f"➕ CREATE NEW: No existing timetable found")
+                        logs.append(f"   Creating new timetable from {upload_start_date} to {upload_end_date}")
                         timetable_doc = frappe.get_doc({
                             "doctype": "SIS Timetable",
                             "title_vn": title_vn,
@@ -1060,7 +1069,9 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     timetable_id = timetable_doc.name
                     logs.append(f"Fallback: Created new timetable: {timetable_id}")
 
-                # Group rows per class and create instances + rows
+                # CREATE PHASE: Tạo instances mới từ upload_start_date
+                logs.append(f"")
+                logs.append(f"➕ CREATE PHASE: Creating new instances from {upload_start_date}")
                 from collections import defaultdict
                 rows_by_class = defaultdict(list)
                 for r in schedule_data:
@@ -1068,6 +1079,8 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                         rows_by_class[r["class_id"].strip()].append(r)
                 instances_created = 0
                 rows_created = 0
+                
+                logs.append(f"   📊 Will create {len(rows_by_class)} instances (one per class)")
 
                 # Collect debug logs
                 import_logs = []
@@ -1229,10 +1242,19 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             import_logs.append(f"Save error traceback: {traceback.format_exc()}")
                             continue
 
-                        logs.append(f"Created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
+                        logs.append(f"   ✅ Created instance {instance_doc.name} with {len(class_rows)} rows for class {class_id}")
                     except Exception as e:
-                        logs.append(f"Failed to create instance for class {class_id}: {str(e)}")
+                        logs.append(f"   ❌ Failed to create instance for class {class_id}: {str(e)}")
                         continue
+                
+                # Summary
+                logs.append(f"")
+                logs.append(f"📊 SUMMARY:")
+                logs.append(f"   • Timetable ID: {timetable_id}")
+                logs.append(f"   • Date range: {upload_start_date} to {upload_end_date}")
+                logs.append(f"   • Instances created: {instances_created}")
+                logs.append(f"   • Total rows created: {rows_created}")
+                logs.append(f"   • Classes: {len(rows_by_class)}")
 
             # Prepare detailed result with created records info
             created_records = {}
