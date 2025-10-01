@@ -718,7 +718,9 @@ def process_excel_import():
 
 
 def process_excel_import_with_metadata_v2(import_data: dict):
-    """Process Excel import with metadata (title, dates, etc.) - Simplified version"""
+    """Process Excel import with metadata (title, dates, etc.) - Simplified version
+    
+    """
     # Initialize logs FIRST before any other code
     logs = []
     
@@ -1235,17 +1237,32 @@ def process_excel_import_with_metadata_v2(import_data: dict):
             # Prepare detailed result with created records info
             created_records = {}
             if not dry_run and 'timetable_id' in locals():
-                # Load timetable_doc if not already available (for update in-place case)
-                if 'timetable_doc' not in locals():
-                    timetable_doc = frappe.get_doc("SIS Timetable", timetable_id)
+                # Get timetable info without loading child tables (avoid 'parent' column error)
+                try:
+                    timetable_info = frappe.db.get_value(
+                        "SIS Timetable", 
+                        timetable_id, 
+                        ["name", "title_vn", "start_date", "end_date"],
+                        as_dict=True
+                    )
+                    logs.append(f"✅ Retrieved timetable info: {timetable_info.get('name')}")
+                except Exception as get_error:
+                    logs.append(f"⚠️  Could not retrieve timetable info: {str(get_error)}")
+                    # Fallback to basic info we already have
+                    timetable_info = {
+                        "name": timetable_id,
+                        "title_vn": title_vn,
+                        "start_date": import_data.get("start_date"),
+                        "end_date": import_data.get("end_date")
+                    }
 
                 created_records = {
                     "timetable": {
                         "id": timetable_id,
-                        "name": timetable_doc.name,
-                        "title_vn": timetable_doc.title_vn,
-                        "start_date": timetable_doc.start_date,
-                        "end_date": timetable_doc.end_date
+                        "name": timetable_info.get("name"),
+                        "title_vn": timetable_info.get("title_vn"),
+                        "start_date": str(timetable_info.get("start_date")),
+                        "end_date": str(timetable_info.get("end_date"))
                     },
                     "instances_created": locals().get('instances_created', 0),
                     "rows_created": locals().get('rows_created', 0)
