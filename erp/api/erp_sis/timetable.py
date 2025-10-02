@@ -872,116 +872,61 @@ def get_teacher_week():
                 frappe.log_error(error_msg, "Timetable Education Stage Filter Error")
                 return error_response(error_msg)
 
-        # Debug: Try without class_id field first to test table
-
-        # First try to get all records to test table existence
-        try:
-            all_rows = frappe.get_all(
-                "SIS Timetable Instance Row",
-                fields=["name"],
-                limit=1
-            )
-        except Exception as table_error:
-            pass
-            return error_response(f"Table not found: {str(table_error)}")
-
-        # Try with minimal fields first to see what exists
-        try:
-            # Step 1: Try with only basic fields
-            basic_fields = ["name", "day_of_week"]
-            rows = frappe.get_all(
-                "SIS Timetable Instance Row",
-                fields=basic_fields,
-                filters=filters,
-                limit=5
-            )
-
-            # Step 2: Try adding more fields one by one
-            available_fields = basic_fields[:]
-            # Ensure we attempt to include essential linkage/display fields
-            test_fields = [
-                "timetable_column_id",
-                "subject_id",
-                "subject_name",
-                "teacher_1_id",
-                "teacher_2_id",
-                "parent",
-            ]
-
-            for field in test_fields:
-                try:
-                    test_rows = frappe.get_all(
-                        "SIS Timetable Instance Row",
-                        fields=available_fields + [field],
-                        filters=filters,
-                        limit=1
-                    )
-                    available_fields.append(field)
-                except Exception as field_error:
-                    pass
-
-            # Step 3: Use all available fields
-            rows = frappe.get_all(
-                "SIS Timetable Instance Row",
-                fields=available_fields,
-                filters=filters,
-                order_by="day_of_week asc",
-            )
-
-        except Exception as query_error:
-            pass
-            return error_response(f"Query failed: {str(query_error)}")
+        # ✅ NEW APPROACH: Query from SIS Teacher Timetable materialized view instead of Instance Rows
+        # This ensures we only return entries that have been properly created with teacher assignments
         
-        # Filter in-memory for teacher (to avoid OR filter limitation in simple get_all)
-        frappe.logger().info(f"🔍 TIMETABLE: Before teacher filter - Total rows: {len(rows)}")
-        rows = [
-            r for r in rows
-            if (r.get("teacher_1_id") in resolved_teacher_ids) or (r.get("teacher_2_id") in resolved_teacher_ids)
-        ]
-        frappe.logger().info(f"✅ TIMETABLE: After teacher filter - Matched rows: {len(rows)} for teacher_ids: {resolved_teacher_ids}")
-
-        # Attach class_id via parent instance if available
-        # Also filter instances by date range to ensure only active instances are included
+        frappe.logger().info(f"🔍 TIMETABLE: Querying Teacher Timetable for teachers: {resolved_teacher_ids}")
+        
+        # Build date filter for the week
+        teacher_timetable_filters = {
+            "date": ["between", [ws, week_end]] if week_end else [">=", ws]
+        }
+        
+        # Add education_stage filter if already applied to 'filters'
+        if "timetable_column_id" in filters:
+            teacher_timetable_filters["timetable_column_id"] = filters["timetable_column_id"]
+        
+        frappe.logger().info(f"🔍 TIMETABLE: Teacher Timetable filters: {teacher_timetable_filters}")
+        
         try:
-            parent_ids = list({r.get("parent") for r in rows if r.get("parent")})
-            parent_class_map = {}
-            if parent_ids:
-                frappe.logger().info(f"🔍 TIMETABLE: Found {len(parent_ids)} unique parent instance IDs")
-                
-                # Build filters with date range
-                instance_filters = {"name": ["in", parent_ids]}
-
-                # Add date filtering if week dates are available
-                if ws and week_end:
-                    instance_filters.update({
-                        "start_date": ["<=", week_end],
-                        "end_date": [">=", ws]
-                    })
-
-                instances = frappe.get_all(
-                    "SIS Timetable Instance",
-                    fields=["name", "class_id", "start_date", "end_date"],
-                    filters=instance_filters,
+            # Query Teacher Timetable directly - this is the materialized view
+            rows = []
+            for teacher_id in resolved_teacher_ids:
+                teacher_filters = {**teacher_timetable_filters, "teacher_id": teacher_id}
+                teacher_rows = frappe.get_all(
+                    "SIS Teacher Timetable",
+                    fields=[
+                        "name",
+                        "teacher_id", 
+                        "class_id",
+                        "day_of_week",
+                        "timetable_column_id",
+                        "subject_id",
+                        "room_id",
+                        "date",
+                        "timetable_instance_id"
+                    ],
+                    filters=teacher_filters,
+                    order_by="date asc, day_of_week asc"
                 )
+                rows.extend(teacher_rows)
+                frappe.logger().info(f"  - Found {len(teacher_rows)} entries for teacher {teacher_id}")
+            
+            frappe.logger().info(f"✅ TIMETABLE: Total {len(rows)} entries from Teacher Timetable")
+            
+            # Map to structure expected by downstream code
+            # Teacher Timetable already has teacher_id, treat as teacher_1_id for compatibility
+            for row in rows:
+                row["teacher_1_id"] = row.get("teacher_id")
+                row["parent"] = row.get("timetable_instance_id")  # For compatibility with instance lookup
                 
-                frappe.logger().info(f"📊 TIMETABLE: Found {len(instances)} valid instances for date range {ws} to {week_end}")
-                if len(instances) > 1:
-                    # Log chi tiết nếu có nhiều instances
-                    for inst in instances:
-                        frappe.logger().info(f"  - Instance {inst.name}: class={inst.class_id}, dates={inst.start_date} to {inst.end_date}")
-                
-                parent_class_map = {i.name: i.class_id for i in instances}
+        except Exception as query_error:
+            frappe.logger().error(f"❌ TIMETABLE: Query failed: {str(query_error)}")
+            return error_response(f"Query failed: {str(query_error)}")
 
-                # Filter out rows whose parent instances are not active for this date range
-                valid_parent_ids = set(parent_class_map.keys())
-                before_instance_filter = len(rows)
-                rows = [r for r in rows if r.get("parent") not in valid_parent_ids or r.get("parent") in valid_parent_ids]
-                frappe.logger().info(f"✅ TIMETABLE: After instance filter - {len(rows)} rows (removed {before_instance_filter - len(rows)} outdated)")
-            for r in rows:
-                if r.get("parent") and not r.get("class_id"):
-                    r["class_id"] = parent_class_map.get(r.get("parent"))
-        except Exception as class_map_error:
-            pass
+        # Teacher Timetable already has class_id, no need to fetch from instance
+        # Just log for debugging
+        frappe.logger().info(f"📝 TIMETABLE: Rows already have class_id from Teacher Timetable")
         # Enrich subject_title and teacher_names
         try:
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
