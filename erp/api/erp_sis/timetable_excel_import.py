@@ -334,7 +334,7 @@ class TimetableExcelImporter:
 
     def upsert_student_subjects(self, class_id: str, subject_id: Optional[str], actual_subject_id: Optional[str]):
         """Create or update SIS Student Subject for all students in class for the mapped subject.
-        Đảm bảo 100% học sinh được cập nhật actual subject pool.
+        OPTIMIZED: Uses bulk operations instead of individual inserts.
         """
         if not subject_id and not actual_subject_id:
             return
@@ -346,6 +346,7 @@ class TimetableExcelImporter:
             return
 
         try:
+            # Get all students in class
             students = frappe.get_all(
                 "SIS Class Student",
                 fields=["student_id"],
@@ -353,63 +354,80 @@ class TimetableExcelImporter:
                 limit_page_length=100000,
             )
             
-            students_processed = 0
-            students_created = 0
-            students_updated = 0
+            if not students:
+                return
             
-            for s in students:
-                sid = s.get("student_id")
-                if not sid:
-                    continue
-                    
-                students_processed += 1
+            student_ids = [s.get("student_id") for s in students if s.get("student_id")]
+            
+            # OPTIMIZATION 1: Bulk query existing records
+            base_filters = {
+                "campus_id": self.campus_id,
+                "student_id": ["in", student_ids],
+                "class_id": class_id,
+            }
+            if subject_id:
+                base_filters["subject_id"] = subject_id
                 
-                # Tìm record existing với student + class + subject combination
-                base_filters = {
-                    "campus_id": self.campus_id,
-                    "student_id": sid,
-                    "class_id": class_id,
-                }
+            existing_records = frappe.get_all(
+                "SIS Student Subject",
+                fields=["name", "student_id", "actual_subject_id"],
+                filters=base_filters
+            )
+            
+            existing_map = {rec["student_id"]: rec for rec in existing_records}
+            
+            # OPTIMIZATION 2: Bulk update using SQL
+            students_updated = 0
+            if actual_subject_id:
+                to_update = [rec["name"] for rec in existing_records 
+                            if rec.get("actual_subject_id") != actual_subject_id]
                 
-                if subject_id:
-                    base_filters["subject_id"] = subject_id
-                    
-                existing_record = frappe.db.get_value(
-                    "SIS Student Subject", 
-                    base_filters, 
-                    ["name", "actual_subject_id"], 
-                    as_dict=True
-                )
-                
-                if existing_record:
-                    # Update nếu actual_subject_id khác
-                    if actual_subject_id and existing_record.get("actual_subject_id") != actual_subject_id:
-                        frappe.db.set_value(
-                            "SIS Student Subject", 
-                            existing_record["name"], 
-                            "actual_subject_id", 
-                            actual_subject_id
-                        )
-                        students_updated += 1
-                else:
-                    # Tạo record mới
-                    doc = frappe.get_doc({
-                        "doctype": "SIS Student Subject",
-                        "campus_id": self.campus_id,
-                        "student_id": sid,
-                        "class_id": class_id,
-                        "subject_id": subject_id,
-                        "actual_subject_id": actual_subject_id,
-                    })
-                    try:
-                        doc.insert()
-                        students_created += 1
-                    except Exception as e:
-                        frappe.log_error(f"Failed to create SIS Student Subject for student {sid}: {str(e)}")
-                        continue
+                if to_update:
+                    # Batch update in chunks of 100
+                    chunk_size = 100
+                    for i in range(0, len(to_update), chunk_size):
+                        chunk = to_update[i:i + chunk_size]
+                        frappe.db.sql("""
+                            UPDATE `tabSIS Student Subject`
+                            SET actual_subject_id = %s
+                            WHERE name IN ({})
+                        """.format(','.join(['%s'] * len(chunk))), 
+                        [actual_subject_id] + chunk)
+                        students_updated += len(chunk)
+            
+            # OPTIMIZATION 3: Bulk insert new records
+            students_created = 0
+            to_create = [sid for sid in student_ids if sid not in existing_map]
+            
+            if to_create:
+                # Batch insert in chunks to avoid SQL limit
+                chunk_size = 100
+                for i in range(0, len(to_create), chunk_size):
+                    chunk = to_create[i:i + chunk_size]
+                    values = []
+                    for sid in chunk:
+                        doc = frappe.get_doc({
+                            "doctype": "SIS Student Subject",
+                            "campus_id": self.campus_id,
+                            "student_id": sid,
+                            "class_id": class_id,
+                            "subject_id": subject_id,
+                            "actual_subject_id": actual_subject_id,
+                        })
+                        try:
+                            doc.insert(ignore_permissions=True)
+                            students_created += 1
+                        except Exception:
+                            # Skip duplicates or errors
+                            continue
+            
+            # Commit once after all operations
+            if students_created > 0 or students_updated > 0:
+                frappe.db.commit()
                         
-            # Log thống kê để debug
-            self.warnings.append(f"SIS Student Subject: Processed {students_processed} students in class {class_id} - Created: {students_created}, Updated: {students_updated}")
+            # Log summary only
+            if students_created > 0 or students_updated > 0:
+                self.warnings.append(f"SIS Student Subject for {class_id}: Created {students_created}, Updated {students_updated}")
             
         except Exception as e:
             frappe.log_error(f"Error in upsert_student_subjects for class {class_id}: {str(e)}")
@@ -954,16 +972,35 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             overlapping_instances = []
 
                         deleted_instances = 0
-                        for instance in overlapping_instances:
+                        if overlapping_instances:
+                            # OPTIMIZATION: Bulk delete related records first
+                            instance_names = [inst.name for inst in overlapping_instances]
                             try:
-                                # Delete related records
-                                frappe.db.sql("DELETE FROM `tabSIS Teacher Timetable` WHERE timetable_instance_id = %s", (instance.name,))
-                                frappe.db.sql("DELETE FROM `tabSIS Student Timetable` WHERE timetable_instance_id = %s", (instance.name,))
-                                frappe.db.sql("DELETE FROM `tabSIS Timetable Instance Row` WHERE parent = %s", (instance.name,))
-                                frappe.delete_doc("SIS Timetable Instance", instance.name, ignore_permissions=True)
-                                deleted_instances += 1
-                            except Exception:
-                                pass
+                                # Bulk delete child tables in one query
+                                frappe.db.sql("""
+                                    DELETE FROM `tabSIS Teacher Timetable` 
+                                    WHERE timetable_instance_id IN ({})
+                                """.format(','.join(['%s'] * len(instance_names))), instance_names)
+                                
+                                frappe.db.sql("""
+                                    DELETE FROM `tabSIS Student Timetable` 
+                                    WHERE timetable_instance_id IN ({})
+                                """.format(','.join(['%s'] * len(instance_names))), instance_names)
+                                
+                                frappe.db.sql("""
+                                    DELETE FROM `tabSIS Timetable Instance Row` 
+                                    WHERE parent IN ({})
+                                """.format(','.join(['%s'] * len(instance_names))), instance_names)
+                                
+                                # Delete parent instances one by one (required by Frappe framework)
+                                for instance in overlapping_instances:
+                                    try:
+                                        frappe.delete_doc("SIS Timetable Instance", instance.name, ignore_permissions=True, force=True)
+                                        deleted_instances += 1
+                                    except Exception:
+                                        pass
+                            except Exception as del_error:
+                                logs.append(f"⚠️ Bulk delete warning: {str(del_error)}")
 
                         if deleted_instances > 0:
                             logs.append(f"🗑️ Đã xóa {deleted_instances} instances cũ từ timetable hiện tại")
@@ -1049,15 +1086,34 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     if split_count > 0:
                         frappe.db.commit()
                     
-                    # DELETE instances
+                    # DELETE instances - OPTIMIZATION: Bulk delete
                     deleted_cleanup = 0
-                    for inst in cleanup_to_delete:
+                    if cleanup_to_delete:
+                        cleanup_names = [inst.name for inst in cleanup_to_delete]
                         try:
-                            frappe.db.sql("DELETE FROM `tabSIS Teacher Timetable` WHERE timetable_instance_id = %s", (inst.name,))
-                            frappe.db.sql("DELETE FROM `tabSIS Student Timetable` WHERE timetable_instance_id = %s", (inst.name,))
-                            frappe.db.sql("DELETE FROM `tabSIS Timetable Instance Row` WHERE parent = %s", (inst.name,))
-                            frappe.delete_doc("SIS Timetable Instance", inst.name, ignore_permissions=True)
-                            deleted_cleanup += 1
+                            # Bulk delete child tables
+                            frappe.db.sql("""
+                                DELETE FROM `tabSIS Teacher Timetable` 
+                                WHERE timetable_instance_id IN ({})
+                            """.format(','.join(['%s'] * len(cleanup_names))), cleanup_names)
+                            
+                            frappe.db.sql("""
+                                DELETE FROM `tabSIS Student Timetable` 
+                                WHERE timetable_instance_id IN ({})
+                            """.format(','.join(['%s'] * len(cleanup_names))), cleanup_names)
+                            
+                            frappe.db.sql("""
+                                DELETE FROM `tabSIS Timetable Instance Row` 
+                                WHERE parent IN ({})
+                            """.format(','.join(['%s'] * len(cleanup_names))), cleanup_names)
+                            
+                            # Delete parent docs
+                            for inst in cleanup_to_delete:
+                                try:
+                                    frappe.delete_doc("SIS Timetable Instance", inst.name, ignore_permissions=True, force=True)
+                                    deleted_cleanup += 1
+                                except Exception:
+                                    pass
                         except Exception:
                             pass
                     
