@@ -753,9 +753,21 @@ def get_subjects_for_timetable_selection():
         # Get education_stage_id from request
         education_stage_id = frappe.local.form_dict.get("education_stage_id")
 
+        # DEBUG: Log received parameters
+        frappe.logger().info(f"🔍 DEBUG get_subjects_for_timetable_selection:")
+        frappe.logger().info(f"  - campus_id: {campus_id}")
+        frappe.logger().info(f"  - education_stage_id from request: {education_stage_id}")
+
         filters = {"campus_id": campus_id}
         if education_stage_id:
             filters["education_stage"] = education_stage_id
+            frappe.logger().info(f"  - Applied filter: education_stage = {education_stage_id}")
+
+        frappe.logger().info(f"  - Final filters: {filters}")
+
+        # Get total count before filtering
+        total_count = frappe.db.count("SIS Subject", {"campus_id": campus_id})
+        frappe.logger().info(f"  - Total subjects in campus: {total_count}")
 
         subjects = frappe.get_all(
             "SIS Subject",
@@ -763,6 +775,14 @@ def get_subjects_for_timetable_selection():
             filters=filters,
             order_by="title asc"
         )
+
+        frappe.logger().info(f"  - Filtered subjects count: {len(subjects)}")
+        
+        # Sample first 3 subjects to verify education_stage field
+        if subjects and len(subjects) > 0:
+            frappe.logger().info(f"  - Sample subjects (first 3):")
+            for subj in subjects[:3]:
+                frappe.logger().info(f"    * {subj.get('name')}: education_stage={subj.get('education_stage')}")
 
         return success_response(
             data=subjects,
