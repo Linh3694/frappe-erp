@@ -180,6 +180,174 @@ def get_students_by_classes():
         return error_response(f"Error fetching students by classes: {str(e)}")
 
 
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def get_subjects_by_students_in_classes():
+    """
+    Get ALL subjects for students in selected classes/grades
+    
+    This API differs from get_subjects_by_classes in that it:
+    1. First identifies students in the specified classes (filtered by grade if provided)
+    2. Then returns ALL subjects these students are enrolled in (including subjects from other classes like Mixed classes)
+    
+    This is useful for Mixed classes where students from multiple grades study together,
+    ensuring report cards only include the correct students while showing all their subjects.
+    
+    Parameters:
+    - class_ids: List of class IDs to filter students
+    - grade_ids: Optional list of grade IDs to further filter students (to avoid mixed-grade students)
+    
+    Returns:
+    - List of unique subjects that the filtered students are studying
+    """
+    try:
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        
+        # Get class_ids and grade_ids from request
+        class_ids = None
+        grade_ids = None
+        
+        # Try from form_dict first
+        if frappe.form_dict.get('class_ids'):
+            class_ids = frappe.form_dict.get('class_ids')
+            if isinstance(class_ids, str):
+                try:
+                    class_ids = json.loads(class_ids)
+                except json.JSONDecodeError:
+                    class_ids = [class_ids]
+        
+        if frappe.form_dict.get('grade_ids'):
+            grade_ids = frappe.form_dict.get('grade_ids')
+            if isinstance(grade_ids, str):
+                try:
+                    grade_ids = json.loads(grade_ids)
+                except json.JSONDecodeError:
+                    grade_ids = [grade_ids]
+        
+        # Try from JSON payload
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                if not class_ids:
+                    class_ids = json_data.get('class_ids', [])
+                if not grade_ids:
+                    grade_ids = json_data.get('grade_ids', [])
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
+                pass
+        
+        if not class_ids or len(class_ids) == 0:
+            return validation_error_response("Validation failed", {"class_ids": ["At least one class ID is required"]})
+        
+        # Make sure class_ids is a list
+        if not isinstance(class_ids, list):
+            class_ids = [class_ids]
+        
+        # Make sure grade_ids is a list if provided
+        if grade_ids and not isinstance(grade_ids, list):
+            grade_ids = [grade_ids]
+        
+        # STEP 1: Get students in the specified classes (with optional grade filter)
+        student_filters = {
+            "campus_id": campus_id,
+            "class_id": ["in", class_ids]
+        }
+        
+        # Add grade filter if provided to avoid mixed-grade students
+        if grade_ids and len(grade_ids) > 0:
+            student_filters["education_grade"] = ["in", grade_ids]
+        
+        frappe.logger().info(f"[get_subjects_by_students_in_classes] Step 1: Finding students with filters: {student_filters}")
+        
+        students_in_classes = frappe.get_all(
+            "SIS Student Subject",
+            fields=["student_id"],
+            filters=student_filters,
+            distinct=True
+        )
+        
+        if not students_in_classes:
+            frappe.logger().info(f"[get_subjects_by_students_in_classes] No students found for classes {class_ids} and grades {grade_ids}")
+            return list_response([], "No students found for the selected classes and grades")
+        
+        student_ids = [s["student_id"] for s in students_in_classes]
+        frappe.logger().info(f"[get_subjects_by_students_in_classes] Found {len(student_ids)} students: {student_ids[:5]}...")
+        
+        # STEP 2: Get ALL subjects for these students (from all their classes)
+        subject_filters = {
+            "campus_id": campus_id,
+            "student_id": ["in", student_ids]
+        }
+        
+        frappe.logger().info(f"[get_subjects_by_students_in_classes] Step 2: Finding all subjects for {len(student_ids)} students")
+        
+        # Get unique actual_subject_id for these students
+        student_subjects = frappe.get_all(
+            "SIS Student Subject",
+            fields=["actual_subject_id"],
+            filters=subject_filters,
+            distinct=True
+        )
+        
+        # Collect all unique actual subject IDs
+        actual_subject_ids = set()
+        for record in student_subjects:
+            if record.get("actual_subject_id"):
+                actual_subject_ids.add(record["actual_subject_id"])
+        
+        if not actual_subject_ids:
+            frappe.logger().info(f"[get_subjects_by_students_in_classes] No subjects found for students")
+            return list_response([], "No subjects found for students in the selected classes")
+        
+        frappe.logger().info(f"[get_subjects_by_students_in_classes] Found {len(actual_subject_ids)} unique subjects")
+        
+        # STEP 3: Get actual subject details from SIS Actual Subject table
+        subjects_query = """
+            SELECT DISTINCT
+                s.name,
+                s.title_vn,
+                s.title_en,
+                s.education_stage_id,
+                s.curriculum_id,
+                s.campus_id
+            FROM `tabSIS Actual Subject` s
+            WHERE s.campus_id = %s AND s.name IN ({})
+            ORDER BY s.title_vn ASC
+        """.format(','.join(['%s'] * len(actual_subject_ids)))
+        
+        subjects = frappe.db.sql(
+            subjects_query, 
+            (campus_id,) + tuple(actual_subject_ids), 
+            as_dict=True
+        )
+        
+        # Format the response
+        formatted_subjects = []
+        for subject in subjects:
+            formatted_subjects.append({
+                "name": subject["name"],
+                "title": subject["title_vn"] or subject["name"],
+                "title_vn": subject["title_vn"] or subject["name"],
+                "title_en": subject["title_en"] or subject["title_vn"] or subject["name"],
+                "education_stage_id": subject["education_stage_id"],
+                "curriculum_id": subject["curriculum_id"],
+                "campus_id": subject["campus_id"]
+            })
+        
+        frappe.logger().info(f"[get_subjects_by_students_in_classes] Returning {len(formatted_subjects)} subjects for {len(student_ids)} students from {len(class_ids)} classes")
+        
+        return list_response(
+            formatted_subjects, 
+            f"Found {len(formatted_subjects)} unique subjects for {len(student_ids)} students in {len(class_ids)} classes"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error fetching subjects by students in classes: {str(e)}")
+        return error_response(f"Error fetching subjects by students in classes: {str(e)}")
+
+
 def _initialize_report_data_from_template(template, student_id: str, class_id: str) -> dict:
     """
     Initialize full data structure for Student Report Card based on template configuration
