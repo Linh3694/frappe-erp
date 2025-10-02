@@ -1090,12 +1090,12 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 students = frappe.get_all(
                     "CRM Student",
                     filters={"student_code": student_code},
-                    fields=["name", "full_name"],
+                    fields=["name"],
                     limit=1
                 )
                 if students:
                     student_id = students[0].name
-                    frappe.logger().info(f"[SIS Class Student] Row {row_num} - Found student: {student_id} ({students[0].get('full_name', '')})")
+                    frappe.logger().info(f"[SIS Class Student] Row {row_num} - Found student: {student_id}")
                 else:
                     frappe.logger().error(f"[SIS Class Student] Row {row_num} - Student not found with code: {student_code}")
                     raise frappe.ValidationError(f"[{doctype}] Không tìm thấy học sinh với mã '{student_code}'")
