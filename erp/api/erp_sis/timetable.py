@@ -845,6 +845,8 @@ def get_teacher_week():
                 column_filters = {"education_stage_id": education_stage}
                 if campus_id:
                     column_filters["campus_id"] = campus_id
+                
+                frappe.logger().info(f"🔍 TIMETABLE: Filtering by education_stage={education_stage} with column_filters={column_filters}")
                     
                 valid_columns = frappe.get_all(
                     "SIS Timetable Column",
@@ -852,15 +854,23 @@ def get_teacher_week():
                     filters=column_filters
                 )
                 
+                frappe.logger().info(f"🔍 TIMETABLE: Found {len(valid_columns)} valid columns for education_stage={education_stage}")
+                
                 if valid_columns:
                     valid_column_ids = [col.name for col in valid_columns]
                     filters["timetable_column_id"] = ["in", valid_column_ids]
+                    frappe.logger().info(f"✅ TIMETABLE: Applied filter with {len(valid_column_ids)} column IDs")
                 else:
                     # If no columns found for this education stage, return empty
+                    frappe.logger().warning(f"⚠️ TIMETABLE: No timetable columns found for education_stage={education_stage}")
                     return list_response([], "No timetable columns found for this education stage")
                     
             except Exception as education_filter_error:
-                pass  # Continue without education stage filter if there's an error
+                # ❌ DO NOT silently ignore errors - log and return error response
+                error_msg = f"Error filtering by education stage {education_stage}: {str(education_filter_error)}"
+                frappe.logger().error(f"❌ TIMETABLE: {error_msg}")
+                frappe.log_error(error_msg, "Timetable Education Stage Filter Error")
+                return error_response(error_msg)
 
         # Debug: Try without class_id field first to test table
 
