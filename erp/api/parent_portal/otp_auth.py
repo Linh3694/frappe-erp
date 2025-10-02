@@ -205,7 +205,7 @@ def request_otp(phone_number):
         logs.append(f"💾 Stored OTP in cache with key: {cache_key}")
         
         # Prepare SMS message
-        sms_message = f"Ma xac thuc Wellspring cua ban la: {otp_code}. Ma co hieu luc trong 5 phut."
+        sms_message = f"Ma xac thuc Parent Portal cua ban la: {otp_code}. Ma co hieu luc trong 5 phut."
         
         # Send SMS
         sms_result = send_sms_via_vivas(normalized_phone, sms_message)
