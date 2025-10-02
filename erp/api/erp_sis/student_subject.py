@@ -189,6 +189,7 @@ def get_subjects_by_students_in_classes():
     1. Filters classes by grade (if grade_ids provided) - JOIN with SIS Class
     2. Identifies students in the filtered classes
     3. Returns ALL subjects these students are enrolled in (including subjects from other classes like Mixed classes)
+    4. Filters subjects by program_type (VN/INTL) based on curriculum_id
     
     This is useful for Mixed classes where students from multiple grades study together,
     ensuring report cards only include the correct students while showing all their subjects.
@@ -196,6 +197,7 @@ def get_subjects_by_students_in_classes():
     Parameters:
     - class_ids: List of class IDs to filter students
     - grade_ids: Optional list of grade IDs to further filter students (to avoid mixed-grade students)
+    - program_type: Optional 'vn' or 'intl' to filter subjects by curriculum
     
     Returns:
     - List of unique subjects that the filtered students are studying
@@ -207,9 +209,16 @@ def get_subjects_by_students_in_classes():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        # Get class_ids and grade_ids from request
+        # Curriculum mapping based on program type
+        CURRICULUM_MAPPING = {
+            'vn': ['SIS_CURRICULUM-00219', 'SIS_CURRICULUM-01333'],  # Chương trình Việt Nam + Phát triển toàn diện
+            'intl': ['SIS_CURRICULUM-00011']  # Chương trình Quốc tế
+        }
+        
+        # Get class_ids, grade_ids, and program_type from request
         class_ids = None
         grade_ids = None
+        program_type = None
         
         # Try from form_dict first
         if frappe.form_dict.get('class_ids'):
@@ -228,6 +237,9 @@ def get_subjects_by_students_in_classes():
                 except json.JSONDecodeError:
                     grade_ids = [grade_ids]
         
+        if frappe.form_dict.get('program_type'):
+            program_type = frappe.form_dict.get('program_type')
+        
         # Try from JSON payload
         if frappe.request.data:
             try:
@@ -236,6 +248,8 @@ def get_subjects_by_students_in_classes():
                     class_ids = json_data.get('class_ids', [])
                 if not grade_ids:
                     grade_ids = json_data.get('grade_ids', [])
+                if not program_type:
+                    program_type = json_data.get('program_type')
             except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
                 pass
         
@@ -329,6 +343,20 @@ def get_subjects_by_students_in_classes():
         frappe.logger().info(f"[get_subjects_by_students_in_classes] Found {len(actual_subject_ids)} unique subjects")
         
         # STEP 4: Get actual subject details from SIS Actual Subject table
+        # Add curriculum filter if program_type is provided
+        curriculum_filter = ""
+        query_params = [campus_id]
+        
+        if program_type and program_type in CURRICULUM_MAPPING:
+            curriculum_ids = CURRICULUM_MAPPING[program_type]
+            curriculum_placeholders = ','.join(['%s'] * len(curriculum_ids))
+            curriculum_filter = f" AND s.curriculum_id IN ({curriculum_placeholders})"
+            query_params.extend(curriculum_ids)
+            frappe.logger().info(f"[get_subjects_by_students_in_classes] Filtering by program_type '{program_type}' -> curriculums: {curriculum_ids}")
+        
+        # Add actual_subject_ids to query params
+        query_params.extend(actual_subject_ids)
+        
         subjects_query = """
             SELECT DISTINCT
                 s.name,
@@ -338,13 +366,16 @@ def get_subjects_by_students_in_classes():
                 s.curriculum_id,
                 s.campus_id
             FROM `tabSIS Actual Subject` s
-            WHERE s.campus_id = %s AND s.name IN ({})
+            WHERE s.campus_id = %s{curriculum_filter} AND s.name IN ({subject_placeholders})
             ORDER BY s.title_vn ASC
-        """.format(','.join(['%s'] * len(actual_subject_ids)))
+        """.format(
+            curriculum_filter=curriculum_filter,
+            subject_placeholders=','.join(['%s'] * len(actual_subject_ids))
+        )
         
         subjects = frappe.db.sql(
             subjects_query, 
-            (campus_id,) + tuple(actual_subject_ids), 
+            tuple(query_params), 
             as_dict=True
         )
         
@@ -361,11 +392,12 @@ def get_subjects_by_students_in_classes():
                 "campus_id": subject["campus_id"]
             })
         
-        frappe.logger().info(f"[get_subjects_by_students_in_classes] Returning {len(formatted_subjects)} subjects for {len(student_ids)} students from {len(class_ids)} classes")
+        program_type_msg = f" (program_type: {program_type})" if program_type else ""
+        frappe.logger().info(f"[get_subjects_by_students_in_classes] Returning {len(formatted_subjects)} subjects for {len(student_ids)} students from {len(class_ids)} classes{program_type_msg}")
         
         return list_response(
             formatted_subjects, 
-            f"Found {len(formatted_subjects)} unique subjects for {len(student_ids)} students in {len(class_ids)} classes"
+            f"Found {len(formatted_subjects)} unique subjects for {len(student_ids)} students in {len(class_ids)} classes{program_type_msg}"
         )
         
     except Exception as e:
