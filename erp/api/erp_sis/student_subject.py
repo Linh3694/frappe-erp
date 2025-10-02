@@ -186,8 +186,9 @@ def get_subjects_by_students_in_classes():
     Get ALL subjects for students in selected classes/grades
     
     This API differs from get_subjects_by_classes in that it:
-    1. First identifies students in the specified classes (filtered by grade if provided)
-    2. Then returns ALL subjects these students are enrolled in (including subjects from other classes like Mixed classes)
+    1. Filters classes by grade (if grade_ids provided) - JOIN with SIS Class
+    2. Identifies students in the filtered classes
+    3. Returns ALL subjects these students are enrolled in (including subjects from other classes like Mixed classes)
     
     This is useful for Mixed classes where students from multiple grades study together,
     ensuring report cards only include the correct students while showing all their subjects.
@@ -299,13 +300,13 @@ def get_subjects_by_students_in_classes():
         student_ids = [s["student_id"] for s in students_in_classes]
         frappe.logger().info(f"[get_subjects_by_students_in_classes] Found {len(student_ids)} students: {student_ids[:5]}...")
         
-        # STEP 2: Get ALL subjects for these students (from all their classes)
+        # STEP 3: Get ALL subjects for these students (from all their classes)
         subject_filters = {
             "campus_id": campus_id,
             "student_id": ["in", student_ids]
         }
         
-        frappe.logger().info(f"[get_subjects_by_students_in_classes] Step 2: Finding all subjects for {len(student_ids)} students")
+        frappe.logger().info(f"[get_subjects_by_students_in_classes] Step 3: Finding all subjects for {len(student_ids)} students")
         
         # Get unique actual_subject_id for these students
         student_subjects = frappe.get_all(
@@ -327,7 +328,7 @@ def get_subjects_by_students_in_classes():
         
         frappe.logger().info(f"[get_subjects_by_students_in_classes] Found {len(actual_subject_ids)} unique subjects")
         
-        # STEP 3: Get actual subject details from SIS Actual Subject table
+        # STEP 4: Get actual subject details from SIS Actual Subject table
         subjects_query = """
             SELECT DISTINCT
                 s.name,
