@@ -451,6 +451,8 @@ def _process_excel_file(job):
         from frappe.utils.file_manager import save_file
 
         frappe.logger().info(f"Processing Excel file for job {job.name}")
+        frappe.logger().info(f"Job doctype_target: {job.doctype_target}")
+        frappe.logger().info(f"Job options: {job.options_json}")
 
         # Resolve file_url to absolute file system path
         file_url = job.file_url or ""
@@ -618,17 +620,27 @@ def _process_excel_file(job):
         frappe.logger().info(f"Excel file has {total_rows} rows")
 
         # Build label->fieldname mapping for column headers
-        meta = frappe.get_meta(job.doctype_target)
-        def _normalize_key(text):
-            key = cstr(text)
-            return "".join(ch.lower() for ch in key if ch.isalnum())
-
+        frappe.logger().info(f"Building label map for doctype: {job.doctype_target}")
+        
+        # For doctypes handled entirely by custom logic, skip field mapping
         label_map = {}
-        for f in meta.fields:
-            if getattr(f, 'fieldname', None):
-                label_map[_normalize_key(f.fieldname)] = f.fieldname
-            if getattr(f, 'label', None):
-                label_map[_normalize_key(f.label)] = f.fieldname
+        if job.doctype_target not in ["SIS Class Student"]:
+            meta = frappe.get_meta(job.doctype_target)
+            def _normalize_key(text):
+                key = cstr(text)
+                return "".join(ch.lower() for ch in key if ch.isalnum())
+
+            for f in meta.fields:
+                if getattr(f, 'fieldname', None):
+                    label_map[_normalize_key(f.fieldname)] = f.fieldname
+                if getattr(f, 'label', None):
+                    label_map[_normalize_key(f.label)] = f.fieldname
+        else:
+            # For SIS Class Student, use simple column name mapping
+            def _normalize_key(text):
+                key = cstr(text)
+                return "".join(ch.lower() for ch in key if ch.isalnum())
+            frappe.logger().info(f"Using simple column mapping for {job.doctype_target}")
         
         # Add special column mappings for specific DocTypes
         special_mappings = {
@@ -665,6 +677,15 @@ def _process_excel_file(job):
                 "class_type": "class_type",
                 "school_year_id": "school_year_id",
                 "campus_id": "campus_id"
+            },
+            "SIS Class Student": {
+                # Map Excel columns to internal field names for lookup
+                "student_code": "student_code",
+                "studentcode": "student_code",
+                "class_short_title": "class_short_title",
+                "classshorttitle": "class_short_title",
+                "short_title": "class_short_title",
+                "shorttitle": "class_short_title"
             }
         }
 
