@@ -162,11 +162,12 @@ def request_otp(phone_number):
         normalized_phone = normalize_phone_number(phone_number)
         logs.append(f"📱 Normalized phone: {normalized_phone}")
         
-        # Find guardian by phone number
+        # Find guardian by phone number (ignore permissions for guest access)
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
             filters={"phone_number": normalized_phone},
-            fields=["name", "guardian_name", "phone_number", "email"]
+            fields=["name", "guardian_name", "phone_number", "email"],
+            ignore_permissions=True
         )
         
         if not guardian_list:
@@ -282,11 +283,12 @@ def verify_otp_and_login(phone_number, otp):
         
         logs.append(f"✅ OTP verified successfully")
         
-        # Get guardian details
+        # Get guardian details (ignore permissions for guest access)
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
             filters={"phone_number": normalized_phone},
-            fields=["name", "guardian_name", "phone_number", "email", "guardian_id"]
+            fields=["name", "guardian_name", "phone_number", "email", "guardian_id"],
+            ignore_permissions=True
         )
         
         if not guardian_list:
