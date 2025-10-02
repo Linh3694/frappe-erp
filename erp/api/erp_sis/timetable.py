@@ -933,10 +933,12 @@ def get_teacher_week():
             return error_response(f"Query failed: {str(query_error)}")
         
         # Filter in-memory for teacher (to avoid OR filter limitation in simple get_all)
+        frappe.logger().info(f"🔍 TIMETABLE: Before teacher filter - Total rows: {len(rows)}")
         rows = [
             r for r in rows
             if (r.get("teacher_1_id") in resolved_teacher_ids) or (r.get("teacher_2_id") in resolved_teacher_ids)
         ]
+        frappe.logger().info(f"✅ TIMETABLE: After teacher filter - Matched rows: {len(rows)} for teacher_ids: {resolved_teacher_ids}")
 
         # Attach class_id via parent instance if available
         # Also filter instances by date range to ensure only active instances are included
@@ -944,6 +946,8 @@ def get_teacher_week():
             parent_ids = list({r.get("parent") for r in rows if r.get("parent")})
             parent_class_map = {}
             if parent_ids:
+                frappe.logger().info(f"🔍 TIMETABLE: Found {len(parent_ids)} unique parent instance IDs")
+                
                 # Build filters with date range
                 instance_filters = {"name": ["in", parent_ids]}
 
@@ -956,14 +960,23 @@ def get_teacher_week():
 
                 instances = frappe.get_all(
                     "SIS Timetable Instance",
-                    fields=["name", "class_id"],
+                    fields=["name", "class_id", "start_date", "end_date"],
                     filters=instance_filters,
                 )
+                
+                frappe.logger().info(f"📊 TIMETABLE: Found {len(instances)} valid instances for date range {ws} to {week_end}")
+                if len(instances) > 1:
+                    # Log chi tiết nếu có nhiều instances
+                    for inst in instances:
+                        frappe.logger().info(f"  - Instance {inst.name}: class={inst.class_id}, dates={inst.start_date} to {inst.end_date}")
+                
                 parent_class_map = {i.name: i.class_id for i in instances}
 
                 # Filter out rows whose parent instances are not active for this date range
                 valid_parent_ids = set(parent_class_map.keys())
+                before_instance_filter = len(rows)
                 rows = [r for r in rows if r.get("parent") not in valid_parent_ids or r.get("parent") in valid_parent_ids]
+                frappe.logger().info(f"✅ TIMETABLE: After instance filter - {len(rows)} rows (removed {before_instance_filter - len(rows)} outdated)")
             for r in rows:
                 if r.get("parent") and not r.get("class_id"):
                     r["class_id"] = parent_class_map.get(r.get("parent"))
@@ -1037,10 +1050,28 @@ def get_teacher_week():
             pass
 
         entries = _build_entries(rows, ws)
+        frappe.logger().info(f"📝 TIMETABLE: Built {len(entries)} entries from {len(rows)} rows")
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
         week_end = _add_days(ws, 6)
         entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", resolved_teacher_ids, ws, week_end)
+        
+        frappe.logger().info(f"✅ TIMETABLE: Final response - {len(entries_with_overrides)} entries (after overrides)")
+        
+        # Detect duplicates by unique key
+        if len(entries_with_overrides) > 0:
+            unique_keys = set()
+            duplicates = []
+            for entry in entries_with_overrides:
+                key = f"{entry.get('date')}_{entry.get('timetable_column_id')}_{entry.get('class_id')}"
+                if key in unique_keys:
+                    duplicates.append(entry)
+                unique_keys.add(key)
+            
+            if duplicates:
+                frappe.logger().warning(f"⚠️ TIMETABLE: Found {len(duplicates)} duplicate entries!")
+                for dup in duplicates[:3]:  # Log first 3
+                    frappe.logger().warning(f"  - Duplicate: {dup.get('date')} / {dup.get('class_id')} / {dup.get('subject_title')}")
         
         return list_response(entries_with_overrides, "Teacher week fetched successfully")
     except Exception as e:
