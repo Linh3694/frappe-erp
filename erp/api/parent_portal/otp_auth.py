@@ -162,16 +162,17 @@ def request_otp(phone_number):
         normalized_phone = normalize_phone_number(phone_number)
         logs.append(f"📱 Normalized phone: {normalized_phone}")
         
-        # Find guardian by phone number (ignore permissions for guest access)
+        # Find guardian by phone number (try both formats: with and without +)
+        # Database might store as +84XXXXXXXXX or 84XXXXXXXXX
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
-            filters={"phone_number": normalized_phone},
+            filters={"phone_number": ["in", [normalized_phone, f"+{normalized_phone}"]]},
             fields=["name", "guardian_name", "phone_number", "email"],
             ignore_permissions=True
         )
         
         if not guardian_list:
-            logs.append(f"❌ No guardian found with phone: {normalized_phone}")
+            logs.append(f"❌ No guardian found with phone: {normalized_phone} or +{normalized_phone}")
             return {
                 "success": False,
                 "message": "Không tìm thấy phụ huynh với số điện thoại này",
@@ -283,10 +284,10 @@ def verify_otp_and_login(phone_number, otp):
         
         logs.append(f"✅ OTP verified successfully")
         
-        # Get guardian details (ignore permissions for guest access)
+        # Get guardian details (try both formats: with and without +)
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
-            filters={"phone_number": normalized_phone},
+            filters={"phone_number": ["in", [normalized_phone, f"+{normalized_phone}"]]},
             fields=["name", "guardian_name", "phone_number", "email", "guardian_id"],
             ignore_permissions=True
         )
@@ -395,11 +396,12 @@ def get_guardian_info():
         
         guardian_id = user_email.split("@")[0]
         
-        # Get guardian
+        # Get guardian (ignore permissions as user can only access their own data)
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
             filters={"guardian_id": guardian_id},
-            fields=["name", "guardian_id", "guardian_name", "phone_number", "email"]
+            fields=["name", "guardian_id", "guardian_name", "phone_number", "email"],
+            ignore_permissions=True
         )
         
         if not guardian_list:
