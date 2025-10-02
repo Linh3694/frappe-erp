@@ -1006,6 +1006,151 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 else:
                     raise frappe.ValidationError(f"[{doctype}] Không thể tìm thấy Education Stage: '{education_stage_name}' cho campus {campus_id}")
 
+        elif doctype == "SIS Class Student":
+
+            # Handle bulk import for SIS Class Student assignment
+            # Expected columns: student_code, class_title
+
+            # Get school_year_id from extraFormData or use current active year
+            school_year_id = row_data.get("academic_year") or row_data.get("school_year_id")
+            if not school_year_id:
+                # Try to get from options or find active school year
+                try:
+                    active_year = frappe.get_all(
+                        "SIS School Year",
+                        filters={"is_enable": 1},
+                        fields=["name"],
+                        order_by="start_date desc",
+                        limit=1
+                    )
+                    if active_year:
+                        school_year_id = active_year[0].name
+                except Exception:
+                    pass
+
+            if not school_year_id:
+                raise frappe.ValidationError(f"[{doctype}] Không thể xác định năm học. Vui lòng cung cấp academic_year trong file hoặc đảm bảo có năm học đang active.")
+
+            # Handle student_code lookup
+            student_code = None
+            for key in ["student_code", "student id", "mã học sinh", "mã học sinh*"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    student_code = str(row_data[key]).strip()
+                    break
+
+            if not student_code:
+                raise frappe.ValidationError(f"[{doctype}] Thiếu mã học sinh trong hàng {row_num}")
+
+            # Lookup student by student_code
+            student_id = None
+            try:
+                students = frappe.get_all(
+                    "CRM Student",
+                    filters={"student_code": student_code},
+                    fields=["name"],
+                    limit=1
+                )
+                if students:
+                    student_id = students[0].name
+                else:
+                    raise frappe.ValidationError(f"[{doctype}] Không tìm thấy học sinh với mã '{student_code}'")
+            except Exception as e:
+                raise frappe.ValidationError(f"[{doctype}] Lỗi khi tìm học sinh với mã '{student_code}': {str(e)}")
+
+            # Handle class_title lookup
+            class_title = None
+            for key in ["class_title", "class title", "tên lớp", "tên lớp*"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    class_title = str(row_data[key]).strip()
+                    break
+
+            if not class_title:
+                raise frappe.ValidationError(f"[{doctype}] Thiếu tên lớp trong hàng {row_num}")
+
+            # Lookup class by title or name
+            class_id = None
+            try:
+                # First try exact match by title
+                classes = frappe.get_all(
+                    "SIS Class",
+                    filters={
+                        "title": class_title,
+                        "school_year_id": school_year_id,
+                        "campus_id": campus_id
+                    },
+                    fields=["name"],
+                    limit=1
+                )
+                if classes:
+                    class_id = classes[0].name
+                else:
+                    # Try match by name
+                    classes = frappe.get_all(
+                        "SIS Class",
+                        filters={
+                            "name": class_title,
+                            "school_year_id": school_year_id,
+                            "campus_id": campus_id
+                        },
+                        fields=["name"],
+                        limit=1
+                    )
+                    if classes:
+                        class_id = classes[0].name
+                    else:
+                        # Try partial match by title
+                        all_classes = frappe.get_all(
+                            "SIS Class",
+                            filters={
+                                "school_year_id": school_year_id,
+                                "campus_id": campus_id
+                            },
+                            fields=["name", "title"]
+                        )
+                        for cls in all_classes:
+                            if class_title.lower() in cls.title.lower() or cls.title.lower() in class_title.lower():
+                                class_id = cls.name
+                                break
+
+                if not class_id:
+                    raise frappe.ValidationError(f"[{doctype}] Không tìm thấy lớp '{class_title}' trong năm học và campus hiện tại")
+
+            except Exception as e:
+                raise frappe.ValidationError(f"[{doctype}] Lỗi khi tìm lớp '{class_title}': {str(e)}")
+
+            # Check for existing assignment
+            existing_assignment = frappe.get_all(
+                "SIS Class Student",
+                filters={
+                    "student_id": student_id,
+                    "class_id": class_id,
+                    "school_year_id": school_year_id
+                },
+                fields=["name"],
+                limit=1
+            )
+
+            if existing_assignment:
+                # Assignment already exists - skip
+                frappe.logger().info(f"[{doctype}] Assignment already exists for student {student_code} in class {class_title}")
+                return {"success": True}
+
+            # Create new SIS Class Student record
+            class_student_doc = frappe.get_doc({
+                "doctype": "SIS Class Student",
+                "class_id": class_id,
+                "student_id": student_id,
+                "school_year_id": school_year_id,
+                "class_type": "regular",  # Default to regular for bulk import
+                "campus_id": campus_id
+            })
+
+            class_student_doc.insert()
+            frappe.db.commit()
+
+            frappe.logger().info(f"[{doctype}] Successfully assigned student {student_code} to class {class_title}")
+            return {"success": True}
+
         elif doctype == "SIS Class":
 
             # Collect all resolution errors for better user feedback
@@ -1381,6 +1526,22 @@ def _find_existing_record(doctype, doc_data):
     if doctype == "SIS Class" and doc_data.get("title"):
         name = frappe.db.exists(doctype, {"title": doc_data["title"]})
         return frappe.get_doc(doctype, name) if name else None
+
+    # For SIS Class Student, check for existing assignment
+    if doctype == "SIS Class Student":
+        # Look for existing assignment with same student, class, and school year
+        existing = frappe.get_all(
+            doctype,
+            filters={
+                "student_id": doc_data.get("student_id"),
+                "class_id": doc_data.get("class_id"),
+                "school_year_id": doc_data.get("school_year_id")
+            },
+            fields=["name"],
+            limit=1
+        )
+        if existing:
+            return frappe.get_doc(doctype, existing[0].name)
 
     return None
 
