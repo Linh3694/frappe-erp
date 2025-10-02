@@ -147,6 +147,17 @@ def create_timetable_subject():
         if not education_stage_id:
             frappe.throw(_("Education stage is required"))
 
+        # Get campus from user context - moved before duplicate check
+        try:
+            campus_id = get_current_campus_from_context()
+        except Exception as e:
+            frappe.logger().error(f"Error getting campus context: {str(e)}")
+            campus_id = None
+
+        if not campus_id:
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+
         # Check for duplicate subject name within the same education stage
         existing_subject = frappe.db.exists(
             "SIS Timetable Subject",
@@ -159,17 +170,6 @@ def create_timetable_subject():
 
         if existing_subject:
             frappe.throw(_("Môn học '{0}' đã tồn tại trong cấp học này. Không được trùng tên môn học trong cùng một cấp học.").format(title_vn))
-
-        # Get campus from user context - simplified
-        try:
-            campus_id = get_current_campus_from_context()
-        except Exception as e:
-            frappe.logger().error(f"Error getting campus context: {str(e)}")
-            campus_id = None
-        
-        if not campus_id:
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         
         # Create new timetable subject

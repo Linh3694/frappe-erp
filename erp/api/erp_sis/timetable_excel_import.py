@@ -1401,16 +1401,31 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
                 teacher_1_id = None
                 if class_id and subject_id:
                     # Try to find teacher from Subject Assignment
+                    # First try with subject_id
                     assignments = frappe.get_all(
                         "SIS Subject Assignment",
                         fields=["teacher_id"],
                         filters={
                             "campus_id": campus_id,
                             "class_id": class_id,
-                            "subject_id": subject_id  # Using subject_id for backward compatibility
+                            "subject_id": subject_id
                         },
                         limit=1
                     )
+                    
+                    # If not found, try with actual_subject_id (fallback)
+                    if not assignments:
+                        assignments = frappe.get_all(
+                            "SIS Subject Assignment",
+                            fields=["teacher_id"],
+                            filters={
+                                "campus_id": campus_id,
+                                "class_id": class_id,
+                                "actual_subject_id": subject_id  # subject_id from timetable might be actual_subject_id
+                            },
+                            limit=1
+                        )
+                    
                     if assignments:
                         teacher_1_id = assignments[0].teacher_id
                     else:
