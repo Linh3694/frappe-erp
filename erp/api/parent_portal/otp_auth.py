@@ -94,7 +94,11 @@ def send_sms_via_vivas(phone_number, message):
         }
         
         logs.append(f"📤 Sending SMS to VIVAS API: {VIVAS_SMS_CONFIG['url']}")
+        logs.append(f"🔑 Username: {VIVAS_SMS_CONFIG['username']}")
+        logs.append(f"🔑 Password: {VIVAS_SMS_CONFIG['password']}")
+        logs.append(f"🏷️ Brandname: {VIVAS_SMS_CONFIG['brandname']}")
         logs.append(f"📱 Phone: {phone_number}")
+        logs.append(f"📝 Message: {message}")
         
         # Send request to VIVAS
         response = requests.post(
