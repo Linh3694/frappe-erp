@@ -1120,6 +1120,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             # Lookup class by short_title
             class_id = None
             class_title = None
+            class_type = "regular"  # Default fallback
             try:
                 # First try exact match by short_title
                 frappe.logger().info(f"[SIS Class Student] Row {row_num} - Looking up class: short_title={class_short_title}, year={school_year_id}, campus={campus_id}")
@@ -1130,13 +1131,14 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         "school_year_id": school_year_id,
                         "campus_id": campus_id
                     },
-                    fields=["name", "title"],
+                    fields=["name", "title", "class_type"],
                     limit=1
                 )
                 if classes:
                     class_id = classes[0].name
                     class_title = classes[0].get('title', class_short_title)
-                    frappe.logger().info(f"[SIS Class Student] Row {row_num} - Found class: {class_id} ({class_title})")
+                    class_type = classes[0].get('class_type', 'regular')  # Get class_type from class
+                    frappe.logger().info(f"[SIS Class Student] Row {row_num} - Found class: {class_id} ({class_title}) - Type: {class_type}")
                 else:
                     frappe.logger().error(f"[SIS Class Student] Row {row_num} - Class not found: {class_short_title}")
                     raise frappe.ValidationError(f"[{doctype}] Không tìm thấy lớp với mã '{class_short_title}' trong năm học {school_year_id} và campus {campus_id}")
@@ -1171,14 +1173,15 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     "class_id": class_id,
                     "student_id": student_id,
                     "school_year_id": school_year_id,
-                    "class_type": "regular",  # Default to regular for bulk import
+                    "class_type": class_type,  # Use class_type from the class
                     "campus_id": campus_id
                 })
 
                 class_student_doc.insert(ignore_permissions=True)
                 frappe.db.commit()
 
-                success_msg = f"Đã phân học sinh {student_code} vào lớp {class_title}"
+                class_type_label = "Lớp chính quy" if class_type == "regular" else ("Lớp chạy" if class_type == "mixed" else "Câu lạc bộ")
+                success_msg = f"Đã phân học sinh {student_code} vào lớp {class_title} ({class_type_label})"
                 frappe.logger().info(f"[{doctype}] Row {row_num} - {success_msg}")
                 return {"success": True, "message": success_msg}
             except Exception as e:
