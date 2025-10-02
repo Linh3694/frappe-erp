@@ -16,7 +16,7 @@ VIVAS_SMS_CONFIG = {
     "url": "https://sms.vivas.vn/SMSBNAPINEW/sendsms",
     "username": "wellspring",
     "password": "2805@Smsbn",
-    "brandname": "Wellspring",
+    "brandname": "WELLSPRING",
     # IMPORTANT: Set to False in production to prevent accidental SMS sending
     "enabled": False,  # Set to True only when ready to send real SMS
 }
