@@ -1596,6 +1596,18 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6
         }
         
+        # Generate all weeks in the timetable period
+        current_date = start_dt
+        all_weeks = []
+        while current_date <= end_dt:
+            # Find Monday of this week
+            week_start = current_date - timedelta(days=current_date.weekday())
+            if week_start not in all_weeks:
+                all_weeks.append(week_start)
+            current_date += timedelta(days=7)
+        
+        logs.append(f"📅 [sync_materialized_views] Generating entries for {len(all_weeks)} weeks from {start_dt} to {end_dt}")
+        
         for row in instance_rows:
             # Normalize and validate day_of_week first
             original_day = str(row.day_of_week or "").strip().lower()
@@ -1623,108 +1635,111 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             if day_num is None:
                 logs.append(f"Could not map day '{normalized_day}' to day number")
                 continue
-                
-            # Find the date for this day in the current week
-            week_start = datetime.now().date() - timedelta(days=datetime.now().weekday())
-            specific_date = week_start + timedelta(days=day_num)
             
-            # 3. Create Teacher Timetable entries
-            teachers = []
-            if row.teacher_1_id:
-                teachers.append(row.teacher_1_id)
-            if row.teacher_2_id:
-                teachers.append(row.teacher_2_id)
+            # 3. Create Teacher Timetable entries for ALL weeks in the timetable period
+            for week_start in all_weeks:
+                specific_date = week_start + timedelta(days=day_num)
                 
-            for teacher_id in teachers:
-                try:
-                    # Validate teacher exists first
-                    if not teacher_id:
-                        continue
-                        
-                    # Check if entry already exists
-                    existing = frappe.db.exists("SIS Teacher Timetable", {
-                        "teacher_id": teacher_id,
-                        "class_id": class_id,
-                        "day_of_week": normalized_day,
-                        "timetable_column_id": row.timetable_column_id,
-                        "date": specific_date
-                    })
-                    
-                    if not existing:
-                        # Create teacher timetable with error handling
-                        try:
-                            teacher_timetable = frappe.get_doc({
-                                "doctype": "SIS Teacher Timetable",
-                                "teacher_id": teacher_id,
-                                "class_id": class_id,
-                                "day_of_week": normalized_day,
-                                "timetable_column_id": row.timetable_column_id,
-                                "subject_id": row.subject_id,
-                                "room_id": row.room_id,
-                                "date": specific_date,
-                                "timetable_instance_id": instance_id
-                            })
-                            
-                            teacher_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
-                            teacher_timetable_count += 1
-                            
-                        except frappe.DoesNotExistError:
-                            logs.append(f"Error creating teacher timetable for {teacher_id}: Tài liệu SIS Teacher không tìm thấy")
-                            continue
-                        except Exception as insert_error:
-                            logs.append(f"Error creating teacher timetable for {teacher_id}: {str(insert_error)}")
-                            continue
-                        
-                except Exception as te_error:
-                    logs.append(f"Error creating teacher timetable for {teacher_id}: {str(te_error)}")
+                # Skip if date is outside the timetable period
+                if specific_date < start_dt or specific_date > end_dt:
                     continue
                     
-            # 4. Create Student Timetable entries
-            for student_id in student_ids:
-                try:
-                    # Validate student exists first
-                    if not student_id:
+                teachers = []
+                if row.teacher_1_id:
+                    teachers.append(row.teacher_1_id)
+                if row.teacher_2_id:
+                    teachers.append(row.teacher_2_id)
+                    
+                for teacher_id in teachers:
+                    try:
+                        # Validate teacher exists first
+                        if not teacher_id:
+                            continue
+                            
+                        # Check if entry already exists
+                        existing = frappe.db.exists("SIS Teacher Timetable", {
+                            "teacher_id": teacher_id,
+                            "class_id": class_id,
+                            "day_of_week": normalized_day,
+                            "timetable_column_id": row.timetable_column_id,
+                            "date": specific_date
+                        })
+                        
+                        if not existing:
+                            # Create teacher timetable with error handling
+                            try:
+                                teacher_timetable = frappe.get_doc({
+                                    "doctype": "SIS Teacher Timetable",
+                                    "teacher_id": teacher_id,
+                                    "class_id": class_id,
+                                    "day_of_week": normalized_day,
+                                    "timetable_column_id": row.timetable_column_id,
+                                    "subject_id": row.subject_id,
+                                    "room_id": row.room_id,
+                                    "date": specific_date,
+                                    "timetable_instance_id": instance_id
+                                })
+                                
+                                teacher_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
+                                teacher_timetable_count += 1
+                                
+                            except frappe.DoesNotExistError:
+                                logs.append(f"Error creating teacher timetable for {teacher_id}: Tài liệu SIS Teacher không tìm thấy")
+                                continue
+                            except Exception as insert_error:
+                                logs.append(f"Error creating teacher timetable for {teacher_id}: {str(insert_error)}")
+                                continue
+                            
+                    except Exception as te_error:
+                        logs.append(f"Error creating teacher timetable for {teacher_id}: {str(te_error)}")
                         continue
                         
-                    # Check if entry already exists
-                    existing_student = frappe.db.exists("SIS Student Timetable", {
-                        "student_id": student_id,
-                        "class_id": class_id,
-                        "day_of_week": normalized_day,
-                        "timetable_column_id": row.timetable_column_id,
-                        "date": specific_date
-                    })
-                    
-                    if not existing_student:
-                        # Create student timetable with error handling
-                        try:
-                            student_timetable = frappe.get_doc({
-                                "doctype": "SIS Student Timetable",
-                                "student_id": student_id,
-                                "class_id": class_id,
-                                "day_of_week": normalized_day,
-                                "timetable_column_id": row.timetable_column_id,
-                                "subject_id": row.subject_id,
-                                "teacher_1_id": row.teacher_1_id,
-                                "teacher_2_id": row.teacher_2_id,
-                                "room_id": row.room_id,
-                                "date": specific_date,
-                                "timetable_instance_id": instance_id
-                            })
-                            
-                            student_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
-                            student_timetable_count += 1
-                            
-                        except frappe.DoesNotExistError:
-                            logs.append(f"Error creating student timetable for {student_id}: Tài liệu SIS Student không tìm thấy")
+                # 4. Create Student Timetable entries for this specific date
+                for student_id in student_ids:
+                    try:
+                        # Validate student exists first
+                        if not student_id:
                             continue
-                        except Exception as insert_error:
-                            logs.append(f"Error creating student timetable for {student_id}: {str(insert_error)}")
-                            continue
+                            
+                        # Check if entry already exists
+                        existing_student = frappe.db.exists("SIS Student Timetable", {
+                            "student_id": student_id,
+                            "class_id": class_id,
+                            "day_of_week": normalized_day,
+                            "timetable_column_id": row.timetable_column_id,
+                            "date": specific_date
+                        })
                         
-                except Exception as st_error:
-                    logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
-                    continue
+                        if not existing_student:
+                            # Create student timetable with error handling
+                            try:
+                                student_timetable = frappe.get_doc({
+                                    "doctype": "SIS Student Timetable",
+                                    "student_id": student_id,
+                                    "class_id": class_id,
+                                    "day_of_week": normalized_day,
+                                    "timetable_column_id": row.timetable_column_id,
+                                    "subject_id": row.subject_id,
+                                    "teacher_1_id": row.teacher_1_id,
+                                    "teacher_2_id": row.teacher_2_id,
+                                    "room_id": row.room_id,
+                                    "date": specific_date,
+                                    "timetable_instance_id": instance_id
+                                })
+                                
+                                student_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
+                                student_timetable_count += 1
+                                
+                            except frappe.DoesNotExistError:
+                                logs.append(f"Error creating student timetable for {student_id}: Tài liệu SIS Student không tìm thấy")
+                                continue
+                            except Exception as insert_error:
+                                logs.append(f"Error creating student timetable for {student_id}: {str(insert_error)}")
+                                continue
+                            
+                    except Exception as st_error:
+                        logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
+                        continue
         
         # Commit all changes
         frappe.db.commit()
