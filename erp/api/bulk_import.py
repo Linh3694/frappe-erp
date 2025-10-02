@@ -494,6 +494,9 @@ def _process_excel_file(job):
                 "message": "File is empty. Please add data to the template."
             }
 
+        # Initialize skipped_rows with default value
+        skipped_rows = 1
+
         if len(df) == 1:
             # File has only 1 row - special handling for single-row files
             if job.doctype_target == "CRM Student":
