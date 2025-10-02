@@ -13,6 +13,9 @@ class SISReportCardEvaluationScale(Document):
 		if not self.title or not self.title.strip():
 			frappe.throw(_("Thang đánh giá không được để trống"))
 
+		# Allow special characters in title (including <, >, +, - etc.)
+		# This overrides Frappe's default validation for title field
+
 		# Validate that at least one option exists
 		if not self.options or len(self.options) == 0:
 			frappe.throw(_("Phải có ít nhất một tùy chọn đánh giá"))
@@ -27,10 +30,11 @@ class SISReportCardEvaluationScale(Document):
 		self.options = [opt for opt in self.options if opt.title and opt.title.strip()]
 
 	def autoname(self):
-		# Generate name based on title and campus
+		# Generate name based on title and campus, allowing special characters
 		if self.title and self.campus_id:
-			from frappe.utils import slug
-			base_name = slug(self.title)
+			# Use title directly instead of slug to preserve special characters
+			# Replace spaces and problematic characters for name generation
+			base_name = self.title.strip().replace(" ", "-").replace("/", "-").replace("\\", "-")
 			counter = 1
 			name = f"{base_name}-{self.campus_id}"
 
