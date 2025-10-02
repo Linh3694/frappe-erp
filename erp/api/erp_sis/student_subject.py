@@ -249,17 +249,41 @@ def get_subjects_by_students_in_classes():
         if grade_ids and not isinstance(grade_ids, list):
             grade_ids = [grade_ids]
         
-        # STEP 1: Get students in the specified classes (with optional grade filter)
+        # STEP 1: If grade filter is provided, first filter classes by grade
+        # Because SIS Student Subject doesn't have education_grade, we need to JOIN with SIS Class
+        filtered_class_ids = class_ids
+        
+        if grade_ids and len(grade_ids) > 0:
+            # Get classes that match both class_ids AND grade_ids
+            class_grade_filters = {
+                "campus_id": campus_id,
+                "name": ["in", class_ids],
+                "education_grade": ["in", grade_ids]
+            }
+            
+            frappe.logger().info(f"[get_subjects_by_students_in_classes] Filtering classes by grades: {grade_ids}")
+            
+            filtered_classes = frappe.get_all(
+                "SIS Class",
+                fields=["name"],
+                filters=class_grade_filters
+            )
+            
+            filtered_class_ids = [c["name"] for c in filtered_classes]
+            
+            if not filtered_class_ids:
+                frappe.logger().info(f"[get_subjects_by_students_in_classes] No classes found matching grades {grade_ids}")
+                return list_response([], f"No classes found matching the selected grades")
+            
+            frappe.logger().info(f"[get_subjects_by_students_in_classes] Filtered to {len(filtered_class_ids)} classes matching grades")
+        
+        # STEP 2: Get students in the filtered classes
         student_filters = {
             "campus_id": campus_id,
-            "class_id": ["in", class_ids]
+            "class_id": ["in", filtered_class_ids]
         }
         
-        # Add grade filter if provided to avoid mixed-grade students
-        if grade_ids and len(grade_ids) > 0:
-            student_filters["education_grade"] = ["in", grade_ids]
-        
-        frappe.logger().info(f"[get_subjects_by_students_in_classes] Step 1: Finding students with filters: {student_filters}")
+        frappe.logger().info(f"[get_subjects_by_students_in_classes] Finding students with filters: {student_filters}")
         
         students_in_classes = frappe.get_all(
             "SIS Student Subject",
