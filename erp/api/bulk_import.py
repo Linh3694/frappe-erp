@@ -795,6 +795,9 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
     """Process a single record"""
     try:
         doctype = job.doctype_target
+        
+        frappe.logger().info(f"[_process_single_record] Row {row_num} - Processing doctype: {doctype}")
+        frappe.logger().info(f"[_process_single_record] Row {row_num} - Row data keys: {list(row_data.keys())}")
 
         # Handle campus_id - use from file or default to user's campus
         campus_id = row_data.get("campus_id")
@@ -1475,12 +1478,14 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             row_data['gender'] = gender_mapping.get(gender_value, gender_value)
 
         # Map Excel columns to DocType fields (regular fields)
-        meta = frappe.get_meta(doctype)
-        excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id", "education_stage"]
-        for field in meta.fields:
-            if field.fieldname in row_data and field.fieldname not in excluded_fields:
-                # Regular field mapping (skip already processed reference fields)
-                doc_data[field.fieldname] = row_data[field.fieldname]
+        # Skip field mapping for doctypes that are handled entirely by custom logic
+        if doctype not in ["SIS Class Student"]:
+            meta = frappe.get_meta(doctype)
+            excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id", "education_stage"]
+            for field in meta.fields:
+                if field.fieldname in row_data and field.fieldname not in excluded_fields:
+                    # Regular field mapping (skip already processed reference fields)
+                    doc_data[field.fieldname] = row_data[field.fieldname]
 
         # Special handling for SIS Menu Category - don't set image_url if not provided
         # This allows it to be optional/undefined in the response
