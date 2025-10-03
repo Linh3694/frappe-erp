@@ -892,7 +892,41 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
             if subject_id and isinstance(payload, dict) and subject_id in payload:
                 # Deep merge the specific subject data to preserve existing fields
                 if subject_id not in existing_scores:
-                    existing_scores[subject_id] = {}
+                    # Initialize with template structure if not exists
+                    template_id = json_data.get("_metadata", {}).get("template_id") or doc.template_id
+                    if template_id:
+                        try:
+                            template = frappe.get_doc("SIS Report Card Template", template_id)
+                            if hasattr(template, "scores") and template.scores:
+                                for score_cfg in template.scores:
+                                    if getattr(score_cfg, "subject_id", None) == subject_id:
+                                        subject_title = (
+                                            getattr(score_cfg, "display_name", None)
+                                            or getattr(score_cfg, "subject_title", None)
+                                            or _resolve_actual_subject_title(subject_id)
+                                        )
+                                        existing_scores[subject_id] = {
+                                            "subject_title": subject_title,
+                                            "display_name": subject_title,
+                                            "subject_type": getattr(score_cfg, "subject_type", "Môn tính điểm"),
+                                            "hs1_scores": [],
+                                            "hs2_scores": [],
+                                            "hs3_scores": [],
+                                            "hs1_average": None,
+                                            "hs2_average": None,
+                                            "hs3_average": None,
+                                            "final_average": None,
+                                            "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
+                                            "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
+                                            "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1,
+                                        }
+                                        break
+                        except Exception as e:
+                            frappe.logger().warning(f"Failed to initialize from template: {str(e)}")
+                    
+                    # Fallback: Create minimal structure if template initialization failed
+                    if subject_id not in existing_scores:
+                        existing_scores[subject_id] = {}
                 
                 new_subject_data = payload[subject_id]
                 frappe.logger().info(f"[SCORES_MERGE] New subject data to merge: {new_subject_data}")
