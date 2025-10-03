@@ -957,6 +957,15 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 
                 json_data["scores"] = existing_scores
                 frappe.logger().info(f"scores deep merge successful: updated subject '{subject_id}', preserved {len(existing_scores) - 1} other subjects")
+                
+                # Store debug info for scores section
+                json_data["_scores_debug"] = {
+                    "template_id": template_id,
+                    "template_config_loaded": template_config is not None,
+                    "template_config": template_config,
+                    "subject_existed": subject_id in existing_scores,
+                    "final_data": existing_scores.get(subject_id)
+                }
             else:
                 # Fallback: if no subject_id identified or payload doesn't match expected structure, 
                 # use old behavior (may cause data loss but maintains backward compatibility)
@@ -969,6 +978,9 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
             json_data[section] = payload
             frappe.logger().info(f"Section '{section}' replaced entirely (standard behavior)")
         
+        # Extract debug info before saving (don't save it to database)
+        debug_info = json_data.pop("_scores_debug", None) if section == "scores" else None
+        
         # Debug logging before saving
         frappe.logger().info(f"Final data_json keys: {list(json_data.keys())}")
         frappe.logger().info(f"Final data_json size: {len(str(json_data))} chars")
@@ -978,19 +990,6 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         frappe.db.commit()
         
         frappe.logger().info(f"Report {doc.name} updated successfully for section '{section}'")
-        
-        # Include debug info in response for scores section
-        debug_info = None
-        if section == "scores":
-            final_scores = json_data.get("scores", {})
-            debug_info = {
-                "section": section,
-                "subject_id": subject_id if 'subject_id' in locals() else None,
-                "subject_id_detected": bool(subject_id) if 'subject_id' in locals() else False,
-                "payload_keys": list(payload.keys()) if isinstance(payload, dict) else "not_dict",
-                "merged_data": final_scores.get(subject_id) if 'subject_id' in locals() and subject_id and isinstance(final_scores, dict) and subject_id in final_scores else None,
-                "all_subjects": list(final_scores.keys()) if isinstance(final_scores, dict) else []
-            }
         
         return success_response(message="Updated", data={"name": doc.name, "debug": debug_info})
     except Exception as e:
