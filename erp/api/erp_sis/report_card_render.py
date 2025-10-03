@@ -450,7 +450,6 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                             try:
                                 scoreboard_config = getattr(template_subject, 'scoreboard', None)
                                 if isinstance(scoreboard_config, str):
-                                    import json
                                     scoreboard_config = json.loads(scoreboard_config or "{}")
                                 
                                 if isinstance(scoreboard_config, dict):
@@ -850,7 +849,6 @@ def get_report_data(report_id: Optional[str] = None):
                                 try:
                                     scoreboard_config = getattr(template_subject, 'scoreboard', None)
                                     if isinstance(scoreboard_config, str):
-                                        import json
                                         scoreboard_config = json.loads(scoreboard_config or "{}")
                                     
                                     if isinstance(scoreboard_config, dict):
