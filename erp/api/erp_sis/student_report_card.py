@@ -849,6 +849,22 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                         existing_intl_scores[subject_id][field_name] = field_value
                         frappe.logger().info(f"Updated {field_name} for subject '{subject_id}': {field_value}")
                 
+                # ENRICH: Ensure subcurriculum_title_en is preserved or fetched
+                if "subcurriculum_id" in existing_intl_scores[subject_id]:
+                    subcurr_id = existing_intl_scores[subject_id]["subcurriculum_id"]
+                    # Only fetch if title is missing or is same as ID (fallback value)
+                    current_title = existing_intl_scores[subject_id].get("subcurriculum_title_en")
+                    if not current_title or current_title == subcurr_id or current_title.strip() == "":
+                        if subcurr_id and subcurr_id != "none":
+                            try:
+                                subcurr_doc = frappe.get_doc("SIS Sub Curriculum", subcurr_id)
+                                subcurr_title = subcurr_doc.title_en or subcurr_doc.title_vn or subcurr_id
+                                existing_intl_scores[subject_id]["subcurriculum_title_en"] = subcurr_title
+                                frappe.logger().info(f"Enriched subcurriculum_title_en for {subject_id}: {subcurr_id} -> {subcurr_title}")
+                            except Exception as e:
+                                frappe.logger().error(f"Failed to fetch subcurriculum {subcurr_id}: {str(e)}")
+                                existing_intl_scores[subject_id]["subcurriculum_title_en"] = subcurr_id
+                
                 json_data["intl_scores"] = existing_intl_scores
                 frappe.logger().info(f"intl_scores deep merge successful: updated subject '{subject_id}', preserved {len(existing_intl_scores) - 1} other subjects")
             else:
