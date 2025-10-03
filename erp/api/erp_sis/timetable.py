@@ -1281,14 +1281,14 @@ def import_timetable():
         start_date = data.get("start_date")
         end_date = data.get("end_date")
 
-        # Validate required fields - end_date is now auto-calculated from school_year_id
+        # Validate required fields - end_date can be provided by user or auto-calculated from school_year_id
         if not all([title_vn, campus_id, school_year_id, education_stage_id, start_date]):
             return validation_error_response("Validation failed", {
                 "required_fields": ["title_vn", "campus_id", "school_year_id", "education_stage_id", "start_date"],
                 "logs": []
             })
         
-        # Auto-calculate end_date from school year if not provided
+        # Auto-calculate end_date from school year if not provided (fallback for backward compatibility)
         if not end_date:
             try:
                 school_year = frappe.get_doc("SIS School Year", school_year_id)
