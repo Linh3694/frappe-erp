@@ -633,6 +633,45 @@ def get_report_by_id(report_id: Optional[str] = None):
         doc = frappe.get_doc("SIS Student Report Card", report_id)
         if doc.campus_id != _campus():
             return forbidden_response("Access denied")
+        
+        # Parse data
+        data = json.loads(doc.data_json or "{}")
+        
+        # AUTO-ENRICH: Populate test_scores from template if missing (for old reports)
+        try:
+            template_id = data.get("_metadata", {}).get("template_id") or doc.template_id
+            if template_id:
+                template = frappe.get_doc("SIS Report Card Template", template_id)
+                
+                # Enrich subject_eval with test_scores from template
+                if data.get("subject_eval") and isinstance(data["subject_eval"], dict):
+                    for subject_id, subject_data in data["subject_eval"].items():
+                        # Only enrich if test_scores is missing or empty
+                        if not subject_data.get("test_scores") or (isinstance(subject_data["test_scores"], dict) and not subject_data["test_scores"].get("titles")):
+                            # Find subject config in template
+                            if hasattr(template, "subjects") and template.subjects:
+                                for subject_cfg in template.subjects:
+                                    if getattr(subject_cfg, "subject_id", None) == subject_id:
+                                        test_point_enabled = getattr(subject_cfg, "test_point_enabled", False)
+                                        if test_point_enabled:
+                                            test_point_titles_raw = getattr(subject_cfg, "test_point_titles", None)
+                                            if test_point_titles_raw:
+                                                # Parse if JSON string
+                                                if isinstance(test_point_titles_raw, str):
+                                                    test_point_titles_raw = json.loads(test_point_titles_raw)
+                                                
+                                                if isinstance(test_point_titles_raw, list):
+                                                    titles = [t.get("title", "") for t in test_point_titles_raw if isinstance(t, dict) and t.get("title")]
+                                                    # Enrich with titles from template
+                                                    data["subject_eval"][subject_id]["test_scores"] = {
+                                                        "titles": titles,
+                                                        "values": subject_data.get("test_point_values", []) or [None] * len(titles)
+                                                    }
+                                                    frappe.logger().info(f"Enriched test_scores for subject {subject_id} with {len(titles)} titles from template")
+                                        break
+        except Exception as enrich_error:
+            frappe.logger().warning(f"Failed to enrich test_scores from template: {str(enrich_error)}")
+        
         return single_item_response({
             "name": doc.name,
             "title": doc.title,
@@ -643,7 +682,7 @@ def get_report_by_id(report_id: Optional[str] = None):
             "school_year": doc.school_year,
             "semester_part": doc.semester_part,
             "status": doc.status,
-            "data": json.loads(doc.data_json or "{}"),
+            "data": data,  # Return enriched data
         }, "Fetched")
     except frappe.DoesNotExistError:
         return not_found_response("Report not found")
