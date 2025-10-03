@@ -982,8 +982,9 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                     "template_id": template_id,
                     "template_config_loaded": template_config is not None,
                     "template_config": template_config,
-                    "subject_existed": subject_id in existing_scores,
-                    "final_data": existing_scores.get(subject_id)
+                    "subject_existed_before_merge": subject_id in existing_scores,
+                    "payload_received": new_subject_data,
+                    "final_data_before_save": existing_scores.get(subject_id)
                 }
             else:
                 # Fallback: if no subject_id identified or payload doesn't match expected structure, 
@@ -1007,6 +1008,14 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         doc.data_json = json.dumps(json_data)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
+        
+        # Verify data was saved correctly by reading it back
+        if section == "scores" and subject_id:
+            doc.reload()
+            saved_data = json.loads(doc.data_json or "{}")
+            saved_scores = saved_data.get("scores", {})
+            saved_subject = saved_scores.get(subject_id, {})
+            frappe.logger().info(f"[SCORES_VERIFY] After save - hs1_scores: {saved_subject.get('hs1_scores')}, hs2_scores: {saved_subject.get('hs2_scores')}, hs3_scores: {saved_subject.get('hs3_scores')}")
         
         frappe.logger().info(f"Report {doc.name} updated successfully for section '{section}'")
         
