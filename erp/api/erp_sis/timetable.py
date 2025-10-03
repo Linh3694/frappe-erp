@@ -1340,15 +1340,23 @@ def import_timetable():
                 "dry_run": dry_run
             }
 
-            # Process the Excel import
-            result = process_excel_import_with_metadata_v2(import_data)
-
-            # Clean up temp file
-            import os
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
-            return result
+            # Enqueue background job for processing to avoid worker timeout
+            job = frappe.enqueue(
+                method='erp.api.erp_sis.timetable_excel_import.process_excel_import_background',
+                queue='long',
+                timeout=3600,  # 1 hour timeout
+                is_async=True,
+                **import_data
+            )
+            
+            job_name = job.get_id() if hasattr(job, 'get_id') else str(job)
+            
+            return single_item_response({
+                "status": "processing",
+                "job_id": job_name,
+                "message": "Timetable import đang được xử lý trong background",
+                "logs": ["📤 Đã upload file thành công", f"⚙️ Background job started: {job_name}"]
+            }, "Timetable import job created")
         else:
             # No file uploaded, just validate metadata
             result = {
@@ -1370,6 +1378,30 @@ def import_timetable():
     except Exception as e:
 
         return error_response(f"Error importing timetable: {str(e)}")
+
+
+@frappe.whitelist(methods=["GET"])
+def get_import_job_status():
+    """
+    Get the status/result of timetable import background job.
+    Frontend should poll this endpoint after submitting import.
+    """
+    try:
+        cache_key = f"timetable_import_result_{frappe.session.user}"
+        result = frappe.cache().get_value(cache_key)
+        
+        if result:
+            # Clear cache after retrieval
+            frappe.cache().delete_value(cache_key)
+            return single_item_response(result, "Import result retrieved")
+        else:
+            return single_item_response({
+                "status": "processing",
+                "message": "Import vẫn đang xử lý..."
+            }, "Import in progress")
+    
+    except Exception as e:
+        return error_response(f"Error retrieving import status: {str(e)}")
 
 
 def save_uploaded_file(file_data, filename: str) -> str:

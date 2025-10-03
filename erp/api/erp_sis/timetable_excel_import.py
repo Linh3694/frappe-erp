@@ -1336,6 +1336,75 @@ def process_excel_import_with_metadata_v2(import_data: dict):
             return validation_error_response("Import thất bại", {"error": [str(e)]})
 
 
+def process_excel_import_background(file_path, title_vn, title_en, campus_id, school_year_id, 
+                                     education_stage_id, start_date, end_date, dry_run=False):
+    """
+    Background job to process timetable import without blocking HTTP request.
+    This function runs in a worker queue and can take a long time.
+    """
+    import os
+    logs = []
+    
+    try:
+        # Disable socketio to prevent Redis timeout
+        frappe.flags.disable_socketio = True
+        
+        logs.append("🚀 Background job started")
+        logs.append(f"📁 Processing file: {file_path}")
+        
+        # Call the main import function
+        import_data = {
+            "file_path": file_path,
+            "title_vn": title_vn,
+            "title_en": title_en,
+            "campus_id": campus_id,
+            "school_year_id": school_year_id,
+            "education_stage_id": education_stage_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "dry_run": dry_run
+        }
+        
+        result = process_excel_import_with_metadata_v2(import_data)
+        
+        # Clean up temp file
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logs.append("🗑️ Cleaned up temp file")
+        
+        # Commit final results
+        frappe.db.commit()
+        
+        logs.append("✅ Background job completed successfully")
+        
+        # Store result in cache for frontend to retrieve
+        cache_key = f"timetable_import_result_{frappe.session.user}"
+        frappe.cache().set_value(cache_key, result, expires_in_sec=3600)
+        
+        return result
+        
+    except Exception as e:
+        logs.append(f"❌ Background job error: {str(e)}")
+        frappe.log_error(f"Timetable import background job failed: {str(e)}", "Timetable Import Error")
+        
+        # Clean up temp file on error
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
+        error_result = {
+            "status": "failed",
+            "message": f"Import failed: {str(e)}",
+            "logs": logs,
+            "error": str(e)
+        }
+        
+        # Store error in cache
+        cache_key = f"timetable_import_result_{frappe.session.user}"
+        frappe.cache().set_value(cache_key, error_result, expires_in_sec=3600)
+        
+        return error_result
+
+
 def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None) -> int:
     """Process Excel data and create timetable instances and rows"""
     success_count = 0
@@ -1664,10 +1733,6 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         except Exception as load_error:
             logs.append(f"⚠️  Error loading existing student entries: {str(load_error)}")
         
-        # Batch commit counter
-        batch_size = 1000
-        pending_commits = 0
-        
         for row in instance_rows:
             # Normalize and validate day_of_week first
             original_day = str(row.day_of_week or "").strip().lower()
@@ -1737,13 +1802,6 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                 teacher_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
                                 teacher_timetable_count += 1
                                 existing_teacher_entries.add(teacher_key)  # Add to cache
-                                pending_commits += 1
-                                
-                                # Batch commit every batch_size records
-                                if pending_commits >= batch_size:
-                                    frappe.db.commit()
-                                    pending_commits = 0
-                                    logs.append(f"💾 Batch committed at {teacher_timetable_count} teacher entries")
                                 
                             except frappe.DoesNotExistError:
                                 logs.append(f"Error creating teacher timetable for {teacher_id}: Tài liệu SIS Teacher không tìm thấy")
@@ -1786,13 +1844,6 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                 student_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
                                 student_timetable_count += 1
                                 existing_student_entries.add(student_key)  # Add to cache
-                                pending_commits += 1
-                                
-                                # Batch commit every batch_size records
-                                if pending_commits >= batch_size:
-                                    frappe.db.commit()
-                                    pending_commits = 0
-                                    logs.append(f"💾 Batch committed at {student_timetable_count} student entries")
                                 
                             except frappe.DoesNotExistError:
                                 logs.append(f"Error creating student timetable for {student_id}: Tài liệu SIS Student không tìm thấy")
@@ -1804,11 +1855,6 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     except Exception as st_error:
                         logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
                         continue
-        
-        # Final commit for any remaining records
-        if pending_commits > 0:
-            frappe.db.commit()
-            logs.append(f"💾 Final commit with {pending_commits} remaining entries")
         
         logs.append(f"Successfully synced materialized views: {teacher_timetable_count} teacher entries, {student_timetable_count} student entries")
         
