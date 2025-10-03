@@ -886,21 +886,28 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
             if not isinstance(existing_scores, dict):
                 existing_scores = {}
             
+            frappe.logger().info(f"[SCORES_MERGE] BEFORE merge - existing_scores keys: {list(existing_scores.keys())}")
+            frappe.logger().info(f"[SCORES_MERGE] BEFORE merge - existing for subject '{subject_id}': {existing_scores.get(subject_id) if subject_id else 'N/A'}")
+            
             if subject_id and isinstance(payload, dict) and subject_id in payload:
                 # Deep merge the specific subject data to preserve existing fields
                 if subject_id not in existing_scores:
                     existing_scores[subject_id] = {}
                 
                 new_subject_data = payload[subject_id]
+                frappe.logger().info(f"[SCORES_MERGE] New subject data to merge: {new_subject_data}")
+                
                 if isinstance(new_subject_data, dict):
                     # Merge each field in the subject data
                     for field_name, field_value in new_subject_data.items():
                         if field_value is not None:  # Only update non-null values
                             existing_scores[subject_id][field_name] = field_value
-                            frappe.logger().info(f"Updated scores {field_name} for subject '{subject_id}': {field_value}")
+                            frappe.logger().info(f"[SCORES_MERGE] Updated scores {field_name} for subject '{subject_id}': {field_value}")
                 else:
                     # Fallback: replace entire subject if not dict
                     existing_scores[subject_id] = new_subject_data
+                
+                frappe.logger().info(f"[SCORES_MERGE] AFTER merge - scores for subject '{subject_id}': {existing_scores[subject_id]}")
                 
                 json_data["scores"] = existing_scores
                 frappe.logger().info(f"scores deep merge successful: updated subject '{subject_id}', preserved {len(existing_scores) - 1} other subjects")
