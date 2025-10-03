@@ -220,11 +220,34 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
                 if not subject_id:
                     continue
 
+                # Initialize test_scores structure from template config
+                test_scores = {}
+                test_point_enabled = getattr(subject_cfg, "test_point_enabled", False)
+                if test_point_enabled:
+                    test_point_titles_raw = getattr(subject_cfg, "test_point_titles", None)
+                    if test_point_titles_raw:
+                        try:
+                            # Parse if it's JSON string
+                            if isinstance(test_point_titles_raw, str):
+                                import json
+                                test_point_titles_raw = json.loads(test_point_titles_raw)
+                            
+                            if isinstance(test_point_titles_raw, list):
+                                # Extract titles from list of dicts
+                                titles = [t.get("title", "") for t in test_point_titles_raw if isinstance(t, dict) and t.get("title")]
+                                test_scores = {
+                                    "titles": titles,
+                                    "values": [None] * len(titles)  # Initialize with None values
+                                }
+                        except Exception:
+                            pass
+
                 subject_eval[subject_id] = {
                     "subject_id": subject_id,
                     "criteria": {},
                     "comments": {},
-                    "test_point_values": [],
+                    "test_point_values": [],  # Keep for backward compatibility
+                    "test_scores": test_scores if test_scores else {},  # New structure
                 }
         base["subject_eval"] = subject_eval
 
@@ -672,12 +695,32 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 existing = {}
             if subject_id:
                 # Store only necessary fields; keep subject_id for clarity
-                existing[subject_id] = {
+                subject_data = {
                     "subject_id": subject_id,
                     "criteria": payload.get("criteria") or {},
                     "comments": payload.get("comments") or {},
-                    "test_point_values": payload.get("test_point_values") or [],  # ✅ ADD: Support test scores
                 }
+                
+                test_scores = payload.get("test_scores")
+                if test_scores and isinstance(test_scores, dict):
+                    # New format - store as structured test_scores
+                    subject_data["test_scores"] = test_scores
+                    # Also keep test_point_values for backward compatibility with old readers
+                    if "values" in test_scores:
+                        subject_data["test_point_values"] = test_scores["values"]
+                elif payload.get("test_point_values"):
+                    # Old format only - convert to new structure
+                    test_point_values = payload.get("test_point_values") or []
+                    subject_data["test_point_values"] = test_point_values
+                    # Create test_scores structure if we have titles from payload
+                    test_titles = payload.get("test_titles") or []
+                    if test_titles:
+                        subject_data["test_scores"] = {
+                            "titles": test_titles,
+                            "values": test_point_values
+                        }
+                
+                existing[subject_id] = subject_data
             json_data["subject_eval"] = existing
         elif section == "intl_scores":
             # INTL Scores section handling with validation and MERGING
