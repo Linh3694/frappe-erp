@@ -941,11 +941,23 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 if "final_average" not in existing_scores[subject_id]:
                     existing_scores[subject_id]["final_average"] = None
                 
-                # Add/update template config fields if available
+                # Add/update template config fields if available, or use defaults
                 if template_config:
                     for key, value in template_config.items():
                         # Always update from template (not just if missing)
                         existing_scores[subject_id][key] = value
+                else:
+                    # If template config not found, ensure minimum required fields with defaults
+                    if "display_name" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["display_name"] = existing_scores[subject_id].get("subject_title", subject_id)
+                    if "subject_type" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["subject_type"] = "Môn tính điểm"
+                    if "weight1_count" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["weight1_count"] = 1
+                    if "weight2_count" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["weight2_count"] = 1
+                    if "weight3_count" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["weight3_count"] = 1
                 
                 new_subject_data = payload[subject_id]
                 frappe.logger().info(f"[SCORES_MERGE] New subject data to merge: {new_subject_data}")
