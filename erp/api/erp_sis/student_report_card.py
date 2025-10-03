@@ -640,21 +640,35 @@ def get_report_by_id(report_id: Optional[str] = None):
         # AUTO-ENRICH: Populate test_scores from template if missing (for old reports)
         try:
             template_id = data.get("_metadata", {}).get("template_id") or doc.template_id
+            frappe.logger().info(f"[TEST_SCORES_ENRICH] Starting enrichment for report {doc.name}, template_id: {template_id}")
+            
             if template_id:
                 template = frappe.get_doc("SIS Report Card Template", template_id)
+                frappe.logger().info(f"[TEST_SCORES_ENRICH] Template loaded: {template.name}, has subjects: {hasattr(template, 'subjects')}")
                 
                 # Enrich subject_eval with test_scores from template
                 if data.get("subject_eval") and isinstance(data["subject_eval"], dict):
+                    frappe.logger().info(f"[TEST_SCORES_ENRICH] Found {len(data['subject_eval'])} subjects in subject_eval")
+                    
                     for subject_id, subject_data in data["subject_eval"].items():
+                        current_test_scores = subject_data.get("test_scores")
+                        should_enrich = not current_test_scores or (isinstance(current_test_scores, dict) and not current_test_scores.get("titles"))
+                        
+                        frappe.logger().info(f"[TEST_SCORES_ENRICH] Subject {subject_id}: test_scores={current_test_scores}, should_enrich={should_enrich}")
+                        
                         # Only enrich if test_scores is missing or empty
-                        if not subject_data.get("test_scores") or (isinstance(subject_data["test_scores"], dict) and not subject_data["test_scores"].get("titles")):
+                        if should_enrich:
                             # Find subject config in template
                             if hasattr(template, "subjects") and template.subjects:
                                 for subject_cfg in template.subjects:
                                     if getattr(subject_cfg, "subject_id", None) == subject_id:
                                         test_point_enabled = getattr(subject_cfg, "test_point_enabled", False)
+                                        frappe.logger().info(f"[TEST_SCORES_ENRICH] Found config for {subject_id}, test_point_enabled={test_point_enabled}")
+                                        
                                         if test_point_enabled:
                                             test_point_titles_raw = getattr(subject_cfg, "test_point_titles", None)
+                                            frappe.logger().info(f"[TEST_SCORES_ENRICH] test_point_titles_raw={test_point_titles_raw}")
+                                            
                                             if test_point_titles_raw:
                                                 # Parse if JSON string
                                                 if isinstance(test_point_titles_raw, str):
@@ -667,10 +681,12 @@ def get_report_by_id(report_id: Optional[str] = None):
                                                         "titles": titles,
                                                         "values": subject_data.get("test_point_values", []) or [None] * len(titles)
                                                     }
-                                                    frappe.logger().info(f"Enriched test_scores for subject {subject_id} with {len(titles)} titles from template")
+                                                    frappe.logger().info(f"[TEST_SCORES_ENRICH] ✅ Enriched test_scores for subject {subject_id} with {len(titles)} titles: {titles}")
                                         break
         except Exception as enrich_error:
-            frappe.logger().warning(f"Failed to enrich test_scores from template: {str(enrich_error)}")
+            import traceback
+            frappe.logger().error(f"[TEST_SCORES_ENRICH] ❌ Failed to enrich: {str(enrich_error)}")
+            frappe.logger().error(f"[TEST_SCORES_ENRICH] Traceback: {traceback.format_exc()}")
         
         return single_item_response({
             "name": doc.name,
