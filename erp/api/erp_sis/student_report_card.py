@@ -719,6 +719,32 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                             "titles": test_titles,
                             "values": test_point_values
                         }
+                else:
+                    # FALLBACK: Load titles from template if not in payload (for old reports)
+                    try:
+                        template_id = json_data.get("_metadata", {}).get("template_id")
+                        if template_id:
+                            template = frappe.get_doc("SIS Report Card Template", template_id)
+                            if hasattr(template, "subjects") and template.subjects:
+                                for subject_cfg in template.subjects:
+                                    if getattr(subject_cfg, "subject_id", None) == subject_id:
+                                        test_point_enabled = getattr(subject_cfg, "test_point_enabled", False)
+                                        if test_point_enabled:
+                                            test_point_titles_raw = getattr(subject_cfg, "test_point_titles", None)
+                                            if test_point_titles_raw:
+                                                if isinstance(test_point_titles_raw, str):
+                                                    import json as json_lib
+                                                    test_point_titles_raw = json_lib.loads(test_point_titles_raw)
+                                                
+                                                if isinstance(test_point_titles_raw, list):
+                                                    titles = [t.get("title", "") for t in test_point_titles_raw if isinstance(t, dict) and t.get("title")]
+                                                    subject_data["test_scores"] = {
+                                                        "titles": titles,
+                                                        "values": [None] * len(titles)
+                                                    }
+                                        break
+                    except Exception as e:
+                        frappe.logger().warning(f"Failed to populate test_scores from template: {str(e)}")
                 
                 existing[subject_id] = subject_data
             json_data["subject_eval"] = existing
