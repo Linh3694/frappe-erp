@@ -279,6 +279,20 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
             subcurriculum_id = getattr(subject_cfg, "subcurriculum_id", None)
             if subcurriculum_id:
                 subject_payload["subcurriculum_id"] = subcurriculum_id
+                
+                # Fetch subcurriculum_title_en from database
+                subcurriculum_title_en = None
+                if subcurriculum_id != "none":
+                    try:
+                        subcurr_doc = frappe.get_doc("SIS Sub Curriculum", subcurriculum_id)
+                        subcurriculum_title_en = subcurr_doc.title_en or subcurr_doc.title_vn or subcurriculum_id
+                        frappe.logger().info(f"[INIT_REPORT] Fetched subcurriculum_title_en: {subcurriculum_id} -> {subcurriculum_title_en}")
+                    except Exception as e:
+                        frappe.logger().error(f"[INIT_REPORT] Failed to fetch subcurriculum {subcurriculum_id}: {str(e)}")
+                        subcurriculum_title_en = subcurriculum_id
+                
+                if subcurriculum_title_en:
+                    subject_payload["subcurriculum_title_en"] = subcurriculum_title_en
 
             intl_comment = getattr(subject_cfg, "intl_comment", None)
             if intl_comment is not None:
@@ -632,6 +646,30 @@ def get_report_by_id(report_id: Optional[str] = None):
         
         # Parse data
         data = json.loads(doc.data_json or "{}")
+        
+        # AUTO-ENRICH: Populate subcurriculum_title_en if missing (for old reports)
+        try:
+            intl_scores = data.get("intl_scores") or data.get("data", {}).get("intl_scoreboard") or {}
+            if isinstance(intl_scores, dict):
+                frappe.logger().info(f"[ENRICH_SUBCURR] Starting enrichment for {len(intl_scores)} subjects")
+                for subject_id, subject_data in intl_scores.items():
+                    if isinstance(subject_data, dict) and "subcurriculum_id" in subject_data:
+                        subcurr_id = subject_data.get("subcurriculum_id")
+                        current_title = subject_data.get("subcurriculum_title_en")
+                        
+                        # Only fetch if title is missing or is same as ID (fallback value)
+                        if not current_title or current_title == subcurr_id or current_title.strip() == "":
+                            if subcurr_id and subcurr_id != "none":
+                                try:
+                                    subcurr_doc = frappe.get_doc("SIS Sub Curriculum", subcurr_id)
+                                    subcurr_title = subcurr_doc.title_en or subcurr_doc.title_vn or subcurr_id
+                                    subject_data["subcurriculum_title_en"] = subcurr_title
+                                    frappe.logger().info(f"[ENRICH_SUBCURR] Enriched {subject_id}: {subcurr_id} -> {subcurr_title}")
+                                except Exception as e:
+                                    frappe.logger().error(f"[ENRICH_SUBCURR] Failed to fetch {subcurr_id}: {str(e)}")
+                                    subject_data["subcurriculum_title_en"] = subcurr_id
+        except Exception as enrich_error:
+            frappe.logger().error(f"[ENRICH_SUBCURR] Failed to enrich: {str(enrich_error)}")
         
         # AUTO-ENRICH: Populate test_scores from template if missing (for old reports)
         try:

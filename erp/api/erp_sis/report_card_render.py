@@ -434,9 +434,24 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                     intl_standardized["ielts_scores"] = {}
 
                 if intl_payload.get("subcurriculum_id"):
-                    intl_standardized["subcurriculum_id"] = intl_payload.get("subcurriculum_id")
-                if intl_payload.get("subcurriculum_title_en"):
-                    intl_standardized["subcurriculum_title_en"] = intl_payload.get("subcurriculum_title_en")
+                    subcurr_id = intl_payload.get("subcurriculum_id")
+                    intl_standardized["subcurriculum_id"] = subcurr_id
+                    
+                    # Enrich subcurriculum_title_en if missing or is just the ID
+                    current_title = intl_payload.get("subcurriculum_title_en")
+                    if not current_title or current_title == subcurr_id or current_title.strip() == "":
+                        if subcurr_id and subcurr_id != "none":
+                            try:
+                                subcurr_doc = frappe.get_doc("SIS Sub Curriculum", subcurr_id)
+                                subcurr_title = subcurr_doc.title_en or subcurr_doc.title_vn or subcurr_id
+                                intl_standardized["subcurriculum_title_en"] = subcurr_title
+                                frappe.logger().info(f"[RENDER_ENRICH] Enriched subcurr for {subject_id}: {subcurr_id} -> {subcurr_title}")
+                            except Exception as e:
+                                frappe.logger().error(f"[RENDER_ENRICH] Failed to fetch {subcurr_id}: {str(e)}")
+                                intl_standardized["subcurriculum_title_en"] = subcurr_id
+                    else:
+                        intl_standardized["subcurriculum_title_en"] = current_title
+                        
                 if intl_payload.get("subject_title"):
                     intl_standardized["subject_title"] = intl_payload.get("subject_title")
                 if intl_payload.get("intl_comment"):
