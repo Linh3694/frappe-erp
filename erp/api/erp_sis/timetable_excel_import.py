@@ -1627,6 +1627,47 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         
         logs.append(f"📅 [sync_materialized_views] Generating entries for {len(all_weeks)} weeks from {start_dt} to {end_dt}")
         
+        # OPTIMIZATION: Load all existing timetable entries into memory to avoid thousands of DB queries
+        logs.append(f"🔍 Loading existing teacher timetable entries...")
+        existing_teacher_entries = set()
+        try:
+            teacher_entries = frappe.get_all(
+                "SIS Teacher Timetable",
+                fields=["teacher_id", "class_id", "day_of_week", "timetable_column_id", "date"],
+                filters={
+                    "class_id": class_id,
+                    "date": ["between", [start_dt, end_dt]]
+                }
+            )
+            for entry in teacher_entries:
+                key = f"{entry.teacher_id}|{entry.class_id}|{entry.day_of_week}|{entry.timetable_column_id}|{entry.date}"
+                existing_teacher_entries.add(key)
+            logs.append(f"✅ Loaded {len(existing_teacher_entries)} existing teacher entries")
+        except Exception as load_error:
+            logs.append(f"⚠️  Error loading existing teacher entries: {str(load_error)}")
+        
+        logs.append(f"🔍 Loading existing student timetable entries...")
+        existing_student_entries = set()
+        try:
+            student_entries = frappe.get_all(
+                "SIS Student Timetable",
+                fields=["student_id", "class_id", "day_of_week", "timetable_column_id", "date"],
+                filters={
+                    "class_id": class_id,
+                    "date": ["between", [start_dt, end_dt]]
+                }
+            )
+            for entry in student_entries:
+                key = f"{entry.student_id}|{entry.class_id}|{entry.day_of_week}|{entry.timetable_column_id}|{entry.date}"
+                existing_student_entries.add(key)
+            logs.append(f"✅ Loaded {len(existing_student_entries)} existing student entries")
+        except Exception as load_error:
+            logs.append(f"⚠️  Error loading existing student entries: {str(load_error)}")
+        
+        # Batch commit counter
+        batch_size = 1000
+        pending_commits = 0
+        
         for row in instance_rows:
             # Normalize and validate day_of_week first
             original_day = str(row.day_of_week or "").strip().lower()
@@ -1675,16 +1716,10 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         if not teacher_id:
                             continue
                             
-                        # Check if entry already exists
-                        existing = frappe.db.exists("SIS Teacher Timetable", {
-                            "teacher_id": teacher_id,
-                            "class_id": class_id,
-                            "day_of_week": normalized_day,
-                            "timetable_column_id": row.timetable_column_id,
-                            "date": specific_date
-                        })
+                        # Check if entry already exists (in-memory check)
+                        teacher_key = f"{teacher_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
                         
-                        if not existing:
+                        if teacher_key not in existing_teacher_entries:
                             # Create teacher timetable with error handling
                             try:
                                 teacher_timetable = frappe.get_doc({
@@ -1701,6 +1736,14 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                 
                                 teacher_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
                                 teacher_timetable_count += 1
+                                existing_teacher_entries.add(teacher_key)  # Add to cache
+                                pending_commits += 1
+                                
+                                # Batch commit every batch_size records
+                                if pending_commits >= batch_size:
+                                    frappe.db.commit()
+                                    pending_commits = 0
+                                    logs.append(f"💾 Batch committed at {teacher_timetable_count} teacher entries")
                                 
                             except frappe.DoesNotExistError:
                                 logs.append(f"Error creating teacher timetable for {teacher_id}: Tài liệu SIS Teacher không tìm thấy")
@@ -1720,16 +1763,10 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         if not student_id:
                             continue
                             
-                        # Check if entry already exists
-                        existing_student = frappe.db.exists("SIS Student Timetable", {
-                            "student_id": student_id,
-                            "class_id": class_id,
-                            "day_of_week": normalized_day,
-                            "timetable_column_id": row.timetable_column_id,
-                            "date": specific_date
-                        })
+                        # Check if entry already exists (in-memory check)
+                        student_key = f"{student_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
                         
-                        if not existing_student:
+                        if student_key not in existing_student_entries:
                             # Create student timetable with error handling
                             try:
                                 student_timetable = frappe.get_doc({
@@ -1748,6 +1785,14 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                 
                                 student_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
                                 student_timetable_count += 1
+                                existing_student_entries.add(student_key)  # Add to cache
+                                pending_commits += 1
+                                
+                                # Batch commit every batch_size records
+                                if pending_commits >= batch_size:
+                                    frappe.db.commit()
+                                    pending_commits = 0
+                                    logs.append(f"💾 Batch committed at {student_timetable_count} student entries")
                                 
                             except frappe.DoesNotExistError:
                                 logs.append(f"Error creating student timetable for {student_id}: Tài liệu SIS Student không tìm thấy")
@@ -1760,8 +1805,11 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
                         continue
         
-        # DO NOT commit here - let the caller decide when to commit to avoid worker timeout
-        # The caller should commit after all instances are processed
+        # Final commit for any remaining records
+        if pending_commits > 0:
+            frappe.db.commit()
+            logs.append(f"💾 Final commit with {pending_commits} remaining entries")
+        
         logs.append(f"Successfully synced materialized views: {teacher_timetable_count} teacher entries, {student_timetable_count} student entries")
         
         return teacher_timetable_count, student_timetable_count
