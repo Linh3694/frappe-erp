@@ -963,9 +963,17 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 frappe.logger().info(f"[SCORES_MERGE] New subject data to merge: {new_subject_data}")
                 
                 if isinstance(new_subject_data, dict):
-                    # Merge each field in the subject data
+                    # always overwrite completely to avoid reference issues
                     for field_name, field_value in new_subject_data.items():
-                        if field_value is not None:  # Only update non-null values
+                        if field_name in ['hs1_scores', 'hs2_scores', 'hs3_scores']:
+                            # Force overwrite arrays (don't check if not None)
+                            if isinstance(field_value, list):
+                                existing_scores[subject_id][field_name] = list(field_value)  # Create new list
+                                frappe.logger().info(f"[SCORES_MERGE] Overwrite array {field_name} for subject '{subject_id}': {field_value}")
+                            else:
+                                existing_scores[subject_id][field_name] = field_value
+                        elif field_value is not None:
+                            # For other fields, only update non-null values
                             existing_scores[subject_id][field_name] = field_value
                             frappe.logger().info(f"[SCORES_MERGE] Updated scores {field_name} for subject '{subject_id}': {field_value}")
                 else:
@@ -974,7 +982,9 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 
                 frappe.logger().info(f"[SCORES_MERGE] AFTER merge - scores for subject '{subject_id}': {existing_scores[subject_id]}")
                 
-                json_data["scores"] = existing_scores
+                # CRITICAL: Deep copy to avoid reference issues
+                import copy
+                json_data["scores"] = copy.deepcopy(existing_scores)
                 frappe.logger().info(f"scores deep merge successful: updated subject '{subject_id}', preserved {len(existing_scores) - 1} other subjects")
                 
                 # Store debug info for scores section
