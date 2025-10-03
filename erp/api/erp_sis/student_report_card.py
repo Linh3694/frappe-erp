@@ -930,15 +930,22 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                         "hs3_average": None,
                         "final_average": None,
                     }
-                    # Add template config if available
-                    if template_config:
-                        existing_scores[subject_id].update(template_config)
-                else:
-                    # Backfill missing fields from template for existing subjects
-                    if template_config:
-                        for key, value in template_config.items():
-                            if key not in existing_scores[subject_id]:
-                                existing_scores[subject_id][key] = value
+                
+                # Always ensure these fields exist (whether new or existing subject)
+                if "hs1_average" not in existing_scores[subject_id]:
+                    existing_scores[subject_id]["hs1_average"] = None
+                if "hs2_average" not in existing_scores[subject_id]:
+                    existing_scores[subject_id]["hs2_average"] = None
+                if "hs3_average" not in existing_scores[subject_id]:
+                    existing_scores[subject_id]["hs3_average"] = None
+                if "final_average" not in existing_scores[subject_id]:
+                    existing_scores[subject_id]["final_average"] = None
+                
+                # Add/update template config fields if available
+                if template_config:
+                    for key, value in template_config.items():
+                        # Always update from template (not just if missing)
+                        existing_scores[subject_id][key] = value
                 
                 new_subject_data = payload[subject_id]
                 frappe.logger().info(f"[SCORES_MERGE] New subject data to merge: {new_subject_data}")
