@@ -1548,6 +1548,10 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
     try:
         # 1. Get all rows for this instance
         logs.append(f"🔍 [sync_materialized_views] Querying instance rows for {instance_id}")
+        
+        # Disable realtime logging to prevent Redis timeout during bulk operations
+        frappe.flags.disable_socketio = True
+        
         try:
             instance_rows = frappe.get_all(
                 "SIS Timetable Instance Row",
@@ -1756,8 +1760,8 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
                         continue
         
-        # Commit all changes
-        frappe.db.commit()
+        # DO NOT commit here - let the caller decide when to commit to avoid worker timeout
+        # The caller should commit after all instances are processed
         logs.append(f"Successfully synced materialized views: {teacher_timetable_count} teacher entries, {student_timetable_count} student entries")
         
         return teacher_timetable_count, student_timetable_count
@@ -1771,6 +1775,9 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
 def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_id: str, logs: list) -> tuple:
     try:
         logs.append(f"🔍 [simplified_sync] Starting for instance {instance_id}")
+        
+        # Disable realtime logging to prevent Redis timeout during bulk operations
+        frappe.flags.disable_socketio = True
         
         # Get instance rows with minimal validation
         try:
@@ -1882,7 +1889,7 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
                 except Exception:
                     continue
         
-        frappe.db.commit()
+        # DO NOT commit here - let the caller decide when to commit to avoid worker timeout
         logs.append(f"Simplified sync completed: {teacher_count} teacher entries, {student_count} student entries")
         return teacher_count, student_count
         
