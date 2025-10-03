@@ -588,17 +588,13 @@ def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[s
                 limit_page_length=limit,
             )
 
-            # Ensure unique by student_id, keep first occurrence (most recently modified)
-            uniq: Dict[str, Dict[str, Any]] = {}
-            for r in rows:
-                sid = r.get("student_id")
-                if sid and sid not in uniq:
-                    uniq[sid] = r
-            uniq_rows = list(uniq.values())
-            total = len(uniq_rows)
+            # ✅ REMOVED unique by student_id logic - Allow multiple reports per student (different semesters/templates)
+            # Previously this was limiting to 1 report per student, which caused issues when students have
+            # multiple report cards for different semesters (Mid Term 1, End Term 1, End Term 2)
+            total = frappe.db.count("SIS Student Report Card", filters=filters)
 
-            frappe.logger().info(f"get_reports_by_class: Found {len(rows)} reports, unique_by_student={total}")
-            return paginated_response(data=uniq_rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
+            frappe.logger().info(f"get_reports_by_class: Found {len(rows)} reports, total={total}")
+            return paginated_response(data=rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
         except Exception as db_error:
             frappe.logger().error(f"Database query failed: {str(db_error)}")
             # Try without campus filter as last resort
