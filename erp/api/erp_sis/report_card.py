@@ -906,9 +906,60 @@ def validate_comment_titles():
 
 
 @frappe.whitelist(allow_guest=False)
+def get_all_classes_for_reports(school_year: Optional[str] = None, page: int = 1, limit: int = 50):
+    """Return ALL classes for SIS Manager role.
+    This is used when user has SIS Manager role and needs to see all classes.
+    """
+    try:
+        page = int(page or 1)
+        limit = int(limit or 50)
+        offset = (page - 1) * limit
+        campus_id = _current_campus_id()
+        user = frappe.session.user
+
+        debug_logs = []
+        debug_logs.append(f"get_all_classes_for_reports called by user: {user}")
+        debug_logs.append(f"Campus ID: {campus_id}, School Year: {school_year}")
+
+        # Build filters for class
+        class_filters = {"campus_id": campus_id}
+        if school_year:
+            class_filters["school_year_id"] = school_year
+
+        # Get all classes for this campus and school year
+        all_classes = frappe.get_all(
+            "SIS Class",
+            fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+            filters=class_filters,
+            order_by="title asc",
+        )
+
+        debug_logs.append(f"All classes found: {len(all_classes)} - {[c['name'] for c in all_classes]}")
+
+        total_count = len(all_classes)
+        page_rows = all_classes[offset : offset + limit]
+        
+        debug_logs.append(f"FINAL RESULT: {total_count} total classes, {len(page_rows)} in page")
+
+        return {
+            "success": True,
+            "data": page_rows,
+            "debug_logs": debug_logs,
+            "current_page": page,
+            "total_count": total_count,
+            "per_page": limit,
+            "message": "All classes for report card fetched successfully",
+        }
+    except Exception as e:
+        frappe.log_error(f"Error fetching all classes for report card: {str(e)}")
+        return error_response("Error fetching all classes for report card")
+
+
+@frappe.whitelist(allow_guest=False)
 def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int = 50):
     """Return classes the current user is homeroom teacher of or teaches a subject in.
     This follows the logic pattern used in Classes module, filtered by campus and optional school_year.
+    If user has 'SIS Manager' role, return all classes instead.
     """
     try:
         page = int(page or 1)
@@ -922,6 +973,42 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         debug_logs = []
         debug_logs.append(f"get_my_classes called by user: {user}")
         debug_logs.append(f"Campus ID: {campus_id}, School Year: {school_year}")
+
+        # Check if user has SIS Manager role
+        user_roles = frappe.get_roles(user)
+        is_sis_manager = "SIS Manager" in user_roles
+        debug_logs.append(f"User roles: {user_roles}")
+        debug_logs.append(f"Is SIS Manager: {is_sis_manager}")
+
+        # If SIS Manager, return all classes
+        if is_sis_manager:
+            debug_logs.append("SIS Manager detected - returning all classes")
+            class_filters = {"campus_id": campus_id}
+            if school_year:
+                class_filters["school_year_id"] = school_year
+
+            all_classes = frappe.get_all(
+                "SIS Class",
+                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+                filters=class_filters,
+                order_by="title asc",
+            )
+
+            debug_logs.append(f"All classes found: {len(all_classes)}")
+            total_count = len(all_classes)
+            page_rows = all_classes[offset : offset + limit]
+            
+            return {
+                "success": True,
+                "data": page_rows,
+                "debug_logs": debug_logs,
+                "current_page": page,
+                "total_count": total_count,
+                "per_page": limit,
+                "message": "All classes for SIS Manager fetched successfully",
+            }
+
+        debug_logs.append("Regular teacher - returning only assigned classes")
 
         # Get teacher record for current user (if any)
         teacher_rows = frappe.get_all("SIS Teacher", fields=["name"], filters={"user_id": user, "campus_id": campus_id}, limit=1)
