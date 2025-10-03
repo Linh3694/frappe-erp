@@ -442,6 +442,27 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                 if intl_payload.get("intl_comment"):
                     intl_standardized["intl_comment"] = intl_payload.get("intl_comment")
 
+                # === EXTRACT SCOREBOARD CONFIG WITH WEIGHTS FROM TEMPLATE ===
+                # This is needed because weights are not stored in report data, only in template
+                if template_doc and hasattr(template_doc, 'subjects'):
+                    for template_subject in template_doc.subjects:
+                        if getattr(template_subject, 'subject_id', None) == subject_id:
+                            try:
+                                scoreboard_config = getattr(template_subject, 'scoreboard', None)
+                                if isinstance(scoreboard_config, str):
+                                    import json
+                                    scoreboard_config = json.loads(scoreboard_config or "{}")
+                                
+                                if isinstance(scoreboard_config, dict):
+                                    main_scores_config = scoreboard_config.get("main_scores", [])
+                                    if isinstance(main_scores_config, list):
+                                        intl_standardized["scoreboard_config"] = {
+                                            "main_scores": main_scores_config
+                                        }
+                            except Exception:
+                                pass
+                            break
+
                 standardized_subject["intl_scores"] = intl_standardized
             except Exception:
                 pass
