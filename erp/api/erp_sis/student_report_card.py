@@ -934,16 +934,19 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         frappe.logger().info(f"Report {doc.name} updated successfully for section '{section}'")
         
         # Include debug info in response for scores section
-        debug_info = {}
-        if section == "scores" and subject_id:
+        debug_info = None
+        if section == "scores":
+            final_scores = json_data.get("scores", {})
             debug_info = {
                 "section": section,
-                "subject_id": subject_id,
-                "merged_data": existing_scores.get(subject_id) if subject_id in existing_scores else None,
-                "all_subjects": list(existing_scores.keys())
+                "subject_id": subject_id if 'subject_id' in locals() else None,
+                "subject_id_detected": bool(subject_id) if 'subject_id' in locals() else False,
+                "payload_keys": list(payload.keys()) if isinstance(payload, dict) else "not_dict",
+                "merged_data": final_scores.get(subject_id) if 'subject_id' in locals() and subject_id and isinstance(final_scores, dict) and subject_id in final_scores else None,
+                "all_subjects": list(final_scores.keys()) if isinstance(final_scores, dict) else []
             }
         
-        return success_response(message="Updated", data={"name": doc.name, "debug": debug_info if debug_info else None})
+        return success_response(message="Updated", data={"name": doc.name, "debug": debug_info})
     except Exception as e:
         frappe.log_error(f"Error update_report_section: {str(e)}")
         return error_response("Error updating report")
