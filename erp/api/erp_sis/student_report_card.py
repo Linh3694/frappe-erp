@@ -932,7 +932,18 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
         frappe.db.commit()
         
         frappe.logger().info(f"Report {doc.name} updated successfully for section '{section}'")
-        return success_response(message="Updated", data={"name": doc.name})
+        
+        # Include debug info in response for scores section
+        debug_info = {}
+        if section == "scores" and subject_id:
+            debug_info = {
+                "section": section,
+                "subject_id": subject_id,
+                "merged_data": existing_scores.get(subject_id) if subject_id in existing_scores else None,
+                "all_subjects": list(existing_scores.keys())
+            }
+        
+        return success_response(message="Updated", data={"name": doc.name, "debug": debug_info if debug_info else None})
     except Exception as e:
         frappe.log_error(f"Error update_report_section: {str(e)}")
         return error_response("Error updating report")
