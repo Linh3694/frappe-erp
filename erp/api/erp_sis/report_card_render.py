@@ -831,6 +831,41 @@ def get_report_data(report_id: Optional[str] = None):
         # Return structured data for frontend React rendering
         standardized_data = _standardize_report_data(transformed_data, report, form)
         
+        # === ENRICH INTL_SCORES WITH SCOREBOARD_CONFIG FROM TEMPLATE ===
+        # This is critical for displaying weights on report cards
+        try:
+            template_id = getattr(report, "template_id", "")
+            if template_id:
+                template_doc = frappe.get_doc("SIS Report Card Template", template_id)
+                intl_scores = transformed_data.get("intl_scores", {})
+                
+                if isinstance(intl_scores, dict) and hasattr(template_doc, 'subjects'):
+                    for subject_id, subject_data in intl_scores.items():
+                        if not isinstance(subject_data, dict):
+                            continue
+                        
+                        # Find matching template subject
+                        for template_subject in template_doc.subjects:
+                            if getattr(template_subject, 'subject_id', None) == subject_id:
+                                try:
+                                    scoreboard_config = getattr(template_subject, 'scoreboard', None)
+                                    if isinstance(scoreboard_config, str):
+                                        import json
+                                        scoreboard_config = json.loads(scoreboard_config or "{}")
+                                    
+                                    if isinstance(scoreboard_config, dict):
+                                        main_scores_config = scoreboard_config.get("main_scores", [])
+                                        if isinstance(main_scores_config, list) and len(main_scores_config) > 0:
+                                            subject_data["scoreboard_config"] = {
+                                                "main_scores": main_scores_config
+                                            }
+                                            frappe.logger().info(f"[SCOREBOARD_CONFIG] Added config for subject {subject_id}: {len(main_scores_config)} main scores")
+                                except Exception as e:
+                                    frappe.logger().error(f"[SCOREBOARD_CONFIG] Error extracting for subject {subject_id}: {str(e)}")
+                                break
+        except Exception as e:
+            frappe.logger().error(f"[SCOREBOARD_CONFIG] Error enriching intl_scores: {str(e)}")
+        
         response_data = {
             "form_code": form.code or "PRIM_VN", 
             "student": standardized_data.get("student", {}),
