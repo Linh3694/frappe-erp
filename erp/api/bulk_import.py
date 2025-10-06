@@ -1568,13 +1568,47 @@ def _find_existing_record(doctype, doc_data):
 
     # For SIS Class Student, check for existing assignment
     if doctype == "SIS Class Student":
+        student_id = doc_data.get("student_id")
+        class_id = doc_data.get("class_id")
+        school_year_id = doc_data.get("school_year_id")
+        
+        # VALIDATION: Check if student already exists in another REGULAR class in same school year
+        # This prevents a student from being assigned to multiple Regular classes simultaneously
+        if student_id and class_id and school_year_id:
+            # Get the class type of the target class
+            target_class = frappe.db.get_value("SIS Class", class_id, ["class_type"], as_dict=True)
+            
+            if target_class and (target_class.get("class_type") == "regular" or not target_class.get("class_type")):
+                # Target is a Regular class - check for conflicts
+                conflicting_assignments = frappe.db.sql("""
+                    SELECT 
+                        cs.name,
+                        cs.class_id,
+                        c.title as class_title,
+                        c.class_type
+                    FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    WHERE cs.student_id = %s
+                    AND cs.school_year_id = %s
+                    AND cs.class_id != %s
+                    AND (c.class_type = 'regular' OR c.class_type IS NULL)
+                """, (student_id, school_year_id, class_id), as_dict=True)
+                
+                if conflicting_assignments:
+                    conflict_classes = [f"{a.class_title} ({a.class_id})" for a in conflicting_assignments]
+                    raise frappe.ValidationError(
+                        f"Học sinh {student_id} đã tồn tại trong lớp Regular khác: {', '.join(conflict_classes)}. "
+                        f"Một học sinh chỉ có thể thuộc 1 lớp Regular trong cùng năm học. "
+                        f"Vui lòng xóa học sinh khỏi lớp cũ trước khi thêm vào lớp mới."
+                    )
+        
         # Look for existing assignment with same student, class, and school year
         existing = frappe.get_all(
             doctype,
             filters={
-                "student_id": doc_data.get("student_id"),
-                "class_id": doc_data.get("class_id"),
-                "school_year_id": doc_data.get("school_year_id")
+                "student_id": student_id,
+                "class_id": class_id,
+                "school_year_id": school_year_id
             },
             fields=["name"],
             limit=1

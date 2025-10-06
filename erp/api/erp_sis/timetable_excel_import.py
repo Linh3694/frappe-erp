@@ -335,6 +335,7 @@ class TimetableExcelImporter:
     def upsert_student_subjects(self, class_id: str, subject_id: Optional[str], actual_subject_id: Optional[str]):
         """Create or update SIS Student Subject for all students in class for the mapped subject.
         OPTIMIZED: Uses bulk operations instead of individual inserts.
+        NEW: Cleanup old Student Subject records from other classes for the same students.
         """
         if not subject_id and not actual_subject_id:
             return
@@ -358,6 +359,56 @@ class TimetableExcelImporter:
                 return
             
             student_ids = [s.get("student_id") for s in students if s.get("student_id")]
+            
+            # NEW: CLEANUP STEP - Delete Student Subject records from OTHER Regular classes
+            # for students who are now in THIS class (indicates class change/transfer)
+            cleanup_deleted = 0
+            try:
+                # Get the school year of current class
+                current_class_info = frappe.db.get_value(
+                    "SIS Class", 
+                    class_id, 
+                    ["school_year_id", "class_type"], 
+                    as_dict=True
+                )
+                
+                if current_class_info and student_ids:
+                    # Only cleanup if current class is Regular
+                    if current_class_info.get("class_type") == "regular" or not current_class_info.get("class_type"):
+                        # Find Student Subject records for these students in OTHER Regular classes
+                        # in the SAME school year
+                        orphaned_records = frappe.db.sql("""
+                            SELECT DISTINCT ss.name
+                            FROM `tabSIS Student Subject` ss
+                            INNER JOIN `tabSIS Class` c ON ss.class_id = c.name
+                            WHERE ss.student_id IN ({student_placeholders})
+                            AND ss.class_id != %s
+                            AND ss.campus_id = %s
+                            AND c.school_year_id = %s
+                            AND (c.class_type = 'regular' OR c.class_type IS NULL)
+                        """.format(student_placeholders=','.join(['%s'] * len(student_ids))),
+                        tuple(student_ids) + (class_id, self.campus_id, current_class_info.get("school_year_id")),
+                        as_dict=True)
+                        
+                        if orphaned_records:
+                            orphaned_ids = [r["name"] for r in orphaned_records]
+                            # Delete in chunks
+                            chunk_size = 100
+                            for i in range(0, len(orphaned_ids), chunk_size):
+                                chunk = orphaned_ids[i:i + chunk_size]
+                                frappe.db.sql("""
+                                    DELETE FROM `tabSIS Student Subject`
+                                    WHERE name IN ({})
+                                """.format(','.join(['%s'] * len(chunk))), chunk)
+                                cleanup_deleted += len(chunk)
+                            
+                            if cleanup_deleted > 0:
+                                self.warnings.append(
+                                    f"Cleaned up {cleanup_deleted} old Student Subject records from previous classes"
+                                )
+            except Exception as cleanup_error:
+                frappe.log_error(f"Error cleaning up old Student Subject records: {str(cleanup_error)}")
+                # Continue even if cleanup fails
             
             # OPTIMIZATION 1: Bulk query existing records
             base_filters = {
@@ -422,7 +473,7 @@ class TimetableExcelImporter:
                             continue
             
             # Commit once after all operations
-            if students_created > 0 or students_updated > 0:
+            if students_created > 0 or students_updated > 0 or cleanup_deleted > 0:
                 frappe.db.commit()
                         
             # Log summary only
