@@ -1025,7 +1025,7 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         if teacher_id:
             homeroom_classes = frappe.get_all(
                 "SIS Class",
-                fields=["name", "title", "short_title", "education_grade", "school_year_id"],
+                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
                 filters={**class_filters, "homeroom_teacher": teacher_id},
                 order_by="title asc",
             )
@@ -1105,7 +1105,7 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                 
             teaching_classes = frappe.get_all(
                 "SIS Class",
-                fields=["name", "title", "short_title", "education_grade", "school_year_id"],
+                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
                 filters=teaching_filters,
                 order_by="title asc"
             ) or []
