@@ -488,8 +488,6 @@ def get_guardian_comprehensive_data(guardian_name):
                         fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
                         ignore_permissions=True
                     )
-                    logs.append(f"🔍 Found {len(relationship_docs)} relationship_docs")
-
                     comprehensive_data["family"] = {
                         "name": family["name"],
                         "family_code": family["family_code"],
@@ -497,9 +495,7 @@ def get_guardian_comprehensive_data(guardian_name):
                     }
 
                     # Process each relationship
-                    logs.append(f"🔍 Processing {len(relationship_docs)} relationships")
-                    for i, rel in enumerate(relationship_docs):
-                        logs.append(f"🔍 Processing relationship {i+1}: student={rel.get('student')}, guardian={rel.get('guardian')}")
+                    for rel in relationship_docs:
                         rel_data = {
                             "name": rel["name"],
                             "student_name": rel["student"],
@@ -514,9 +510,7 @@ def get_guardian_comprehensive_data(guardian_name):
                         # Get student details
                         if rel["student"]:
                             try:
-                                logs.append(f"🔍 Getting student doc: {rel['student']}")
                                 student = frappe.get_doc("CRM Student", rel["student"])
-                                logs.append(f"✅ Got student doc: {student.student_name}")
                                 rel_data["student_details"] = {
                                     "name": student.name,
                                     "student_name": student.student_name,
@@ -526,7 +520,6 @@ def get_guardian_comprehensive_data(guardian_name):
                                     "campus_id": student.campus_id,
                                     "family_code": student.family_code
                                 }
-                                logs.append(f"✅ Set student_details for: {student.student_name}")
 
                                 # Get campus details
                                 if student.campus_id:
@@ -565,25 +558,13 @@ def get_guardian_comprehensive_data(guardian_name):
 
                         # Add student to students list if not already present
                         student_details = rel_data.get("student_details")
-                        logs.append(f"🔍 Checking student_details: {student_details is not None}")
-                        if student_details:
-                            student_name = student_details.get("name")
-                            logs.append(f"🔍 Student name: {student_name}")
-                            if student_name:
-                                student_already_in_list = any(
-                                    s.get("name") == student_name
-                                    for s in comprehensive_data["students"]
-                                )
-                                logs.append(f"🔍 Student already in list: {student_already_in_list}")
-                                if not student_already_in_list:
-                                    comprehensive_data["students"].append(student_details)
-                                    logs.append(f"✅ Added student to list: {student_details.get('student_name')}")
-                                else:
-                                    logs.append(f"⚠️ Student already exists: {student_details.get('student_name')}")
-                            else:
-                                logs.append(f"⚠️ No student name in details")
-                        else:
-                            logs.append(f"⚠️ No student_details in rel_data")
+                        if student_details and student_details.get("name"):
+                            student_already_in_list = any(
+                                s.get("name") == student_details["name"]
+                                for s in comprehensive_data["students"]
+                            )
+                            if not student_already_in_list:
+                                comprehensive_data["students"].append(student_details)
 
             except Exception as e:
                 logs.append(f"⚠️ Could not get family details: {str(e)}")
@@ -652,9 +633,6 @@ def get_guardian_comprehensive_data(guardian_name):
                                 student_already_exists = any(s.get("name") == student.name for s in comprehensive_data["students"])
                                 if not student_already_exists:
                                     comprehensive_data["students"].append(rel_data["student_details"])
-                                    logs.append(f"✅ Added student to list: {student.student_name}")
-                                else:
-                                    logs.append(f"⚠️ Student already in list: {student.student_name}")
 
                             except Exception as e:
                                 logs.append(f"⚠️ Could not get student details: {str(e)}")
