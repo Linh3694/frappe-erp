@@ -335,7 +335,7 @@ def verify_otp_and_login(phone_number, otp):
         # Generate JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
         token = generate_jwt_token(user_email)
-        logs.append(f"🔑 JWT token generated")
+        logs.append("JWT token generated")
         
         # Clear OTP from cache
         frappe.cache().delete_value(cache_key)
