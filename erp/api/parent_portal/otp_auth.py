@@ -343,10 +343,13 @@ def verify_otp_and_login(phone_number, otp):
         
         # Get comprehensive guardian data
         try:
+            logs.append(f"🔍 Calling get_guardian_comprehensive_data for: {guardian['name']}")
             comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
             logs.append(f"📊 Got comprehensive data: {len(comprehensive_data.get('data', {}).get('students', []))} students")
         except Exception as e:
+            import traceback
             logs.append(f"❌ Error getting comprehensive data: {str(e)}")
+            logs.append(f"❌ Traceback: {traceback.format_exc()}")
             comprehensive_data = {
                 "success": False,
                 "data": {"family": {}, "students": [], "campus": {}},
