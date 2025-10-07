@@ -452,13 +452,11 @@ def get_guardian_comprehensive_data(guardian_name):
         dict: Comprehensive data including family, students, and campus info
     """
     logs = []
-    logs.append(f"DEBUG: Starting get_guardian_comprehensive_data for: {guardian_name}")
 
     try:
         # Get guardian details with family_code
         guardian = frappe.get_doc("CRM Guardian", guardian_name)
         logs.append(f"✅ Retrieved guardian: {guardian.guardian_name}")
-        logs.append(f"DEBUG: Guardian family_code: {guardian.family_code}")
 
         comprehensive_data = {
             "family": {},
@@ -484,18 +482,12 @@ def get_guardian_comprehensive_data(guardian_name):
                     logs.append(f"✅ Found family: {family['family_code']}")
 
                     # Get family relationships - get all docs to ensure we get all field values
-                    logs.append(f"DEBUG: About to query relationships for family: {family['name']}")
-                    try:
-                        relationship_docs = frappe.get_all(
-                            "CRM Family Relationship",
-                            filters={"parent": family["name"]},
-                            fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
-                            ignore_permissions=True
-                        )
-                        logs.append(f"DEBUG: Found {len(relationship_docs)} relationship_docs")
-                    except Exception as e:
-                        logs.append(f"DEBUG: Error querying relationships: {str(e)}")
-                        relationship_docs = []
+                    relationship_docs = frappe.get_all(
+                        "CRM Family Relationship",
+                        filters={"parent": family["name"]},
+                        fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
+                        ignore_permissions=True
+                    )
                     comprehensive_data["family"] = {
                         "name": family["name"],
                         "family_code": family["family_code"],
@@ -503,9 +495,7 @@ def get_guardian_comprehensive_data(guardian_name):
                     }
 
                     # Process each relationship
-                    logs.append(f"DEBUG: Processing {len(relationship_docs)} relationships")
                     for rel in relationship_docs:
-                        logs.append(f"DEBUG: Processing relationship for student: {rel.get('student')}")
                         rel_data = {
                             "name": rel["name"],
                             "student_name": rel["student"],
@@ -543,11 +533,9 @@ def get_guardian_comprehensive_data(guardian_name):
                                     limit_page_length=1
                                 )
 
-                                logs.append(f"DEBUG: SIS Photos for {student.name}: {len(sis_photos)}")
                                 if sis_photos:
                                     rel_data["student_details"]["sis_photo"] = sis_photos[0]["photo"]
                                     rel_data["student_details"]["photo_title"] = sis_photos[0]["title"]
-                                    logs.append(f"DEBUG: Set SIS photo for {student.name}: {sis_photos[0]['photo']}")
                                 else:
                                     rel_data["student_details"]["sis_photo"] = "chưa có"
 
