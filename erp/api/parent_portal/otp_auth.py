@@ -521,6 +521,44 @@ def get_guardian_comprehensive_data(guardian_name):
                                     "family_code": student.family_code
                                 }
 
+                                # Get SIS Photo for this student
+                                sis_photos = frappe.get_all("SIS Photo",
+                                    filters={
+                                        "student_id": student.name,
+                                        "type": "student",
+                                        "status": "Active"
+                                    },
+                                    fields=["photo", "title", "upload_date"],
+                                    order_by="upload_date desc",
+                                    limit_page_length=1
+                                )
+
+                                if sis_photos:
+                                    rel_data["student_details"]["sis_photo"] = sis_photos[0]["photo"]
+                                    rel_data["student_details"]["photo_title"] = sis_photos[0]["title"]
+
+                                # Get SIS Class Student for current/latest class
+                                class_students = frappe.get_all("SIS Class Student",
+                                    filters={"student_id": student.name},
+                                    fields=["class_id", "school_year_id"],
+                                    order_by="modified desc",
+                                    limit_page_length=1
+                                )
+
+                                if class_students:
+                                    cs = class_students[0]
+                                    rel_data["student_details"]["current_class_id"] = cs["class_id"]
+                                    rel_data["student_details"]["school_year_id"] = cs["school_year_id"]
+
+                                    # Get class details
+                                    if cs["class_id"]:
+                                        try:
+                                            class_doc = frappe.get_doc("SIS Class", cs["class_id"])
+                                            rel_data["student_details"]["class_name"] = class_doc.class_name
+                                            rel_data["student_details"]["grade"] = getattr(class_doc, 'grade', None)
+                                        except Exception as e:
+                                            logs.append(f"Could not get class details: {str(e)}")
+
                                 # Get campus details
                                 if student.campus_id:
                                     try:
@@ -613,6 +651,44 @@ def get_guardian_comprehensive_data(guardian_name):
                                     },
                                     "guardian_details": {}
                                 }
+
+                                # Get SIS Photo for this student (direct relationships)
+                                sis_photos_direct = frappe.get_all("SIS Photo",
+                                    filters={
+                                        "student_id": student.name,
+                                        "type": "student",
+                                        "status": "Active"
+                                    },
+                                    fields=["photo", "title", "upload_date"],
+                                    order_by="upload_date desc",
+                                    limit_page_length=1
+                                )
+
+                                if sis_photos_direct:
+                                    rel_data["student_details"]["sis_photo"] = sis_photos_direct[0]["photo"]
+                                    rel_data["student_details"]["photo_title"] = sis_photos_direct[0]["title"]
+
+                                # Get SIS Class Student for current/latest class (direct relationships)
+                                class_students_direct = frappe.get_all("SIS Class Student",
+                                    filters={"student_id": student.name},
+                                    fields=["class_id", "school_year_id"],
+                                    order_by="modified desc",
+                                    limit_page_length=1
+                                )
+
+                                if class_students_direct:
+                                    cs_direct = class_students_direct[0]
+                                    rel_data["student_details"]["current_class_id"] = cs_direct["class_id"]
+                                    rel_data["student_details"]["school_year_id"] = cs_direct["school_year_id"]
+
+                                    # Get class details
+                                    if cs_direct["class_id"]:
+                                        try:
+                                            class_doc_direct = frappe.get_doc("SIS Class", cs_direct["class_id"])
+                                            rel_data["student_details"]["class_name"] = class_doc_direct.class_name
+                                            rel_data["student_details"]["grade"] = getattr(class_doc_direct, 'grade', None)
+                                        except Exception as e:
+                                            logs.append(f"Could not get class details (direct): {str(e)}")
 
                                 # Get campus details if available
                                 if student.campus_id:
