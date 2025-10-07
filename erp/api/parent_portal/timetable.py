@@ -211,13 +211,18 @@ def _get_class_timetable_for_date(class_id, target_date):
                         try:
                             tt_subject = frappe.get_doc("SIS Timetable Subject", subject.timetable_subject_id)
                             row["timetable_subject_title"] = tt_subject.title_vn or tt_subject.title_en
+                            # Get curriculum ID directly from timetable subject
+                            row["curriculum_id"] = tt_subject.curriculum_id or ""
                         except:
                             row["timetable_subject_title"] = ""
+                            row["curriculum_id"] = ""
                     else:
                         row["timetable_subject_title"] = ""
+                        row["curriculum_id"] = ""
                 except:
                     row["subject_title"] = ""
                     row["timetable_subject_title"] = ""
+                    row["curriculum_id"] = ""
 
             # Get teacher names
             teacher_names = []
@@ -306,12 +311,22 @@ def _get_class_timetable_for_date(class_id, target_date):
                     row = matching_rows[0]
                     if override.get("subject_id"):
                         row["subject_id"] = override["subject_id"]
-                        # Re-fetch subject title
+                        # Re-fetch subject title and curriculum
                         try:
                             subject = frappe.get_doc("SIS Subject", override["subject_id"])
                             row["subject_title"] = subject.title
+
+                            # Update curriculum ID from timetable subject
+                            if subject.get("timetable_subject_id"):
+                                try:
+                                    tt_subject = frappe.get_doc("SIS Timetable Subject", subject.timetable_subject_id)
+                                    row["curriculum_id"] = tt_subject.curriculum_id or ""
+                                except:
+                                    row["curriculum_id"] = ""
+                            else:
+                                row["curriculum_id"] = ""
                         except:
-                            pass
+                            row["curriculum_id"] = ""
                     
                     if override.get("teacher_1_id"):
                         row["teacher_1_id"] = override["teacher_1_id"]
