@@ -537,27 +537,34 @@ def get_guardian_comprehensive_data(guardian_name):
                                     rel_data["student_details"]["sis_photo"] = sis_photos[0]["photo"]
                                     rel_data["student_details"]["photo_title"] = sis_photos[0]["title"]
 
-                                # Get SIS Class Student for current/latest class
+                                # Get SIS Class Student for current/latest class (only regular type)
                                 class_students = frappe.get_all("SIS Class Student",
                                     filters={"student_id": student.name},
                                     fields=["class_id", "school_year_id"],
-                                    order_by="modified desc",
-                                    limit_page_length=1
+                                    order_by="modified desc"
                                 )
 
-                                if class_students:
-                                    cs = class_students[0]
-                                    rel_data["student_details"]["current_class_id"] = cs["class_id"]
-                                    rel_data["student_details"]["school_year_id"] = cs["school_year_id"]
-
-                                    # Get class details
+                                # Find the latest regular class
+                                current_class = None
+                                for cs in class_students:
                                     if cs["class_id"]:
                                         try:
                                             class_doc = frappe.get_doc("SIS Class", cs["class_id"])
-                                            rel_data["student_details"]["class_name"] = class_doc.class_name
-                                            rel_data["student_details"]["grade"] = getattr(class_doc, 'grade', None)
-                                        except Exception as e:
-                                            logs.append(f"Could not get class details: {str(e)}")
+                                            if getattr(class_doc, 'class_type', '') == 'regular':
+                                                current_class = {
+                                                    'class_id': cs["class_id"],
+                                                    'school_year_id': cs["school_year_id"],
+                                                    'class_doc': class_doc
+                                                }
+                                                break  # Take the most recent regular class
+                                        except:
+                                            continue
+
+                                if current_class:
+                                    rel_data["student_details"]["current_class_id"] = current_class["class_id"]
+                                    rel_data["student_details"]["school_year_id"] = current_class["school_year_id"]
+                                    rel_data["student_details"]["class_name"] = getattr(current_class["class_doc"], 'title', '')
+                                    rel_data["student_details"]["grade"] = getattr(current_class["class_doc"], 'education_grade', None)
 
                                 # Get campus details
                                 if student.campus_id:
@@ -668,27 +675,34 @@ def get_guardian_comprehensive_data(guardian_name):
                                     rel_data["student_details"]["sis_photo"] = sis_photos_direct[0]["photo"]
                                     rel_data["student_details"]["photo_title"] = sis_photos_direct[0]["title"]
 
-                                # Get SIS Class Student for current/latest class (direct relationships)
+                                # Get SIS Class Student for current/latest class (direct relationships, only regular type)
                                 class_students_direct = frappe.get_all("SIS Class Student",
                                     filters={"student_id": student.name},
                                     fields=["class_id", "school_year_id"],
-                                    order_by="modified desc",
-                                    limit_page_length=1
+                                    order_by="modified desc"
                                 )
 
-                                if class_students_direct:
-                                    cs_direct = class_students_direct[0]
-                                    rel_data["student_details"]["current_class_id"] = cs_direct["class_id"]
-                                    rel_data["student_details"]["school_year_id"] = cs_direct["school_year_id"]
-
-                                    # Get class details
-                                    if cs_direct["class_id"]:
+                                # Find the latest regular class
+                                current_class_direct = None
+                                for cs in class_students_direct:
+                                    if cs["class_id"]:
                                         try:
-                                            class_doc_direct = frappe.get_doc("SIS Class", cs_direct["class_id"])
-                                            rel_data["student_details"]["class_name"] = class_doc_direct.class_name
-                                            rel_data["student_details"]["grade"] = getattr(class_doc_direct, 'grade', None)
-                                        except Exception as e:
-                                            logs.append(f"Could not get class details (direct): {str(e)}")
+                                            class_doc = frappe.get_doc("SIS Class", cs["class_id"])
+                                            if getattr(class_doc, 'class_type', '') == 'regular':
+                                                current_class_direct = {
+                                                    'class_id': cs["class_id"],
+                                                    'school_year_id': cs["school_year_id"],
+                                                    'class_doc': class_doc
+                                                }
+                                                break  # Take the most recent regular class
+                                        except:
+                                            continue
+
+                                if current_class_direct:
+                                    rel_data["student_details"]["current_class_id"] = current_class_direct["class_id"]
+                                    rel_data["student_details"]["school_year_id"] = current_class_direct["school_year_id"]
+                                    rel_data["student_details"]["class_name"] = getattr(current_class_direct["class_doc"], 'title', '')
+                                    rel_data["student_details"]["grade"] = getattr(current_class_direct["class_doc"], 'education_grade', None)
 
                                 # Get campus details if available
                                 if student.campus_id:
