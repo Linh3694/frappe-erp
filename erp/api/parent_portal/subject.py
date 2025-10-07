@@ -237,8 +237,17 @@ def get_subject_curriculum_and_teacher():
     logs = []
 
     try:
+        # Debug: Log all available sources
+        logs.append(f"form_dict: {dict(frappe.form_dict)}")
+        logs.append(f"request.args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
+        logs.append(f"request.method: {frappe.request.method if hasattr(frappe.request, 'method') else 'No method'}")
+
+        # Try to get parameters from different sources
         subject_id = frappe.form_dict.get('subject_id')
         class_id = frappe.form_dict.get('class_id')
+
+        logs.append(f"Extracted subject_id: {subject_id}")
+        logs.append(f"Extracted class_id: {class_id}")
 
         if not subject_id:
             return validation_error_response("Subject ID is required", {"subject_id": ["Required"]})
