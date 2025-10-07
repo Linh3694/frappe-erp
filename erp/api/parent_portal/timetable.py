@@ -216,17 +216,17 @@ def _get_class_timetable_for_date(class_id, target_date):
                     row["period_name"] = ""
                     row["period_type"] = ""
 
-        # Check for date-specific overrides
-        overrides = frappe.get_all(
-            "Timetable_Date_Override",
-            filters={
-                "target_type": "Class",
-                "target_id": class_id,
-                "date": target_date_str
-            },
-            fields=["timetable_column_id", "subject_id", "teacher_1_id", "teacher_2_id", "room_id", "override_type"],
-            ignore_permissions=True
-        )
+        # Check for date-specific overrides (from custom table)
+        overrides = []
+        try:
+            overrides = frappe.db.sql("""
+                SELECT timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id, override_type
+                FROM `tabTimetable_Date_Override`
+                WHERE target_type = %s AND target_id = %s AND date = %s
+            """, ("Class", class_id, target_date_str), as_dict=True)
+        except Exception as override_error:
+            # Table might not exist or no overrides - that's okay
+            logs.append(f"ℹ️ No overrides table or no overrides found: {str(override_error)}")
         
         if overrides:
             logs.append(f"🔄 Found {len(overrides)} override(s) for {target_date_str}")
