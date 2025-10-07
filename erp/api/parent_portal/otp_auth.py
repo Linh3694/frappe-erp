@@ -465,7 +465,10 @@ def get_guardian_comprehensive_data(guardian_name):
         }
 
         # Get family information if family_code exists
+        logs.append(f"🔍 Guardian family_code: {guardian.family_code}")
+
         if guardian.family_code:
+            family_found = False
             try:
                 family_list = frappe.db.get_list(
                     "CRM Family",
@@ -554,15 +557,93 @@ def get_guardian_comprehensive_data(guardian_name):
 
                         comprehensive_data["family"]["relationships"].append(rel_data)
 
-                    # Also add students directly from this guardian's relationships
-                    for student_name in comprehensive_data["family"]["relationships"]:
-                        if student_name.get("student_details"):
-                            comprehensive_data["students"].append(student_name["student_details"])
-
             except Exception as e:
                 logs.append(f"⚠️ Could not get family details: {str(e)}")
         else:
             logs.append("⚠️ No family_code found for guardian")
+            logs.append("🔍 Attempting to find direct relationships from guardian...")
+
+            # Try to find relationships directly from this guardian
+            try:
+                direct_relationships = frappe.db.get_list(
+                    "CRM Family Relationship",
+                    filters={"guardian": guardian_name},
+                    fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
+                    ignore_permissions=True
+                )
+
+                if direct_relationships:
+                    logs.append(f"✅ Found {len(direct_relationships)} direct relationships")
+
+                    # Group by students to create family-like structure
+                    student_groups = {}
+                    for rel in direct_relationships:
+                        student_id = rel["student"]
+                        if student_id not in student_groups:
+                            student_groups[student_id] = []
+
+                        # Get student details
+                        if rel["student"]:
+                            try:
+                                student = frappe.get_doc("CRM Student", rel["student"])
+                                rel_data = {
+                                    "name": rel["name"],
+                                    "student_name": rel["student"],
+                                    "guardian_name": rel["guardian"],
+                                    "relationship_type": rel["relationship_type"],
+                                    "key_person": rel["key_person"],
+                                    "access": rel["access"],
+                                    "student_details": {
+                                        "name": student.name,
+                                        "student_name": student.student_name,
+                                        "student_code": student.student_code,
+                                        "dob": student.dob.strftime("%Y-%m-%d") if student.dob else None,
+                                        "gender": student.gender,
+                                        "campus_id": student.campus_id,
+                                        "family_code": student.family_code
+                                    },
+                                    "guardian_details": {}
+                                }
+
+                                # Get campus details if available
+                                if student.campus_id:
+                                    try:
+                                        campus = frappe.get_doc("SIS Campus", student.campus_id)
+                                        comprehensive_data["campus"] = {
+                                            "name": campus.name,
+                                            "title_vn": campus.title_vn,
+                                            "title_en": campus.title_en,
+                                            "short_title": campus.short_title
+                                        }
+                                    except Exception as e:
+                                        logs.append(f"⚠️ Could not get campus details: {str(e)}")
+
+                                student_groups[student_id].append(rel_data)
+
+                                # Add to students list
+                                if not any(s.get("name") == student.name for s in comprehensive_data["students"]):
+                                    comprehensive_data["students"].append(rel_data["student_details"])
+
+                            except Exception as e:
+                                logs.append(f"⚠️ Could not get student details: {str(e)}")
+
+                    # Create a temporary family structure
+                    if student_groups:
+                        comprehensive_data["family"] = {
+                            "name": f"temp_family_{guardian_name}",
+                            "family_code": "NO_FAMILY_CODE",
+                            "relationships": [rel for rels in student_groups.values() for rel in rels],
+                            "note": "Guardian không có family_code, hiển thị relationships trực tiếp"
+                        }
+                        logs.append(f"✅ Created temporary family structure with {len(comprehensive_data['students'])} students")
+                else:
+                    logs.append("⚠️ No direct relationships found for this guardian")
+                    comprehensive_data["family"] = {
+                        "note": "Guardian chưa có family hoặc relationships nào"
+                    }
+
+            except Exception as e:
+                logs.append(f"⚠️ Error finding direct relationships: {str(e)}")
 
         logs.append(f"📊 Comprehensive data retrieved: {len(comprehensive_data['students'])} students")
 
