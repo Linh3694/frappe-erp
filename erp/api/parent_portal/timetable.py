@@ -162,13 +162,13 @@ def _get_class_timetable_for_date(class_id, target_date):
         # Enrich with subject titles, teacher names, and room info
         for row in rows:
             row["class_id"] = class_id
-            
+
             # Get subject title
             if row.get("subject_id"):
                 try:
                     subject = frappe.get_doc("SIS Subject", row["subject_id"])
                     row["subject_title"] = subject.title
-                    
+
                     # Get timetable subject if available
                     if subject.get("timetable_subject_id"):
                         try:
@@ -181,7 +181,7 @@ def _get_class_timetable_for_date(class_id, target_date):
                 except:
                     row["subject_title"] = ""
                     row["timetable_subject_title"] = ""
-            
+
             # Get teacher names
             teacher_names = []
             for teacher_field in ["teacher_1_id", "teacher_2_id"]:
@@ -195,7 +195,7 @@ def _get_class_timetable_for_date(class_id, target_date):
                     except:
                         pass
             row["teacher_names"] = ", ".join(teacher_names)
-            
+
             # Get room info
             if row.get("room_id"):
                 try:
@@ -203,17 +203,19 @@ def _get_class_timetable_for_date(class_id, target_date):
                     row["room_title"] = room.title
                 except:
                     row["room_title"] = ""
-            
-            # Get timetable column info (period time)
+
+            # Get timetable column info (period time and type)
             if row.get("timetable_column_id"):
                 try:
                     column = frappe.get_doc("SIS Timetable Column", row["timetable_column_id"])
                     row["period_name"] = column.title
                     row["start_time"] = column.start_time.strftime("%H:%M") if column.start_time else None
                     row["end_time"] = column.end_time.strftime("%H:%M") if column.end_time else None
+                    row["period_type"] = column.period_type  # Add period_type to response
                 except:
                     row["period_name"] = ""
-        
+                    row["period_type"] = ""
+
         # Check for date-specific overrides
         overrides = frappe.get_all(
             "Timetable_Date_Override",
