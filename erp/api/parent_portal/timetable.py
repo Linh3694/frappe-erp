@@ -246,12 +246,30 @@ def _get_class_timetable_for_date(class_id, target_date):
                 try:
                     column = frappe.get_doc("SIS Timetable Column", row["timetable_column_id"])
                     row["period_name"] = column.period_name  # Correct field name
-                    row["start_time"] = column.start_time.strftime("%H:%M") if column.start_time else None
-                    row["end_time"] = column.end_time.strftime("%H:%M") if column.end_time else None
+                    
+                    # Convert timedelta to HH:MM format
+                    if column.start_time:
+                        total_seconds = int(column.start_time.total_seconds())
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds % 3600) // 60
+                        row["start_time"] = f"{hours:02d}:{minutes:02d}"
+                    else:
+                        row["start_time"] = None
+                    
+                    if column.end_time:
+                        total_seconds = int(column.end_time.total_seconds())
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds % 3600) // 60
+                        row["end_time"] = f"{hours:02d}:{minutes:02d}"
+                    else:
+                        row["end_time"] = None
+                    
                     # Get period_type, default to "study" if not set
                     row["period_type"] = column.period_type if column.period_type else "study"
                 except Exception as e:
                     row["period_name"] = ""
+                    row["start_time"] = None
+                    row["end_time"] = None
                     row["period_type"] = "study"  # Default to study if column not found
                     logs.append(f"⚠️ Could not get column info: {str(e)}")
             else:
