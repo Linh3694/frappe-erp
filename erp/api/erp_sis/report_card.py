@@ -960,11 +960,11 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
     """Return classes the current user is homeroom teacher of or teaches a subject in.
     This follows the logic pattern used in Classes module, filtered by campus and optional school_year.
     If user has 'SIS Manager' role, return all classes instead.
+    
+    Note: page and limit parameters are kept for backward compatibility but not used.
+    All classes are returned without pagination.
     """
     try:
-        page = int(page or 1)
-        limit = int(limit or 50)
-        offset = (page - 1) * limit
         campus_id = _current_campus_id()
 
         user = frappe.session.user
@@ -980,9 +980,9 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         debug_logs.append(f"User roles: {user_roles}")
         debug_logs.append(f"Is SIS Manager: {is_sis_manager}")
 
-        # If SIS Manager, return all classes
+        # If SIS Manager, return all classes without pagination
         if is_sis_manager:
-            debug_logs.append("SIS Manager detected - returning all classes")
+            debug_logs.append("SIS Manager detected - returning all classes without pagination")
             class_filters = {"campus_id": campus_id}
             if school_year:
                 class_filters["school_year_id"] = school_year
@@ -995,16 +995,12 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
             )
 
             debug_logs.append(f"All classes found: {len(all_classes)}")
-            total_count = len(all_classes)
-            page_rows = all_classes[offset : offset + limit]
             
             return {
                 "success": True,
-                "data": page_rows,
+                "data": all_classes,
                 "debug_logs": debug_logs,
-                "current_page": page,
-                "total_count": total_count,
-                "per_page": limit,
+                "total_count": len(all_classes),
                 "message": "All classes for SIS Manager fetched successfully",
             }
 
@@ -1120,20 +1116,16 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
             by_name[row["name"]] = row
 
         all_rows = list(by_name.values())
-        total_count = len(all_rows)
-        page_rows = all_rows[offset : offset + limit]
         
-        debug_logs.append(f"FINAL RESULT: {len(all_rows)} total classes, {len(page_rows)} in page")
+        debug_logs.append(f"FINAL RESULT: {len(all_rows)} total classes returned without pagination")
         debug_logs.append(f"Class names: {[c['name'] for c in all_rows]}")
 
-        # TEMPORARY: Return debug logs in response for debugging
+        # Return all classes without pagination
         return {
             "success": True,
-            "data": page_rows,
-            "debug_logs": debug_logs,  # TEMP for debugging
-            "current_page": page,
-            "total_count": total_count,
-            "per_page": limit,
+            "data": all_rows,
+            "debug_logs": debug_logs,
+            "total_count": len(all_rows),
             "message": "Classes for report card fetched successfully",
         }
     except Exception as e:
