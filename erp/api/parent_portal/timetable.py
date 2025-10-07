@@ -248,10 +248,14 @@ def _get_class_timetable_for_date(class_id, target_date):
                     row["period_name"] = column.title
                     row["start_time"] = column.start_time.strftime("%H:%M") if column.start_time else None
                     row["end_time"] = column.end_time.strftime("%H:%M") if column.end_time else None
-                    row["period_type"] = column.period_type  # Add period_type to response
-                except:
+                    # Get period_type, default to "study" if not set
+                    row["period_type"] = getattr(column, "period_type", None) or "study"
+                except Exception as e:
                     row["period_name"] = ""
-                    row["period_type"] = ""
+                    row["period_type"] = "study"  # Default to study if column not found
+                    logs.append(f"⚠️ Could not get column info: {str(e)}")
+            else:
+                row["period_type"] = "study"  # Default if no column_id
 
         # Check for date-specific overrides (from custom table)
         overrides = []
