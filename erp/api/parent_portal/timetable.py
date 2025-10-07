@@ -245,11 +245,11 @@ def _get_class_timetable_for_date(class_id, target_date):
             if row.get("timetable_column_id"):
                 try:
                     column = frappe.get_doc("SIS Timetable Column", row["timetable_column_id"])
-                    row["period_name"] = column.title
+                    row["period_name"] = column.period_name  # Correct field name
                     row["start_time"] = column.start_time.strftime("%H:%M") if column.start_time else None
                     row["end_time"] = column.end_time.strftime("%H:%M") if column.end_time else None
                     # Get period_type, default to "study" if not set
-                    row["period_type"] = getattr(column, "period_type", None) or "study"
+                    row["period_type"] = column.period_type if column.period_type else "study"
                 except Exception as e:
                     row["period_name"] = ""
                     row["period_type"] = "study"  # Default to study if column not found
