@@ -341,6 +341,9 @@ def verify_otp_and_login(phone_number, otp):
         frappe.cache().delete_value(cache_key)
         logs.append(f"🗑️ Cleared OTP from cache")
         
+        # Get comprehensive guardian data
+        comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
+
         # Return success response
         return {
             "success": True,
@@ -357,6 +360,9 @@ def verify_otp_and_login(phone_number, otp):
                     "email": user_email,
                     "full_name": guardian["guardian_name"]
                 },
+                "family": comprehensive_data.get("family", {}),
+                "students": comprehensive_data.get("students", []),
+                "campus": comprehensive_data.get("campus", {}),
                 "token": token,
                 "expires_in": 365 * 24 * 60 * 60  # 365 days
             },
@@ -432,5 +438,148 @@ def get_guardian_info():
         return {
             "success": False,
             "message": f"Lỗi hệ thống: {str(e)}"
+        }
+
+
+def get_guardian_comprehensive_data(guardian_name):
+    """
+    Get comprehensive data for a guardian including family and student information
+
+    Args:
+        guardian_name: Guardian document name
+
+    Returns:
+        dict: Comprehensive data including family, students, and campus info
+    """
+    logs = []
+
+    try:
+        # Get guardian details with family_code
+        guardian = frappe.get_doc("CRM Guardian", guardian_name)
+        logs.append(f"✅ Retrieved guardian: {guardian.guardian_name}")
+
+        comprehensive_data = {
+            "family": {},
+            "students": [],
+            "campus": {}
+        }
+
+        # Get family information if family_code exists
+        if guardian.family_code:
+            try:
+                family_list = frappe.db.get_list(
+                    "CRM Family",
+                    filters={"family_code": guardian.family_code},
+                    fields=["name", "family_code"],
+                    ignore_permissions=True
+                )
+
+                if family_list:
+                    family = family_list[0]
+                    logs.append(f"✅ Found family: {family['family_code']}")
+
+                    # Get family relationships
+                    relationships = frappe.db.get_list(
+                        "CRM Family Relationship",
+                        filters={"parent": family["name"]},
+                        fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
+                        ignore_permissions=True
+                    )
+
+                    comprehensive_data["family"] = {
+                        "name": family["name"],
+                        "family_code": family["family_code"],
+                        "relationships": []
+                    }
+
+                    # Process each relationship
+                    for rel in relationships:
+                        rel_data = {
+                            "name": rel["name"],
+                            "student_name": rel["student"],
+                            "guardian_name": rel["guardian"],
+                            "relationship_type": rel["relationship_type"],
+                            "key_person": rel["key_person"],
+                            "access": rel["access"],
+                            "student_details": {},
+                            "guardian_details": {}
+                        }
+
+                        # Get student details
+                        if rel["student"]:
+                            try:
+                                student = frappe.get_doc("CRM Student", rel["student"])
+                                rel_data["student_details"] = {
+                                    "name": student.name,
+                                    "student_name": student.student_name,
+                                    "student_code": student.student_code,
+                                    "dob": student.dob.strftime("%Y-%m-%d") if student.dob else None,
+                                    "gender": student.gender,
+                                    "campus_id": student.campus_id,
+                                    "family_code": student.family_code
+                                }
+
+                                # Get campus details
+                                if student.campus_id:
+                                    try:
+                                        campus = frappe.get_doc("SIS Campus", student.campus_id)
+                                        comprehensive_data["campus"] = {
+                                            "name": campus.name,
+                                            "title_vn": campus.title_vn,
+                                            "title_en": campus.title_en,
+                                            "short_title": campus.short_title
+                                        }
+                                        logs.append(f"✅ Retrieved campus: {campus.title_vn}")
+                                    except Exception as e:
+                                        logs.append(f"⚠️ Could not get campus details: {str(e)}")
+
+                                logs.append(f"✅ Retrieved student: {student.student_name}")
+                            except Exception as e:
+                                logs.append(f"⚠️ Could not get student details: {str(e)}")
+
+                        # Get guardian details (if different from current guardian)
+                        if rel["guardian"] and rel["guardian"] != guardian_name:
+                            try:
+                                other_guardian = frappe.get_doc("CRM Guardian", rel["guardian"])
+                                rel_data["guardian_details"] = {
+                                    "name": other_guardian.name,
+                                    "guardian_id": other_guardian.guardian_id,
+                                    "guardian_name": other_guardian.guardian_name,
+                                    "phone_number": other_guardian.phone_number,
+                                    "email": other_guardian.email
+                                }
+                                logs.append(f"✅ Retrieved related guardian: {other_guardian.guardian_name}")
+                            except Exception as e:
+                                logs.append(f"⚠️ Could not get related guardian details: {str(e)}")
+
+                        comprehensive_data["family"]["relationships"].append(rel_data)
+
+                    # Also add students directly from this guardian's relationships
+                    for student_name in comprehensive_data["family"]["relationships"]:
+                        if student_name.get("student_details"):
+                            comprehensive_data["students"].append(student_name["student_details"])
+
+            except Exception as e:
+                logs.append(f"⚠️ Could not get family details: {str(e)}")
+        else:
+            logs.append("⚠️ No family_code found for guardian")
+
+        logs.append(f"📊 Comprehensive data retrieved: {len(comprehensive_data['students'])} students")
+
+        return {
+            "success": True,
+            "data": comprehensive_data,
+            "logs": logs
+        }
+
+    except Exception as e:
+        logs.append(f"❌ Error getting comprehensive data: {str(e)}")
+        frappe.log_error(f"Get Comprehensive Data Error: {str(e)}\nLogs: {json.dumps(logs)}", "Parent Portal")
+
+        return {
+            "success": False,
+            "data": {"family": {}, "students": [], "campus": {}},
+            "logs": logs,
+            "error": str(e)
         }
 
