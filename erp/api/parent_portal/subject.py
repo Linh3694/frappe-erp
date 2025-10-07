@@ -220,3 +220,128 @@ def get_subjects_by_class(class_id):
     except Exception as e:
         logs.append(f"Error retrieving subjects by class: {str(e)}")
         return error_response(f"An error occurred: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_subject_curriculum_and_teacher(subject_id, class_id):
+    """
+    Get curriculum information for a subject and find the teacher assigned to teach it for a specific class
+
+    Args:
+        subject_id: Subject document name (SIS Subject)
+        class_id: Class document name
+
+    Returns:
+        dict: Curriculum info and teacher assignment for the subject-class combination
+    """
+    logs = []
+
+    try:
+        if not subject_id:
+            return validation_error_response("Subject ID is required")
+        if not class_id:
+            return validation_error_response("Class ID is required")
+
+        # Get subject basic information
+        subject = frappe.get_doc("SIS Subject", subject_id)
+
+        if not subject:
+            return error_response("Subject not found")
+
+        logs.append(f"Found subject: {subject.title}")
+
+        # Get curriculum information
+        curriculum_info = None
+        if subject.subcurriculum_id:
+            try:
+                subcurriculum = frappe.get_doc("SIS Sub Curriculum", subject.subcurriculum_id)
+                curriculum_info = {
+                    "subcurriculum_id": subcurriculum.name,
+                    "subcurriculum_title": subcurriculum.title,
+                    "curriculum_id": subcurriculum.curriculum_id if hasattr(subcurriculum, 'curriculum_id') else None
+                }
+
+                # Get main curriculum if available
+                if curriculum_info.get("curriculum_id"):
+                    try:
+                        curriculum = frappe.get_doc("SIS Curriculum", curriculum_info["curriculum_id"])
+                        curriculum_info["curriculum_title"] = curriculum.title
+                    except Exception as e:
+                        logs.append(f"Could not get curriculum details: {str(e)}")
+
+            except Exception as e:
+                logs.append(f"Could not get subcurriculum details: {str(e)}")
+
+        # Find teacher assignment for this subject and class
+        teacher_assignment = None
+        teacher_info = None
+
+        # Query SIS Subject Assignment to find teacher for this subject and class
+        assignments = frappe.get_all(
+            "SIS Subject Assignment",
+            filters={
+                "actual_subject_id": subject.actual_subject_id,
+                "class_id": class_id
+            },
+            fields=[
+                "name",
+                "teacher_id",
+                "class_id",
+                "actual_subject_id"
+            ]
+        )
+
+        logs.append(f"Found {len(assignments)} assignments for subject {subject.actual_subject_id} in class {class_id}")
+
+        if assignments:
+            assignment = assignments[0]  # Take the first assignment
+            teacher_assignment = {
+                "assignment_id": assignment.name,
+                "class_id": assignment.class_id,
+                "actual_subject_id": assignment.actual_subject_id
+            }
+
+            # Get teacher details
+            if assignment.teacher_id:
+                try:
+                    teacher_doc = frappe.get_doc("SIS Teacher", assignment.teacher_id)
+                    teacher_info = {
+                        "teacher_id": teacher_doc.name,
+                        "teacher_name": teacher_doc.teacher_name,
+                        "teacher_email": teacher_doc.email,
+                        "teacher_phone": getattr(teacher_doc, 'phone', None)
+                    }
+                    logs.append(f"Found teacher: {teacher_doc.teacher_name}")
+                except Exception as e:
+                    logs.append(f"Could not get teacher details: {str(e)}")
+            else:
+                logs.append("No teacher assigned for this subject and class")
+        else:
+            logs.append(f"No subject assignment found for subject {subject.actual_subject_id} in class {class_id}")
+
+        # Prepare response data
+        response_data = {
+            "subject_id": subject.name,
+            "subject_title": subject.title,
+            "actual_subject_id": subject.actual_subject_id,
+            "class_id": class_id,
+            "curriculum": curriculum_info,
+            "teacher_assignment": teacher_assignment,
+            "teacher": teacher_info
+        }
+
+        logs.append("Subject curriculum and teacher information retrieved successfully")
+
+        return {
+            "success": True,
+            "message": "Subject curriculum and teacher information retrieved successfully",
+            "data": response_data,
+            "logs": logs
+        }
+
+    except frappe.DoesNotExistError:
+        return error_response("Subject not found")
+
+    except Exception as e:
+        logs.append(f"Error retrieving subject curriculum and teacher: {str(e)}")
+        return error_response(f"An error occurred: {str(e)}", logs=logs)
