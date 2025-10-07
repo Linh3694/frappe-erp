@@ -495,7 +495,9 @@ def get_guardian_comprehensive_data(guardian_name):
                     }
 
                     # Process each relationship
+                    logs.append(f"DEBUG: Processing {len(relationship_docs)} relationships")
                     for rel in relationship_docs:
+                        logs.append(f"DEBUG: Processing relationship for student: {rel.get('student')}")
                         rel_data = {
                             "name": rel["name"],
                             "student_name": rel["student"],
@@ -533,9 +535,13 @@ def get_guardian_comprehensive_data(guardian_name):
                                     limit_page_length=1
                                 )
 
+                                logs.append(f"DEBUG: SIS Photos for {student.name}: {len(sis_photos)}")
                                 if sis_photos:
                                     rel_data["student_details"]["sis_photo"] = sis_photos[0]["photo"]
                                     rel_data["student_details"]["photo_title"] = sis_photos[0]["title"]
+                                    logs.append(f"DEBUG: Set SIS photo for {student.name}: {sis_photos[0]['photo']}")
+                                else:
+                                    rel_data["student_details"]["sis_photo"] = "chưa có"
 
                                 # Get SIS Class Student for current/latest class (only regular type)
                                 class_students = frappe.get_all("SIS Class Student",
