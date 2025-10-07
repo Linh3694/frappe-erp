@@ -342,20 +342,7 @@ def verify_otp_and_login(phone_number, otp):
         logs.append("Cleared OTP from cache")
 
         # Get comprehensive guardian data
-        logs.append("About to call get_guardian_comprehensive_data")
-        try:
-            logs.append(f"🔍 Calling get_guardian_comprehensive_data for: {guardian['name']}")
-            comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
-            logs.append(f"📊 Got comprehensive data: {len(comprehensive_data.get('data', {}).get('students', []))} students")
-        except Exception as e:
-            import traceback
-            logs.append(f"❌ Error getting comprehensive data: {str(e)}")
-            logs.append(f"❌ Traceback: {traceback.format_exc()}")
-            comprehensive_data = {
-                "success": False,
-                "data": {"family": {}, "students": [], "campus": {}},
-                "logs": [f"Error: {str(e)}"]
-            }
+        comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
 
         # Return success response
         return {
@@ -373,9 +360,9 @@ def verify_otp_and_login(phone_number, otp):
                     "email": user_email,
                     "full_name": guardian["guardian_name"]
                 },
-                "family": comprehensive_data.get("family", {}),
-                "students": comprehensive_data.get("students", []),
-                "campus": comprehensive_data.get("campus", {}),
+                "family": comprehensive_data.get("data", {}).get("family", {}),
+                "students": comprehensive_data.get("data", {}).get("students", []),
+                "campus": comprehensive_data.get("data", {}).get("campus", {}),
                 "token": token,
                 "expires_in": 365 * 24 * 60 * 60  # 365 days
             },
