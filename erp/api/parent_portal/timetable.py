@@ -103,7 +103,7 @@ def _get_class_timetable_for_date(class_id, target_date):
     
     try:
         target_date_str = target_date.strftime("%Y-%m-%d")
-        day_of_week = target_date.strftime("%A")
+        day_of_week = target_date.strftime("%A").lower()[:3]  # Convert to lowercase 3-letter format: tue, mon, etc.
         
         logs.append(f"📅 Getting timetable for class {class_id} on {target_date_str} ({day_of_week})")
         
@@ -401,9 +401,10 @@ def get_student_timetable_today(student_id=None):
         # Get today's date
         today = datetime.now()
         today_str = today.strftime("%Y-%m-%d")
-        day_of_week = today.strftime("%A")
+        day_of_week_full = today.strftime("%A")  # For display: Tuesday
+        day_of_week = day_of_week_full.lower()[:3]  # For query: tue
         
-        logs.append(f"📅 Today: {today_str} ({day_of_week})")
+        logs.append(f"📅 Today: {today_str} ({day_of_week_full})")
         
         # Get all classes for this student
         class_result = _get_student_classes(student_id)
@@ -450,7 +451,7 @@ def get_student_timetable_today(student_id=None):
             "message": "Thời khóa biểu hôm nay",
             "data": {
                 "date": today_str,
-                "day_of_week": day_of_week,
+                "day_of_week": day_of_week_full,  # Return full name for display
                 "entries": all_entries
             },
             "logs": logs
