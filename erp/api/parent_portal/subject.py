@@ -24,7 +24,7 @@ def get_subject_info(subject_id):
 
     try:
         if not subject_id:
-            return validation_error_response("Subject ID is required")
+            return validation_error_response("Subject ID is required", {"subject_id": ["Required"]})
 
         # Get subject basic information
         subject = frappe.get_doc("SIS Subject", subject_id)
@@ -146,7 +146,7 @@ def get_subjects_by_class(class_id):
 
     try:
         if not class_id:
-            return validation_error_response("Class ID is required")
+            return validation_error_response("Class ID is required", {"class_id": ["Required"]})
 
         # Get subjects assigned to this class through timetable
         timetable_subjects = frappe.get_all(
@@ -241,9 +241,9 @@ def get_subject_curriculum_and_teacher():
         class_id = frappe.form_dict.get('class_id')
 
         if not subject_id:
-            return validation_error_response("Subject ID is required")
+            return validation_error_response("Subject ID is required", {"subject_id": ["Required"]})
         if not class_id:
-            return validation_error_response("Class ID is required")
+            return validation_error_response("Class ID is required", {"class_id": ["Required"]})
 
         # Get subject basic information
         subject = frappe.get_doc("SIS Subject", subject_id)
