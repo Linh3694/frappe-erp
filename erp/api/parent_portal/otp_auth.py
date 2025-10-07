@@ -339,9 +339,10 @@ def verify_otp_and_login(phone_number, otp):
         
         # Clear OTP from cache
         frappe.cache().delete_value(cache_key)
-        logs.append(f"🗑️ Cleared OTP from cache")
-        
+        logs.append("Cleared OTP from cache")
+
         # Get comprehensive guardian data
+        logs.append("About to call get_guardian_comprehensive_data")
         try:
             logs.append(f"🔍 Calling get_guardian_comprehensive_data for: {guardian['name']}")
             comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
