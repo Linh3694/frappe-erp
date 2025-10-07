@@ -223,11 +223,11 @@ def get_subjects_by_class(class_id):
 
 
 @frappe.whitelist()
-def get_subject_curriculum_and_teacher(subject_id, class_id):
+def get_subject_curriculum_and_teacher():
     """
     Get curriculum information for a subject and find the teacher assigned to teach it for a specific class
 
-    Args:
+    Parameters are passed via frappe.form_dict:
         subject_id: Subject document name (SIS Subject)
         class_id: Class document name
 
@@ -237,6 +237,9 @@ def get_subject_curriculum_and_teacher(subject_id, class_id):
     logs = []
 
     try:
+        subject_id = frappe.form_dict.get('subject_id')
+        class_id = frappe.form_dict.get('class_id')
+
         if not subject_id:
             return validation_error_response("Subject ID is required")
         if not class_id:
