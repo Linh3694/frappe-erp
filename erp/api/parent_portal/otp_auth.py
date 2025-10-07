@@ -488,6 +488,7 @@ def get_guardian_comprehensive_data(guardian_name):
                         fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
                         ignore_permissions=True
                     )
+                    logs.append(f"🔍 Found {len(relationship_docs)} relationship_docs")
 
                     comprehensive_data["family"] = {
                         "name": family["name"],
