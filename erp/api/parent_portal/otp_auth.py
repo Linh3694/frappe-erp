@@ -342,7 +342,16 @@ def verify_otp_and_login(phone_number, otp):
         logs.append(f"🗑️ Cleared OTP from cache")
         
         # Get comprehensive guardian data
-        comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
+        try:
+            comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
+            logs.append(f"📊 Got comprehensive data: {len(comprehensive_data.get('data', {}).get('students', []))} students")
+        except Exception as e:
+            logs.append(f"❌ Error getting comprehensive data: {str(e)}")
+            comprehensive_data = {
+                "success": False,
+                "data": {"family": {}, "students": [], "campus": {}},
+                "logs": [f"Error: {str(e)}"]
+            }
 
         # Return success response
         return {
