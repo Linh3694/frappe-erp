@@ -483,13 +483,17 @@ def get_guardian_comprehensive_data(guardian_name):
 
                     # Get family relationships - get all docs to ensure we get all field values
                     logs.append(f"DEBUG: About to query relationships for family: {family['name']}")
-                    relationship_docs = frappe.get_all(
-                        "CRM Family Relationship",
-                        filters={"parent": family["name"]},
-                        fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
-                        ignore_permissions=True
-                    )
-                    logs.append(f"DEBUG: Found {len(relationship_docs)} relationship_docs")
+                    try:
+                        relationship_docs = frappe.get_all(
+                            "CRM Family Relationship",
+                            filters={"parent": family["name"]},
+                            fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
+                            ignore_permissions=True
+                        )
+                        logs.append(f"DEBUG: Found {len(relationship_docs)} relationship_docs")
+                    except Exception as e:
+                        logs.append(f"DEBUG: Error querying relationships: {str(e)}")
+                        relationship_docs = []
                     comprehensive_data["family"] = {
                         "name": family["name"],
                         "family_code": family["family_code"],
