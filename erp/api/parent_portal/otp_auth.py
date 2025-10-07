@@ -452,11 +452,13 @@ def get_guardian_comprehensive_data(guardian_name):
         dict: Comprehensive data including family, students, and campus info
     """
     logs = []
+    logs.append(f"DEBUG: Starting get_guardian_comprehensive_data for: {guardian_name}")
 
     try:
         # Get guardian details with family_code
         guardian = frappe.get_doc("CRM Guardian", guardian_name)
         logs.append(f"✅ Retrieved guardian: {guardian.guardian_name}")
+        logs.append(f"DEBUG: Guardian family_code: {guardian.family_code}")
 
         comprehensive_data = {
             "family": {},
