@@ -132,30 +132,67 @@ def _get_class_timetable_for_date(class_id, target_date):
         instance_ids = [i.name for i in instances]
         logs.append(f"✅ Found {len(instance_ids)} timetable instance(s): {instance_ids}")
         
-        # Get timetable rows for this day of week
-        row_filters = {
-            "parent": ["in", instance_ids],
-            "parenttype": "SIS Timetable Instance",
-            "parentfield": "weekly_pattern",
-            "day_of_week": day_of_week
-        }
+        # Get timetable rows for this day of week - with fallback query
+        rows = []
+        try:
+            # Try standard parent field first
+            row_filters = {
+                "parent": ["in", instance_ids],
+                "parenttype": "SIS Timetable Instance",
+                "parentfield": "weekly_pattern",
+                "day_of_week": day_of_week
+            }
+            
+            rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=[
+                    "name",
+                    "parent",
+                    "day_of_week",
+                    "timetable_column_id",
+                    "subject_id",
+                    "teacher_1_id",
+                    "teacher_2_id",
+                    "room_id"
+                ],
+                filters=row_filters,
+                order_by="timetable_column_id asc",
+                ignore_permissions=True
+            )
+            logs.append(f"✅ Queried with 'parent' field - found {len(rows)} rows")
+        except Exception as e:
+            logs.append(f"⚠️ Error with 'parent' field: {str(e)}")
         
-        rows = frappe.get_all(
-            "SIS Timetable Instance Row",
-            fields=[
-                "name",
-                "parent",
-                "day_of_week",
-                "timetable_column_id",
-                "subject_id",
-                "teacher_1_id",
-                "teacher_2_id",
-                "room_id"
-            ],
-            filters=row_filters,
-            order_by="timetable_column_id asc",
-            ignore_permissions=True
-        )
+        # Fallback: try parent_timetable_instance field
+        if not rows:
+            try:
+                logs.append(f"🔄 Trying fallback with 'parent_timetable_instance' field")
+                alt_rows = frappe.get_all(
+                    "SIS Timetable Instance Row",
+                    fields=[
+                        "name",
+                        "parent_timetable_instance",
+                        "day_of_week",
+                        "timetable_column_id",
+                        "subject_id",
+                        "teacher_1_id",
+                        "teacher_2_id",
+                        "room_id"
+                    ],
+                    filters={
+                        "parent_timetable_instance": ["in", instance_ids],
+                        "day_of_week": day_of_week
+                    },
+                    order_by="timetable_column_id asc",
+                    ignore_permissions=True
+                )
+                # Normalize to same shape
+                for r in alt_rows:
+                    r["parent"] = r.get("parent_timetable_instance")
+                rows = alt_rows
+                logs.append(f"✅ Fallback query found {len(rows)} rows")
+            except Exception as e2:
+                logs.append(f"❌ Fallback query also failed: {str(e2)}")
         
         logs.append(f"✅ Found {len(rows)} timetable entries for {day_of_week}")
         
