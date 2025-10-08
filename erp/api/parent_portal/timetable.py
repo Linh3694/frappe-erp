@@ -581,12 +581,12 @@ def get_student_timetable_today(student_id=None):
 
 
 @frappe.whitelist()
-def get_teacher_info(teacher_ids):
+def get_teacher_info():
     """
     Get teacher information including names and avatars
 
     Args:
-        teacher_ids: JSON array of teacher IDs (SIS Teacher)
+        teacher_ids: JSON array of teacher IDs (SIS Teacher) from form_dict
 
     Returns:
         dict: Teacher information with names and avatars
@@ -595,8 +595,18 @@ def get_teacher_info(teacher_ids):
 
     try:
         import json
+        teacher_ids = frappe.form_dict.get('teacher_ids')
+
+        # If teacher_ids is a string, try to parse as JSON
         if isinstance(teacher_ids, str):
-            teacher_ids = json.loads(teacher_ids)
+            try:
+                teacher_ids = json.loads(teacher_ids)
+            except:
+                teacher_ids = [teacher_ids]  # Single teacher ID as string
+
+        # Also check if it's passed as array/list
+        if not teacher_ids:
+            teacher_ids = frappe.form_dict.get('teacher_ids[]') or []
 
         if not teacher_ids or not isinstance(teacher_ids, list):
             return {
