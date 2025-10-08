@@ -595,18 +595,28 @@ def get_teacher_info():
 
     try:
         import json
+
+        # Debug: Log all form_dict data
+        logs.append(f"DEBUG: frappe.form_dict keys: {list(frappe.form_dict.keys())}")
+        logs.append(f"DEBUG: frappe.form_dict: {dict(frappe.form_dict)}")
+
         teacher_ids = frappe.form_dict.get('teacher_ids')
 
         # If teacher_ids is a string, try to parse as JSON
         if isinstance(teacher_ids, str):
             try:
                 teacher_ids = json.loads(teacher_ids)
-            except:
+                logs.append(f"DEBUG: Parsed teacher_ids from JSON: {teacher_ids}")
+            except Exception as e:
+                logs.append(f"DEBUG: Failed to parse JSON: {e}, treating as single ID")
                 teacher_ids = [teacher_ids]  # Single teacher ID as string
 
         # Also check if it's passed as array/list
         if not teacher_ids:
             teacher_ids = frappe.form_dict.get('teacher_ids[]') or []
+            logs.append(f"DEBUG: Using teacher_ids[]: {teacher_ids}")
+
+        logs.append(f"DEBUG: Final teacher_ids: {teacher_ids}, type: {type(teacher_ids)}")
 
         if not teacher_ids or not isinstance(teacher_ids, list):
             return {
