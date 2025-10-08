@@ -237,11 +237,14 @@ def get_subject_curriculum_and_teacher(subject_id, class_id):
     logs = []
 
     try:
+        logs.append(f"🔍 Received parameters - subject_id: '{subject_id}' (type: {type(subject_id)}), class_id: '{class_id}' (type: {type(class_id)})")
 
         if not subject_id:
-            return validation_error_response("Subject ID is required", {"subject_id": ["Required"]})
+            logs.append(f"❌ Subject ID validation failed: subject_id is falsy")
+            return error_response("Subject ID is required", errors={"subject_id": ["Required"]}, logs=logs)
         if not class_id:
-            return validation_error_response("Class ID is required", {"class_id": ["Required"]})
+            logs.append(f"❌ Class ID validation failed: class_id is falsy")
+            return error_response("Class ID is required", errors={"class_id": ["Required"]}, logs=logs)
 
         # Get subject basic information
         subject = frappe.get_doc("SIS Subject", subject_id)
