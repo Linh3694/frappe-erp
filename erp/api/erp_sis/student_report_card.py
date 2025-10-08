@@ -482,7 +482,10 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 )
                 continue
 
-            initial_data = _initialize_report_data_from_template(template, class_id)
+            # ✅ FIX: Pass student_id to filter subjects properly
+            # Use the correct _initialize function from student_subject.py that filters by actual enrolled subjects
+            from erp.api.erp_sis.student_subject import _initialize_report_data_from_template as init_with_student_filter
+            initial_data = init_with_student_filter(template, resolved_student_id, class_id)
             doc = frappe.get_doc({
                 "doctype": "SIS Student Report Card",
                 "title": template.title,
