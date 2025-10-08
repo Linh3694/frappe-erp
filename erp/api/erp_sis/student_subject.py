@@ -430,27 +430,9 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         # Get actual subject details - these are subjects the student ACTUALLY studies
         actual_subject_ids = [s["actual_subject_id"] for s in student_subjects if s.get("actual_subject_id")]
 
-        # DEBUG: Log actual subjects for this student
-        print(f"DEBUG_REPORT_INIT: Student {student_id} in class {class_id} studies {len(actual_subject_ids)} subjects: {actual_subject_ids[:3]}...")  # Limit log size
-
-        # If template has specific subjects config, only include subjects that are BOTH:
-        # 1. Configured in template AND
-        # 2. Actually studied by this student
-        template_actual_subject_ids = []
-        if hasattr(template, 'subjects') and template.subjects:
-            template_actual_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
-            print(f"DEBUG_REPORT_INIT: Template has {len(template_actual_subject_ids)} configured subjects")
-
-            # CRITICAL: Only include subjects that student actually studies AND are in template
-            original_count = len(actual_subject_ids)
-            actual_subject_ids = [sid for sid in actual_subject_ids if sid in template_actual_subject_ids]
-            filtered_count = len(actual_subject_ids)
-
-            print(f"DEBUG_REPORT_INIT: After template filter: {original_count} -> {filtered_count} subjects for student {student_id}")
-            if original_count != filtered_count:
-                print(f"DEBUG_REPORT_INIT: WARNING - Student {student_id} missing {original_count - filtered_count} template subjects")
-
-        print(f"DEBUG_REPORT_INIT: Final actual_subject_ids for {student_id}: {actual_subject_ids[:3]}...")
+        # CRITICAL: Only use subjects that student actually studies
+        # Do NOT add subjects from template that student doesn't study
+        # This ensures report card only shows subjects the student is enrolled in
         
         # Get actual subject names/titles for reference
         subjects_info = {}
@@ -466,23 +448,17 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         if getattr(template, 'scores_enabled', False):
             scores = {}
 
-            # DEBUG: Log template scores subjects
+            # ONLY include scores for subjects that student actually studies
             if hasattr(template, 'scores') and template.scores:
-                template_score_subject_ids = [s.subject_id for s in template.scores if s.subject_id]
-                print(f"DEBUG_REPORT_INIT: Template has {len(template_score_subject_ids)} score subjects")
-
-            # If template has scores config, use that structure with actual subjects
-            if hasattr(template, 'scores') and template.scores:
-                included_count = 0
-                excluded_count = 0
                 for score_config in template.scores:
                     actual_subject_id = score_config.subject_id
+                    # CRITICAL CHECK: Only add if student actually studies this subject
                     if actual_subject_id in actual_subject_ids:
                         scores[actual_subject_id] = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
                             "display_name": score_config.display_name or subjects_info.get(actual_subject_id, actual_subject_id),
                             "subject_type": score_config.subject_type or "Môn tính điểm",
-                            "hs1_scores": [],  # List of individual scores
+                            "hs1_scores": [],
                             "hs2_scores": [],
                             "hs3_scores": [],
                             "hs1_average": None,
@@ -493,12 +469,6 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                             "weight2_count": getattr(score_config, "weight2_count", 1) or 1,
                             "weight3_count": getattr(score_config, "weight3_count", 1) or 1
                         }
-                        included_count += 1
-                    else:
-                        excluded_count += 1
-                        print(f"DEBUG_REPORT_INIT: EXCLUDED score subject {actual_subject_id} - student doesn't study it")
-
-                print(f"DEBUG_REPORT_INIT: Scores section: included {included_count}, excluded {excluded_count} subjects")
             
             data["scores"] = scores
         
@@ -522,19 +492,12 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         if getattr(template, 'subject_eval_enabled', False):
             subject_eval = {}
 
-            # DEBUG: Log subject evaluation subjects
-            if hasattr(template, 'subjects') and template.subjects:
-                template_eval_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
-                print(f"DEBUG_REPORT_INIT: Template has {len(template_eval_subject_ids)} subject evaluation configs")
-
-            # Initialize for each actual subject configured in template
-            included_eval_count = 0
-            excluded_eval_count = 0
+            # ONLY include subject evaluations for subjects that student actually studies
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
                     actual_subject_id = subject_config.subject_id
+                    # CRITICAL CHECK: Only add if student actually studies this subject
                     if actual_subject_id in actual_subject_ids:
-                        included_eval_count += 1
                         subject_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
                             "test_points": {},
@@ -581,11 +544,6 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                                     pass
                         
                         subject_eval[actual_subject_id] = subject_data
-                    else:
-                        excluded_eval_count += 1
-                        print(f"DEBUG_REPORT_INIT: EXCLUDED eval subject {actual_subject_id} - student doesn't study it")
-
-            print(f"DEBUG_REPORT_INIT: Subject Evaluation: included {included_eval_count}, excluded {excluded_eval_count} subjects")
             
             data["subject_eval"] = subject_eval
         
@@ -594,18 +552,12 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             # Initialize INTL scoreboard structure
             intl_scoreboard = {}
 
-            # DEBUG: Log INTL scoreboard subjects
-            if hasattr(template, 'subjects') and template.subjects:
-                template_intl_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
-                print(f"DEBUG_REPORT_INIT: Template has {len(template_intl_subject_ids)} INTL scoreboard configs")
-
-            included_intl_count = 0
-            excluded_intl_count = 0
+            # ONLY include INTL scoreboard for subjects that student actually studies
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
                     actual_subject_id = subject_config.subject_id
+                    # CRITICAL CHECK: Only add if student actually studies this subject
                     if actual_subject_id in actual_subject_ids:
-                        included_intl_count += 1
                         subcurriculum_id = getattr(subject_config, 'subcurriculum_id', None) or 'none'
                         subcurriculum_title_en = 'General Program'
                         
