@@ -521,12 +521,20 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         # 3. Initialize Subject Evaluation section (VN program)
         if getattr(template, 'subject_eval_enabled', False):
             subject_eval = {}
-            
+
+            # DEBUG: Log subject evaluation subjects
+            if hasattr(template, 'subjects') and template.subjects:
+                template_eval_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
+                print(f"DEBUG_REPORT_INIT: Template has {len(template_eval_subject_ids)} subject evaluation configs")
+
             # Initialize for each actual subject configured in template
+            included_eval_count = 0
+            excluded_eval_count = 0
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
                     actual_subject_id = subject_config.subject_id
                     if actual_subject_id in actual_subject_ids:
+                        included_eval_count += 1
                         subject_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
                             "test_points": {},
@@ -573,6 +581,11 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                                     pass
                         
                         subject_eval[actual_subject_id] = subject_data
+                    else:
+                        excluded_eval_count += 1
+                        print(f"DEBUG_REPORT_INIT: EXCLUDED eval subject {actual_subject_id} - student doesn't study it")
+
+            print(f"DEBUG_REPORT_INIT: Subject Evaluation: included {included_eval_count}, excluded {excluded_eval_count} subjects")
             
             data["subject_eval"] = subject_eval
         
@@ -580,11 +593,19 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         if template.program_type == 'intl':
             # Initialize INTL scoreboard structure
             intl_scoreboard = {}
-            
+
+            # DEBUG: Log INTL scoreboard subjects
+            if hasattr(template, 'subjects') and template.subjects:
+                template_intl_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
+                print(f"DEBUG_REPORT_INIT: Template has {len(template_intl_subject_ids)} INTL scoreboard configs")
+
+            included_intl_count = 0
+            excluded_intl_count = 0
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
                     actual_subject_id = subject_config.subject_id
                     if actual_subject_id in actual_subject_ids:
+                        included_intl_count += 1
                         subcurriculum_id = getattr(subject_config, 'subcurriculum_id', None) or 'none'
                         subcurriculum_title_en = 'General Program'
                         
