@@ -414,14 +414,15 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
     
     try:
         # Get all actual subjects for this student from SIS Student Subject
+        # IMPORTANT: Get subjects from ALL classes this student is enrolled in, including mixed classes
+        # This ensures mixed class subjects are included in the report card
         campus_id = template.campus_id
         student_subjects = frappe.get_all(
             "SIS Student Subject",
             fields=["actual_subject_id"],
             filters={
                 "campus_id": campus_id,
-                "class_id": class_id,
-                "student_id": student_id
+                "student_id": student_id  # Get ALL subjects for this student across all classes
             },
             distinct=True
         )

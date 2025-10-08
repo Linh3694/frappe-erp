@@ -384,28 +384,28 @@ def get_guardian_info():
     """
     Get current logged-in guardian information
     Requires authentication
-    
+
     Returns:
         dict: Guardian information
     """
     try:
         user_email = frappe.session.user
-        
+
         if user_email == "Guest":
             return {
                 "success": False,
                 "message": "Vui lòng đăng nhập"
             }
-        
+
         # Extract guardian_id from email (format: guardian_id@parent.wellspring.edu.vn)
         if "@parent.wellspring.edu.vn" not in user_email:
             return {
                 "success": False,
                 "message": "Tài khoản không hợp lệ"
             }
-        
+
         guardian_id = user_email.split("@")[0]
-        
+
         # Get guardian (ignore permissions as user can only access their own data)
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
@@ -413,15 +413,15 @@ def get_guardian_info():
             fields=["name", "guardian_id", "guardian_name", "phone_number", "email"],
             ignore_permissions=True
         )
-        
+
         if not guardian_list:
             return {
                 "success": False,
                 "message": "Không tìm thấy thông tin phụ huynh"
             }
-        
+
         guardian = guardian_list[0]
-        
+
         return {
             "success": True,
             "data": {
@@ -432,9 +432,75 @@ def get_guardian_info():
                 }
             }
         }
-        
+
     except Exception as e:
         frappe.log_error(f"Get Guardian Info Error: {str(e)}", "Parent Portal")
+        return {
+            "success": False,
+            "message": f"Lỗi hệ thống: {str(e)}"
+        }
+
+
+@frappe.whitelist()
+def get_current_guardian_comprehensive_data():
+    """
+    Get comprehensive data for current logged-in guardian
+    Requires authentication
+
+    Returns:
+        dict: Comprehensive guardian data including family, students, and campus
+    """
+    try:
+        user_email = frappe.session.user
+
+        if user_email == "Guest":
+            return {
+                "success": False,
+                "message": "Vui lòng đăng nhập"
+            }
+
+        # Extract guardian_id from email (format: guardian_id@parent.wellspring.edu.vn)
+        if "@parent.wellspring.edu.vn" not in user_email:
+            return {
+                "success": False,
+                "message": "Tài khoản không hợp lệ"
+            }
+
+        guardian_id = user_email.split("@")[0]
+
+        # Get guardian (ignore permissions as user can only access their own data)
+        guardian_list = frappe.db.get_list(
+            "CRM Guardian",
+            filters={"guardian_id": guardian_id},
+            fields=["name", "guardian_id", "guardian_name", "phone_number", "email", "family_code"],
+            ignore_permissions=True
+        )
+
+        if not guardian_list:
+            return {
+                "success": False,
+                "message": "Không tìm thấy thông tin phụ huynh"
+            }
+
+        guardian = guardian_list[0]
+
+        # Get comprehensive data using existing function
+        comprehensive_result = get_guardian_comprehensive_data(guardian["name"])
+
+        if not comprehensive_result.get("success", False):
+            return {
+                "success": False,
+                "message": comprehensive_result.get("error", "Không thể lấy dữ liệu guardian")
+            }
+
+        return {
+            "success": True,
+            "data": comprehensive_result["data"],
+            "logs": comprehensive_result.get("logs", [])
+        }
+
+    except Exception as e:
+        frappe.log_error(f"Get Guardian Comprehensive Data Error: {str(e)}", "Parent Portal")
         return {
             "success": False,
             "message": f"Lỗi hệ thống: {str(e)}"
