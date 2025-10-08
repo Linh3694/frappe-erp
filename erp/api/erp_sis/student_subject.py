@@ -431,7 +431,7 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         actual_subject_ids = [s["actual_subject_id"] for s in student_subjects if s.get("actual_subject_id")]
 
         # DEBUG: Log actual subjects for this student
-        frappe.logger().info(f"[REPORT_INIT] Student {student_id} in class {class_id} studies {len(actual_subject_ids)} subjects: {actual_subject_ids}")
+        print(f"DEBUG_REPORT_INIT: Student {student_id} in class {class_id} studies {len(actual_subject_ids)} subjects: {actual_subject_ids[:3]}...")  # Limit log size
 
         # If template has specific subjects config, only include subjects that are BOTH:
         # 1. Configured in template AND
@@ -439,16 +439,18 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         template_actual_subject_ids = []
         if hasattr(template, 'subjects') and template.subjects:
             template_actual_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
-            frappe.logger().info(f"[REPORT_INIT] Template has {len(template_actual_subject_ids)} configured subjects: {template_actual_subject_ids}")
+            print(f"DEBUG_REPORT_INIT: Template has {len(template_actual_subject_ids)} configured subjects")
 
             # CRITICAL: Only include subjects that student actually studies AND are in template
             original_count = len(actual_subject_ids)
             actual_subject_ids = [sid for sid in actual_subject_ids if sid in template_actual_subject_ids]
             filtered_count = len(actual_subject_ids)
 
-            frappe.logger().info(f"[REPORT_INIT] After template filter: {original_count} -> {filtered_count} subjects for student {student_id}")
+            print(f"DEBUG_REPORT_INIT: After template filter: {original_count} -> {filtered_count} subjects for student {student_id}")
             if original_count != filtered_count:
-                frappe.logger().warning(f"[REPORT_INIT] Student {student_id} missing {original_count - filtered_count} template subjects")
+                print(f"DEBUG_REPORT_INIT: WARNING - Student {student_id} missing {original_count - filtered_count} template subjects")
+
+        print(f"DEBUG_REPORT_INIT: Final actual_subject_ids for {student_id}: {actual_subject_ids[:3]}...")
         
         # Get actual subject names/titles for reference
         subjects_info = {}
@@ -463,9 +465,16 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         # 1. Initialize Scores section (VN program)
         if getattr(template, 'scores_enabled', False):
             scores = {}
-            
+
+            # DEBUG: Log template scores subjects
+            if hasattr(template, 'scores') and template.scores:
+                template_score_subject_ids = [s.subject_id for s in template.scores if s.subject_id]
+                print(f"DEBUG_REPORT_INIT: Template has {len(template_score_subject_ids)} score subjects")
+
             # If template has scores config, use that structure with actual subjects
             if hasattr(template, 'scores') and template.scores:
+                included_count = 0
+                excluded_count = 0
                 for score_config in template.scores:
                     actual_subject_id = score_config.subject_id
                     if actual_subject_id in actual_subject_ids:
@@ -484,6 +493,12 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                             "weight2_count": getattr(score_config, "weight2_count", 1) or 1,
                             "weight3_count": getattr(score_config, "weight3_count", 1) or 1
                         }
+                        included_count += 1
+                    else:
+                        excluded_count += 1
+                        print(f"DEBUG_REPORT_INIT: EXCLUDED score subject {actual_subject_id} - student doesn't study it")
+
+                print(f"DEBUG_REPORT_INIT: Scores section: included {included_count}, excluded {excluded_count} subjects")
             
             data["scores"] = scores
         
