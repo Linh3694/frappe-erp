@@ -18,7 +18,7 @@ VIVAS_SMS_CONFIG = {
     "password": "2805@Smsbn",
     "brandname": "WELLSPRING",
     # IMPORTANT: Set to False in production to prevent accidental SMS sending
-    "enabled": False,  # Set to True only when ready to send real SMS
+    "enabled": True,  # Set to True only when ready to send real SMS
 }
 
 
