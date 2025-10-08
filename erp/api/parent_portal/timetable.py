@@ -477,12 +477,18 @@ def get_student_timetable_today(student_id=None):
     logs = []
     
     try:
-        # Get student_id from form_dict if not provided as parameter (Frappe GET request handling)
+        # Get student_id from request args if not provided as parameter (Frappe GET request handling)
         if not student_id:
-            student_id = frappe.form_dict.get('student_id') or frappe.local.form_dict.get('student_id')
+            # Try multiple ways to get the parameter
+            student_id = (
+                frappe.request.args.get('student_id') or 
+                frappe.form_dict.get('student_id') or 
+                frappe.local.form_dict.get('student_id')
+            )
         
         # DEBUG: Log received student_id
         logs.append(f"🔍 DEBUG: Received student_id parameter: '{student_id}' (type: {type(student_id).__name__})")
+        logs.append(f"🔍 DEBUG: frappe.request.args: {dict(frappe.request.args)}")
         logs.append(f"🔍 DEBUG: frappe.form_dict: {frappe.form_dict}")
         
         # If student_id not provided, try to get from current user
