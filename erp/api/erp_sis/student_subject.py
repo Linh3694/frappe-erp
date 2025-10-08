@@ -427,15 +427,28 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
             distinct=True
         )
         
-        # Get actual subject details and filter by template subjects config if available
+        # Get actual subject details - these are subjects the student ACTUALLY studies
         actual_subject_ids = [s["actual_subject_id"] for s in student_subjects if s.get("actual_subject_id")]
-        
-        # If template has specific subjects config, only include those (assume template now uses actual_subject_id)
+
+        # DEBUG: Log actual subjects for this student
+        frappe.logger().info(f"[REPORT_INIT] Student {student_id} in class {class_id} studies {len(actual_subject_ids)} subjects: {actual_subject_ids}")
+
+        # If template has specific subjects config, only include subjects that are BOTH:
+        # 1. Configured in template AND
+        # 2. Actually studied by this student
         template_actual_subject_ids = []
         if hasattr(template, 'subjects') and template.subjects:
             template_actual_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
-            # Filter actual_subject_ids to only include those configured in template
+            frappe.logger().info(f"[REPORT_INIT] Template has {len(template_actual_subject_ids)} configured subjects: {template_actual_subject_ids}")
+
+            # CRITICAL: Only include subjects that student actually studies AND are in template
+            original_count = len(actual_subject_ids)
             actual_subject_ids = [sid for sid in actual_subject_ids if sid in template_actual_subject_ids]
+            filtered_count = len(actual_subject_ids)
+
+            frappe.logger().info(f"[REPORT_INIT] After template filter: {original_count} -> {filtered_count} subjects for student {student_id}")
+            if original_count != filtered_count:
+                frappe.logger().warning(f"[REPORT_INIT] Student {student_id} missing {original_count - filtered_count} template subjects")
         
         # Get actual subject names/titles for reference
         subjects_info = {}
