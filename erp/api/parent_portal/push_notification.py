@@ -6,7 +6,21 @@ Xử lý push subscriptions và gửi notifications đến phụ huynh
 import frappe
 import json
 from frappe import _
-from pywebpush import webpush, WebPushException
+
+# Try to import pywebpush, fallback to our simple implementation
+try:
+    from pywebpush import webpush, WebPushException
+    USE_PYWEBPUSH = True
+except ImportError:
+    print("⚠️  pywebpush not installed, using simplified sender")
+    from erp.api.parent_portal.webpush_sender import send_web_push, send_simple_notification
+    USE_PYWEBPUSH = False
+    
+    # Create a simple WebPushException for fallback
+    class WebPushException(Exception):
+        def __init__(self, message, response=None):
+            super().__init__(message)
+            self.response = response
 
 
 @frappe.whitelist(allow_guest=False)
@@ -196,14 +210,26 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
             payload["actions"] = actions
         
         # Gửi push notification
-        response = webpush(
-            subscription_info=subscription,
-            data=json.dumps(payload),
-            vapid_private_key=vapid_private_key,
-            vapid_claims={
-                "sub": f"mailto:{vapid_claims_email}"
-            }
-        )
+        if USE_PYWEBPUSH:
+            # Sử dụng pywebpush nếu có
+            response = webpush(
+                subscription_info=subscription,
+                data=json.dumps(payload),
+                vapid_private_key=vapid_private_key,
+                vapid_claims={
+                    "sub": f"mailto:{vapid_claims_email}"
+                }
+            )
+        else:
+            # Fallback sang implementation đơn giản
+            response = send_web_push(
+                subscription_info=subscription,
+                data=json.dumps(payload),
+                vapid_private_key=vapid_private_key,
+                vapid_claims={
+                    "sub": f"mailto:{vapid_claims_email}"
+                }
+            )
         
         # Log success
         log_message = f"Push notification sent to {user_email}: {title}"
