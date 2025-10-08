@@ -224,18 +224,24 @@ def _get_class_timetable_for_date(class_id, target_date):
                     row["timetable_subject_title"] = ""
                     row["curriculum_id"] = ""
 
-            # Get teacher names
+            # Get teacher names from SIS Teacher.teacher_name (more reliable than User names)
             teacher_names = []
             for teacher_field in ["teacher_1_id", "teacher_2_id"]:
                 teacher_id = row.get(teacher_field)
                 if teacher_id:
                     try:
                         teacher = frappe.get_doc("SIS Teacher", teacher_id)
-                        if teacher.user_id:
-                            user = frappe.get_doc("User", teacher.user_id)
-                            teacher_names.append(user.full_name or user.first_name)
-                    except:
-                        pass
+                        if teacher.teacher_name:
+                            teacher_names.append(teacher.teacher_name)
+                        elif teacher.user_id:
+                            # Fallback to user name if teacher_name is not set
+                            try:
+                                user = frappe.get_doc("User", teacher.user_id)
+                                teacher_names.append(user.full_name or user.first_name)
+                            except:
+                                pass
+                    except Exception as e:
+                        logs.append(f"⚠️ Could not get teacher name for {teacher_id}: {str(e)}")
             row["teacher_names"] = ", ".join(teacher_names)
 
             # Get room info
@@ -333,18 +339,24 @@ def _get_class_timetable_for_date(class_id, target_date):
                     if override.get("teacher_2_id"):
                         row["teacher_2_id"] = override["teacher_2_id"]
                     
-                    # Re-fetch teacher names
+                    # Re-fetch teacher names from SIS Teacher.teacher_name (consistent with main logic)
                     teacher_names = []
                     for teacher_field in ["teacher_1_id", "teacher_2_id"]:
                         teacher_id = row.get(teacher_field)
                         if teacher_id:
                             try:
                                 teacher = frappe.get_doc("SIS Teacher", teacher_id)
-                                if teacher.user_id:
-                                    user = frappe.get_doc("User", teacher.user_id)
-                                    teacher_names.append(user.full_name or user.first_name)
-                            except:
-                                pass
+                                if teacher.teacher_name:
+                                    teacher_names.append(teacher.teacher_name)
+                                elif teacher.user_id:
+                                    # Fallback to user name if teacher_name is not set
+                                    try:
+                                        user = frappe.get_doc("User", teacher.user_id)
+                                        teacher_names.append(user.full_name or user.first_name)
+                                    except:
+                                        pass
+                            except Exception as e:
+                                logs.append(f"⚠️ Could not get teacher name for override {teacher_id}: {str(e)}")
                     row["teacher_names"] = ", ".join(teacher_names)
                     
                     if override.get("room_id"):
