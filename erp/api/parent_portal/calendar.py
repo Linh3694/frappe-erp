@@ -87,9 +87,10 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None):
         if not school_year_id:
             class_students = frappe.get_all(
                 "SIS Class Student",
-                filters={"student_id": student_id, "is_active": 1},
+                filters={"student_id": student_id},
                 fields=["class_id", "school_year_id"],
                 ignore_permissions=True,
+                order_by="creation desc",  # Get the most recent one
                 limit=1
             )
 
