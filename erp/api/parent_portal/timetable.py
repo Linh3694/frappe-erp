@@ -59,15 +59,29 @@ def _get_student_classes(student_id, school_year_id=None):
         
         logs.append(f"🔍 Looking for classes with filters: {filters}")
         
-        # Get all class assignments for this student
+        # DEBUG: Try direct SQL query to compare
+        try:
+            sql_result = frappe.db.sql(f"""
+                SELECT name, class_id, school_year_id, docstatus 
+                FROM `tabSIS Class Student` 
+                WHERE student_id = %(student_id)s 
+                AND school_year_id = %(school_year_id)s
+                LIMIT 5
+            """, filters, as_dict=True)
+            logs.append(f"🔍 DEBUG SQL query returned {len(sql_result)} rows: {sql_result}")
+        except Exception as e:
+            logs.append(f"⚠️ DEBUG SQL query failed: {str(e)}")
+        
+        # Get all class assignments for this student (including drafts)
         class_students = frappe.get_all(
             "SIS Class Student",
             filters=filters,
-            fields=["class_id", "school_year_id"],
-            ignore_permissions=True
+            fields=["class_id", "school_year_id", "docstatus"],
+            ignore_permissions=True,
+            or_filters={"docstatus": ["in", [0, 1]]}  # Include both draft (0) and submitted (1)
         )
         
-        logs.append(f"✅ Found {len(class_students)} class assignments")
+        logs.append(f"✅ Found {len(class_students)} class assignments via get_all: {class_students}")
         
         class_ids = [cs.class_id for cs in class_students if cs.class_id]
         logs.append(f"📚 Class IDs: {class_ids}")
@@ -463,6 +477,9 @@ def get_student_timetable_today(student_id=None):
     logs = []
     
     try:
+        # DEBUG: Log received student_id
+        logs.append(f"🔍 DEBUG: Received student_id parameter: '{student_id}' (type: {type(student_id).__name__})")
+        
         # If student_id not provided, try to get from current user
         if not student_id:
             # Get guardian from current user
