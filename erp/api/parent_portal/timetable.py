@@ -598,18 +598,64 @@ def get_teacher_info():
 
         # Debug: Log all form_dict data
         logs.append(f"DEBUG: frappe.form_dict keys: {list(frappe.form_dict.keys())}")
-        logs.append(f"DEBUG: frappe.form_dict: {dict(frappe.form_dict)}")
+        logs.append(f"DEBUG: Raw form_dict: {dict(frappe.form_dict)}")
 
-        teacher_ids = frappe.form_dict.get('teacher_ids')
+        # Debug: Check request data
+        logs.append(f"DEBUG: frappe.request.data type: {type(frappe.request.data)}")
+        logs.append(f"DEBUG: frappe.request.data length: {len(frappe.request.data) if hasattr(frappe.request.data, '__len__') else 'N/A'}")
 
-        # If teacher_ids is a string, try to parse as JSON
-        if isinstance(teacher_ids, str):
+        teacher_ids = []
+
+        # Try to parse from raw request data (URL-encoded)
+        if hasattr(frappe.request, 'data') and frappe.request.data:
             try:
-                teacher_ids = json.loads(teacher_ids)
-                logs.append(f"DEBUG: Parsed teacher_ids from JSON: {teacher_ids}")
+                # Parse URL-encoded data manually
+                data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
+                logs.append(f"DEBUG: Raw request data: {data_str[:200]}...")  # First 200 chars
+
+                from urllib.parse import parse_qs
+                parsed_data = parse_qs(data_str)
+                logs.append(f"DEBUG: Parsed data keys: {list(parsed_data.keys())}")
+
+                # Extract teacher_ids
+                teacher_ids_params = []
+                for key, values in parsed_data.items():
+                    if key.startswith('teacher_ids[') and key.endswith(']'):
+                        teacher_ids_params.extend(values)
+
+                if teacher_ids_params:
+                    teacher_ids = teacher_ids_params
+                    logs.append(f"DEBUG: Found teacher_ids in raw data: {teacher_ids}")
+
             except Exception as e:
-                logs.append(f"DEBUG: Failed to parse JSON: {e}, treating as single ID")
-                teacher_ids = [teacher_ids]  # Single teacher ID as string
+                logs.append(f"DEBUG: Failed to parse raw request data: {e}")
+
+        # Try to get teacher_ids as array from query parameters like teacher_ids[0], teacher_ids[1], etc.
+        if not teacher_ids:
+            teacher_count = frappe.form_dict.get('teacher_ids_count')
+            if teacher_count:
+                try:
+                    count = int(teacher_count)
+                    for i in range(count):
+                        param_key = f'teacher_ids[{i}]'
+                        teacher_id = frappe.form_dict.get(param_key)
+                        if teacher_id:
+                            teacher_ids.append(teacher_id)
+                    logs.append(f"DEBUG: Parsed teacher_ids from array params: {teacher_ids}")
+                except Exception as e:
+                    logs.append(f"DEBUG: Failed to parse array params: {e}")
+
+        # Fallback: check for JSON string
+        if not teacher_ids:
+            teacher_ids_json = frappe.form_dict.get('teacher_ids')
+            if teacher_ids_json:
+                if isinstance(teacher_ids_json, str):
+                    try:
+                        teacher_ids = json.loads(teacher_ids_json)
+                        logs.append(f"DEBUG: Parsed teacher_ids from JSON: {teacher_ids}")
+                    except Exception as e:
+                        logs.append(f"DEBUG: Failed to parse JSON: {e}, treating as single ID")
+                        teacher_ids = [teacher_ids_json]
 
         # Also check if it's passed as array/list
         if not teacher_ids:
