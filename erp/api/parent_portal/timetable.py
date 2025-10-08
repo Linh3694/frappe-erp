@@ -226,6 +226,8 @@ def _get_class_timetable_for_date(class_id, target_date):
 
             # Get teacher names from SIS Subject Assignment (more accurate than timetable row data)
             teacher_names = []
+            teacher_ids = []
+
             if row.get("subject_id"):
                 try:
                     # Query SIS Subject Assignment to find teacher for this subject and class
@@ -241,23 +243,27 @@ def _get_class_timetable_for_date(class_id, target_date):
 
                     for assignment in assignments:
                         if assignment.teacher_id:
+                            teacher_ids.append(assignment.teacher_id)
                             try:
                                 teacher = frappe.get_doc("SIS Teacher", assignment.teacher_id)
-                                if teacher.teacher_name:
-                                    teacher_names.append(teacher.teacher_name)
-                                elif teacher.user_id:
-                                    # Fallback to user name if teacher_name is not set
+                                if teacher.user_id:
+                                    # Get teacher name from User table
                                     try:
                                         user = frappe.get_doc("User", teacher.user_id)
-                                        teacher_names.append(user.full_name or user.first_name)
-                                    except:
-                                        pass
+                                        teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+                                        if teacher_name:
+                                            teacher_names.append(teacher_name)
+                                    except Exception as user_e:
+                                        logs.append(f"⚠️ Could not get user name for teacher {assignment.teacher_id}: {str(user_e)}")
+                                else:
+                                    logs.append(f"⚠️ Teacher {assignment.teacher_id} has no user_id")
                             except Exception as e:
-                                logs.append(f"⚠️ Could not get teacher name for assignment {assignment.teacher_id}: {str(e)}")
+                                logs.append(f"⚠️ Could not get teacher {assignment.teacher_id}: {str(e)}")
                 except Exception as e:
                     logs.append(f"⚠️ Could not get subject assignments for subject {row['subject_id']}: {str(e)}")
 
             row["teacher_names"] = ", ".join(teacher_names)
+            row["teacher_ids"] = teacher_ids
 
             # Get room info
             if row.get("room_id"):
@@ -356,24 +362,28 @@ def _get_class_timetable_for_date(class_id, target_date):
                     
                     # Re-fetch teacher names - use override teacher data first, then fallback to subject assignment
                     teacher_names = []
+                    teacher_ids = []
 
                     # First, try to use teacher data from the override itself
                     for teacher_field in ["teacher_1_id", "teacher_2_id"]:
                         teacher_id = override.get(teacher_field)
                         if teacher_id:
+                            teacher_ids.append(teacher_id)
                             try:
                                 teacher = frappe.get_doc("SIS Teacher", teacher_id)
-                                if teacher.teacher_name:
-                                    teacher_names.append(teacher.teacher_name)
-                                elif teacher.user_id:
-                                    # Fallback to user name if teacher_name is not set
+                                if teacher.user_id:
+                                    # Get teacher name from User table
                                     try:
                                         user = frappe.get_doc("User", teacher.user_id)
-                                        teacher_names.append(user.full_name or user.first_name)
-                                    except:
-                                        pass
+                                        teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+                                        if teacher_name:
+                                            teacher_names.append(teacher_name)
+                                    except Exception as user_e:
+                                        logs.append(f"⚠️ Could not get user name for override teacher {teacher_id}: {str(user_e)}")
+                                else:
+                                    logs.append(f"⚠️ Override teacher {teacher_id} has no user_id")
                             except Exception as e:
-                                logs.append(f"⚠️ Could not get teacher name for override teacher {teacher_id}: {str(e)}")
+                                logs.append(f"⚠️ Could not get override teacher {teacher_id}: {str(e)}")
 
                     # If no teachers found from override, fallback to subject assignment
                     if not teacher_names and row.get("subject_id"):
@@ -391,23 +401,27 @@ def _get_class_timetable_for_date(class_id, target_date):
 
                             for assignment in assignments:
                                 if assignment.teacher_id:
+                                    teacher_ids.append(assignment.teacher_id)
                                     try:
                                         teacher = frappe.get_doc("SIS Teacher", assignment.teacher_id)
-                                        if teacher.teacher_name:
-                                            teacher_names.append(teacher.teacher_name)
-                                        elif teacher.user_id:
-                                            # Fallback to user name if teacher_name is not set
+                                        if teacher.user_id:
+                                            # Get teacher name from User table
                                             try:
                                                 user = frappe.get_doc("User", teacher.user_id)
-                                                teacher_names.append(user.full_name or user.first_name)
-                                            except:
-                                                pass
+                                                teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+                                                if teacher_name:
+                                                    teacher_names.append(teacher_name)
+                                            except Exception as user_e:
+                                                logs.append(f"⚠️ Could not get user name for override assignment {assignment.teacher_id}: {str(user_e)}")
+                                        else:
+                                            logs.append(f"⚠️ Assignment teacher {assignment.teacher_id} has no user_id")
                                     except Exception as e:
-                                        logs.append(f"⚠️ Could not get teacher name for override assignment {assignment.teacher_id}: {str(e)}")
+                                        logs.append(f"⚠️ Could not get override assignment teacher {assignment.teacher_id}: {str(e)}")
                         except Exception as e:
                             logs.append(f"⚠️ Could not get subject assignments for override subject {row['subject_id']}: {str(e)}")
 
                     row["teacher_names"] = ", ".join(teacher_names)
+                    row["teacher_ids"] = teacher_ids
                     
                     if override.get("room_id"):
                         row["room_id"] = override["room_id"]
@@ -562,6 +576,80 @@ def get_student_timetable_today(student_id=None):
         return {
             "success": False,
             "message": f"Lỗi hệ thống: {str(e)}",
+            "logs": logs
+        }
+
+
+@frappe.whitelist()
+def get_teacher_info(teacher_ids):
+    """
+    Get teacher information including names and avatars
+
+    Args:
+        teacher_ids: JSON array of teacher IDs (SIS Teacher)
+
+    Returns:
+        dict: Teacher information with names and avatars
+    """
+    logs = []
+
+    try:
+        import json
+        if isinstance(teacher_ids, str):
+            teacher_ids = json.loads(teacher_ids)
+
+        if not teacher_ids or not isinstance(teacher_ids, list):
+            return {
+                "success": False,
+                "message": "Teacher IDs are required as a list",
+                "logs": logs
+            }
+
+        teachers_info = {}
+
+        for teacher_id in teacher_ids:
+            if not teacher_id:
+                continue
+
+            try:
+                teacher = frappe.get_doc("SIS Teacher", teacher_id)
+                teacher_info = {
+                    "teacher_id": teacher_id,
+                    "teacher_name": "",
+                    "avatar_url": None
+                }
+
+                if teacher.user_id:
+                    try:
+                        user = frappe.get_doc("User", teacher.user_id)
+                        teacher_info["teacher_name"] = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+
+                        # Get user avatar if available
+                        if user.user_image:
+                            teacher_info["avatar_url"] = user.user_image
+                        elif hasattr(user, 'photo') and user.photo:
+                            teacher_info["avatar_url"] = user.photo
+
+                    except Exception as user_e:
+                        logs.append(f"⚠️ Could not get user info for teacher {teacher_id}: {str(user_e)}")
+
+                teachers_info[teacher_id] = teacher_info
+
+            except Exception as e:
+                logs.append(f"⚠️ Could not get teacher {teacher_id}: {str(e)}")
+
+        return {
+            "success": True,
+            "message": "Teacher information retrieved successfully",
+            "data": teachers_info,
+            "logs": logs
+        }
+
+    except Exception as e:
+        logs.append(f"❌ Error getting teacher info: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error getting teacher info: {str(e)}",
             "logs": logs
         }
 
