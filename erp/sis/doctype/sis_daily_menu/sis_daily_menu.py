@@ -32,8 +32,8 @@ class SISDailyMenu(Document):
 					meal_items[item.meal_type] = []
 
 				# Check for duplicate menu categories within same meal
-				# Skip duplicate check for dinner meals (allow multiple snack/drink items)
-				if item.meal_type != "dinner":
+				# Skip duplicate check for breakfast and dinner meals (allow multiple items)
+				if item.meal_type == "lunch":
 					if item.menu_category_id in meal_items[item.meal_type]:
 						frappe.throw(f"Món ăn '{item.menu_category_id}' bị trùng lặp trong bữa {item.meal_type}")
 					meal_items[item.meal_type].append(item.menu_category_id)
