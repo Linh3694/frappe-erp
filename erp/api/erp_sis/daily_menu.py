@@ -417,69 +417,70 @@ def create_daily_menu():
                 if meal_data.get("set_a_config", {}).get("enabled"):
                     config = meal_data["set_a_config"]
                     for item_data in config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id")
-                        if menu_category_id:  # Only add if menu_category_id is not empty
-                            all_items.append({
-                                "doctype": "SIS Daily Menu Item",
-                                "meal_type": meal_type,
-                                "meal_type_reference": "set_a",
-                                "menu_category_id": menu_category_id,
-                                "display_name": item_data.get("display_name", ""),
-                                "display_name_en": item_data.get("display_name_en", ""),
-                                "education_stage": ""
-                            })
+                        menu_category_id = item_data.get("menu_category_id", "")
+                        # Always create item for lunch set configs, even if menu_category_id is empty
+                        # This maintains the fixed structure
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": "set_a",
+                            "menu_category_id": menu_category_id,
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": ""
+                        })
 
                 # Handle set_au_config
                 if meal_data.get("set_au_config", {}).get("enabled"):
                     config = meal_data["set_au_config"]
                     for item_data in config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id")
-                        if menu_category_id:  # Only add if menu_category_id is not empty
-                            all_items.append({
-                                "doctype": "SIS Daily Menu Item",
-                                "meal_type": meal_type,
-                                "meal_type_reference": "set_au",
-                                "menu_category_id": menu_category_id,
-                                "display_name": item_data.get("display_name", ""),
-                                "display_name_en": item_data.get("display_name_en", ""),
-                                "education_stage": ""
-                            })
+                        menu_category_id = item_data.get("menu_category_id", "")
+                        # Always create item for lunch set configs, even if menu_category_id is empty
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": "set_au",
+                            "menu_category_id": menu_category_id,
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": ""
+                        })
 
                 # Handle eat_clean_config
                 if meal_data.get("eat_clean_config", {}).get("enabled"):
                     config = meal_data["eat_clean_config"]
                     for item_data in config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id")
-                        if menu_category_id:  # Only add if menu_category_id is not empty
-                            all_items.append({
-                                "doctype": "SIS Daily Menu Item",
-                                "meal_type": meal_type,
-                                "meal_type_reference": "eat_clean",
-                                "menu_category_id": menu_category_id,
-                                "display_name": item_data.get("display_name", ""),
-                                "display_name_en": item_data.get("display_name_en", ""),
-                                "education_stage": ""
-                            })
+                        menu_category_id = item_data.get("menu_category_id", "")
+                        # Always create item for lunch set configs, even if menu_category_id is empty
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": "eat_clean",
+                            "menu_category_id": menu_category_id,
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": ""
+                        })
 
                 # Handle buffet_config
-                if meal_data.get("buffet_config") and meal_data["buffet_config"].get("items"):
+                if meal_data.get("buffet_config", {}).get("enabled"):
                     buffet_config = meal_data["buffet_config"]
                     buffet_name_vn = buffet_config.get("name_vn", "")
                     buffet_name_en = buffet_config.get("name_en", "")
                     for item_data in buffet_config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id")
-                        if menu_category_id:  # Only add if menu_category_id is not empty
-                            all_items.append({
-                                "doctype": "SIS Daily Menu Item",
-                                "meal_type": meal_type,
-                                "meal_type_reference": "buffet",
-                                "menu_category_id": menu_category_id,
-                                "display_name": item_data.get("display_name", ""),
-                                "display_name_en": item_data.get("display_name_en", ""),
-                                "education_stage": "",
-                                "buffet_name_vn": buffet_name_vn,
-                                "buffet_name_en": buffet_name_en
-                            })
+                        menu_category_id = item_data.get("menu_category_id", "")
+                        # Always create item for buffet config, even if menu_category_id is empty
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": "buffet",
+                            "menu_category_id": menu_category_id,
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": "",
+                            "buffet_name_vn": buffet_name_vn,
+                            "buffet_name_en": buffet_name_en
+                        })
 
             # Handle new dinner_options structure
             elif meal_type == "dinner" and "dinner_options" in meal_data:
