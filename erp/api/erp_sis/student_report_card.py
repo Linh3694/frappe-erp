@@ -833,7 +833,7 @@ def list_reports():
     """
     List student report cards with optional filters.
     """
-        campus_id = _campus()
+    campus_id = _campus()
     filters = {"campus_id": campus_id}
 
     # Optional query params
@@ -842,8 +842,8 @@ def list_reports():
         filters["class_id"] = class_id
 
     template_id = frappe.form_dict.get("template_id")
-        if template_id:
-            filters["template_id"] = template_id
+    if template_id:
+        filters["template_id"] = template_id
             
     student_id = frappe.form_dict.get("student_id")
     if student_id:
