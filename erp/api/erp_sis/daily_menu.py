@@ -20,27 +20,47 @@ def convert_items_to_meals_structure(items, menu_name):
     """Convert flat items array to new meals structure for frontend"""
     meals_result = {}
 
-    # Initialize meal structures
-    for meal_type in ["breakfast", "lunch", "dinner"]:
-        if meal_type not in meals_result:
-            meals_result[meal_type] = {
-                "meal_type": meal_type,
-                "menu_type": "custom",
-                "meal_type_reference": "",
-                "name": f"{meal_type}_{menu_name}"
+    # Initialize meal structures with full nested structure
+    meals_result = {
+        "breakfast": {
+            "meal_type": "breakfast",
+            "menu_type": "custom",
+            "meal_type_reference": "",
+            "name": f"breakfast_{menu_name}",
+            "breakfast_options": {
+                "option1": {"menu_category_id": "", "display_name": "", "display_name_en": ""},
+                "option2": {"menu_category_id": "", "display_name": "", "display_name_en": ""},
+                "external": {"menu_category_id": "", "display_name": "", "display_name_en": ""}
             }
+        },
+        "lunch": {
+            "meal_type": "lunch",
+            "menu_type": "custom",
+            "meal_type_reference": "",
+            "name": f"lunch_{menu_name}",
+            "set_a_config": {"enabled": False, "items": []},
+            "set_au_config": {"enabled": False, "items": []},
+            "eat_clean_config": {"enabled": False, "items": []},
+            "buffet_config": {"enabled": False, "name_vn": "", "name_en": "", "items": []}
+        },
+        "dinner": {
+            "meal_type": "dinner",
+            "menu_type": "custom",
+            "meal_type_reference": "",
+            "name": f"dinner_{menu_name}",
+            "dinner_options": {
+                "snack": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""},
+                "drink": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""}
+            }
+        }
+    }
 
     for item in items:
         meal_type = item.meal_type
 
-        # Ensure meal type exists in result
+        # Skip if meal_type not in our fixed structure
         if meal_type not in meals_result:
-            meals_result[meal_type] = {
-                "meal_type": meal_type,
-                "menu_type": "custom",
-                "meal_type_reference": item.meal_type_reference or "",
-                "name": f"{meal_type}_{menu_name}"
-            }
+            continue
 
         # Helper function to convert empty menu_category_id to __none__
         def convert_menu_category_id(menu_category_id):
@@ -48,13 +68,6 @@ def convert_items_to_meals_structure(items, menu_name):
 
         # Handle breakfast options
         if meal_type == "breakfast":
-            if "breakfast_options" not in meals_result[meal_type]:
-                meals_result[meal_type]["breakfast_options"] = {
-                    "option1": {"menu_category_id": "", "display_name": "", "display_name_en": ""},
-                    "option2": {"menu_category_id": "", "display_name": "", "display_name_en": ""},
-                    "external": {"menu_category_id": "", "display_name": "", "display_name_en": ""}
-                }
-
             # Map item to appropriate breakfast option
             meal_type_reference = item.meal_type_reference or ""
             if meal_type_reference == "option1" or not meal_type_reference:
@@ -103,16 +116,6 @@ def convert_items_to_meals_structure(items, menu_name):
         elif meal_type == "lunch":
             meal_type_reference = item.meal_type_reference or ""
 
-            # Initialize lunch configs if not exists
-            if "set_a_config" not in meals_result[meal_type]:
-                meals_result[meal_type]["set_a_config"] = {"enabled": False, "items": []}
-            if "set_au_config" not in meals_result[meal_type]:
-                meals_result[meal_type]["set_au_config"] = {"enabled": False, "items": []}
-            if "eat_clean_config" not in meals_result[meal_type]:
-                meals_result[meal_type]["eat_clean_config"] = {"enabled": False, "items": []}
-            if "buffet_config" not in meals_result[meal_type]:
-                meals_result[meal_type]["buffet_config"] = {"enabled": False, "name_vn": "", "name_en": "", "items": []}
-
             if meal_type_reference == "set_a":
                 meals_result[meal_type]["set_a_config"]["enabled"] = True
                 meals_result[meal_type]["set_a_config"]["items"].append({
@@ -154,12 +157,6 @@ def convert_items_to_meals_structure(items, menu_name):
         # Handle dinner options
         elif meal_type == "dinner":
             meal_type_reference = item.meal_type_reference or ""
-
-            if "dinner_options" not in meals_result[meal_type]:
-                meals_result[meal_type]["dinner_options"] = {
-                    "snack": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""},
-                    "drink": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""}
-                }
 
             if meal_type_reference == "snack":
                 meals_result[meal_type]["dinner_options"]["snack"] = {
@@ -403,7 +400,6 @@ def create_daily_menu():
                     option_data = breakfast_options.get(option_key)
                     if option_data:
                         menu_category_id = option_data.get("menu_category_id", "")
-                        # Always create item for breakfast options, even if menu_category_id is empty
                         # This maintains the fixed 3-option structure
                         all_items.append({
                             "doctype": "SIS Daily Menu Item",
