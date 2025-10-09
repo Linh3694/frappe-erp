@@ -784,7 +784,7 @@ def get_reports_by_class():
     
     # If not in form_dict, try request.args (for GET query params)
     if not class_id and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
-            class_id = frappe.request.args.get("class_id")
+        class_id = frappe.request.args.get("class_id")
     
     if not class_id:
         frappe.logger().error(f"[get_reports_by_class] class_id not found in form_dict or request.args")
@@ -810,10 +810,10 @@ def get_reports_by_class():
     
     # Fetch reports
     reports = frappe.get_all(
-                "SIS Student Report Card",
+        "SIS Student Report Card",
         fields=["name", "title", "template_id", "form_id", "class_id", "student_id",
                 "school_year", "semester_part", "status", "creation", "modified"],
-                filters=filters,
+        filters=filters,
         order_by="modified desc"
     )
     
@@ -833,7 +833,7 @@ def list_reports():
     """
     List student report cards with optional filters.
     """
-        campus_id = _campus()
+    campus_id = _campus()
     filters = {"campus_id": campus_id}
 
     # Optional query params
@@ -842,8 +842,8 @@ def list_reports():
         filters["class_id"] = class_id
 
     template_id = frappe.form_dict.get("template_id")
-        if template_id:
-            filters["template_id"] = template_id
+    if template_id:
+        filters["template_id"] = template_id
             
     student_id = frappe.form_dict.get("student_id")
     if student_id:
