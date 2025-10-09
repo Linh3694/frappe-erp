@@ -885,11 +885,11 @@ def list_reports():
 def get_report(report_id=None, **kwargs):
     """Get a single student report card by ID."""
     # Try to get report_id from multiple sources
-        if not report_id:
+    if not report_id:
         # Priority 1: Direct parameter
         report_id = frappe.form_dict.get("report_id")
     
-        if not report_id:
+    if not report_id:
         # Priority 2: From kwargs (when called via get_report_by_id)
         report_id = kwargs.get("report_id")
     
