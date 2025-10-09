@@ -401,18 +401,19 @@ def create_daily_menu():
                 breakfast_options = meal_data["breakfast_options"]
                 for option_key in ["option1", "option2", "external"]:
                     option_data = breakfast_options.get(option_key)
-                    if option_data and option_data.get("menu_category_id"):
-                        menu_category_id = option_data.get("menu_category_id")
-                        if menu_category_id:  # Only add if menu_category_id is not empty
-                            all_items.append({
-                                "doctype": "SIS Daily Menu Item",
-                                "meal_type": meal_type,
-                                "meal_type_reference": meal_type_reference,
-                                "menu_category_id": menu_category_id,
-                                "display_name": option_data.get("display_name", ""),
-                                "display_name_en": option_data.get("display_name_en", ""),
-                                "education_stage": ""
-                            })
+                    if option_data:
+                        menu_category_id = option_data.get("menu_category_id", "")
+                        # Always create item for breakfast options, even if menu_category_id is empty
+                        # This maintains the fixed 3-option structure
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": option_key,  # Use option_key as reference
+                            "menu_category_id": menu_category_id,
+                            "display_name": option_data.get("display_name", ""),
+                            "display_name_en": option_data.get("display_name_en", ""),
+                            "education_stage": ""
+                        })
 
             # Handle lunch set configurations
             elif meal_type == "lunch":
@@ -626,12 +627,15 @@ def update_daily_menu():
                         breakfast_options = meal_data["breakfast_options"]
                         for option_key in ["option1", "option2", "external"]:
                             option_data = breakfast_options.get(option_key)
-                            if option_data and option_data.get("menu_category_id"):
+                            if option_data:
+                                menu_category_id = option_data.get("menu_category_id", "")
+                                # Always create item for breakfast options, even if menu_category_id is empty
+                                # This maintains the fixed 3-option structure
                                 daily_menu_doc.append("items", {
                                     "doctype": "SIS Daily Menu Item",
                                     "meal_type": meal_type,
-                                    "meal_type_reference": meal_type_reference,
-                                    "menu_category_id": option_data.get("menu_category_id"),
+                                    "meal_type_reference": option_key,  # Use option_key as reference
+                                    "menu_category_id": menu_category_id,
                                     "display_name": option_data.get("display_name", ""),
                                     "display_name_en": option_data.get("display_name_en", ""),
                                     "education_stage": ""
