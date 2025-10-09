@@ -396,12 +396,9 @@ def sync_new_subjects_to_reports():
 def _sanitize_float(value: Any) -> Optional[float]:
     """Convert value to float if possible, return None if invalid."""
     if value is None or value == "" or value == "null":
-        return None
-    if isinstance(value, (int, float)):
-    try:
-            return float(value)
-        except (TypeError, ValueError):
             return None
+    if isinstance(value, (int, float)):
+        return float(value)
     if isinstance(value, str):
         value = value.strip()
         if value == "":
@@ -800,9 +797,9 @@ def get_reports_by_class():
     
     # Optional filters
     template_id = frappe.form_dict.get("template_id")
-    if template_id:
-        filters["template_id"] = template_id
-    
+        if template_id:
+            filters["template_id"] = template_id
+            
     school_year = frappe.form_dict.get("school_year")
     if school_year:
         filters["school_year"] = school_year
@@ -813,10 +810,10 @@ def get_reports_by_class():
     
     # Fetch reports
     reports = frappe.get_all(
-        "SIS Student Report Card",
+                "SIS Student Report Card",
         fields=["name", "title", "template_id", "form_id", "class_id", "student_id",
                 "school_year", "semester_part", "status", "creation", "modified"],
-        filters=filters,
+                filters=filters,
         order_by="modified desc"
     )
     
