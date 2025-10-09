@@ -884,18 +884,27 @@ def list_reports():
 @frappe.whitelist(allow_guest=False)
 def get_report(report_id=None, **kwargs):
     """Get a single student report card by ID."""
-    # Ignore 'cmd' and other Frappe internal params passed via **kwargs
     # Try to get report_id from multiple sources
     if not report_id:
-        # Priority 1: frappe.form_dict (works for both GET and POST in most cases)
+        # Priority 1: Direct parameter
         report_id = frappe.form_dict.get("report_id")
+    
+    if not report_id:
+        # Priority 2: From kwargs (when called via get_report_by_id)
+        report_id = kwargs.get("report_id")
+    
+    if not report_id:
+        # Priority 3: Try request.args for GET params
+        if hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+            report_id = frappe.request.args.get("report_id")
     
     if not report_id:
         return validation_error_response(
             message="report_id is required", 
             errors={"report_id": ["Required"]},
             debug_info={
-                "form_dict_keys": list(frappe.form_dict.keys()) if hasattr(frappe, 'form_dict') else []
+                "form_dict_keys": list(frappe.form_dict.keys()) if hasattr(frappe, 'form_dict') else [],
+                "kwargs_keys": [k for k in kwargs.keys() if k != 'cmd']
             }
         )
 
