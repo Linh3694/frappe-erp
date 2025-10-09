@@ -882,8 +882,9 @@ def list_reports():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_report(report_id=None):
+def get_report(report_id=None, **kwargs):
     """Get a single student report card by ID."""
+    # Ignore 'cmd' and other Frappe internal params passed via **kwargs
     # Try to get report_id from multiple sources
     if not report_id:
         # Priority 1: frappe.form_dict (works for both GET and POST in most cases)
