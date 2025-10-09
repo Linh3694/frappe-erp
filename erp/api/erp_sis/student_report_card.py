@@ -771,6 +771,57 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET"])
+def get_reports_by_class():
+    """
+    Get all student report cards for a specific class.
+    Used by frontend to list reports per class.
+    """
+    campus_id = _campus()
+    
+    # Required parameter
+    class_id = frappe.form_dict.get("class_id")
+    if not class_id:
+        return validation_error_response(message="class_id is required", errors={"class_id": ["Required"]})
+    
+    filters = {
+        "campus_id": campus_id,
+        "class_id": class_id
+    }
+    
+    # Optional filters
+    template_id = frappe.form_dict.get("template_id")
+    if template_id:
+        filters["template_id"] = template_id
+    
+    school_year = frappe.form_dict.get("school_year")
+    if school_year:
+        filters["school_year"] = school_year
+    
+    semester_part = frappe.form_dict.get("semester_part")
+    if semester_part:
+        filters["semester_part"] = semester_part
+    
+    # Fetch reports
+    reports = frappe.get_all(
+        "SIS Student Report Card",
+        fields=["name", "title", "template_id", "form_id", "class_id", "student_id",
+                "school_year", "semester_part", "status", "creation", "modified"],
+        filters=filters,
+        order_by="modified desc"
+    )
+    
+    # Pagination
+    page = int(frappe.form_dict.get("page", 1))
+    page_size = int(frappe.form_dict.get("page_size", 200))
+    total = len(reports)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated = reports[start:end]
+    
+    return paginated_response(paginated, total, page, page_size)
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
 def list_reports():
     """
     List student report cards with optional filters.
