@@ -784,7 +784,7 @@ def get_reports_by_class():
     
     # If not in form_dict, try request.args (for GET query params)
     if not class_id and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
-        class_id = frappe.request.args.get("class_id")
+            class_id = frappe.request.args.get("class_id")
     
     if not class_id:
         frappe.logger().error(f"[get_reports_by_class] class_id not found in form_dict or request.args")
@@ -833,7 +833,7 @@ def list_reports():
     """
     List student report cards with optional filters.
     """
-    campus_id = _campus()
+        campus_id = _campus()
     filters = {"campus_id": campus_id}
 
     # Optional query params
@@ -842,8 +842,8 @@ def list_reports():
         filters["class_id"] = class_id
 
     template_id = frappe.form_dict.get("template_id")
-    if template_id:
-        filters["template_id"] = template_id
+        if template_id:
+            filters["template_id"] = template_id
             
     student_id = frappe.form_dict.get("student_id")
     if student_id:
@@ -885,11 +885,11 @@ def list_reports():
 def get_report(report_id=None, **kwargs):
     """Get a single student report card by ID."""
     # Try to get report_id from multiple sources
-    if not report_id:
+        if not report_id:
         # Priority 1: Direct parameter
         report_id = frappe.form_dict.get("report_id")
     
-    if not report_id:
+        if not report_id:
         # Priority 2: From kwargs (when called via get_report_by_id)
         report_id = kwargs.get("report_id")
     
@@ -920,11 +920,15 @@ def get_report(report_id=None, **kwargs):
         return not_found_response("Report card not found")
 
     item = report[0]
-    # Parse data_json
+    # Parse data_json and rename to "data" for frontend compatibility
     try:
-        item["data_json"] = json.loads(item.get("data_json") or "{}")
+        data_json = json.loads(item.get("data_json") or "{}")
     except Exception:
-        item["data_json"] = {}
+        data_json = {}
+    
+    # Map data_json to "data" key for frontend (ReportCardEntry expects data.data)
+    item["data"] = data_json
+    item["data_json"] = data_json  # Keep both for backward compatibility
 
     return single_item_response(item)
 
@@ -1103,10 +1107,10 @@ def update_report_section():
                     subject_id = payload.get("subject_id") or data.get("subject_id")
                     if not subject_id:
                         # Try to find SIS_ACTUAL_SUBJECT-* pattern in payload keys
-                        for key in payload.keys():
+                for key in payload.keys():
                             if key.startswith("SIS_ACTUAL_SUBJECT-"):
-                                subject_id = key
-                                break
+                        subject_id = key
+                        break
                 else:
                     # Check if payload is a dict of subjects (keys are subject IDs)
                     # In this case, we'll merge each subject
