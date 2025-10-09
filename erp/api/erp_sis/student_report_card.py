@@ -797,8 +797,8 @@ def get_reports_by_class():
     
     # Optional filters
     template_id = frappe.form_dict.get("template_id")
-        if template_id:
-            filters["template_id"] = template_id
+    if template_id:
+        filters["template_id"] = template_id
             
     school_year = frappe.form_dict.get("school_year")
     if school_year:
