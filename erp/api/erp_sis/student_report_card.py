@@ -48,55 +48,403 @@ def _resolve_actual_subject_title(subject_id: Optional[str]) -> str:
         return subject_id
 
 
-def _sanitize_int(value: Any, minimum: Optional[int] = None) -> Optional[int]:
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def sync_new_subjects_to_reports():
+    """
+    Sync NEW subjects from template to all existing student report cards.
+    
+    USE CASES:
+    1. After creating reports: Immediately add new subjects that should go to ALL students
+    2. After editing template: Add newly added subjects to existing reports
+    
+    Logic:
+    - Existing subjects in reports → Keep as-is (preserve student-specific subjects)
+    - New subjects (specified in new_subject_ids OR not in reports) → Add to ALL reports
+    
+    Request payload:
+    {
+        "template_id": "TEMPLATE-XXX",
+        "new_subject_ids": ["SIS_ACTUAL_SUBJECT-123"],  // Optional: specific subjects to add (if provided, ONLY add these)
+        "class_ids": ["CLASS-A", "CLASS-B"],  // Optional: limit to specific classes
+        "student_ids": ["STUDENT-1"],         // Optional: limit to specific students
+        "sections": ["scores", "subject_eval", "intl_scoreboard"],  // Which sections to sync
+        "dry_run": false                      // If true, only return what would be changed
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "updated_reports": 50,
+        "skipped_reports": 5,
+        "new_subjects_added": ["SIS_ACTUAL_SUBJECT-123"],
+        "details": [...]
+    }
+    """
     try:
-        if value is None:
-            return None
-        parsed = int(value)
-        if minimum is not None and parsed < minimum:
-            return minimum
-        return parsed
-    except (TypeError, ValueError):
-        return None
+        data = _payload()
+        campus_id = _campus()
+        
+        template_id = data.get("template_id")
+        if not template_id:
+            return validation_error_response("Validation failed", {"template_id": ["Template ID is required"]})
+        
+        # Load template
+        try:
+            template = frappe.get_doc("SIS Report Card Template", template_id)
+            if template.campus_id != campus_id:
+                return forbidden_response("Template access denied")
+        except frappe.DoesNotExistError:
+            return not_found_response("Report card template not found")
+        
+        # Get sections to sync (default: all sections)
+        sections_to_sync = data.get("sections", ["scores", "subject_eval", "intl_scoreboard"])
+        dry_run = data.get("dry_run", False)
+        
+        # Get new_subject_ids if provided (specific subjects to add)
+        new_subject_ids = data.get("new_subject_ids")
+        if new_subject_ids and not isinstance(new_subject_ids, list):
+            new_subject_ids = [new_subject_ids]
+        
+        # Build filters for reports
+        report_filters = {
+            "template_id": template_id,
+            "campus_id": campus_id,
+            "status": ["!=", "published"]  # Don't touch published reports
+        }
+        
+        # Optional filters
+        if data.get("class_ids"):
+            report_filters["class_id"] = ["in", data.get("class_ids")]
+        if data.get("student_ids"):
+            report_filters["student_id"] = ["in", data.get("student_ids")]
+        
+        # Get all matching reports
+        reports = frappe.get_all(
+            "SIS Student Report Card",
+            filters=report_filters,
+            fields=["name", "student_id", "class_id", "data_json"]
+        )
+        
+        if not reports:
+            return success_response({
+                "updated_reports": 0,
+                "skipped_reports": 0,
+                "message": "No reports found matching criteria"
+            })
+        
+        # Determine which subjects to sync
+        if new_subject_ids:
+            # MODE 1: Only sync specified new subjects (for immediate use after creating reports)
+            subjects_to_sync = set(new_subject_ids)
+            frappe.logger().info(f"[SYNC] Syncing SPECIFIC new subjects: {subjects_to_sync}")
+        else:
+            # MODE 2: Sync all subjects from template that are missing in reports (for template updates)
+            subjects_to_sync = set()
+            
+            # Extract all subject IDs from template
+            if hasattr(template, 'scores') and template.scores:
+                for score_cfg in template.scores:
+                    if score_cfg.subject_id:
+                        subjects_to_sync.add(score_cfg.subject_id)
+            
+            if hasattr(template, 'subjects') and template.subjects:
+                for subject_cfg in template.subjects:
+                    if subject_cfg.subject_id:
+                        subjects_to_sync.add(subject_cfg.subject_id)
+            
+            frappe.logger().info(f"[SYNC] Syncing ALL template subjects (will add missing ones): {subjects_to_sync}")
+        
+        # Process each report
+        updated_count = 0
+        skipped_count = 0
+        details = []
+        all_new_subjects_added = set()
+        
+        for report in reports:
+            try:
+                data_json = json.loads(report.data_json or "{}")
+                report_updated = False
+                new_subjects_for_this_report = []
+                
+                # === SYNC SCORES SECTION (VN program) ===
+                if "scores" in sections_to_sync and template.scores_enabled:
+                    existing_scores = data_json.get("scores", {})
+                    existing_subject_ids = set(existing_scores.keys())
+                    
+                    # Find NEW subjects to add (subjects in subjects_to_sync but not in report)
+                    new_subjects_in_scores = subjects_to_sync - existing_subject_ids
+                    
+                    if new_subjects_in_scores and hasattr(template, 'scores') and template.scores:
+                        for score_cfg in template.scores:
+                            subject_id = score_cfg.subject_id
+                            
+                            # Only add if this is a NEW subject
+                            if subject_id in new_subjects_in_scores:
+                                subject_title = (
+                                    score_cfg.display_name
+                                    or _resolve_actual_subject_title(subject_id)
+                                    or subject_id
+                                )
+                                
+                                existing_scores[subject_id] = {
+                                    "subject_title": subject_title,
+                                    "display_name": subject_title,
+                                    "subject_type": score_cfg.subject_type or "Môn tính điểm",
+                                    "hs1_scores": [],
+                                    "hs2_scores": [],
+                                    "hs3_scores": [],
+                                    "hs1_average": None,
+                                    "hs2_average": None,
+                                    "hs3_average": None,
+                                    "final_average": None,
+                                    "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
+                                    "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
+                                    "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1
+                                }
+                                
+                                report_updated = True
+                                new_subjects_for_this_report.append(subject_id)
+                                all_new_subjects_added.add(subject_id)
+                                
+                                frappe.logger().info(f"[SYNC] Added new subject {subject_id} to scores for report {report.name}")
+                        
+                        data_json["scores"] = existing_scores
+                
+                # === SYNC SUBJECT EVALUATION SECTION (VN program) ===
+                if "subject_eval" in sections_to_sync and template.subject_eval_enabled:
+                    existing_subject_eval = data_json.get("subject_eval", {})
+                    existing_subject_ids = set(existing_subject_eval.keys())
+                    
+                    # Find NEW subjects to add
+                    new_subjects_in_eval = subjects_to_sync - existing_subject_ids
+                    
+                    if new_subjects_in_eval and hasattr(template, 'subjects') and template.subjects:
+                        for subject_cfg in template.subjects:
+                            subject_id = subject_cfg.subject_id
+                            
+                            # Only add if this is a NEW subject
+                            if subject_id in new_subjects_in_eval:
+                                subject_title = _resolve_actual_subject_title(subject_id) or subject_id
+                                
+                                subject_data = {
+                                    "subject_title": subject_title,
+                                    "test_points": {},
+                                    "criteria_scores": {},
+                                    "scale_scores": {},
+                                    "comments": {}
+                                }
+                                
+                                # Initialize test points from template
+                                if subject_cfg.test_point_enabled and hasattr(subject_cfg, 'test_point_titles'):
+                                    for title_cfg in subject_cfg.test_point_titles:
+                                        if title_cfg.title:
+                                            subject_data["test_points"][title_cfg.title] = ""
+                                
+                                # Initialize rubric criteria from template
+                                if subject_cfg.rubric_enabled and hasattr(subject_cfg, 'criteria_id') and subject_cfg.criteria_id:
+                                    try:
+                                        criteria_doc = frappe.get_doc("SIS Evaluation Criteria", subject_cfg.criteria_id)
+                                        if hasattr(criteria_doc, 'options') and criteria_doc.options:
+                                            for opt in criteria_doc.options:
+                                                criteria_name = opt.get("name", "") or opt.get("title", "")
+                                                if criteria_name:
+                                                    subject_data["criteria_scores"][criteria_name] = ""
+                                    except Exception as e:
+                                        frappe.log_error(f"Failed to load criteria {subject_cfg.criteria_id}: {str(e)}")
+                                
+                                # Initialize comment titles from template
+                                if subject_cfg.comment_title_enabled and hasattr(subject_cfg, 'comment_title_id') and subject_cfg.comment_title_id:
+                                    try:
+                                        comment_doc = frappe.get_doc("SIS Comment Title", subject_cfg.comment_title_id)
+                                        if hasattr(comment_doc, 'options') and comment_doc.options:
+                                            for opt in comment_doc.options:
+                                                comment_name = opt.get("name", "") or opt.get("title", "")
+                                                if comment_name:
+                                                    subject_data["comments"][comment_name] = ""
+                                    except Exception as e:
+                                        frappe.log_error(f"Failed to load comment titles {subject_cfg.comment_title_id}: {str(e)}")
+                                
+                                existing_subject_eval[subject_id] = subject_data
+                                report_updated = True
+                                new_subjects_for_this_report.append(subject_id)
+                                all_new_subjects_added.add(subject_id)
+                                
+                                frappe.logger().info(f"[SYNC] Added new subject {subject_id} to subject_eval for report {report.name}")
+                        
+                        data_json["subject_eval"] = existing_subject_eval
+                
+                # === SYNC INTL SCOREBOARD SECTION (INTL program) ===
+                if "intl_scoreboard" in sections_to_sync and template.program_type == 'intl':
+                    existing_intl_scoreboard = data_json.get("intl_scoreboard", {})
+                    existing_subject_ids = set(existing_intl_scoreboard.keys())
+                    
+                    # Find NEW subjects to add
+                    new_subjects_in_intl = subjects_to_sync - existing_subject_ids
+                    
+                    if new_subjects_in_intl and hasattr(template, 'subjects') and template.subjects:
+                        for subject_cfg in template.subjects:
+                            subject_id = subject_cfg.subject_id
+                            
+                            # Only add if this is a NEW subject
+                            if subject_id in new_subjects_in_intl:
+                                subject_title = _resolve_actual_subject_title(subject_id) or subject_id
+                                subcurriculum_id = getattr(subject_cfg, 'subcurriculum_id', None) or 'none'
+                                subcurriculum_title_en = 'General Program'
+                                
+                                # Fetch subcurriculum title
+                                if subcurriculum_id and subcurriculum_id != 'none':
+                                    try:
+                                        subcurriculum_doc = frappe.get_doc("SIS Sub Curriculum", subcurriculum_id)
+                                        subcurriculum_title_en = subcurriculum_doc.title_en or subcurriculum_doc.title_vn or subcurriculum_id
+                                    except Exception as e:
+                                        frappe.log_error(f"Failed to fetch subcurriculum {subcurriculum_id}: {str(e)}")
+                                        subcurriculum_title_en = subcurriculum_id
+                                
+                                scoreboard_data = {
+                                    "subject_title": subject_title,
+                                    "subcurriculum_id": subcurriculum_id,
+                                    "subcurriculum_title_en": subcurriculum_title_en,
+                                    "intl_comment": getattr(subject_cfg, 'intl_comment', None) or '',
+                                    "main_scores": {}
+                                }
+                                
+                                # Initialize main scores from template scoreboard JSON
+                                if hasattr(subject_cfg, 'scoreboard') and subject_cfg.scoreboard:
+                                    try:
+                                        if isinstance(subject_cfg.scoreboard, str):
+                                            scoreboard_obj = json.loads(subject_cfg.scoreboard)
+                                        else:
+                                            scoreboard_obj = subject_cfg.scoreboard
+                                        
+                                        if scoreboard_obj and "main_scores" in scoreboard_obj:
+                                            for main_score in scoreboard_obj["main_scores"]:
+                                                main_title = main_score.get("title", "")
+                                                if main_title:
+                                                    scoreboard_data["main_scores"][main_title] = {
+                                                        "weight": main_score.get("weight", 0),
+                                                        "components": {},
+                                                        "final_score": None
+                                                    }
+                                                    
+                                                    if "components" in main_score:
+                                                        for component in main_score["components"]:
+                                                            comp_title = component.get("title", "")
+                                                            if comp_title:
+                                                                scoreboard_data["main_scores"][main_title]["components"][comp_title] = {
+                                                                    "weight": component.get("weight", 0),
+                                                                    "score": None
+                                                                }
+                                    except Exception as e:
+                                        frappe.log_error(f"Error parsing scoreboard for subject {subject_id}: {str(e)}")
+                                
+                                existing_intl_scoreboard[subject_id] = scoreboard_data
+                                report_updated = True
+                                new_subjects_for_this_report.append(subject_id)
+                                all_new_subjects_added.add(subject_id)
+                                
+                                frappe.logger().info(f"[SYNC] Added new subject {subject_id} to intl_scoreboard for report {report.name}")
+                        
+                        data_json["intl_scoreboard"] = existing_intl_scoreboard
+                
+                # Save report if updated (unless dry_run)
+                if report_updated:
+                    if not dry_run:
+                        frappe.db.set_value(
+                            "SIS Student Report Card",
+                            report.name,
+                            "data_json",
+                            json.dumps(data_json, ensure_ascii=False)
+                        )
+                    
+                    updated_count += 1
+                    details.append({
+                        "report_id": report.name,
+                        "student_id": report.student_id,
+                        "class_id": report.class_id,
+                        "new_subjects": new_subjects_for_this_report
+                    })
+                else:
+                    skipped_count += 1
+                
+            except Exception as e:
+                frappe.log_error(f"Error syncing report {report.name}: {str(e)}")
+                skipped_count += 1
+                details.append({
+                    "report_id": report.name,
+                    "error": str(e)
+                })
+        
+        # Commit changes if not dry_run
+        if not dry_run and updated_count > 0:
+            frappe.db.commit()
+        
+        return success_response({
+            "updated_reports": updated_count,
+            "skipped_reports": skipped_count,
+            "new_subjects_added": list(all_new_subjects_added),
+            "total_reports": len(reports),
+            "dry_run": dry_run,
+            "details": details if dry_run else details[:10],  # Limit details in production
+            "message": f"{'[DRY RUN] Would sync' if dry_run else 'Synced'} {updated_count} reports with {len(all_new_subjects_added)} new subjects"
+        })
+        
+    except Exception as e:
+        frappe.log_error(f"Error in sync_new_subjects_to_reports: {str(e)}")
+        return error_response(f"Failed to sync subjects: {str(e)}")
 
 
 def _sanitize_float(value: Any) -> Optional[float]:
-    try:
-        if value is None:
-            return None
-        parsed = float(value)
-        if parsed != parsed:  # NaN check
-            frappe.logger().warning(f"_sanitize_float: NaN detected for value '{value}'")
-            return None
-        return parsed
-    except (TypeError, ValueError) as e:
-        frappe.logger().warning(f"_sanitize_float: Parse failed for value '{value}': {str(e)}")
+    """Convert value to float if possible, return None if invalid."""
+    if value is None or value == "" or value == "null":
         return None
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "":
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
 
 
-def _normalize_intl_scores_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    payload = payload or {}
+def _normalize_intl_scores(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize INTL Scores structure to ensure all fields are properly typed:
+    - main_scores / component_scores → Dict[str, float | None]
+    - ielts_scores → Dict[str, Dict[str, float | None]]  (raw/band per option)
+    - overall_mark → float | None
+    - overall_grade → str | None
+    - comment → str | None
 
+    Returns normalized dict ready for data_json merging.
+    """
+    # Normalize main scores (Term 1, Term 2, Final, etc.)
     normalized_main_scores: Dict[str, Optional[float]] = {}
     raw_main_scores = payload.get("main_scores")
     if isinstance(raw_main_scores, dict):
-        for key, value in raw_main_scores.items():
-            if not key:
+        for field_name, field_value in raw_main_scores.items():
+            if not field_name:
                 continue
-            normalized_main_scores[key] = _sanitize_float(value)
+            sanitized_value = _sanitize_float(field_value)
+            normalized_main_scores[field_name] = sanitized_value
 
-    normalized_component_scores: Dict[str, Dict[str, Optional[float]]] = {}
+    # Normalize component scores (Formative, Summative, Practical, etc.)
+    normalized_component_scores: Dict[str, Optional[float]] = {}
     raw_component_scores = payload.get("component_scores")
     if isinstance(raw_component_scores, dict):
-        for main_title, components in raw_component_scores.items():
-            if not main_title or not isinstance(components, dict):
+        for field_name, field_value in raw_component_scores.items():
+            if not field_name:
                 continue
-            normalized_component_scores[main_title] = {}
-            for comp_title, comp_value in components.items():
-                if not comp_title:
-                    continue
-                normalized_component_scores[main_title][comp_title] = _sanitize_float(comp_value)
+            sanitized_value = _sanitize_float(field_value)
+            normalized_component_scores[field_name] = sanitized_value
 
+    # Normalize IELTS scores (nested structure per option)
     normalized_ielts_scores: Dict[str, Dict[str, Any]] = {}
     raw_ielts_scores = payload.get("ielts_scores")
     
@@ -254,132 +602,24 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
     # Initialize INTL scores metadata if applicable
     if getattr(template, "program_type", "vn") == "intl":
         intl_scores: Dict[str, Dict[str, Any]] = {}
-        intl_subject_configs = {}
-
         if hasattr(template, "subjects") and template.subjects:
-            for subject_cfg in template.subjects:
-                subject_id = getattr(subject_cfg, "subject_id", None)
-                if not subject_id:
+            for subj_cfg in template.subjects:
+                subj_id = getattr(subj_cfg, "subject_id", None)
+                if not subj_id:
                     continue
-
-                intl_subject_configs[subject_id] = subject_cfg
-
-        for subject_id, subject_cfg in intl_subject_configs.items():
-            subject_payload: Dict[str, Any] = {
-                "main_scores": {},
-                "component_scores": {},
-                "ielts_scores": {},
-                "overall_mark": None,
-                "overall_grade": None,
-                "comment": None,
-            }
-
-            subject_payload["subject_title"] = _resolve_actual_subject_title(subject_id)
-
-            subcurriculum_id = getattr(subject_cfg, "subcurriculum_id", None)
-            if subcurriculum_id:
-                subject_payload["subcurriculum_id"] = subcurriculum_id
-                
-                # Fetch subcurriculum_title_en from database
-                subcurriculum_title_en = None
-                if subcurriculum_id != "none":
-                    try:
-                        subcurr_doc = frappe.get_doc("SIS Sub Curriculum", subcurriculum_id)
-                        subcurriculum_title_en = subcurr_doc.title_en or subcurr_doc.title_vn or subcurriculum_id
-                        frappe.logger().info(f"[INIT_REPORT] Fetched subcurriculum_title_en: {subcurriculum_id} -> {subcurriculum_title_en}")
-                    except Exception as e:
-                        frappe.logger().error(f"[INIT_REPORT] Failed to fetch subcurriculum {subcurriculum_id}: {str(e)}")
-                        subcurriculum_title_en = subcurriculum_id
-                
-                if subcurriculum_title_en:
-                    subject_payload["subcurriculum_title_en"] = subcurriculum_title_en
-
-            intl_comment = getattr(subject_cfg, "intl_comment", None)
-            if intl_comment is not None:
-                subject_payload["intl_comment"] = intl_comment
-
-            # ✅ POPULATE MAIN_SCORES AND COMPONENT_SCORES FROM TEMPLATE SCOREBOARD CONFIG
-            scoreboard_config = None
-            try:
-                scoreboard_config = getattr(subject_cfg, "scoreboard", None)
-                if isinstance(scoreboard_config, str):
-                    import json
-                    scoreboard_config = json.loads(scoreboard_config or "{}")
-            except Exception:
-                scoreboard_config = None
-
-            if isinstance(scoreboard_config, dict):
-                main_scores_config = scoreboard_config.get("main_scores", [])
-                if isinstance(main_scores_config, list):
-                    # Initialize main_scores structure from template
-                    for main_score in main_scores_config:
-                        if not isinstance(main_score, dict):
-                            continue
-                        main_title = main_score.get("title")
-                        if not main_title:
-                            continue
-                        
-                        # Initialize main score with null value
-                        subject_payload["main_scores"][main_title] = None
-                        
-                        # Initialize component scores if they exist
-                        components = main_score.get("components", [])
-                        if isinstance(components, list) and components:
-                            subject_payload["component_scores"][main_title] = {}
-                            for component in components:
-                                if not isinstance(component, dict):
-                                    continue
-                                component_title = component.get("title")
-                                if component_title:
-                                    subject_payload["component_scores"][main_title][component_title] = None
-
-            ielts_config = None
-            try:
-                ielts_config = getattr(subject_cfg, "intl_ielts_config", None)
-                if isinstance(ielts_config, str):
-                    import json
-                    ielts_config = json.loads(ielts_config or "{}")
-            except Exception:
-                ielts_config = None
-
-            if isinstance(ielts_config, dict) and ielts_config.get("enabled"):
-                options = ielts_config.get("options")
-                if isinstance(options, list):
-                    for option in options:
-                        if not isinstance(option, dict):
-                            continue
-                        option_key = option.get("option")
-                        if not option_key:
-                            continue
-                        subject_payload["ielts_scores"].setdefault(option_key, {})
-                        
-                        # Special handling for IELTS Writing - generate Task 1 and Task 2 structure
-                        if option_key == "IELTS Writing":
-                            subject_payload["ielts_scores"]["IELTS Writing Task 1"] = {
-                                "raw": None,
-                                "band": None
-                            }
-                            subject_payload["ielts_scores"]["IELTS Writing Task 2"] = {
-                                "raw": None, 
-                                "band": None
-                            }
-                            # Overall Writing band (calculated from Task 1 and Task 2)
-                            subject_payload["ielts_scores"][option_key]["band"] = None
-                            # Remove raw for overall Writing as it will be calculated
-                            # from Task 1 and Task 2
-                        else:
-                            # Standard IELTS skills (Listening, Reading, Speaking)
-                            subject_payload["ielts_scores"][option_key]["raw"] = None
-                            subject_payload["ielts_scores"][option_key]["band"] = None
-
-            intl_scores[subject_id] = subject_payload
-
-        base.setdefault("intl_scores", intl_scores)
+                intl_scores[subj_id] = {
+                    "main_scores": {},
+                    "component_scores": {},
+                    "ielts_scores": {},
+                    "overall_mark": None,
+                    "overall_grade": None,
+                    "comment": None,
+                }
+        base["intl_scores"] = intl_scores
 
     return base
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
 def create_reports_for_class(template_id: Optional[str] = None, class_id: Optional[str] = None):
     """Generate draft student report cards for all students in a class based on a template."""
     try:
@@ -502,271 +742,126 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
             try:
                 doc.insert(ignore_permissions=True)
                 created.append(doc.name)
-                logs.append(
-                    f"Created report {doc.name} for student {resolved_student_id or row.get('student_id') or row.get('name')}"
-                )
-            except Exception as e:
-                failed_students.append({"student_id": resolved_student_id, "error": str(e)})
-                frappe.log_error(f"Create report failed for student {resolved_student_id}: {str(e)}")
-                logs.append(
-                    f"Failed to create report for student {resolved_student_id or row.get('student_id') or row.get('name')}: {str(e)}"
-                )
+                logs.append(f"Created report {doc.name} for student {resolved_student_id}")
+            except Exception as insert_err:
+                frappe.log_error(f"insert() failed for {doc.as_dict()}: {str(insert_err)}")
+                # Log failure but continue
+                failed_students.append({
+                    "student_id": resolved_student_id,
+                    "error": str(insert_err),
+                })
+                logs.append(f"Failed to create report for student {resolved_student_id}: {str(insert_err)}")
+
+        # Commit once after all inserts
         frappe.db.commit()
+
+        # Prepare response summary with included logs
         summary = {
-            "created_count": len(created),
-            "skipped_count": len(skipped_students),
-            "failed_count": len(failed_students),
-            "logs": logs,
+            "created": created,
+            "failed": failed_students,
+            "skipped": skipped_students,
+            "total_students": len(students),
+            "logs": logs  # Include logs in response for frontend to read
         }
-        return success_response(
-            data={
-                "created": created,
-                "failed": failed_students,
-                "skipped": skipped_students,
-                "summary": summary,
-            },
-            message="Student report cards generated",
-        )
+        return success_response(summary)
+
     except Exception as e:
-        frappe.log_error(f"Error create_reports_for_class: {str(e)}")
-        return error_response("Error generating reports")
+        frappe.log_error(f"create_reports_for_class error: {str(e)}")
+        return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
-def get_reports_by_class(class_id: Optional[str] = None, template_id: Optional[str] = None, page: int = 1, limit: int = 50):
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def list_reports():
+    """
+    List student report cards with optional filters.
+    """
+    campus_id = _campus()
+    filters = {"campus_id": campus_id}
+
+    # Optional query params
+    class_id = frappe.form_dict.get("class_id")
+    if class_id:
+        filters["class_id"] = class_id
+
+    template_id = frappe.form_dict.get("template_id")
+    if template_id:
+        filters["template_id"] = template_id
+
+    student_id = frappe.form_dict.get("student_id")
+    if student_id:
+        filters["student_id"] = student_id
+
+    status = frappe.form_dict.get("status")
+    if status:
+        filters["status"] = status
+
+    school_year = frappe.form_dict.get("school_year")
+    if school_year:
+        filters["school_year"] = school_year
+
+    semester_part = frappe.form_dict.get("semester_part")
+    if semester_part:
+        filters["semester_part"] = semester_part
+
+    # Fetch reports
+    reports = frappe.get_all(
+        "SIS Student Report Card",
+        fields=["name", "title", "template_id", "form_id", "class_id", "student_id",
+                "school_year", "semester_part", "status", "creation", "modified"],
+        filters=filters,
+        order_by="modified desc"
+    )
+
+    # Pagination
+    page = int(frappe.form_dict.get("page", 1))
+    page_size = int(frappe.form_dict.get("page_size", 20))
+    total = len(reports)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated = reports[start:end]
+
+    return paginated_response(paginated, total, page, page_size)
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def get_report(report_id: Optional[str] = None):
+    """Get a single student report card by ID."""
+    report_id = report_id or frappe.form_dict.get("report_id")
+    if not report_id:
+        return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
+
+    campus_id = _campus()
+    report = frappe.get_all(
+        "SIS Student Report Card",
+        fields=["name", "title", "template_id", "form_id", "class_id", "student_id",
+                "school_year", "semester_part", "status", "data_json", "creation", "modified"],
+        filters={"name": report_id, "campus_id": campus_id}
+    )
+
+    if not report:
+        return not_found_response("Report card not found")
+
+    item = report[0]
+    # Parse data_json
     try:
-        frappe.logger().info(f"get_reports_by_class called with args: class_id={class_id}, template_id={template_id}, page={page}, limit={limit}")
-        frappe.logger().info(f"frappe.local.form_dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"frappe.request.args: {getattr(frappe.request, 'args', 'No args') if hasattr(frappe, 'request') else 'No request'}")
-        class_id = class_id or (frappe.local.form_dict or {}).get("class_id")
-        template_id = template_id or (frappe.local.form_dict or {}).get("template_id")
-        page = page or (frappe.local.form_dict or {}).get("page", 1)
-        limit = limit or (frappe.local.form_dict or {}).get("limit", 50)
+        item["data_json"] = json.loads(item.get("data_json") or "{}")
+    except Exception:
+        item["data_json"] = {}
 
-        # Also read from request.args for GET query string params (align behavior with get_class_reports)
-        if (not class_id) and getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
-            class_id = frappe.request.args.get("class_id")
-        if (not template_id) and getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
-            template_id = frappe.request.args.get("template_id")
-        if getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
-            page = page or frappe.request.args.get("page", 1)
-            limit = limit or frappe.request.args.get("limit", 50)
-
-        # Finally, fallback to JSON payload if provided (in case client POSTs accidentally)
-        if not class_id or not template_id or not page or not limit:
-            try:
-                payload = _payload()
-                class_id = class_id or payload.get("class_id") or payload.get("name")
-                template_id = template_id or payload.get("template_id")
-                page = page or payload.get("page", 1)
-                limit = limit or payload.get("limit", 50)
-            except Exception:
-                pass
-        
-        # Clean up template_id - handle 'undefined' string from frontend
-        if template_id in ['undefined', 'null', '']:
-            template_id = None
-        
-        # Clean up class_id
-        if class_id and isinstance(class_id, str):
-            class_id = class_id.strip()
-        
-        frappe.logger().info(f"get_reports_by_class resolved params: class_id='{class_id}', template_id='{template_id}', page={page}, limit={limit}")
-        
-        if not class_id or class_id in ['undefined', 'null']:
-            frappe.logger().error(f"Invalid class_id received: '{class_id}'")
-            return validation_error_response(message="Class ID is required", errors={"class_id": ["Required"]})
-        campus_id = _campus()
-        page = int(page or 1)
-        limit = int(limit or 50)
-        offset = (page - 1) * limit
-        filters = {"class_id": class_id}
-        
-        # Add campus filter if campus_id is valid, otherwise skip campus filtering
-        if campus_id and campus_id.strip():
-            filters["campus_id"] = campus_id
-            frappe.logger().info(f"get_reports_by_class: Using campus filter: {campus_id}")
-        else:
-            frappe.logger().warning(f"get_reports_by_class: No valid campus context, skipping campus filter")
-            
-        if template_id:
-            filters["template_id"] = template_id
-            
-        frappe.logger().info(f"get_reports_by_class: filters={filters}")
-        
-        # Try the query with safe error handling
-        try:
-            rows = frappe.get_all(
-                "SIS Student Report Card",
-                fields=["name","title","student_id","status","modified"],
-                filters=filters,
-                order_by="modified desc",
-                limit_start=offset,
-                limit_page_length=limit,
-            )
-
-            # ✅ REMOVED unique by student_id logic - Allow multiple reports per student (different semesters/templates)
-            # Previously this was limiting to 1 report per student, which caused issues when students have
-            # multiple report cards for different semesters (Mid Term 1, End Term 1, End Term 2)
-            total = frappe.db.count("SIS Student Report Card", filters=filters)
-
-            frappe.logger().info(f"get_reports_by_class: Found {len(rows)} reports, total={total}")
-            return paginated_response(data=rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
-        except Exception as db_error:
-            frappe.logger().error(f"Database query failed: {str(db_error)}")
-            # Try without campus filter as last resort
-            if "campus_id" in filters:
-                frappe.logger().warning("Retrying without campus filter...")
-                filters_no_campus = {k: v for k, v in filters.items() if k != "campus_id"}
-                rows = frappe.get_all("SIS Student Report Card", fields=["name","title","student_id","status","modified"], filters=filters_no_campus, order_by="modified desc", limit_start=offset, limit_page_length=limit)
-                total = frappe.db.count("SIS Student Report Card", filters=filters_no_campus)
-                frappe.logger().info(f"get_reports_by_class (no campus): Found {len(rows)} reports, total={total}")
-                return paginated_response(data=rows, current_page=page, total_count=total, per_page=limit, message="Fetched")
-            else:
-                raise db_error
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        # Log error với title ngắn để tránh length limit
-        frappe.log_error(error_details, title="get_reports_by_class_error")
-        frappe.logger().error(f"get_reports_by_class exception: {str(e)}")
-        frappe.logger().error(f"Full traceback: {error_details}")
-        return error_response(f"Error fetching reports: {str(e)}")
-
-
-@frappe.whitelist(allow_guest=False)
-def get_report_by_id(report_id: Optional[str] = None):
-    try:
-        report_id = report_id or (frappe.local.form_dict or {}).get("report_id") or ((frappe.request.args.get("report_id") if getattr(frappe, "request", None) and getattr(frappe.request, "args", None) else None))
-        if not report_id:
-            payload = _payload()
-            report_id = payload.get("report_id") or payload.get("name")
-        if not report_id:
-            return validation_error_response(message="Report ID is required", errors={"report_id": ["Required"]})
-        doc = frappe.get_doc("SIS Student Report Card", report_id)
-        if doc.campus_id != _campus():
-            return forbidden_response("Access denied")
-        
-        # Parse data
-        data = json.loads(doc.data_json or "{}")
-        
-        # AUTO-ENRICH: Populate subcurriculum_title_en if missing (for old reports)
-        try:
-            intl_scores = data.get("intl_scores") or data.get("data", {}).get("intl_scoreboard") or {}
-            if isinstance(intl_scores, dict):
-                frappe.logger().info(f"[ENRICH_SUBCURR] Starting enrichment for {len(intl_scores)} subjects")
-                for subject_id, subject_data in intl_scores.items():
-                    if isinstance(subject_data, dict) and "subcurriculum_id" in subject_data:
-                        subcurr_id = subject_data.get("subcurriculum_id")
-                        current_title = subject_data.get("subcurriculum_title_en")
-                        
-                        # Only fetch if title is missing or is same as ID (fallback value)
-                        if not current_title or current_title == subcurr_id or current_title.strip() == "":
-                            if subcurr_id and subcurr_id != "none":
-                                try:
-                                    subcurr_doc = frappe.get_doc("SIS Sub Curriculum", subcurr_id)
-                                    subcurr_title = subcurr_doc.title_en or subcurr_doc.title_vn or subcurr_id
-                                    subject_data["subcurriculum_title_en"] = subcurr_title
-                                    frappe.logger().info(f"[ENRICH_SUBCURR] Enriched {subject_id}: {subcurr_id} -> {subcurr_title}")
-                                except Exception as e:
-                                    frappe.logger().error(f"[ENRICH_SUBCURR] Failed to fetch {subcurr_id}: {str(e)}")
-                                    subject_data["subcurriculum_title_en"] = subcurr_id
-        except Exception as enrich_error:
-            frappe.logger().error(f"[ENRICH_SUBCURR] Failed to enrich: {str(enrich_error)}")
-        
-        # AUTO-ENRICH: Populate test_scores from template if missing (for old reports)
-        try:
-            template_id = data.get("_metadata", {}).get("template_id") or doc.template_id
-            frappe.logger().info(f"[TEST_SCORES_ENRICH] Starting enrichment for report {doc.name}, template_id: {template_id}")
-            
-            if template_id:
-                template = frappe.get_doc("SIS Report Card Template", template_id)
-                frappe.logger().info(f"[TEST_SCORES_ENRICH] Template loaded: {template.name}, has subjects: {hasattr(template, 'subjects')}")
-                
-                # Enrich subject_eval with test_scores from template
-                if data.get("subject_eval") and isinstance(data["subject_eval"], dict):
-                    frappe.logger().info(f"[TEST_SCORES_ENRICH] Found {len(data['subject_eval'])} subjects in subject_eval")
-                    
-                    for subject_id, subject_data in data["subject_eval"].items():
-                        current_test_scores = subject_data.get("test_scores")
-                        should_enrich = not current_test_scores or (isinstance(current_test_scores, dict) and not current_test_scores.get("titles"))
-                        
-                        frappe.logger().info(f"[TEST_SCORES_ENRICH] Subject {subject_id}: test_scores={current_test_scores}, should_enrich={should_enrich}")
-                        
-                        # Only enrich if test_scores is missing or empty
-                        if should_enrich:
-                            # Find subject config in template
-                            if hasattr(template, "subjects") and template.subjects:
-                                for subject_cfg in template.subjects:
-                                    if getattr(subject_cfg, "subject_id", None) == subject_id:
-                                        test_point_enabled = getattr(subject_cfg, "test_point_enabled", False)
-                                        frappe.logger().info(f"[TEST_SCORES_ENRICH] Found config for {subject_id}, test_point_enabled={test_point_enabled}")
-                                        
-                                        if test_point_enabled:
-                                            test_point_titles_raw = getattr(subject_cfg, "test_point_titles", None)
-                                            frappe.logger().info(f"[TEST_SCORES_ENRICH] test_point_titles_raw={test_point_titles_raw}")
-                                            
-                                            if test_point_titles_raw:
-                                                # Parse if JSON string
-                                                if isinstance(test_point_titles_raw, str):
-                                                    test_point_titles_raw = json.loads(test_point_titles_raw)
-                                                
-                                                if isinstance(test_point_titles_raw, list):
-                                                    titles = [t.get("title", "") for t in test_point_titles_raw if isinstance(t, dict) and t.get("title")]
-                                                    # Enrich with titles from template
-                                                    data["subject_eval"][subject_id]["test_scores"] = {
-                                                        "titles": titles,
-                                                        "values": subject_data.get("test_point_values", []) or [None] * len(titles)
-                                                    }
-                                                    frappe.logger().info(f"[TEST_SCORES_ENRICH] ✅ Enriched test_scores for subject {subject_id} with {len(titles)} titles: {titles}")
-                                        break
-        except Exception as enrich_error:
-            import traceback
-            frappe.logger().error(f"[TEST_SCORES_ENRICH] ❌ Failed to enrich: {str(enrich_error)}")
-            frappe.logger().error(f"[TEST_SCORES_ENRICH] Traceback: {traceback.format_exc()}")
-        
-        return single_item_response({
-            "name": doc.name,
-            "title": doc.title,
-            "template_id": doc.template_id,
-            "form_id": doc.form_id,
-            "class_id": doc.class_id,
-            "student_id": doc.student_id,
-            "school_year": doc.school_year,
-            "semester_part": doc.semester_part,
-            "status": doc.status,
-            "data": data,  # Return enriched data
-        }, "Fetched")
-    except frappe.DoesNotExistError:
-        return not_found_response("Report not found")
-    except Exception as e:
-        frappe.log_error(f"Error get_report_by_id: {str(e)}")
-        return error_response("Error fetching report")
+    return single_item_response(item)
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def update_report_section(report_id: Optional[str] = None, section: Optional[str] = None):
+def update_report_section():
+    """
+    Update a specific section of a Student Report Card's data_json.
+    Sections: scores, homeroom, subject_eval, intl_scores (merged per subject_id)
+    This function implements DEEP MERGE logic to avoid data loss.
+    """
     try:
         data = _payload()
-        report_id = report_id or data.get("report_id")
-        section = section or data.get("section")
-        
-        # Debug logging for incoming request
-        frappe.logger().info(f"update_report_section called: report_id={report_id}, section={section}")
-        frappe.logger().info(f"Request data keys: {list(data.keys()) if isinstance(data, dict) else 'not_dict'}")
-        
-        if not report_id or not section:
-            errors = {}
-            if not report_id:
-                errors["report_id"] = ["Required"]
-            if not section:
-                errors["section"] = ["Required"]
-            return validation_error_response(message="report_id and section are required", errors=errors)
-        doc = frappe.get_doc("SIS Student Report Card", report_id)
-        if doc.campus_id != _campus():
-            return forbidden_response("Access denied")
-        if doc.status == "locked":
-            return forbidden_response("Report is locked")
+        report_id = data.get("report_id")
+        section = data.get("section")  # e.g., "scores", "homeroom", "subject_eval", "intl_scores"
         payload = data.get("payload") or {}
         
         # Debug logging for payload
@@ -847,110 +942,106 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
             # Get subject_id from payload BEFORE normalizing (as normalize may exclude it)
             subject_id = None
             if isinstance(payload, dict):
-                # Frontend now sends subject_id directly in payload
+                # Try to find subject_id in various places
                 subject_id = payload.get("subject_id")
-            
-            # Debug logging for intl_scores payload structure
-            frappe.logger().info(f"intl_scores update: subject_id='{subject_id}', payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}")
-            
-            # Now normalize the payload (subject_id is excluded from normalized data but we already have it)
-            processed = _normalize_intl_scores_payload(payload)
-            
-            # If subject_id still not found, try other sources
-            if not subject_id:
-                # Try to get from request form data
-                form_data = frappe.local.form_dict
-                subject_id = form_data.get("subject_id") or form_data.get("selectedSubject")
-                
-            # Debug log for troubleshooting (only log if no subject_id found)
-            if not subject_id:
-                frappe.log_error(f"[WARNING] intl_scores update: No subject_id found. payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}")
-            
-            # If we have existing intl_scores, preserve other subjects' data
-            existing_intl_scores = json_data.get("intl_scores", {})
-            if not isinstance(existing_intl_scores, dict):
-                existing_intl_scores = {}
+                if not subject_id:
+                    # Check if it's nested in payload
+                    for key, value in payload.items():
+                        if key.startswith("SIS_ACTUAL_SUBJECT-"):
+                            subject_id = key
+                            payload = value  # Use nested payload
+                            break
             
             if subject_id:
-                # Deep merge the specific subject data to preserve existing fields
-                if subject_id not in existing_intl_scores:
-                    existing_intl_scores[subject_id] = {}
+                frappe.logger().info(f"[INTL_SCORES_MERGE] subject_id identified: {subject_id}")
                 
-                # Deep merge each top-level field
-                for field_name, field_value in processed.items():
-                    if field_value is None:
-                        # Skip null values to preserve existing data
-                        continue
-                    elif isinstance(field_value, dict) and field_name in existing_intl_scores[subject_id] and isinstance(existing_intl_scores[subject_id][field_name], dict):
-                        # Deep merge nested dictionaries (like ielts_scores, component_scores, main_scores)
-                        existing_intl_scores[subject_id][field_name].update(field_value)
-                        frappe.logger().info(f"Deep merged {field_name} for subject '{subject_id}': {len(field_value)} fields updated")
-                    else:
-                        # Replace field value (for simple types or when target is not dict)
-                        existing_intl_scores[subject_id][field_name] = field_value
-                        frappe.logger().info(f"Updated {field_name} for subject '{subject_id}': {field_value}")
+                # Get or init existing intl_scores dict
+                existing_intl_scores = json_data.get("intl_scores")
+                if not isinstance(existing_intl_scores, dict):
+                    existing_intl_scores = {}
                 
-                # ENRICH: Ensure subcurriculum_title_en is preserved or fetched
-                if "subcurriculum_id" in existing_intl_scores[subject_id]:
-                    subcurr_id = existing_intl_scores[subject_id]["subcurriculum_id"]
-                    # Only fetch if title is missing or is same as ID (fallback value)
-                    current_title = existing_intl_scores[subject_id].get("subcurriculum_title_en")
-                    if not current_title or current_title == subcurr_id or current_title.strip() == "":
-                        if subcurr_id and subcurr_id != "none":
-                            try:
-                                subcurr_doc = frappe.get_doc("SIS Sub Curriculum", subcurr_id)
-                                subcurr_title = subcurr_doc.title_en or subcurr_doc.title_vn or subcurr_id
-                                existing_intl_scores[subject_id]["subcurriculum_title_en"] = subcurr_title
-                                frappe.logger().info(f"Enriched subcurriculum_title_en for {subject_id}: {subcurr_id} -> {subcurr_title}")
-                            except Exception as e:
-                                frappe.logger().error(f"Failed to fetch subcurriculum {subcurr_id}: {str(e)}")
-                                existing_intl_scores[subject_id]["subcurriculum_title_en"] = subcurr_id
+                # Get existing data for this subject (if any)
+                existing_subject_data = existing_intl_scores.get(subject_id, {})
+                if not isinstance(existing_subject_data, dict):
+                    existing_subject_data = {}
                 
+                # Normalize the incoming payload (sanitize floats, structure IELTS, etc.)
+                normalized_payload = _normalize_intl_scores(payload)
+                frappe.logger().info(f"[INTL_SCORES_MERGE] Normalized payload: {normalized_payload}")
+                
+                # DEEP MERGE: Merge normalized payload into existing data
+                for section_key in ["main_scores", "component_scores", "ielts_scores"]:
+                    if section_key in normalized_payload:
+                        if section_key not in existing_subject_data:
+                            existing_subject_data[section_key] = {}
+                        
+                        incoming_section = normalized_payload[section_key]
+                        if isinstance(incoming_section, dict):
+                            for field_name, field_value in incoming_section.items():
+                                # For IELTS scores (nested dict), merge the nested fields
+                                if section_key == "ielts_scores" and isinstance(field_value, dict):
+                                    if field_name not in existing_subject_data[section_key]:
+                                        existing_subject_data[section_key][field_name] = {}
+                                    for ielts_field, ielts_value in field_value.items():
+                                        existing_subject_data[section_key][field_name][ielts_field] = ielts_value
+                                        frappe.logger().info(f"[INTL_SCORES_MERGE] Updated {section_key}.{field_name}.{ielts_field} = {ielts_value}")
+                                else:
+                                    # For main_scores / component_scores (flat dict), merge directly
+                                    existing_subject_data[section_key][field_name] = field_value
+                                    frappe.logger().info(f"[INTL_SCORES_MERGE] Updated {section_key}.{field_name} = {field_value}")
+                
+                # Merge top-level fields (overall_mark, overall_grade, comment, etc.)
+                for top_key in ["overall_mark", "overall_grade", "comment", "subcurriculum_id", "subcurriculum_title_en", "intl_comment", "subject_title"]:
+                    if top_key in normalized_payload and normalized_payload[top_key] is not None:
+                        existing_subject_data[top_key] = normalized_payload[top_key]
+                        frappe.logger().info(f"[INTL_SCORES_MERGE] Updated top-level {top_key} = {normalized_payload[top_key]}")
+                
+                # Update the subject in existing_intl_scores
+                existing_intl_scores[subject_id] = existing_subject_data
                 json_data["intl_scores"] = existing_intl_scores
-                frappe.logger().info(f"intl_scores deep merge successful: updated subject '{subject_id}', preserved {len(existing_intl_scores) - 1} other subjects")
+                
+                frappe.logger().info(f"[INTL_SCORES_MERGE] Successfully merged subject '{subject_id}'. Total subjects in intl_scores: {len(existing_intl_scores)}")
             else:
-                # Fallback: if no subject_id identified, replace entire intl_scores (old behavior)
-                # This maintains backward compatibility but may cause data loss
-                json_data["intl_scores"] = processed
-                frappe.logger().warning(f"intl_scores fallback: no subject_id found, replacing entire intl_scores (may cause data loss)")
-                frappe.log_error(f"intl_scores update: No subject_id found. payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}", title="intl_scores_no_subject_id")
+                # Fallback: If no subject_id, use old behavior (may overwrite)
+                frappe.logger().warning("[INTL_SCORES_MERGE] No subject_id found in payload. Using fallback behavior (may overwrite existing data).")
+                json_data["intl_scores"] = _normalize_intl_scores(payload)
         elif section == "scores":
-            # VN Scores section handling with MERGING to avoid data loss
-            # CRITICAL: Merge per subject to preserve other subjects' data
+            # DEEP MERGE for scores section - merge per subject_id to avoid data loss
+            # This ensures that updating one subject doesn't wipe out others
             
-            # Get subject_id from payload
+            # Detect if payload contains a single subject or multiple subjects
             subject_id = None
             if isinstance(payload, dict):
-                # Try to get subject_id from payload structure
-                for key in payload.keys():
-                    # Payload structure for scores is: { subject_id: { hs1_scores: [...], hs2_scores: [...], ... } }
-                    if isinstance(payload[key], dict) and any(score_key in payload[key] for score_key in ['hs1_scores', 'hs2_scores', 'hs3_scores']):
-                        subject_id = key
-                        break
+                # Check if payload is a single subject data (contains hs1_scores, etc.)
+                if any(key in payload for key in ['hs1_scores', 'hs2_scores', 'hs3_scores', 'hs1_average']):
+                    # This is a single subject update - need to extract subject_id from context
+                    # Look for subject_id in the payload itself or in data
+                    subject_id = payload.get("subject_id") or data.get("subject_id")
+                    if not subject_id:
+                        # Try to find SIS_ACTUAL_SUBJECT-* pattern in payload keys
+                        for key in payload.keys():
+                            if key.startswith("SIS_ACTUAL_SUBJECT-"):
+                                subject_id = key
+                                break
+                else:
+                    # Check if payload is a dict of subjects (keys are subject IDs)
+                    # In this case, we'll merge each subject
+                    payload_keys = list(payload.keys())
+                    if payload_keys and payload_keys[0].startswith("SIS_ACTUAL_SUBJECT-"):
+                        # This is a multi-subject payload, iterate and merge each
+                        pass
             
-            # If subject_id still not found, try other sources
-            if not subject_id:
-                # Try to get from request form data
-                form_data = frappe.local.form_dict
-                subject_id = form_data.get("subject_id") or form_data.get("selectedSubject")
-            
-            # Debug log for troubleshooting (only log if no subject_id found)
-            if not subject_id:
-                frappe.log_error(f"[WARNING] scores update: No subject_id found. payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}")
-            
-            # If we have existing scores, preserve other subjects' data
-            existing_scores = json_data.get("scores", {})
+            # Get existing scores or initialize empty dict
+            existing_scores = json_data.get("scores")
             if not isinstance(existing_scores, dict):
                 existing_scores = {}
             
-            frappe.logger().info(f"[SCORES_MERGE] BEFORE merge - existing_scores keys: {list(existing_scores.keys())}")
-            frappe.logger().info(f"[SCORES_MERGE] BEFORE merge - existing for subject '{subject_id}': {existing_scores.get(subject_id) if subject_id else 'N/A'}")
-            
-            if subject_id and isinstance(payload, dict) and subject_id in payload:
-                # Deep merge the specific subject data to preserve existing fields
+            # If we have a single subject_id, do targeted merge
+            if subject_id and isinstance(payload, dict) and not any(k.startswith("SIS_ACTUAL_SUBJECT-") for k in payload.keys()):
+                frappe.logger().info(f"[SCORES_MERGE] Single subject update for: {subject_id}")
                 
-                # Get template config for backfilling missing fields
-                template_id = json_data.get("_metadata", {}).get("template_id") or doc.template_id
+                # Load template config for this subject if available
+                template_id = json_data.get("_metadata", {}).get("template_id")
                 template_config = None
                 if template_id:
                     try:
@@ -958,24 +1049,18 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                         if hasattr(template, "scores") and template.scores:
                             for score_cfg in template.scores:
                                 if getattr(score_cfg, "subject_id", None) == subject_id:
-                                    subject_title = (
-                                        getattr(score_cfg, "display_name", None)
-                                        or getattr(score_cfg, "subject_title", None)
-                                        or _resolve_actual_subject_title(subject_id)
-                                    )
                                     template_config = {
-                                        "subject_title": subject_title,
-                                        "display_name": subject_title,
-                                        "subject_type": getattr(score_cfg, "subject_type", "Môn tính điểm"),
+                                        "display_name": score_cfg.display_name or _resolve_actual_subject_title(subject_id),
+                                        "subject_type": score_cfg.subject_type or "Môn tính điểm",
                                         "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
                                         "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
-                                        "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1,
+                                        "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1
                                     }
                                     break
                     except Exception as e:
-                        frappe.logger().warning(f"Failed to load template config: {str(e)}")
+                        frappe.logger().warning(f"Failed to load template config for subject {subject_id}: {str(e)}")
                 
-                # Initialize or get existing subject data
+                # Get or create subject entry
                 if subject_id not in existing_scores:
                     # Create new with full structure
                     existing_scores[subject_id] = {
@@ -1057,74 +1142,53 @@ def update_report_section(report_id: Optional[str] = None, section: Optional[str
                 # Fallback: if no subject_id identified or payload doesn't match expected structure, 
                 # use old behavior (may cause data loss but maintains backward compatibility)
                 json_data["scores"] = payload
-                frappe.logger().warning(f"scores fallback: subject_id='{subject_id}', payload_structure_valid={isinstance(payload, dict) and subject_id in payload}, using old behavior (may cause data loss)")
-                if not subject_id:
-                    frappe.log_error(f"scores update: No subject_id found. payload_keys={list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}", title="scores_no_subject_id")
+                frappe.logger().warning("[SCORES_MERGE] Using fallback merge (entire scores section replaced)")
         else:
-            # Overwrite the section with provided payload for other sections (e.g., homeroom)
+            # For other sections (homeroom, etc.), just overwrite
             json_data[section] = payload
-            frappe.logger().info(f"Section '{section}' replaced entirely (standard behavior)")
-        
-        # Extract debug info before saving (don't save it to database)
-        debug_info = json_data.pop("_scores_debug", None) if section == "scores" else None
-        
-        # Debug logging before saving
-        frappe.logger().info(f"Final data_json keys: {list(json_data.keys())}")
-        frappe.logger().info(f"Final data_json size: {len(str(json_data))} chars")
-        
-        doc.data_json = json.dumps(json_data)
+
+        # Save updated data_json
+        doc.data_json = json.dumps(json_data, ensure_ascii=False)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
-        
-        # Verify data was saved correctly by reading it back
-        if section == "scores" and subject_id:
-            doc.reload()
-            saved_data = json.loads(doc.data_json or "{}")
-            saved_scores = saved_data.get("scores", {})
-            saved_subject = saved_scores.get(subject_id, {})
-            frappe.logger().info(f"[SCORES_VERIFY] After save - hs1_scores: {saved_subject.get('hs1_scores')}, hs2_scores: {saved_subject.get('hs2_scores')}, hs3_scores: {saved_subject.get('hs3_scores')}")
-        
-        frappe.logger().info(f"Report {doc.name} updated successfully for section '{section}'")
-        
-        return success_response(message="Updated", data={"name": doc.name, "debug": debug_info})
+
+        return success_response({"report_id": report_id, "section": section, "message": f"Section '{section}' updated successfully"})
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Report card not found")
     except Exception as e:
-        frappe.log_error(f"Error update_report_section: {str(e)}")
-        return error_response("Error updating report")
+        frappe.log_error(f"update_report_section error: {str(e)}")
+        return error_response(f"Failed to update report section: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def lock_report(report_id: Optional[str] = None):
+def delete_report():
+    """Delete a student report card."""
     try:
-        report_id = report_id or (_payload().get("report_id"))
+        data = _payload()
+        report_id = data.get("report_id")
         if not report_id:
             return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
+
+        campus_id = _campus()
         doc = frappe.get_doc("SIS Student Report Card", report_id)
-        if doc.campus_id != _campus():
+        if doc.campus_id != campus_id:
             return forbidden_response("Access denied")
-        doc.status = "locked"
-        doc.save(ignore_permissions=True)
+
+        # Check if published - don't allow deletion of published reports
+        if doc.status == "published":
+            return validation_error_response(
+                message="Cannot delete published report",
+                errors={"status": ["Published reports cannot be deleted"]}
+            )
+
+        doc.delete(ignore_permissions=True)
         frappe.db.commit()
-        return success_response(message="Locked")
+
+        return success_response({"message": f"Report {report_id} deleted successfully"})
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Report card not found")
     except Exception as e:
-        frappe.log_error(f"Error lock_report: {str(e)}")
-        return error_response("Error locking report")
-
-
-@frappe.whitelist(allow_guest=False, methods=["POST"])
-def publish_report(report_id: Optional[str] = None):
-    try:
-        report_id = report_id or (_payload().get("report_id"))
-        if not report_id:
-            return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
-        doc = frappe.get_doc("SIS Student Report Card", report_id)
-        if doc.campus_id != _campus():
-            return forbidden_response("Access denied")
-        doc.status = "published"
-        doc.save(ignore_permissions=True)
-        frappe.db.commit()
-        return success_response(message="Published")
-    except Exception as e:
-        frappe.log_error(f"Error publish_report: {str(e)}")
-        return error_response("Error publishing report")
-
-
+        frappe.log_error(f"delete_report error: {str(e)}")
+        return error_response(f"Failed to delete report: {str(e)}")
