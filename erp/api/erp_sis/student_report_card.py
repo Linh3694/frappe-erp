@@ -398,7 +398,7 @@ def _sanitize_float(value: Any) -> Optional[float]:
     if value is None or value == "" or value == "null":
         return None
     if isinstance(value, (int, float)):
-        try:
+    try:
             return float(value)
         except (TypeError, ValueError):
             return None
@@ -410,7 +410,7 @@ def _sanitize_float(value: Any) -> Optional[float]:
             return float(value)
         except ValueError:
             return None
-    return None
+        return None
 
 
 def _normalize_intl_scores(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -608,13 +608,13 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
                 if not subj_id:
                     continue
                 intl_scores[subj_id] = {
-                    "main_scores": {},
-                    "component_scores": {},
-                    "ielts_scores": {},
-                    "overall_mark": None,
-                    "overall_grade": None,
-                    "comment": None,
-                }
+                "main_scores": {},
+                "component_scores": {},
+                "ielts_scores": {},
+                "overall_mark": None,
+                "overall_grade": None,
+                "comment": None,
+            }
         base["intl_scores"] = intl_scores
 
     return base
@@ -757,9 +757,9 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
 
         # Prepare response summary with included logs
         summary = {
-            "created": created,
-            "failed": failed_students,
-            "skipped": skipped_students,
+                "created": created,
+                "failed": failed_students,
+                "skipped": skipped_students,
             "total_students": len(students),
             "logs": logs  # Include logs in response for frontend to read
         }
@@ -787,7 +787,7 @@ def get_reports_by_class():
     
     # If not in form_dict, try request.args (for GET query params)
     if not class_id and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
-        class_id = frappe.request.args.get("class_id")
+            class_id = frappe.request.args.get("class_id")
     
     if not class_id:
         frappe.logger().error(f"[get_reports_by_class] class_id not found in form_dict or request.args")
@@ -836,7 +836,7 @@ def list_reports():
     """
     List student report cards with optional filters.
     """
-    campus_id = _campus()
+        campus_id = _campus()
     filters = {"campus_id": campus_id}
 
     # Optional query params
@@ -845,9 +845,9 @@ def list_reports():
         filters["class_id"] = class_id
 
     template_id = frappe.form_dict.get("template_id")
-    if template_id:
-        filters["template_id"] = template_id
-
+        if template_id:
+            filters["template_id"] = template_id
+            
     student_id = frappe.form_dict.get("student_id")
     if student_id:
         filters["student_id"] = student_id
@@ -866,10 +866,10 @@ def list_reports():
 
     # Fetch reports
     reports = frappe.get_all(
-        "SIS Student Report Card",
+                "SIS Student Report Card",
         fields=["name", "title", "template_id", "form_id", "class_id", "student_id",
                 "school_year", "semester_part", "status", "creation", "modified"],
-        filters=filters,
+                filters=filters,
         order_by="modified desc"
     )
 
@@ -885,18 +885,21 @@ def list_reports():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_report(report_id: Optional[str] = None):
+def get_report(report_id=None):
     """Get a single student report card by ID."""
-    # Try multiple sources for report_id
-    report_id = report_id or frappe.form_dict.get("report_id")
-    
-    # If not in form_dict, try request.args (for GET query params)
-    if not report_id and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
-        report_id = frappe.request.args.get("report_id")
+    # Try to get report_id from multiple sources
+    if not report_id:
+        # Priority 1: frappe.form_dict (works for both GET and POST in most cases)
+        report_id = frappe.form_dict.get("report_id")
     
     if not report_id:
-        frappe.logger().error(f"[get_report] report_id not found. form_dict: {frappe.form_dict}")
-        return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
+        return validation_error_response(
+            message="report_id is required", 
+            errors={"report_id": ["Required"]},
+            debug_info={
+                "form_dict_keys": list(frappe.form_dict.keys()) if hasattr(frappe, 'form_dict') else []
+            }
+        )
 
     campus_id = _campus()
     report = frappe.get_all(
@@ -920,9 +923,9 @@ def get_report(report_id: Optional[str] = None):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_report_by_id(report_id: Optional[str] = None):
+def get_report_by_id(**kwargs):
     """Alias for get_report() - Get a single student report card by ID."""
-    return get_report(report_id)
+    return get_report(**kwargs)
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
@@ -1018,7 +1021,7 @@ def update_report_section():
             if isinstance(payload, dict):
                 # Try to find subject_id in various places
                 subject_id = payload.get("subject_id")
-                if not subject_id:
+            if not subject_id:
                     # Check if it's nested in payload
                     for key, value in payload.items():
                         if key.startswith("SIS_ACTUAL_SUBJECT-"):
@@ -1031,9 +1034,9 @@ def update_report_section():
                 
                 # Get or init existing intl_scores dict
                 existing_intl_scores = json_data.get("intl_scores")
-                if not isinstance(existing_intl_scores, dict):
-                    existing_intl_scores = {}
-                
+            if not isinstance(existing_intl_scores, dict):
+                existing_intl_scores = {}
+            
                 # Get existing data for this subject (if any)
                 existing_subject_data = existing_intl_scores.get(subject_id, {})
                 if not isinstance(existing_subject_data, dict):
@@ -1059,7 +1062,7 @@ def update_report_section():
                                     for ielts_field, ielts_value in field_value.items():
                                         existing_subject_data[section_key][field_name][ielts_field] = ielts_value
                                         frappe.logger().info(f"[INTL_SCORES_MERGE] Updated {section_key}.{field_name}.{ielts_field} = {ielts_value}")
-                                else:
+                    else:
                                     # For main_scores / component_scores (flat dict), merge directly
                                     existing_subject_data[section_key][field_name] = field_value
                                     frappe.logger().info(f"[INTL_SCORES_MERGE] Updated {section_key}.{field_name} = {field_value}")
@@ -1093,10 +1096,10 @@ def update_report_section():
                     subject_id = payload.get("subject_id") or data.get("subject_id")
                     if not subject_id:
                         # Try to find SIS_ACTUAL_SUBJECT-* pattern in payload keys
-                        for key in payload.keys():
+                for key in payload.keys():
                             if key.startswith("SIS_ACTUAL_SUBJECT-"):
-                                subject_id = key
-                                break
+                        subject_id = key
+                        break
                 else:
                     # Check if payload is a dict of subjects (keys are subject IDs)
                     # In this case, we'll merge each subject
@@ -1225,7 +1228,7 @@ def update_report_section():
         doc.data_json = json.dumps(json_data, ensure_ascii=False)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
-
+        
         return success_response({"report_id": report_id, "section": section, "message": f"Section '{section}' updated successfully"})
 
     except frappe.DoesNotExistError:
