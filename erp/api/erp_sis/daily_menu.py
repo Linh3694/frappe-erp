@@ -374,25 +374,25 @@ def create_daily_menu():
         # Create new daily menu with simplified structure
         frappe.db.begin()
         try:
-        # Prepare all items with meal information
-        all_items = []
+            # Prepare all items with meal information
+            all_items = []
 
-        # Normalize education stage values to match DocType options
-        def normalize_education_stage(raw_education_stage):
-            if not raw_education_stage:
-                return ""
-            if "tiểu" in raw_education_stage.lower():
-                return "Tiểu học"
-            elif "trung" in raw_education_stage.lower():
-                return "Trung học"
-            else:
-                return raw_education_stage
+            # Normalize education stage values to match DocType options
+            def normalize_education_stage(raw_education_stage):
+                if not raw_education_stage:
+                    return ""
+                if "tiểu" in raw_education_stage.lower():
+                    return "Tiểu học"
+                elif "trung" in raw_education_stage.lower():
+                    return "Trung học"
+                else:
+                    return raw_education_stage
 
-        for meal_data in meals:
-            meal_type = meal_data.get("meal_type")
-            meal_type_reference = meal_data.get("meal_type_reference", "")
+            for meal_data in meals:
+                meal_type = meal_data.get("meal_type")
+                meal_type_reference = meal_data.get("meal_type_reference", "")
 
-            # Handle new breakfast_options structure
+                # Handle new breakfast_options structure
             if meal_type == "breakfast" and "breakfast_options" in meal_data:
                 breakfast_options = meal_data["breakfast_options"]
                 for option_key in ["option1", "option2", "external"]:
