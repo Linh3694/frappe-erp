@@ -884,7 +884,7 @@ def list_reports():
     return paginated_response(paginated, total, page, page_size)
 
 
-@frappe.whitelist(allow_guest=False, methods=["GET"])
+@frappe.whitelist(allow_guest=False)
 def get_report(report_id: Optional[str] = None):
     """Get a single student report card by ID."""
     report_id = report_id or frappe.form_dict.get("report_id")
@@ -910,6 +910,12 @@ def get_report(report_id: Optional[str] = None):
         item["data_json"] = {}
 
     return single_item_response(item)
+
+
+@frappe.whitelist(allow_guest=False)
+def get_report_by_id(report_id: Optional[str] = None):
+    """Alias for get_report() - Get a single student report card by ID."""
+    return get_report(report_id)
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
