@@ -770,7 +770,7 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
         return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False, methods=["GET"])
+@frappe.whitelist(allow_guest=False)
 def get_reports_by_class():
     """
     Get all student report cards for a specific class.
@@ -778,9 +778,19 @@ def get_reports_by_class():
     """
     campus_id = _campus()
     
-    # Required parameter
+    # Debug: Log all received parameters
+    frappe.logger().info(f"[get_reports_by_class] form_dict: {frappe.form_dict}")
+    frappe.logger().info(f"[get_reports_by_class] request.args: {frappe.request.args if hasattr(frappe, 'request') else 'N/A'}")
+    
+    # Required parameter - try multiple sources
     class_id = frappe.form_dict.get("class_id")
+    
+    # If not in form_dict, try request.args (for GET query params)
+    if not class_id and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+        class_id = frappe.request.args.get("class_id")
+    
     if not class_id:
+        frappe.logger().error(f"[get_reports_by_class] class_id not found in form_dict or request.args")
         return validation_error_response(message="class_id is required", errors={"class_id": ["Required"]})
     
     filters = {
