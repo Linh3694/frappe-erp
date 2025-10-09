@@ -42,6 +42,10 @@ def convert_items_to_meals_structure(items, menu_name):
                 "name": f"{meal_type}_{menu_name}"
             }
 
+        # Helper function to convert empty menu_category_id to __none__
+        def convert_menu_category_id(menu_category_id):
+            return menu_category_id if menu_category_id else "__none__"
+
         # Handle breakfast options
         if meal_type == "breakfast":
             if "breakfast_options" not in meals_result[meal_type]:
@@ -56,21 +60,21 @@ def convert_items_to_meals_structure(items, menu_name):
             if meal_type_reference == "option1" or not meal_type_reference:
                 if not meals_result[meal_type]["breakfast_options"]["option1"]["menu_category_id"]:
                     meals_result[meal_type]["breakfast_options"]["option1"] = {
-                        "menu_category_id": item.menu_category_id,
+                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
                         "display_name": item.display_name or "",
                         "display_name_en": item.display_name_en or ""
                     }
             elif meal_type_reference == "option2":
                 if not meals_result[meal_type]["breakfast_options"]["option2"]["menu_category_id"]:
                     meals_result[meal_type]["breakfast_options"]["option2"] = {
-                        "menu_category_id": item.menu_category_id,
+                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
                         "display_name": item.display_name or "",
                         "display_name_en": item.display_name_en or ""
                     }
             elif meal_type_reference == "external":
                 if not meals_result[meal_type]["breakfast_options"]["external"]["menu_category_id"]:
                     meals_result[meal_type]["breakfast_options"]["external"] = {
-                        "menu_category_id": item.menu_category_id,
+                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
                         "display_name": item.display_name or "",
                         "display_name_en": item.display_name_en or ""
                     }
@@ -78,19 +82,19 @@ def convert_items_to_meals_structure(items, menu_name):
             else:
                 if not meals_result[meal_type]["breakfast_options"]["option1"]["menu_category_id"]:
                     meals_result[meal_type]["breakfast_options"]["option1"] = {
-                        "menu_category_id": item.menu_category_id,
+                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
                         "display_name": item.display_name or "",
                         "display_name_en": item.display_name_en or ""
                     }
                 elif not meals_result[meal_type]["breakfast_options"]["option2"]["menu_category_id"]:
                     meals_result[meal_type]["breakfast_options"]["option2"] = {
-                        "menu_category_id": item.menu_category_id,
+                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
                         "display_name": item.display_name or "",
                         "display_name_en": item.display_name_en or ""
                     }
                 elif not meals_result[meal_type]["breakfast_options"]["external"]["menu_category_id"]:
                     meals_result[meal_type]["breakfast_options"]["external"] = {
-                        "menu_category_id": item.menu_category_id,
+                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
                         "display_name": item.display_name or "",
                         "display_name_en": item.display_name_en or ""
                     }
@@ -113,7 +117,7 @@ def convert_items_to_meals_structure(items, menu_name):
                 meals_result[meal_type]["set_a_config"]["enabled"] = True
                 meals_result[meal_type]["set_a_config"]["items"].append({
                     "id": f"item_{len(meals_result[meal_type]['set_a_config']['items'])}",
-                    "menu_category_id": item.menu_category_id,
+                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
                     "display_name": item.display_name or "",
                     "display_name_en": item.display_name_en or ""
                 })
@@ -121,7 +125,7 @@ def convert_items_to_meals_structure(items, menu_name):
                 meals_result[meal_type]["set_au_config"]["enabled"] = True
                 meals_result[meal_type]["set_au_config"]["items"].append({
                     "id": f"item_{len(meals_result[meal_type]['set_au_config']['items'])}",
-                    "menu_category_id": item.menu_category_id,
+                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
                     "display_name": item.display_name or "",
                     "display_name_en": item.display_name_en or ""
                 })
@@ -129,7 +133,7 @@ def convert_items_to_meals_structure(items, menu_name):
                 meals_result[meal_type]["eat_clean_config"]["enabled"] = True
                 meals_result[meal_type]["eat_clean_config"]["items"].append({
                     "id": f"item_{len(meals_result[meal_type]['eat_clean_config']['items'])}",
-                    "menu_category_id": item.menu_category_id,
+                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
                     "display_name": item.display_name or "",
                     "display_name_en": item.display_name_en or ""
                 })
@@ -142,7 +146,7 @@ def convert_items_to_meals_structure(items, menu_name):
                     meals_result[meal_type]["buffet_config"]["name_en"] = item.buffet_name_en
                 meals_result[meal_type]["buffet_config"]["items"].append({
                     "id": f"item_{len(meals_result[meal_type]['buffet_config']['items'])}",
-                    "menu_category_id": item.menu_category_id,
+                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
                     "display_name": item.display_name or "",
                     "display_name_en": item.display_name_en or ""
                 })
@@ -159,14 +163,14 @@ def convert_items_to_meals_structure(items, menu_name):
 
             if meal_type_reference == "snack":
                 meals_result[meal_type]["dinner_options"]["snack"] = {
-                    "menu_category_id": item.menu_category_id,
+                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
                     "display_name": item.display_name or "",
                     "display_name_en": item.display_name_en or "",
                     "education_stage": item.education_stage or ""
                 }
             elif meal_type_reference == "drink":
                 meals_result[meal_type]["dinner_options"]["drink"] = {
-                    "menu_category_id": item.menu_category_id,
+                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
                     "display_name": item.display_name or "",
                     "display_name_en": item.display_name_en or "",
                     "education_stage": item.education_stage or ""
@@ -175,14 +179,14 @@ def convert_items_to_meals_structure(items, menu_name):
             else:
                 if not meals_result[meal_type]["dinner_options"]["snack"]["menu_category_id"]:
                     meals_result[meal_type]["dinner_options"]["snack"] = {
-                        "menu_category_id": item.menu_category_id,
+                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
                         "display_name": item.display_name or "",
                         "display_name_en": item.display_name_en or "",
                         "education_stage": item.education_stage or ""
                     }
                 elif not meals_result[meal_type]["dinner_options"]["drink"]["menu_category_id"]:
                     meals_result[meal_type]["dinner_options"]["drink"] = {
-                        "menu_category_id": item.menu_category_id,
+                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
                         "display_name": item.display_name or "",
                         "display_name_en": item.display_name_en or "",
                         "education_stage": item.education_stage or ""
@@ -398,15 +402,17 @@ def create_daily_menu():
                 for option_key in ["option1", "option2", "external"]:
                     option_data = breakfast_options.get(option_key)
                     if option_data and option_data.get("menu_category_id"):
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": meal_type_reference,
-                            "menu_category_id": option_data.get("menu_category_id"),
-                            "display_name": option_data.get("display_name", ""),
-                            "display_name_en": option_data.get("display_name_en", ""),
-                            "education_stage": ""
-                        })
+                        menu_category_id = option_data.get("menu_category_id")
+                        if menu_category_id:  # Only add if menu_category_id is not empty
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": meal_type_reference,
+                                "menu_category_id": menu_category_id,
+                                "display_name": option_data.get("display_name", ""),
+                                "display_name_en": option_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
 
             # Handle lunch set configurations
             elif meal_type == "lunch":
@@ -414,43 +420,49 @@ def create_daily_menu():
                 if meal_data.get("set_a_config", {}).get("enabled"):
                     config = meal_data["set_a_config"]
                     for item_data in config.get("items", []):
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "set_a",
-                            "menu_category_id": item_data.get("menu_category_id"),
-                            "display_name": item_data.get("display_name", ""),
-                            "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": ""
-                        })
+                        menu_category_id = item_data.get("menu_category_id")
+                        if menu_category_id:  # Only add if menu_category_id is not empty
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "set_a",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
 
                 # Handle set_au_config
                 if meal_data.get("set_au_config", {}).get("enabled"):
                     config = meal_data["set_au_config"]
                     for item_data in config.get("items", []):
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "set_au",
-                            "menu_category_id": item_data.get("menu_category_id"),
-                            "display_name": item_data.get("display_name", ""),
-                            "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": ""
-                        })
+                        menu_category_id = item_data.get("menu_category_id")
+                        if menu_category_id:  # Only add if menu_category_id is not empty
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "set_au",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
 
                 # Handle eat_clean_config
                 if meal_data.get("eat_clean_config", {}).get("enabled"):
                     config = meal_data["eat_clean_config"]
                     for item_data in config.get("items", []):
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "eat_clean",
-                            "menu_category_id": item_data.get("menu_category_id"),
-                            "display_name": item_data.get("display_name", ""),
-                            "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": ""
-                        })
+                        menu_category_id = item_data.get("menu_category_id")
+                        if menu_category_id:  # Only add if menu_category_id is not empty
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "eat_clean",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
 
                 # Handle buffet_config
                 if meal_data.get("buffet_config") and meal_data["buffet_config"].get("items"):
@@ -458,17 +470,19 @@ def create_daily_menu():
                     buffet_name_vn = buffet_config.get("name_vn", "")
                     buffet_name_en = buffet_config.get("name_en", "")
                     for item_data in buffet_config.get("items", []):
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "buffet",
-                            "menu_category_id": item_data.get("menu_category_id"),
-                            "display_name": item_data.get("display_name", ""),
-                            "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": "",
-                            "buffet_name_vn": buffet_name_vn,
-                            "buffet_name_en": buffet_name_en
-                        })
+                        menu_category_id = item_data.get("menu_category_id")
+                        if menu_category_id:  # Only add if menu_category_id is not empty
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "buffet",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": "",
+                                "buffet_name_vn": buffet_name_vn,
+                                "buffet_name_en": buffet_name_en
+                            })
 
             # Handle new dinner_options structure
             elif meal_type == "dinner" and "dinner_options" in meal_data:
@@ -629,15 +643,17 @@ def update_daily_menu():
                         if meal_data.get("set_a_config", {}).get("enabled"):
                             config = meal_data["set_a_config"]
                             for item_data in config.get("items", []):
-                                daily_menu_doc.append("items", {
-                                    "doctype": "SIS Daily Menu Item",
-                                    "meal_type": meal_type,
-                                    "meal_type_reference": "set_a",
-                                    "menu_category_id": item_data.get("menu_category_id"),
-                                    "display_name": item_data.get("display_name", ""),
-                                    "display_name_en": item_data.get("display_name_en", ""),
-                                    "education_stage": ""
-                                })
+                        menu_category_id = item_data.get("menu_category_id")
+                        if menu_category_id:  
+                            daily_menu_doc.append("items", {
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "set_a",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
 
                         # Handle set_au_config
                         if meal_data.get("set_au_config", {}).get("enabled"):
