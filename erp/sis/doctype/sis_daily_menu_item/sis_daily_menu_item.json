@@ -14,13 +14,15 @@
  "document_type": "Document",
  "editable_grid": 1,
  "engine": "InnoDB",
- "field_order": [
+  "field_order": [
   "meal_type",
   "meal_type_reference",
   "menu_category_id",
   "display_name",
   "display_name_en",
-  "education_stage"
+  "education_stage",
+  "buffet_name_vn",
+  "buffet_name_en"
  ],
  "fields": [
   {
@@ -33,10 +35,9 @@
   },
   {
    "fieldname": "meal_type_reference",
-   "fieldtype": "Link",
-   "label": "Loại thực đơn",
-   "options": "SIS Meal Type",
-   "description": "Tham chiếu đến loại thực đơn có sẵn"
+   "fieldtype": "Data",
+   "label": "Tham chiếu loại bữa",
+   "description": "Tham chiếu để phân biệt các options trong cùng bữa ăn (set_a, set_au, buffet, snack, drink, etc.)"
   },
   {
    "fieldname": "menu_category_id",
@@ -65,6 +66,18 @@
    "label": "Trường học",
    "options": "Tiểu học\nTrung học",
    "description": "Chỉ áp dụng cho bữa xế"
+  },
+  {
+   "fieldname": "buffet_name_vn",
+   "fieldtype": "Data",
+   "label": "Tên buffet (VN)",
+   "description": "Chỉ áp dụng cho buffet items - lưu tên buffet tiếng Việt"
+  },
+  {
+   "fieldname": "buffet_name_en",
+   "fieldtype": "Data",
+   "label": "Tên buffet (EN)",
+   "description": "Chỉ áp dụng cho buffet items - lưu tên buffet tiếng Anh"
   }
  ],
  "index_web_pages_for_search": 1,

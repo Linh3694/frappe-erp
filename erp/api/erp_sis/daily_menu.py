@@ -16,6 +16,192 @@ from erp.utils.api_response import (
 )
 
 
+def convert_items_to_meals_structure(items, menu_name):
+    """Convert flat items array to new meals structure for frontend"""
+    meals_result = {}
+
+    # Initialize meal structures
+    for meal_type in ["breakfast", "lunch", "dinner"]:
+        if meal_type not in meals_result:
+            meals_result[meal_type] = {
+                "meal_type": meal_type,
+                "menu_type": "custom",
+                "meal_type_reference": "",
+                "name": f"{meal_type}_{menu_name}"
+            }
+
+    for item in items:
+        meal_type = item.meal_type
+
+        # Ensure meal type exists in result
+        if meal_type not in meals_result:
+            meals_result[meal_type] = {
+                "meal_type": meal_type,
+                "menu_type": "custom",
+                "meal_type_reference": item.meal_type_reference or "",
+                "name": f"{meal_type}_{menu_name}"
+            }
+
+        # Handle breakfast options
+        if meal_type == "breakfast":
+            if "breakfast_options" not in meals_result[meal_type]:
+                meals_result[meal_type]["breakfast_options"] = {
+                    "option1": {"menu_category_id": "", "display_name": "", "display_name_en": ""},
+                    "option2": {"menu_category_id": "", "display_name": "", "display_name_en": ""},
+                    "external": {"menu_category_id": "", "display_name": "", "display_name_en": ""}
+                }
+
+            # Map item to appropriate breakfast option
+            meal_type_reference = item.meal_type_reference or ""
+            if meal_type_reference == "option1" or not meal_type_reference:
+                if not meals_result[meal_type]["breakfast_options"]["option1"]["menu_category_id"]:
+                    meals_result[meal_type]["breakfast_options"]["option1"] = {
+                        "menu_category_id": item.menu_category_id,
+                        "display_name": item.display_name or "",
+                        "display_name_en": item.display_name_en or ""
+                    }
+            elif meal_type_reference == "option2":
+                if not meals_result[meal_type]["breakfast_options"]["option2"]["menu_category_id"]:
+                    meals_result[meal_type]["breakfast_options"]["option2"] = {
+                        "menu_category_id": item.menu_category_id,
+                        "display_name": item.display_name or "",
+                        "display_name_en": item.display_name_en or ""
+                    }
+            elif meal_type_reference == "external":
+                if not meals_result[meal_type]["breakfast_options"]["external"]["menu_category_id"]:
+                    meals_result[meal_type]["breakfast_options"]["external"] = {
+                        "menu_category_id": item.menu_category_id,
+                        "display_name": item.display_name or "",
+                        "display_name_en": item.display_name_en or ""
+                    }
+            # Fallback: assign to first available option
+            else:
+                if not meals_result[meal_type]["breakfast_options"]["option1"]["menu_category_id"]:
+                    meals_result[meal_type]["breakfast_options"]["option1"] = {
+                        "menu_category_id": item.menu_category_id,
+                        "display_name": item.display_name or "",
+                        "display_name_en": item.display_name_en or ""
+                    }
+                elif not meals_result[meal_type]["breakfast_options"]["option2"]["menu_category_id"]:
+                    meals_result[meal_type]["breakfast_options"]["option2"] = {
+                        "menu_category_id": item.menu_category_id,
+                        "display_name": item.display_name or "",
+                        "display_name_en": item.display_name_en or ""
+                    }
+                elif not meals_result[meal_type]["breakfast_options"]["external"]["menu_category_id"]:
+                    meals_result[meal_type]["breakfast_options"]["external"] = {
+                        "menu_category_id": item.menu_category_id,
+                        "display_name": item.display_name or "",
+                        "display_name_en": item.display_name_en or ""
+                    }
+
+        # Handle lunch configurations
+        elif meal_type == "lunch":
+            meal_type_reference = item.meal_type_reference or ""
+
+            # Initialize lunch configs if not exists
+            if "set_a_config" not in meals_result[meal_type]:
+                meals_result[meal_type]["set_a_config"] = {"enabled": False, "items": []}
+            if "set_au_config" not in meals_result[meal_type]:
+                meals_result[meal_type]["set_au_config"] = {"enabled": False, "items": []}
+            if "eat_clean_config" not in meals_result[meal_type]:
+                meals_result[meal_type]["eat_clean_config"] = {"enabled": False, "items": []}
+            if "buffet_config" not in meals_result[meal_type]:
+                meals_result[meal_type]["buffet_config"] = {"enabled": False, "name_vn": "", "name_en": "", "items": []}
+
+            if meal_type_reference == "set_a":
+                meals_result[meal_type]["set_a_config"]["enabled"] = True
+                meals_result[meal_type]["set_a_config"]["items"].append({
+                    "id": f"item_{len(meals_result[meal_type]['set_a_config']['items'])}",
+                    "menu_category_id": item.menu_category_id,
+                    "display_name": item.display_name or "",
+                    "display_name_en": item.display_name_en or ""
+                })
+            elif meal_type_reference == "set_au":
+                meals_result[meal_type]["set_au_config"]["enabled"] = True
+                meals_result[meal_type]["set_au_config"]["items"].append({
+                    "id": f"item_{len(meals_result[meal_type]['set_au_config']['items'])}",
+                    "menu_category_id": item.menu_category_id,
+                    "display_name": item.display_name or "",
+                    "display_name_en": item.display_name_en or ""
+                })
+            elif meal_type_reference == "eat_clean":
+                meals_result[meal_type]["eat_clean_config"]["enabled"] = True
+                meals_result[meal_type]["eat_clean_config"]["items"].append({
+                    "id": f"item_{len(meals_result[meal_type]['eat_clean_config']['items'])}",
+                    "menu_category_id": item.menu_category_id,
+                    "display_name": item.display_name or "",
+                    "display_name_en": item.display_name_en or ""
+                })
+            elif meal_type_reference == "buffet":
+                meals_result[meal_type]["buffet_config"]["enabled"] = True
+                # Get buffet names from the first item or any item that has them
+                if not meals_result[meal_type]["buffet_config"]["name_vn"] and item.buffet_name_vn:
+                    meals_result[meal_type]["buffet_config"]["name_vn"] = item.buffet_name_vn
+                if not meals_result[meal_type]["buffet_config"]["name_en"] and item.buffet_name_en:
+                    meals_result[meal_type]["buffet_config"]["name_en"] = item.buffet_name_en
+                meals_result[meal_type]["buffet_config"]["items"].append({
+                    "id": f"item_{len(meals_result[meal_type]['buffet_config']['items'])}",
+                    "menu_category_id": item.menu_category_id,
+                    "display_name": item.display_name or "",
+                    "display_name_en": item.display_name_en or ""
+                })
+
+        # Handle dinner options
+        elif meal_type == "dinner":
+            meal_type_reference = item.meal_type_reference or ""
+
+            if "dinner_options" not in meals_result[meal_type]:
+                meals_result[meal_type]["dinner_options"] = {
+                    "snack": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""},
+                    "drink": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""}
+                }
+
+            if meal_type_reference == "snack":
+                meals_result[meal_type]["dinner_options"]["snack"] = {
+                    "menu_category_id": item.menu_category_id,
+                    "display_name": item.display_name or "",
+                    "display_name_en": item.display_name_en or "",
+                    "education_stage": item.education_stage or ""
+                }
+            elif meal_type_reference == "drink":
+                meals_result[meal_type]["dinner_options"]["drink"] = {
+                    "menu_category_id": item.menu_category_id,
+                    "display_name": item.display_name or "",
+                    "display_name_en": item.display_name_en or "",
+                    "education_stage": item.education_stage or ""
+                }
+            # Fallback: assign to first available option
+            else:
+                if not meals_result[meal_type]["dinner_options"]["snack"]["menu_category_id"]:
+                    meals_result[meal_type]["dinner_options"]["snack"] = {
+                        "menu_category_id": item.menu_category_id,
+                        "display_name": item.display_name or "",
+                        "display_name_en": item.display_name_en or "",
+                        "education_stage": item.education_stage or ""
+                    }
+                elif not meals_result[meal_type]["dinner_options"]["drink"]["menu_category_id"]:
+                    meals_result[meal_type]["dinner_options"]["drink"] = {
+                        "menu_category_id": item.menu_category_id,
+                        "display_name": item.display_name or "",
+                        "display_name_en": item.display_name_en or "",
+                        "education_stage": item.education_stage or ""
+                    }
+
+        # Handle legacy items array for backward compatibility
+        else:
+            if "items" not in meals_result[meal_type]:
+                meals_result[meal_type]["items"] = []
+            meals_result[meal_type]["items"].append({
+                "menu_category_id": item.menu_category_id,
+                "display_name": item.display_name or "",
+                "display_name_en": item.display_name_en or "",
+                "education_stage": item.education_stage or ""
+            })
+
+    return list(meals_result.values())
+
+
 def get_request_param(param_name):
     """Helper function to get parameter from request in order of priority"""
     # 1. Try function parameter
@@ -86,28 +272,9 @@ def get_all_daily_menus():
         # Get items for each daily menu and convert to meals structure
         for menu in daily_menus:
             daily_menu_doc = frappe.get_doc("SIS Daily Menu", menu.name)
-            
-            # Convert flat items to meals structure
-            meals_result = {}
-            for item in daily_menu_doc.items:
-                meal_type = item.meal_type
-                if meal_type not in meals_result:
-                    meals_result[meal_type] = {
-                        "meal_type": meal_type,
-                        "menu_type": "custom",
-                        "meal_type_reference": item.meal_type_reference or "",
-                        "name": f"{meal_type}_{menu.name}",
-                        "items": []
-                    }
-                
-                meals_result[meal_type]["items"].append({
-                    "menu_category_id": item.menu_category_id,
-                    "display_name": item.display_name or "",
-                    "display_name_en": item.display_name_en or "",
-                    "education_stage": item.education_stage or ""
-                })
 
-            menu["meals"] = list(meals_result.values())
+            # Convert flat items to new meals structure
+            menu["meals"] = convert_items_to_meals_structure(daily_menu_doc.items, menu.name)
 
         return list_response(daily_menus, "Daily menus fetched successfully")
 
@@ -143,33 +310,14 @@ def get_daily_menu_by_id(daily_menu_id=None):
 
         menu = daily_menus[0]
 
-        # Get menu items directly (much simpler now)
+        # Get menu items directly
         daily_menu_doc = frappe.get_doc("SIS Daily Menu", menu.name)
-        
-        # Convert flat items to meals structure for frontend compatibility
-        meals_result = {}
-        for item in daily_menu_doc.items:
-            meal_type = item.meal_type
-            if meal_type not in meals_result:
-                meals_result[meal_type] = {
-                    "meal_type": meal_type,
-                    "menu_type": "custom",
-                    "meal_type_reference": item.meal_type_reference or "",
-                    "name": f"{meal_type}_{menu.name}",  # Generate consistent meal name for frontend
-                    "items": []
-                }
-            
-            meals_result[meal_type]["items"].append({
-                "menu_category_id": item.menu_category_id,
-                "display_name": item.display_name or "",
-                "display_name_en": item.display_name_en or "",
-                "education_stage": item.education_stage or ""
-            })
 
+        # Convert flat items to new meals structure for frontend compatibility
         menu_data = {
             "name": menu.name,
             "menu_date": menu.menu_date,
-            "meals": list(meals_result.values())
+            "meals": convert_items_to_meals_structure(daily_menu_doc.items, menu.name)
         }
         return single_item_response(menu_data, "Daily Menu fetched successfully")
 
@@ -226,26 +374,140 @@ def create_daily_menu():
         # Create new daily menu with simplified structure
         frappe.db.begin()
         try:
-            # Prepare all items with meal information
-            all_items = []
-            for meal_data in meals:
-                meal_type = meal_data.get("meal_type")
-                meal_type_reference = meal_data.get("meal_type_reference", "")
-                
+        # Prepare all items with meal information
+        all_items = []
+
+        # Normalize education stage values to match DocType options
+        def normalize_education_stage(raw_education_stage):
+            if not raw_education_stage:
+                return ""
+            if "tiểu" in raw_education_stage.lower():
+                return "Tiểu học"
+            elif "trung" in raw_education_stage.lower():
+                return "Trung học"
+            else:
+                return raw_education_stage
+
+        for meal_data in meals:
+            meal_type = meal_data.get("meal_type")
+            meal_type_reference = meal_data.get("meal_type_reference", "")
+
+            # Handle new breakfast_options structure
+            if meal_type == "breakfast" and "breakfast_options" in meal_data:
+                breakfast_options = meal_data["breakfast_options"]
+                for option_key in ["option1", "option2", "external"]:
+                    option_data = breakfast_options.get(option_key)
+                    if option_data and option_data.get("menu_category_id"):
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": meal_type_reference,
+                            "menu_category_id": option_data.get("menu_category_id"),
+                            "display_name": option_data.get("display_name", ""),
+                            "display_name_en": option_data.get("display_name_en", ""),
+                            "education_stage": ""
+                        })
+
+            # Handle lunch set configurations
+            elif meal_type == "lunch":
+                # Handle set_a_config
+                if meal_data.get("set_a_config", {}).get("enabled"):
+                    config = meal_data["set_a_config"]
+                    for item_data in config.get("items", []):
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": "set_a",
+                            "menu_category_id": item_data.get("menu_category_id"),
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": ""
+                        })
+
+                # Handle set_au_config
+                if meal_data.get("set_au_config", {}).get("enabled"):
+                    config = meal_data["set_au_config"]
+                    for item_data in config.get("items", []):
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": "set_au",
+                            "menu_category_id": item_data.get("menu_category_id"),
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": ""
+                        })
+
+                # Handle eat_clean_config
+                if meal_data.get("eat_clean_config", {}).get("enabled"):
+                    config = meal_data["eat_clean_config"]
+                    for item_data in config.get("items", []):
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": "eat_clean",
+                            "menu_category_id": item_data.get("menu_category_id"),
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": ""
+                        })
+
+                # Handle buffet_config
+                if meal_data.get("buffet_config") and meal_data["buffet_config"].get("items"):
+                    buffet_config = meal_data["buffet_config"]
+                    buffet_name_vn = buffet_config.get("name_vn", "")
+                    buffet_name_en = buffet_config.get("name_en", "")
+                    for item_data in buffet_config.get("items", []):
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": "buffet",
+                            "menu_category_id": item_data.get("menu_category_id"),
+                            "display_name": item_data.get("display_name", ""),
+                            "display_name_en": item_data.get("display_name_en", ""),
+                            "education_stage": "",
+                            "buffet_name_vn": buffet_name_vn,
+                            "buffet_name_en": buffet_name_en
+                        })
+
+            # Handle new dinner_options structure
+            elif meal_type == "dinner" and "dinner_options" in meal_data:
+                dinner_options = meal_data["dinner_options"]
+
+                # Add snack item
+                if dinner_options.get("snack", {}).get("menu_category_id"):
+                    snack_data = dinner_options["snack"]
+                    all_items.append({
+                        "doctype": "SIS Daily Menu Item",
+                        "meal_type": meal_type,
+                        "meal_type_reference": "snack",
+                        "menu_category_id": snack_data.get("menu_category_id"),
+                        "display_name": snack_data.get("display_name", "Món nhẹ"),
+                        "display_name_en": snack_data.get("display_name_en", "Snack"),
+                        "education_stage": normalize_education_stage(snack_data.get("education_stage", ""))
+                    })
+
+                # Add drink item
+                if dinner_options.get("drink", {}).get("menu_category_id"):
+                    drink_data = dinner_options["drink"]
+                    all_items.append({
+                        "doctype": "SIS Daily Menu Item",
+                        "meal_type": meal_type,
+                        "meal_type_reference": "drink",
+                        "menu_category_id": drink_data.get("menu_category_id"),
+                        "display_name": drink_data.get("display_name", "Đồ uống"),
+                        "display_name_en": drink_data.get("display_name_en", "Drink"),
+                        "education_stage": normalize_education_stage(drink_data.get("education_stage", ""))
+                    })
+
+            # Handle legacy items array (for backward compatibility)
+            else:
                 for item_data in meal_data.get("items", []):
                     # Only allow education_stage for dinner meals
                     education_stage = ""
                     if meal_type == "dinner":
-                        raw_education_stage = item_data.get("education_stage", "")
-                        # Normalize education stage values to match DocType options
-                        if raw_education_stage:
-                            if "tiểu" in raw_education_stage.lower():
-                                education_stage = "Tiểu học"
-                            elif "trung" in raw_education_stage.lower():
-                                education_stage = "Trung học"
-                            else:
-                                education_stage = raw_education_stage
-                    
+                        education_stage = normalize_education_stage(item_data.get("education_stage", ""))
+
                     all_items.append({
                         "doctype": "SIS Daily Menu Item",
                         "meal_type": meal_type,
@@ -271,29 +533,11 @@ def create_daily_menu():
             frappe.db.rollback()
             raise e
 
-        # Convert flat items back to meals structure for frontend compatibility
-        meals_result = {}
-        for item in daily_menu_doc.items:
-            meal_type = item.meal_type
-            if meal_type not in meals_result:
-                meals_result[meal_type] = {
-                    "meal_type": meal_type,
-                    "menu_type": "custom",
-                    "meal_type_reference": item.meal_type_reference or "",
-                    "items": []
-                }
-            
-            meals_result[meal_type]["items"].append({
-                "menu_category_id": item.menu_category_id,
-                "display_name": item.display_name or "",
-                "display_name_en": item.display_name_en or "",
-                "education_stage": item.education_stage or ""
-            })
-
+        # Convert flat items back to new meals structure for frontend compatibility
         daily_menu_data = {
             "name": daily_menu_doc.name,
             "menu_date": daily_menu_doc.menu_date,
-            "meals": list(meals_result.values())
+            "meals": convert_items_to_meals_structure(daily_menu_doc.items, daily_menu_doc.name)
         }
         return single_item_response(daily_menu_data, "Daily Menu created successfully")
 
@@ -348,33 +592,146 @@ def update_daily_menu():
                 daily_menu_doc.items = []
 
                 # Prepare all items with meal information
+                # Normalize education stage values to match DocType options
+                def normalize_education_stage(raw_education_stage):
+                    if not raw_education_stage:
+                        return ""
+                    if "tiểu" in raw_education_stage.lower():
+                        return "Tiểu học"
+                    elif "trung" in raw_education_stage.lower():
+                        return "Trung học"
+                    else:
+                        return raw_education_stage
+
                 for meal_data in meals:
                     meal_type = meal_data.get("meal_type")
                     meal_type_reference = meal_data.get("meal_type_reference", "")
-                    
-                    for item_data in meal_data.get("items", []):
-                        # Only allow education_stage for dinner meals
-                        education_stage = ""
-                        if meal_type == "dinner":
-                            raw_education_stage = item_data.get("education_stage", "")
-                            # Normalize education stage values to match DocType options
-                            if raw_education_stage:
-                                if "tiểu" in raw_education_stage.lower():
-                                    education_stage = "Tiểu học"
-                                elif "trung" in raw_education_stage.lower():
-                                    education_stage = "Trung học"
-                                else:
-                                    education_stage = raw_education_stage
-                        
-                        daily_menu_doc.append("items", {
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": meal_type_reference,
-                            "menu_category_id": item_data.get("menu_category_id"),
-                            "display_name": item_data.get("display_name", ""),
-                            "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": education_stage
-                        })
+
+                    # Handle new breakfast_options structure
+                    if meal_type == "breakfast" and "breakfast_options" in meal_data:
+                        breakfast_options = meal_data["breakfast_options"]
+                        for option_key in ["option1", "option2", "external"]:
+                            option_data = breakfast_options.get(option_key)
+                            if option_data and option_data.get("menu_category_id"):
+                                daily_menu_doc.append("items", {
+                                    "doctype": "SIS Daily Menu Item",
+                                    "meal_type": meal_type,
+                                    "meal_type_reference": meal_type_reference,
+                                    "menu_category_id": option_data.get("menu_category_id"),
+                                    "display_name": option_data.get("display_name", ""),
+                                    "display_name_en": option_data.get("display_name_en", ""),
+                                    "education_stage": ""
+                                })
+
+                    # Handle lunch set configurations
+                    elif meal_type == "lunch":
+                        # Handle set_a_config
+                        if meal_data.get("set_a_config", {}).get("enabled"):
+                            config = meal_data["set_a_config"]
+                            for item_data in config.get("items", []):
+                                daily_menu_doc.append("items", {
+                                    "doctype": "SIS Daily Menu Item",
+                                    "meal_type": meal_type,
+                                    "meal_type_reference": "set_a",
+                                    "menu_category_id": item_data.get("menu_category_id"),
+                                    "display_name": item_data.get("display_name", ""),
+                                    "display_name_en": item_data.get("display_name_en", ""),
+                                    "education_stage": ""
+                                })
+
+                        # Handle set_au_config
+                        if meal_data.get("set_au_config", {}).get("enabled"):
+                            config = meal_data["set_au_config"]
+                            for item_data in config.get("items", []):
+                                daily_menu_doc.append("items", {
+                                    "doctype": "SIS Daily Menu Item",
+                                    "meal_type": meal_type,
+                                    "meal_type_reference": "set_au",
+                                    "menu_category_id": item_data.get("menu_category_id"),
+                                    "display_name": item_data.get("display_name", ""),
+                                    "display_name_en": item_data.get("display_name_en", ""),
+                                    "education_stage": ""
+                                })
+
+                        # Handle eat_clean_config
+                        if meal_data.get("eat_clean_config", {}).get("enabled"):
+                            config = meal_data["eat_clean_config"]
+                            for item_data in config.get("items", []):
+                                daily_menu_doc.append("items", {
+                                    "doctype": "SIS Daily Menu Item",
+                                    "meal_type": meal_type,
+                                    "meal_type_reference": "eat_clean",
+                                    "menu_category_id": item_data.get("menu_category_id"),
+                                    "display_name": item_data.get("display_name", ""),
+                                    "display_name_en": item_data.get("display_name_en", ""),
+                                    "education_stage": ""
+                                })
+
+                        # Handle buffet_config
+                        if meal_data.get("buffet_config") and meal_data["buffet_config"].get("items"):
+                            buffet_config = meal_data["buffet_config"]
+                            buffet_name_vn = buffet_config.get("name_vn", "")
+                            buffet_name_en = buffet_config.get("name_en", "")
+                            for item_data in buffet_config.get("items", []):
+                                daily_menu_doc.append("items", {
+                                    "doctype": "SIS Daily Menu Item",
+                                    "meal_type": meal_type,
+                                    "meal_type_reference": "buffet",
+                                    "menu_category_id": item_data.get("menu_category_id"),
+                                    "display_name": item_data.get("display_name", ""),
+                                    "display_name_en": item_data.get("display_name_en", ""),
+                                    "education_stage": "",
+                                    "buffet_name_vn": buffet_name_vn,
+                                    "buffet_name_en": buffet_name_en
+                                })
+
+                    # Handle new dinner_options structure
+                    elif meal_type == "dinner" and "dinner_options" in meal_data:
+                        dinner_options = meal_data["dinner_options"]
+
+                        # Add snack item
+                        if dinner_options.get("snack", {}).get("menu_category_id"):
+                            snack_data = dinner_options["snack"]
+                            daily_menu_doc.append("items", {
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "snack",
+                                "menu_category_id": snack_data.get("menu_category_id"),
+                                "display_name": snack_data.get("display_name", "Món nhẹ"),
+                                "display_name_en": snack_data.get("display_name_en", "Snack"),
+                                "education_stage": normalize_education_stage(snack_data.get("education_stage", ""))
+                            })
+
+                        # Add drink item
+                        if dinner_options.get("drink", {}).get("menu_category_id"):
+                            drink_data = dinner_options["drink"]
+                            daily_menu_doc.append("items", {
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "drink",
+                                "menu_category_id": drink_data.get("menu_category_id"),
+                                "display_name": drink_data.get("display_name", "Đồ uống"),
+                                "display_name_en": drink_data.get("display_name_en", "Drink"),
+                                "education_stage": normalize_education_stage(drink_data.get("education_stage", ""))
+                            })
+
+                    # Handle legacy items array (for backward compatibility)
+                    else:
+                        for item_data in meal_data.get("items", []):
+                            # Only allow education_stage for dinner meals
+                            education_stage = ""
+                            if meal_type == "dinner":
+                                education_stage = normalize_education_stage(item_data.get("education_stage", ""))
+
+                            daily_menu_doc.append("items", {
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": meal_type_reference,
+                                "menu_category_id": item_data.get("menu_category_id"),
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": education_stage
+                            })
 
                 # Save all changes in one transaction
                 daily_menu_doc.save()
@@ -384,29 +741,11 @@ def update_daily_menu():
                 frappe.db.rollback()
                 raise e
 
-        # Convert flat items back to meals structure for frontend compatibility
-        meals_result = {}
-        for item in daily_menu_doc.items:
-            meal_type = item.meal_type
-            if meal_type not in meals_result:
-                meals_result[meal_type] = {
-                    "meal_type": meal_type,
-                    "menu_type": "custom",
-                    "meal_type_reference": item.meal_type_reference or "",
-                    "items": []
-                }
-            
-            meals_result[meal_type]["items"].append({
-                "menu_category_id": item.menu_category_id,
-                "display_name": item.display_name or "",
-                "display_name_en": item.display_name_en or "",
-                "education_stage": item.education_stage or ""
-            })
-
+        # Convert flat items back to new meals structure for frontend compatibility
         daily_menu_data = {
             "name": daily_menu_doc.name,
             "menu_date": daily_menu_doc.menu_date,
-            "meals": list(meals_result.values())
+            "meals": convert_items_to_meals_structure(daily_menu_doc.items, daily_menu_doc.name)
         }
         return single_item_response(daily_menu_data, "Daily Menu updated successfully")
 
@@ -523,28 +862,9 @@ def get_daily_menus_by_month(month=None):
         # Get items for each daily menu and convert to meals structure
         for menu in daily_menus:
             daily_menu_doc = frappe.get_doc("SIS Daily Menu", menu.name)
-            
-            # Convert flat items to meals structure
-            meals_result = {}
-            for item in daily_menu_doc.items:
-                meal_type = item.meal_type
-                if meal_type not in meals_result:
-                    meals_result[meal_type] = {
-                        "meal_type": meal_type,
-                        "menu_type": "custom",
-                        "meal_type_reference": item.meal_type_reference or "",
-                        "name": f"{meal_type}_{menu.name}",
-                        "items": []
-                    }
-                
-                meals_result[meal_type]["items"].append({
-                    "menu_category_id": item.menu_category_id,
-                    "display_name": item.display_name or "",
-                    "display_name_en": item.display_name_en or "",
-                    "education_stage": item.education_stage or ""
-                })
 
-            menu["meals"] = list(meals_result.values())
+            # Convert flat items to new meals structure
+            menu["meals"] = convert_items_to_meals_structure(daily_menu_doc.items, menu.name)
 
         return list_response(daily_menus, "Daily menus for month fetched successfully")
 
