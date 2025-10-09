@@ -1093,10 +1093,10 @@ def update_report_section():
                     subject_id = payload.get("subject_id") or data.get("subject_id")
                     if not subject_id:
                         # Try to find SIS_ACTUAL_SUBJECT-* pattern in payload keys
-                for key in payload.keys():
+                        for key in payload.keys():
                             if key.startswith("SIS_ACTUAL_SUBJECT-"):
-                        subject_id = key
-                        break
+                                subject_id = key
+                                break
                 else:
                     # Check if payload is a dict of subjects (keys are subject IDs)
                     # In this case, we'll merge each subject
