@@ -887,8 +887,15 @@ def list_reports():
 @frappe.whitelist(allow_guest=False)
 def get_report(report_id: Optional[str] = None):
     """Get a single student report card by ID."""
+    # Try multiple sources for report_id
     report_id = report_id or frappe.form_dict.get("report_id")
+    
+    # If not in form_dict, try request.args (for GET query params)
+    if not report_id and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+        report_id = frappe.request.args.get("report_id")
+    
     if not report_id:
+        frappe.logger().error(f"[get_report] report_id not found. form_dict: {frappe.form_dict}")
         return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
 
     campus_id = _campus()
