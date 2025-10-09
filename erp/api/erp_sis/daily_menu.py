@@ -643,17 +643,17 @@ def update_daily_menu():
                         if meal_data.get("set_a_config", {}).get("enabled"):
                             config = meal_data["set_a_config"]
                             for item_data in config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id")
-                        if menu_category_id:  
-                            daily_menu_doc.append("items", {
-                                "doctype": "SIS Daily Menu Item",
-                                "meal_type": meal_type,
-                                "meal_type_reference": "set_a",
-                                "menu_category_id": menu_category_id,
-                                "display_name": item_data.get("display_name", ""),
-                                "display_name_en": item_data.get("display_name_en", ""),
-                                "education_stage": ""
-                            })
+                                menu_category_id = item_data.get("menu_category_id")
+                                if menu_category_id:
+                                    daily_menu_doc.append("items", {
+                                        "doctype": "SIS Daily Menu Item",
+                                        "meal_type": meal_type,
+                                        "meal_type_reference": "set_a",
+                                        "menu_category_id": menu_category_id,
+                                        "display_name": item_data.get("display_name", ""),
+                                        "display_name_en": item_data.get("display_name_en", ""),
+                                        "education_stage": ""
+                                    })
 
                         # Handle set_au_config
                         if meal_data.get("set_au_config", {}).get("enabled"):
