@@ -282,7 +282,7 @@ def delete_leave_request():
 				return error_response("Đã quá thời hạn xóa đơn (24 giờ)")
 
 		# Delete the request
-		frappe.delete_doc("SIS Student Leave Request", leave_request_id)
+		frappe.delete_doc("SIS Student Leave Request", leave_request_id, ignore_permissions=True)
 
 		return success_response({"message": "Đã xóa đơn xin nghỉ phép thành công"})
 
