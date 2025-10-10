@@ -252,8 +252,8 @@ def update_leave_request():
 def get_student_leave_requests(student_id):
 	"""Get leave requests for a specific student (for teachers/admins)"""
 	try:
-	if not student_id:
-		return validation_error_response("Thiếu student_id", {"student_id": ["Student ID là bắt buộc"]})
+		if not student_id:
+			return validation_error_response("Thiếu student_id", {"student_id": ["Student ID là bắt buộc"]})
 
 		# Check permissions (SIS Teacher, SIS Admin, SIS Manager, System Manager)
 		user_roles = frappe.get_roles(frappe.session.user)
