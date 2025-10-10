@@ -296,8 +296,8 @@ def delete_leave_request():
 def get_student_leave_requests(student_id):
 	"""Get leave requests for a specific student (for teachers/admins)"""
 	try:
-	if not student_id:
-		return validation_error_response("Thiếu student_id", {"student_id": ["Student ID là bắt buộc"]})
+		if not student_id:
+			return validation_error_response("Thiếu student_id", {"student_id": ["Student ID là bắt buộc"]})
 
 		# Check permissions (SIS Teacher, SIS Admin, SIS Manager, System Manager)
 		user_roles = frappe.get_roles(frappe.session.user)
@@ -334,57 +334,57 @@ def get_student_leave_requests(student_id):
 		return error_response(f"Lỗi khi lấy đơn xin nghỉ phép của học sinh: {str(e)}")
 
 
-@frappe.whitelist()
-def debug_relationships():
-	"""Debug API to check parent-student relationships"""
-	try:
-		parent_id = _get_current_parent()
-		if not parent_id:
-			return error_response("Không tìm thấy thông tin phụ huynh")
+# @frappe.whitelist()
+# def debug_relationships():
+# 	"""Debug API to check parent-student relationships"""
+# 	try:
+# 		parent_id = _get_current_parent()
+# 		if not parent_id:
+# 			return error_response("Không tìm thấy thông tin phụ huynh")
 
-		# Get all relationships for this parent
-		parent_relationships = frappe.get_all("CRM Family Relationship",
-			filters={"parent": parent_id},
-			fields=["student", "parent", "relationship_type"]
-		)
+# 		# Get all relationships for this parent
+# 		parent_relationships = frappe.get_all("CRM Family Relationship",
+# 			filters={"parent": parent_id},
+# 			fields=["student", "parent", "relationship_type"]
+# 		)
 
-		# Get all students from auth storage (frontend data)
-		user_email = frappe.session.user
-		if "@parent.wellspring.edu.vn" in user_email:
-			guardian_id_from_email = user_email.split("@")[0]
+# 		# Get all students from auth storage (frontend data)
+# 		user_email = frappe.session.user
+# 		if "@parent.wellspring.edu.vn" in user_email:
+# 			guardian_id_from_email = user_email.split("@")[0]
 
-			# Get actual guardian name
-			actual_guardian_name = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_id_from_email}, "name")
+# 			# Get actual guardian name
+# 			actual_guardian_name = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_id_from_email}, "name")
 
-			# Get comprehensive data like frontend does
-			comprehensive_data = frappe.get_all(
-				"CRM Family Relationship",
-				filters={"parent": actual_guardian_name},
-				fields=["student", "relationship_type"]
-			)
+# 			# Get comprehensive data like frontend does
+# 			comprehensive_data = frappe.get_all(
+# 				"CRM Family Relationship",
+# 				filters={"parent": actual_guardian_name},
+# 				fields=["student", "relationship_type"]
+# 			)
 
-			students_data = []
-			for rel in comprehensive_data:
-				try:
-					student_doc = frappe.get_doc("CRM Student", rel.student)
-					students_data.append({
-						"name": student_doc.name,
-						"student_name": student_doc.student_name,
-						"student_code": student_doc.student_code
-					})
-				except:
-					continue
+# 			students_data = []
+# 			for rel in comprehensive_data:
+# 				try:
+# 					student_doc = frappe.get_doc("CRM Student", rel.student)
+# 					students_data.append({
+# 						"name": student_doc.name,
+# 						"student_name": student_doc.student_name,
+# 						"student_code": student_doc.student_code
+# 					})
+# 				except:
+# 					continue
 
-		return success_response({
-			"parent_id": parent_id,
-			"user_email": user_email,
-			"parent_relationships": parent_relationships,
-			"students_from_relationships": students_data
-		})
+# 		return success_response({
+# 			"parent_id": parent_id,
+# 			"user_email": user_email,
+# 			"parent_relationships": parent_relationships,
+# 			"students_from_relationships": students_data
+# 		})
 
-	except Exception as e:
-		frappe.logger().error(f"Debug relationships error: {str(e)}")
-		return error_response(f"Lỗi debug: {str(e)}")
+# 	except Exception as e:
+# 		frappe.logger().error(f"Debug relationships error: {str(e)}")
+# 		return error_response(f"Lỗi debug: {str(e)}")
 
 
 @frappe.whitelist()
