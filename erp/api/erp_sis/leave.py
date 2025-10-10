@@ -85,6 +85,56 @@ def get_class_leave_requests(class_id=None):
 
 
 @frappe.whitelist(allow_guest=False)
+def get_student_photo(student_id=None):
+    """Get student photo URL"""
+    try:
+        # Try to get student_id from various sources
+        if not student_id:
+            student_id = frappe.form_dict.get('student_id') or frappe.request.args.get('student_id')
+
+        if not student_id:
+            return validation_error_response("Thiếu student_id", {"student_id": ["Student ID là bắt buộc"]})
+
+        # Get active student photo
+        photo = frappe.get_all(
+            "SIS Photo",
+            filters={
+                "student_id": student_id,
+                "type": "student",
+                "status": "Active"
+            },
+            fields=["name", "photo", "upload_date"],
+            order_by="upload_date desc",
+            limit=1
+        )
+
+        if photo and photo[0].photo:
+            # Get full file URL
+            file_url = photo[0].photo
+            if file_url.startswith('/files/'):
+                file_url = frappe.utils.get_url(file_url)
+            elif not file_url.startswith('http'):
+                file_url = frappe.utils.get_url('/files/' + file_url)
+
+            return success_response({
+                "photo_url": file_url,
+                "photo_name": photo[0].name,
+                "upload_date": photo[0].upload_date
+            })
+
+        # Return default response if no photo found
+        return success_response({
+            "photo_url": None,
+            "photo_name": None,
+            "upload_date": None
+        })
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "ERP SIS Get Student Photo Error")
+        return error_response(f"Lỗi khi lấy ảnh học sinh: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
 def get_leave_request_details(leave_request_id=None):
     """Get detailed information of a specific leave request"""
     try:
