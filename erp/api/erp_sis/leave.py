@@ -74,7 +74,7 @@ def get_class_leave_requests(class_id=None):
         return success_response({
             "leave_requests": leave_requests,
             "total": len(leave_requests),
-            "class_name": class_doc.class_name
+            "class_name": class_doc.title
         })
 
     except frappe.DoesNotExistError:
