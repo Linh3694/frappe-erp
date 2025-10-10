@@ -46,12 +46,18 @@ def _validate_parent_student_access(parent_id, student_ids):
 def submit_leave_request():
 	"""Submit leave request for multiple students"""
 	try:
-		data = frappe.form_dict
+		# TEMPORARY: Try JSON first
+		data = json.loads(frappe.request.data or '{}')
+		frappe.logger().info(f"Submit leave request data: {data}")
 
-		# Required fields validation
-		required_fields = ['students', 'reason', 'start_date', 'end_date']
+		# Required fields validation (except students, handled separately)
+		required_fields = ['reason', 'start_date', 'end_date']
+		frappe.logger().info(f"Checking required fields: {required_fields}")
+		frappe.logger().info(f"Data keys: {list(data.keys())}")
 		for field in required_fields:
+			frappe.logger().info(f"Checking field '{field}': in data={field in data}, value={data.get(field)}")
 			if field not in data or not data[field]:
+				frappe.logger().info(f"Field '{field}' failed validation")
 				return validation_error_response(f"Thiếu trường bắt buộc: {field}", {field: [f"Trường {field} là bắt buộc"]})
 
 		# Validate reason
@@ -68,13 +74,19 @@ def submit_leave_request():
 		if not parent_id:
 			return error_response("Không tìm thấy thông tin phụ huynh")
 
-		# Parse students list if it's a string
+		# Parse students list if it's a string (for FormData) or use directly (for JSON)
 		students = data['students']
+		frappe.logger().info(f"Raw students data: {students}, type: {type(students)}")
 		if isinstance(students, str):
 			try:
 				students = json.loads(students)
+				frappe.logger().info(f"Parsed students: {students}")
 			except:
 				return validation_error_response("Dữ liệu học sinh không hợp lệ", {"students": ["Định dạng danh sách học sinh không hợp lệ"]})
+
+		# Validate students list
+		if not students or (isinstance(students, list) and len(students) == 0):
+			return validation_error_response("Vui lòng chọn ít nhất một học sinh", {"students": ["Phải chọn ít nhất một học sinh"]})
 
 		# Validate parent has access to all students
 		if not _validate_parent_student_access(parent_id, students):
@@ -105,19 +117,20 @@ def submit_leave_request():
 
 			leave_request.insert(ignore_permissions=True)
 
+			# TEMPORARY: Skip file handling for JSON test
 			# Attach files if any
-			if frappe.request.files:
-				for file_key, file_obj in frappe.request.files.items():
-					if file_key.startswith('documents'):
-						file_doc = frappe.get_doc({
-							"doctype": "File",
-							"file_name": file_obj.filename,
-							"attached_to_doctype": "SIS Student Leave Request",
-							"attached_to_name": leave_request.name,
-							"content": file_obj.stream.read(),
-							"is_private": 1
-						})
-						file_doc.insert(ignore_permissions=True)
+			# if frappe.request.files:
+			# 	for file_key, file_obj in frappe.request.files.items():
+			# 		if file_key.startswith('documents'):
+			# 			file_doc = frappe.get_doc({
+			# 				"doctype": "File",
+			# 				"file_name": file_obj.filename,
+			# 				"attached_to_doctype": "SIS Student Leave Request",
+			# 				"attached_to_name": leave_request.name,
+			# 				"content": file_obj.stream.read(),
+			# 				"is_private": 1
+			# 			})
+			# 			file_doc.insert(ignore_permissions=True)
 
 			created_requests.append({
 				"id": leave_request.name,
@@ -189,7 +202,8 @@ def get_my_leave_requests(student_id=None):
 def update_leave_request():
 	"""Update leave request (within 24 hours)"""
 	try:
-		data = frappe.form_dict
+		# TEMPORARY: Try JSON first
+		data = json.loads(frappe.request.data or '{}')
 
 		# Required fields
 		if 'id' not in data:
@@ -216,19 +230,20 @@ def update_leave_request():
 			if field in data:
 				leave_request.set(field, data[field])
 
+		# TEMPORARY: Skip file handling for JSON test
 		# Handle file attachments if any
-		if frappe.request.files:
-			for file_key, file_obj in frappe.request.files.items():
-				if file_key.startswith('documents'):
-					file_doc = frappe.get_doc({
-						"doctype": "File",
-						"file_name": file_obj.filename,
-						"attached_to_doctype": "SIS Student Leave Request",
-						"attached_to_name": leave_request.name,
-						"content": file_obj.stream.read(),
-						"is_private": 1
-					})
-					file_doc.insert(ignore_permissions=True)
+		# if frappe.request.files:
+		# 	for file_key, file_obj in frappe.request.files.items():
+		# 		if file_key.startswith('documents'):
+		# 			file_doc = frappe.get_doc({
+		# 				"doctype": "File",
+		# 				"file_name": file_obj.filename,
+		# 				"attached_to_doctype": "SIS Student Leave Request",
+		# 				"attached_to_name": leave_request.name,
+		# 				"content": file_obj.stream.read(),
+		# 				"is_private": 1
+		# 			})
+		# 			file_doc.insert(ignore_permissions=True)
 
 		# Validate and save
 		leave_request.save(ignore_permissions=True)
