@@ -52,16 +52,16 @@ def submit_leave_request():
 		required_fields = ['students', 'reason', 'start_date', 'end_date']
 		for field in required_fields:
 			if field not in data or not data[field]:
-				return validation_error_response(f"Thiếu trường bắt buộc: {field}")
+				return validation_error_response(f"Thiếu trường bắt buộc: {field}", {field: [f"Trường {field} là bắt buộc"]})
 
 		# Validate reason
 		valid_reasons = ['sick_child', 'family_matters', 'other']
 		if data['reason'] not in valid_reasons:
-			return validation_error_response("Lý do không hợp lệ")
+			return validation_error_response("Lý do không hợp lệ", {"reason": ["Lý do phải là một trong: con_ốm, gia_đình_có_việc_bận, lý_do_khác"]})
 
 		# Validate other_reason if reason is 'other'
 		if data['reason'] == 'other' and not data.get('other_reason', '').strip():
-			return validation_error_response("Vui lòng nhập lý do khác")
+			return validation_error_response("Vui lòng nhập lý do khác", {"other_reason": ["Vui lòng nhập lý do cụ thể khi chọn 'Lý do khác'"]})
 
 		# Get current parent
 		parent_id = _get_current_parent()
@@ -74,7 +74,7 @@ def submit_leave_request():
 			try:
 				students = json.loads(students)
 			except:
-				return validation_error_response("Dữ liệu học sinh không hợp lệ")
+				return validation_error_response("Dữ liệu học sinh không hợp lệ", {"students": ["Định dạng danh sách học sinh không hợp lệ"]})
 
 		# Validate parent has access to all students
 		if not _validate_parent_student_access(parent_id, students):
@@ -193,7 +193,7 @@ def update_leave_request():
 
 		# Required fields
 		if 'id' not in data:
-			return validation_error_response("Thiếu ID đơn xin nghỉ phép")
+			return validation_error_response("Thiếu ID đơn xin nghỉ phép", {"id": ["ID đơn xin nghỉ phép là bắt buộc"]})
 
 		leave_request_id = data['id']
 
@@ -252,8 +252,8 @@ def update_leave_request():
 def get_student_leave_requests(student_id):
 	"""Get leave requests for a specific student (for teachers/admins)"""
 	try:
-		if not student_id:
-			return validation_error_response("Thiếu student_id")
+	if not student_id:
+		return validation_error_response("Thiếu student_id", {"student_id": ["Student ID là bắt buộc"]})
 
 		# Check permissions (SIS Teacher, SIS Admin, SIS Manager, System Manager)
 		user_roles = frappe.get_roles(frappe.session.user)
