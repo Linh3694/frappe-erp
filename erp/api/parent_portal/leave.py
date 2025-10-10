@@ -72,13 +72,12 @@ def submit_leave_request():
 		if data['reason'] == 'other' and not data.get('other_reason', '').strip():
 			return validation_error_response("Vui lòng nhập lý do khác", {"other_reason": ["Vui lòng nhập lý do cụ thể khi chọn 'Lý do khác'"]})
 
-	# Get current parent
-	parent_id = _get_current_parent()
-	frappe.logger().info(f"Current parent ID: {parent_id}")
-	if not parent_id:
-		return error_response("Không tìm thấy thông tin phụ huynh")
+		# Get current parent
+		parent_id = _get_current_parent()
+		frappe.logger().info(f"Current parent ID: {parent_id}")
+		if not parent_id:
+			return error_response("Không tìm thấy thông tin phụ huynh")
 
-		# Parse students list if it's a string (for FormData) or use directly (for JSON)
 		students = data['students']
 		frappe.logger().info(f"Raw students data: {students}, type: {type(students)}")
 		if isinstance(students, str):
