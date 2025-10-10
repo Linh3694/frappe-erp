@@ -1,0 +1,281 @@
+"""
+Parent Portal Leave Request API
+Handles leave request submission and management for parent portal
+"""
+
+import frappe
+from frappe import _
+from datetime import datetime, timedelta
+import json
+from erp.utils.api_response import validation_error_response, list_response, error_response, success_response
+
+
+def _get_current_parent():
+	"""Get current logged in parent/guardian"""
+	user = frappe.session.user
+	if user == "Guest":
+		return None
+
+	# Get guardian linked to current user
+	guardian = frappe.db.get_value("CRM Guardian", {"user": user}, "name")
+	return guardian
+
+
+def _validate_parent_student_access(parent_id, student_ids):
+	"""Validate that parent has access to all students"""
+	for student_id in student_ids:
+		if not frappe.db.exists("CRM Student Guardian", {
+			"guardian": parent_id,
+			"student": student_id
+		}):
+			return False
+	return True
+
+
+@frappe.whitelist()
+def submit_leave_request():
+	"""Submit leave request for multiple students"""
+	try:
+		data = json.loads(frappe.request.data or '{}')
+
+		# Required fields validation
+		required_fields = ['students', 'reason', 'start_date', 'end_date']
+		for field in required_fields:
+			if field not in data or not data[field]:
+				return validation_error_response(f"Thiếu trường bắt buộc: {field}")
+
+		# Validate reason
+		valid_reasons = ['sick_child', 'family_matters', 'other']
+		if data['reason'] not in valid_reasons:
+			return validation_error_response("Lý do không hợp lệ")
+
+		# Validate other_reason if reason is 'other'
+		if data['reason'] == 'other' and not data.get('other_reason', '').strip():
+			return validation_error_response("Vui lòng nhập lý do khác")
+
+		# Get current parent
+		parent_id = _get_current_parent()
+		if not parent_id:
+			return error_response("Không tìm thấy thông tin phụ huynh")
+
+		# Validate parent has access to all students
+		if not _validate_parent_student_access(parent_id, data['students']):
+			return error_response("Bạn không có quyền gửi đơn cho một số học sinh đã chọn")
+
+		created_requests = []
+
+		# Create separate request for each student
+		for student_id in data['students']:
+			# Get student campus
+			student_campus = frappe.db.get_value("CRM Student", student_id, "campus_id")
+			if not student_campus:
+				continue
+
+			# Create leave request
+			leave_request = frappe.get_doc({
+				"doctype": "SIS Student Leave Request",
+				"student_id": student_id,
+				"parent_id": parent_id,
+				"campus_id": student_campus,
+				"reason": data['reason'],
+				"other_reason": data.get('other_reason', ''),
+				"start_date": data['start_date'],
+				"end_date": data['end_date'],
+				"description": data.get('description', ''),
+				"submitted_at": datetime.now()
+			})
+
+			leave_request.insert()
+			created_requests.append({
+				"id": leave_request.name,
+				"student_id": student_id,
+				"student_name": leave_request.student_name
+			})
+
+		return success_response({
+			"message": f"Đã gửi đơn xin nghỉ phép cho {len(created_requests)} học sinh",
+			"requests": created_requests
+		})
+
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Parent Portal Leave Request Submit Error")
+		return error_response(f"Lỗi khi gửi đơn xin nghỉ phép: {str(e)}")
+
+
+@frappe.whitelist()
+def get_my_leave_requests(student_id=None):
+	"""Get leave requests for current parent's students"""
+	try:
+		parent_id = _get_current_parent()
+		if not parent_id:
+			return error_response("Không tìm thấy thông tin phụ huynh")
+
+		# Build filters
+		filters = {"parent_id": parent_id}
+		if student_id:
+			filters["student_id"] = student_id
+
+		# Get leave requests
+		requests = frappe.get_all(
+			"SIS Student Leave Request",
+			filters=filters,
+			fields=[
+				"name", "student_id", "student_name", "student_code",
+				"reason", "other_reason", "start_date", "end_date",
+				"total_days", "description", "submitted_at",
+				"creation", "modified"
+			],
+			order_by="creation desc"
+		)
+
+		# Transform reason to Vietnamese for display
+		reason_mapping = {
+			'sick_child': 'Con ốm',
+			'family_matters': 'Gia đình có việc bận',
+			'other': 'Lý do khác'
+		}
+
+		for request in requests:
+			request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
+			# Check if can edit (within 24 hours)
+			if request['submitted_at']:
+				submitted_time = datetime.strptime(str(request['submitted_at']), '%Y-%m-%d %H:%M:%S.%f')
+				time_diff = datetime.now() - submitted_time
+				request['can_edit'] = time_diff.total_seconds() <= (24 * 60 * 60)
+			else:
+				request['can_edit'] = True
+
+		return list_response(requests)
+
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Parent Portal Get Leave Requests Error")
+		return error_response(f"Lỗi khi lấy danh sách đơn xin nghỉ phép: {str(e)}")
+
+
+@frappe.whitelist()
+def update_leave_request():
+	"""Update leave request (within 24 hours)"""
+	try:
+		data = json.loads(frappe.request.data or '{}')
+
+		# Required fields
+		if 'id' not in data:
+			return validation_error_response("Thiếu ID đơn xin nghỉ phép")
+
+		leave_request_id = data['id']
+
+		# Get leave request
+		leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
+
+		# Check ownership
+		parent_id = _get_current_parent()
+		if leave_request.parent_id != parent_id:
+			return error_response("Bạn không có quyền chỉnh sửa đơn này")
+
+		# Check if can edit (within 24 hours)
+		if not leave_request.can_edit():
+			return error_response("Đã quá thời hạn chỉnh sửa (24 giờ)")
+
+		# Update fields
+		updatable_fields = ['reason', 'other_reason', 'start_date', 'end_date', 'description']
+
+		for field in updatable_fields:
+			if field in data:
+				leave_request.set(field, data[field])
+
+		# Validate and save
+		leave_request.save()
+
+		return success_response({
+			"message": "Đã cập nhật đơn xin nghỉ phép thành công",
+			"request": {
+				"id": leave_request.name,
+				"student_name": leave_request.student_name
+			}
+		})
+
+	except frappe.DoesNotExistError:
+		return error_response("Không tìm thấy đơn xin nghỉ phép")
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Parent Portal Update Leave Request Error")
+		return error_response(f"Lỗi khi cập nhật đơn xin nghỉ phép: {str(e)}")
+
+
+@frappe.whitelist()
+def get_student_leave_requests(student_id):
+	"""Get leave requests for a specific student (for teachers/admins)"""
+	try:
+		if not student_id:
+			return validation_error_response("Thiếu student_id")
+
+		# Check permissions (SIS Teacher, SIS Admin, SIS Manager, System Manager)
+		user_roles = frappe.get_roles(frappe.session.user)
+		allowed_roles = ['SIS Teacher', 'SIS Admin', 'SIS Manager', 'System Manager']
+
+		if not any(role in user_roles for role in allowed_roles):
+			return error_response("Bạn không có quyền xem thông tin này")
+
+		requests = frappe.get_all(
+			"SIS Student Leave Request",
+			filters={"student_id": student_id},
+			fields=[
+				"name", "student_name", "parent_name", "reason", "other_reason",
+				"start_date", "end_date", "total_days", "description",
+				"submitted_at", "creation", "modified"
+			],
+			order_by="creation desc"
+		)
+
+		# Transform reason to Vietnamese
+		reason_mapping = {
+			'sick_child': 'Con ốm',
+			'family_matters': 'Gia đình có việc bận',
+			'other': 'Lý do khác'
+		}
+
+		for request in requests:
+			request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
+
+		return list_response(requests)
+
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Parent Portal Get Student Leave Requests Error")
+		return error_response(f"Lỗi khi lấy đơn xin nghỉ phép của học sinh: {str(e)}")
+
+
+@frappe.whitelist()
+def get_all_leave_requests():
+	"""Get all leave requests (for admins/managers)"""
+	try:
+		# Check permissions
+		user_roles = frappe.get_roles(frappe.session.user)
+		allowed_roles = ['SIS Admin', 'SIS Manager', 'System Manager']
+
+		if not any(role in user_roles for role in allowed_roles):
+			return error_response("Bạn không có quyền xem thông tin này")
+
+		requests = frappe.get_all(
+			"SIS Student Leave Request",
+			fields=[
+				"name", "student_name", "student_code", "parent_name",
+				"campus_id", "reason", "start_date", "end_date",
+				"total_days", "submitted_at"
+			],
+			order_by="creation desc"
+		)
+
+		# Transform reason to Vietnamese
+		reason_mapping = {
+			'sick_child': 'Con ốm',
+			'family_matters': 'Gia đình có việc bận',
+			'other': 'Lý do khác'
+		}
+
+		for request in requests:
+			request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
+
+		return list_response(requests)
+
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Parent Portal Get All Leave Requests Error")
+		return error_response(f"Lỗi khi lấy danh sách tất cả đơn xin nghỉ phép: {str(e)}")

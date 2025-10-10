@@ -1,0 +1,203 @@
+{
+  "actions": [],
+  "allow_copy": 0,
+  "allow_events_in_timeline": 0,
+  "allow_guest_to_view": 0,
+  "allow_import": 0,
+  "allow_rename": 1,
+  "autoname": "format:SIS-LEAVE-{#####}",
+  "beta": 0,
+  "creation": "2024-12-10 00:00:00.000000",
+  "custom": 0,
+  "description": "Student Leave Request from Parent Portal",
+  "docstatus": 0,
+  "doctype": "DocType",
+  "document_type": "Document",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "student_id",
+    "student_name",
+    "student_code",
+    "parent_id",
+    "parent_name",
+    "campus_id",
+    "reason",
+    "other_reason",
+    "start_date",
+    "end_date",
+    "total_days",
+    "description",
+    "attachments",
+    "submitted_at"
+  ],
+  "fields": [
+    {
+      "fieldname": "student_id",
+      "fieldtype": "Link",
+      "label": "Học sinh",
+      "options": "CRM Student",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "student_name",
+      "fieldtype": "Data",
+      "label": "Tên học sinh",
+      "read_only": 1
+    },
+    {
+      "fieldname": "student_code",
+      "fieldtype": "Data",
+      "label": "Mã học sinh",
+      "read_only": 1
+    },
+    {
+      "fieldname": "parent_id",
+      "fieldtype": "Link",
+      "label": "Phụ huynh",
+      "options": "CRM Guardian",
+      "reqd": 1
+    },
+    {
+      "fieldname": "parent_name",
+      "fieldtype": "Data",
+      "label": "Tên phụ huynh",
+      "read_only": 1
+    },
+    {
+      "fieldname": "campus_id",
+      "fieldtype": "Link",
+      "label": "Trường học",
+      "options": "SIS Campus",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "reason",
+      "fieldtype": "Select",
+      "label": "Lý do nghỉ học",
+      "options": "sick_child\nfamily_matters\nother",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "other_reason",
+      "fieldtype": "Small Text",
+      "label": "Lý do khác",
+      "depends_on": "eval:doc.reason=='other'"
+    },
+    {
+      "fieldname": "start_date",
+      "fieldtype": "Date",
+      "label": "Ngày bắt đầu",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "end_date",
+      "fieldtype": "Date",
+      "label": "Ngày kết thúc",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "total_days",
+      "fieldtype": "Int",
+      "label": "Tổng số ngày",
+      "read_only": 1
+    },
+    {
+      "fieldname": "description",
+      "fieldtype": "Small Text",
+      "label": "Mô tả thêm"
+    },
+    {
+      "fieldname": "attachments",
+      "fieldtype": "Attach",
+      "label": "Tài liệu đính kèm"
+    },
+    {
+      "fieldname": "submitted_at",
+      "fieldtype": "Datetime",
+      "label": "Thời gian gửi",
+      "default": "Now",
+      "read_only": 1
+    }
+  ],
+  "index_web_pages_for_search": 1,
+  "is_submittable": 0,
+  "links": [],
+  "modified": "2024-12-10 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "SIS",
+  "name": "SIS Student Leave Request",
+  "naming_rule": "By \"Naming Series\"",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "create": 1,
+      "delete": 1,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "report": 1,
+      "role": "System Manager",
+      "share": 1,
+      "write": 1
+    },
+    {
+      "create": 1,
+      "delete": 1,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "report": 1,
+      "role": "SIS Manager",
+      "share": 1,
+      "write": 1
+    },
+    {
+      "create": 1,
+      "delete": 1,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "report": 1,
+      "role": "SIS Admin",
+      "share": 1,
+      "write": 1
+    },
+    {
+      "create": 1,
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "role": "SIS Parent",
+      "share": 1,
+      "write": 1
+    },
+    {
+      "email": 1,
+      "export": 1,
+      "print": 1,
+      "read": 1,
+      "role": "SIS Teacher",
+      "share": 1,
+      "write": 1
+    }
+  ],
+  "quick_entry": 0,
+  "search_fields": "student_name,start_date,end_date",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": [],
+  "title_field": "student_name",
+  "track_changes": 1,
+  "track_seen": 0,
+  "track_views": 0
+}
