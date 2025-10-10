@@ -27,8 +27,8 @@ def _get_current_parent():
 def _validate_parent_student_access(parent_id, student_ids):
 	"""Validate that parent has access to all students"""
 	for student_id in student_ids:
-		if not frappe.db.exists("CRM Student Guardian", {
-			"guardian": parent_id,
+		if not frappe.db.exists("CRM Family Relationship", {
+			"parent": parent_id,
 			"student": student_id
 		}):
 			return False
