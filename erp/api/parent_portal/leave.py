@@ -12,13 +12,16 @@ from erp.utils.api_response import validation_error_response, list_response, err
 
 def _get_current_parent():
 	"""Get current logged in parent/guardian"""
-	user = frappe.session.user
-	if user == "Guest":
+	user_email = frappe.session.user
+	if user_email == "Guest":
 		return None
 
-	# Get guardian linked to current user
-	guardian = frappe.db.get_value("CRM Guardian", {"user": user}, "name")
-	return guardian
+	# Extract guardian_id from email (format: guardian_id@parent.wellspring.edu.vn)
+	if "@parent.wellspring.edu.vn" not in user_email:
+		return None
+
+	guardian_id = user_email.split("@")[0]
+	return guardian_id
 
 
 def _validate_parent_student_access(parent_id, student_ids):
