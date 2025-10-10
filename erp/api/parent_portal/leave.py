@@ -193,8 +193,8 @@ def update_leave_request():
 			if field in data:
 				leave_request.set(field, data[field])
 
-	# Validate and save
-	leave_request.save(ignore_permissions=True)
+		# Validate and save
+		leave_request.save(ignore_permissions=True)
 
 		return success_response({
 			"message": "Đã cập nhật đơn xin nghỉ phép thành công",
