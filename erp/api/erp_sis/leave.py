@@ -15,9 +15,13 @@ from erp.utils.api_response import (
 
 
 @frappe.whitelist(allow_guest=False)
-def get_class_leave_requests(class_id: str = None):
+def get_class_leave_requests(class_id=None):
     """Get all leave requests for a specific class (admin view)"""
     try:
+        # Try to get class_id from various sources
+        if not class_id:
+            class_id = frappe.form_dict.get('class_id') or frappe.request.args.get('class_id')
+
         if not class_id:
             return validation_error_response("Thiếu class_id", {"class_id": ["Class ID là bắt buộc"]})
 
@@ -81,9 +85,13 @@ def get_class_leave_requests(class_id: str = None):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_leave_request_details(leave_request_id: str = None):
+def get_leave_request_details(leave_request_id=None):
     """Get detailed information of a specific leave request"""
     try:
+        # Try to get leave_request_id from various sources
+        if not leave_request_id:
+            leave_request_id = frappe.form_dict.get('leave_request_id') or frappe.request.args.get('leave_request_id')
+
         if not leave_request_id:
             return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
 
