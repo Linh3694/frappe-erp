@@ -765,6 +765,19 @@ def get_student_timetable_week(student_id=None, week_start=None, week_end=None):
     logs = []
     
     try:
+        # Get student_id from request args if not provided as parameter (Frappe GET request handling)
+        if not student_id:
+            # Try multiple ways to get the parameter
+            student_id = (
+                frappe.request.args.get('student_id') or
+                frappe.form_dict.get('student_id') or
+                frappe.local.form_dict.get('student_id')
+            )
+
+        logs.append(f"🔍 DEBUG: Received student_id parameter: '{student_id}' (type: {type(student_id).__name__})")
+        logs.append(f"🔍 DEBUG: frappe.request.args: {dict(frappe.request.args)}")
+        logs.append(f"🔍 DEBUG: frappe.form_dict: {frappe.form_dict}")
+
         # If student_id not provided, try to get from current user
         if not student_id:
             # Get guardian from current user
@@ -825,18 +838,20 @@ def get_student_timetable_week(student_id=None, week_start=None, week_end=None):
         we = _parse_iso_date(week_end) if week_end else _add_days(ws, 6)  # Sunday
         
         logs.append(f"📅 Week: {ws.strftime('%Y-%m-%d')} to {we.strftime('%Y-%m-%d')}")
-        
+
         # Get all classes for this student
         class_result = _get_student_classes(student_id)
         logs.extend(class_result.get("logs", []))
-        
+
+        logs.append(f"🔍 Student {student_id} has class_ids: {class_result.get('class_ids', [])}")
+
         if not class_result.get("success"):
             return {
                 "success": False,
                 "message": "Không thể lấy danh sách lớp của học sinh",
                 "logs": logs
             }
-        
+
         class_ids = class_result.get("class_ids", [])
         
         if not class_ids:
