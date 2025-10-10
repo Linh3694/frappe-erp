@@ -21,13 +21,14 @@ def _get_current_parent():
 		return None
 
 	guardian_id = user_email.split("@")[0]
-	return guardian_id
+
+	# Get the actual guardian name from guardian_id field
+	guardian = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_id}, "name")
+	return guardian
 
 
 def _validate_parent_student_access(parent_id, student_ids):
 	"""Validate that parent has access to all students"""
-	frappe.logger().info(f"Validating access for parent: {parent_id}, students: {student_ids}")
-
 	for student_id in student_ids:
 		# Check if relationship exists
 		exists = frappe.db.exists("CRM Family Relationship", {
@@ -36,24 +37,8 @@ def _validate_parent_student_access(parent_id, student_ids):
 		})
 
 		if not exists:
-			frappe.logger().error(f"No relationship found for parent {parent_id} and student {student_id}")
-
-			# Try alternative queries for debugging
-			parent_relationships = frappe.get_all("CRM Family Relationship",
-				filters={"parent": parent_id},
-				fields=["student", "parent"]
-			)
-			frappe.logger().info(f"Parent {parent_id} relationships: {parent_relationships}")
-
-			student_relationships = frappe.get_all("CRM Family Relationship",
-				filters={"student": student_id},
-				fields=["student", "parent"]
-			)
-			frappe.logger().info(f"Student {student_id} relationships: {student_relationships}")
-
 			return False
 
-	frappe.logger().info("Access validation passed")
 	return True
 
 
@@ -84,9 +69,8 @@ def submit_leave_request():
 			return error_response("Không tìm thấy thông tin phụ huynh")
 
 		# Validate parent has access to all students
-		# Temporarily disabled for debugging
-		# if not _validate_parent_student_access(parent_id, data['students']):
-		# 	return error_response("Bạn không có quyền gửi đơn cho một số học sinh đã chọn")
+		if not _validate_parent_student_access(parent_id, data['students']):
+			return error_response("Bạn không có quyền gửi đơn cho một số học sinh đã chọn")
 
 		created_requests = []
 
@@ -286,12 +270,15 @@ def debug_relationships():
 		# Get all students from auth storage (frontend data)
 		user_email = frappe.session.user
 		if "@parent.wellspring.edu.vn" in user_email:
-			guardian_id = user_email.split("@")[0]
+			guardian_id_from_email = user_email.split("@")[0]
+
+			# Get actual guardian name
+			actual_guardian_name = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_id_from_email}, "name")
 
 			# Get comprehensive data like frontend does
 			comprehensive_data = frappe.get_all(
 				"CRM Family Relationship",
-				filters={"parent": guardian_id},
+				filters={"parent": actual_guardian_name},
 				fields=["student", "relationship_type"]
 			)
 
