@@ -46,7 +46,7 @@ def _validate_parent_student_access(parent_id, student_ids):
 def submit_leave_request():
 	"""Submit leave request for multiple students"""
 	try:
-		data = json.loads(frappe.request.data or '{}')
+		data = frappe.form_dict
 
 		# Required fields validation
 		required_fields = ['students', 'reason', 'start_date', 'end_date']
@@ -68,14 +68,22 @@ def submit_leave_request():
 		if not parent_id:
 			return error_response("Không tìm thấy thông tin phụ huynh")
 
+		# Parse students list if it's a string
+		students = data['students']
+		if isinstance(students, str):
+			try:
+				students = json.loads(students)
+			except:
+				return validation_error_response("Dữ liệu học sinh không hợp lệ")
+
 		# Validate parent has access to all students
-		if not _validate_parent_student_access(parent_id, data['students']):
+		if not _validate_parent_student_access(parent_id, students):
 			return error_response("Bạn không có quyền gửi đơn cho một số học sinh đã chọn")
 
 		created_requests = []
 
 		# Create separate request for each student
-		for student_id in data['students']:
+		for student_id in students:
 			# Get student campus
 			student_campus = frappe.db.get_value("CRM Student", student_id, "campus_id")
 			if not student_campus:
@@ -96,6 +104,21 @@ def submit_leave_request():
 			})
 
 			leave_request.insert(ignore_permissions=True)
+
+			# Attach files if any
+			if frappe.request.files:
+				for file_key, file_obj in frappe.request.files.items():
+					if file_key.startswith('documents'):
+						file_doc = frappe.get_doc({
+							"doctype": "File",
+							"file_name": file_obj.filename,
+							"attached_to_doctype": "SIS Student Leave Request",
+							"attached_to_name": leave_request.name,
+							"content": file_obj.stream.read(),
+							"is_private": 1
+						})
+						file_doc.insert(ignore_permissions=True)
+
 			created_requests.append({
 				"id": leave_request.name,
 				"student_id": student_id,
@@ -166,7 +189,7 @@ def get_my_leave_requests(student_id=None):
 def update_leave_request():
 	"""Update leave request (within 24 hours)"""
 	try:
-		data = json.loads(frappe.request.data or '{}')
+		data = frappe.form_dict
 
 		# Required fields
 		if 'id' not in data:
@@ -192,6 +215,20 @@ def update_leave_request():
 		for field in updatable_fields:
 			if field in data:
 				leave_request.set(field, data[field])
+
+		# Handle file attachments if any
+		if frappe.request.files:
+			for file_key, file_obj in frappe.request.files.items():
+				if file_key.startswith('documents'):
+					file_doc = frappe.get_doc({
+						"doctype": "File",
+						"file_name": file_obj.filename,
+						"attached_to_doctype": "SIS Student Leave Request",
+						"attached_to_name": leave_request.name,
+						"content": file_obj.stream.read(),
+						"is_private": 1
+					})
+					file_doc.insert(ignore_permissions=True)
 
 		# Validate and save
 		leave_request.save(ignore_permissions=True)
