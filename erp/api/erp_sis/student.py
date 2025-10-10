@@ -366,8 +366,7 @@ def batch_get_students():
                 "student_code",
                 "dob",
                 "gender",
-                "campus_id",
-                "user_image"
+                "campus_id"
             ]
         )
         
@@ -385,9 +384,11 @@ def batch_get_students():
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
-        frappe.log_error(f"batch_get_students error: {error_detail}")
+        # Log to console (full detail)
         frappe.logger().error(f"❌ [Backend] batch_get_students error: {str(e)}")
         frappe.logger().error(f"❌ [Backend] Full traceback: {error_detail}")
+        # Log to Error Log (shortened to avoid character limit)
+        frappe.log_error(f"batch_get_students: {str(e)[:100]}", "Batch Get Students Error")
         return error_response(
             message=f"Failed to fetch students: {str(e)}",
             code="BATCH_GET_STUDENTS_ERROR"
