@@ -653,6 +653,202 @@ def get_event_attendance_statuses():
         return error_response(f"Failed to get event attendance statuses: {str(e)}", code="GET_EVENT_ATTENDANCE_STATUSES_ERROR", debug_info={"logs": debug_logs})
 
 
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def batch_get_event_attendance():
+    """
+    Get event attendance data for multiple periods in a single request.
+    Optimized to minimize database queries.
+    
+    Request body:
+    {
+        "class_id": "CLASS-001",
+        "date": "2024-01-15", 
+        "periods": ["Tiết 1", "Tiết 2", ...],
+        "education_stage_id": "EDU-STAGE-001"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "Tiết 1": {
+                "events": [{eventId, eventTitle, studentIds}],
+                "statuses": {student_id: status}
+            },
+            "Tiết 2": {...}
+        }
+    }
+    """
+    try:
+        frappe.logger().info("🚀 [Backend] batch_get_event_attendance called")
+        
+        # Parse request data
+        data = {}
+        if frappe.request.data:
+            try:
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().error(f"❌ [Backend] JSON parse failed: {str(e)}")
+                return error_response("Invalid JSON data", code="INVALID_JSON")
+        
+        class_id = data.get('class_id')
+        date = data.get('date')
+        periods = data.get('periods', [])
+        education_stage_id = data.get('education_stage_id')
+        
+        if not class_id or not date or not periods:
+            return error_response("Missing class_id, date, or periods", code="MISSING_PARAMS")
+        
+        frappe.logger().info(f"📝 [Backend] Parameters: class_id={class_id}, date={date}, periods={len(periods)}, education_stage_id={education_stage_id}")
+        
+        # Get ALL approved events (once)
+        all_events = frappe.get_all("SIS Event",
+                                   fields=["name", "title", "start_time", "end_time"],
+                                   filters={"status": "approved"})
+        
+        frappe.logger().info(f"📊 [Backend] Found {len(all_events)} approved events total")
+        
+        # Get timetable columns for these periods (once)
+        schedule_filters = {"period_type": "study", "period_name": ["in", periods]}
+        if education_stage_id:
+            schedule_filters["education_stage_id"] = education_stage_id
+            
+        schedules = frappe.get_all("SIS Timetable Column",
+                                  fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                                  filters=schedule_filters)
+        
+        # Create period_name -> schedule mapping
+        schedule_map = {}
+        for s in schedules:
+            period_name = s.get('period_name')
+            if period_name:
+                schedule_map[period_name] = s
+        
+        frappe.logger().info(f"📚 [Backend] Loaded {len(schedules)} schedules for {len(periods)} periods")
+        
+        # Get class students (once)
+        class_students = frappe.get_all("SIS Class Student",
+                                       filters={"class_id": class_id},
+                                       fields=["name", "student_id"])
+        class_student_dict = {cs['name']: cs['student_id'] for cs in class_students}
+        
+        frappe.logger().info(f"👥 [Backend] Class has {len(class_students)} students")
+        
+        # Result structure
+        result = {}
+        for period in periods:
+            result[period] = {"events": [], "statuses": {}}
+        
+        # Process each event once
+        for event in all_events:
+            try:
+                # Get event date times
+                event_date_times = frappe.get_all("SIS Event Date Time",
+                                                 filters={"event_id": event['name']},
+                                                 fields=["event_date", "start_time", "end_time"])
+                
+                # Check if event affects our date
+                matching_dt = None
+                for dt in event_date_times:
+                    if str(dt.get('event_date')) == date:
+                        matching_dt = dt
+                        break
+                
+                if not matching_dt:
+                    continue
+                
+                # Get event students (once per event)
+                event_students = frappe.get_all("SIS Event Student",
+                                               filters={"parent": event['name']},
+                                               fields=["class_student_id", "status"])
+                
+                # Match with class students
+                matching_student_ids = []
+                for es in event_students:
+                    class_student_id = es['class_student_id']
+                    if class_student_id in class_student_dict:
+                        student_id = class_student_dict[class_student_id]
+                        matching_student_ids.append(student_id)
+                
+                if not matching_student_ids:
+                    continue
+                
+                # Check which periods this event overlaps with
+                event_time_range = {
+                    'startTime': str(matching_dt.get('start_time', '')),
+                    'endTime': str(matching_dt.get('end_time', ''))
+                }
+                
+                for period_name in periods:
+                    schedule = schedule_map.get(period_name)
+                    if not schedule:
+                        continue
+                    
+                    if time_ranges_overlap(event_time_range, schedule):
+                        # Event affects this period!
+                        result[period_name]["events"].append({
+                            "eventId": event['name'],
+                            "eventTitle": event['title'],
+                            "studentIds": matching_student_ids
+                        })
+                
+            except Exception as event_error:
+                frappe.logger().warning(f"⚠️ [Backend] Error processing event {event.get('name')}: {str(event_error)}")
+                continue
+        
+        # Now batch query ALL event attendance records at once
+        all_event_ids = set()
+        all_student_ids = set()
+        for period_data in result.values():
+            for event in period_data["events"]:
+                all_event_ids.add(event["eventId"])
+                all_student_ids.update(event["studentIds"])
+        
+        if all_event_ids and all_student_ids:
+            frappe.logger().info(f"📊 [Backend] Batch querying attendance for {len(all_event_ids)} events and {len(all_student_ids)} students")
+            
+            attendance_records = frappe.db.sql("""
+                SELECT event_id, student_id, status
+                FROM `tabSIS Event Attendance`
+                WHERE event_id IN %(event_ids)s
+                    AND student_id IN %(student_ids)s
+                    AND attendance_date = %(date)s
+            """, {
+                "event_ids": list(all_event_ids),
+                "student_ids": list(all_student_ids),
+                "date": date
+            }, as_dict=True)
+            
+            # Create lookup: (event_id, student_id) -> status
+            attendance_lookup = {}
+            for record in attendance_records:
+                key = (record['event_id'], record['student_id'])
+                attendance_lookup[key] = record['status']
+            
+            frappe.logger().info(f"✅ [Backend] Found {len(attendance_records)} attendance records")
+            
+            # Apply statuses to results
+            for period_name, period_data in result.items():
+                for event in period_data["events"]:
+                    event_id = event["eventId"]
+                    for student_id in event["studentIds"]:
+                        key = (event_id, student_id)
+                        status = attendance_lookup.get(key, 'excused')  # Default to excused
+                        period_data["statuses"][student_id] = status
+        
+        frappe.logger().info(f"✅ [Backend] batch_get_event_attendance completed successfully")
+        return success_response(result)
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        frappe.logger().error(f"❌ [Backend] batch_get_event_attendance error: {str(e)}")
+        frappe.logger().error(f"❌ [Backend] Full traceback: {error_detail}")
+        frappe.log_error(f"batch_get_event_attendance: {str(e)[:100]}", "Batch Event Attendance Error")
+        return error_response(f"Failed to get batch event attendance: {str(e)}", code="BATCH_EVENT_ATTENDANCE_ERROR")
+
+
 @frappe.whitelist(allow_guest=False)
 def validate_period_for_education_stage():
     """
