@@ -376,6 +376,50 @@ def batch_get_students():
         
         frappe.logger().info(f"✅ [Backend] batch_get_students: Found {len(students)} students")
         
+        # ✨ Enrich với ảnh từ SIS Photo (batch query)
+        if len(students) > 0:
+            try:
+                frappe.logger().info(f"📸 [Backend] Enriching {len(students)} students with photos")
+                
+                # Get all active photos for these students in one query
+                student_ids_for_photos = [s.get('name') for s in students]
+                photos = frappe.db.sql("""
+                    SELECT 
+                        student_id,
+                        photo,
+                        upload_date
+                    FROM `tabSIS Photo`
+                    WHERE student_id IN %(student_ids)s
+                        AND type = 'student'
+                        AND status = 'Active'
+                    ORDER BY upload_date DESC
+                """, {"student_ids": student_ids_for_photos}, as_dict=True)
+                
+                # Create mapping: student_id -> photo URL
+                photo_map = {}
+                for photo in photos:
+                    student_id = photo.get('student_id')
+                    if student_id and student_id not in photo_map:
+                        photo_url = photo.get('photo')
+                        if photo_url:
+                            # Convert to full URL if needed
+                            if photo_url.startswith('/files/'):
+                                photo_url = frappe.utils.get_url(photo_url)
+                            elif not photo_url.startswith('http'):
+                                photo_url = frappe.utils.get_url('/files/' + photo_url)
+                            photo_map[student_id] = photo_url
+                
+                # Enrich students with photo URLs
+                for student in students:
+                    student_id = student.get('name')
+                    student['user_image'] = photo_map.get(student_id)
+                
+                frappe.logger().info(f"📸 [Backend] Enriched {len(photo_map)} students with photos")
+                
+            except Exception as photo_error:
+                # Don't fail the whole request if photo loading fails
+                frappe.logger().warning(f"⚠️ [Backend] Failed to load photos: {str(photo_error)}")
+        
         return success_response(
             data=students,
             message=f"Successfully fetched {len(students)} students"
