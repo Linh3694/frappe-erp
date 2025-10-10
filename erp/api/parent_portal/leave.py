@@ -254,7 +254,8 @@ def update_leave_request():
 def delete_leave_request():
 	"""Delete leave request"""
 	try:
-		data = frappe.form_dict
+		data = json.loads(frappe.request.data or '{}')
+		frappe.logger().info(f"Delete leave request data: {data}")
 
 		# Required field
 		if 'id' not in data:
