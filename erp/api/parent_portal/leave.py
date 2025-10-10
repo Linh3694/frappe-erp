@@ -29,14 +29,17 @@ def _get_current_parent():
 
 def _validate_parent_student_access(parent_id, student_ids):
 	"""Validate that parent has access to all students"""
+	frappe.logger().info(f"Validating access for parent: {parent_id}, students: {student_ids}")
 	for student_id in student_ids:
+		frappe.logger().info(f"Checking relationship for student: {student_id}")
 		# Check if relationship exists
 		exists = frappe.db.exists("CRM Family Relationship", {
 			"parent": parent_id,
 			"student": student_id
 		})
-
+		frappe.logger().info(f"Relationship exists: {exists}")
 		if not exists:
+			frappe.logger().info(f"No relationship found for parent {parent_id} and student {student_id}")
 			return False
 
 	return True
@@ -69,10 +72,11 @@ def submit_leave_request():
 		if data['reason'] == 'other' and not data.get('other_reason', '').strip():
 			return validation_error_response("Vui lòng nhập lý do khác", {"other_reason": ["Vui lòng nhập lý do cụ thể khi chọn 'Lý do khác'"]})
 
-		# Get current parent
-		parent_id = _get_current_parent()
-		if not parent_id:
-			return error_response("Không tìm thấy thông tin phụ huynh")
+	# Get current parent
+	parent_id = _get_current_parent()
+	frappe.logger().info(f"Current parent ID: {parent_id}")
+	if not parent_id:
+		return error_response("Không tìm thấy thông tin phụ huynh")
 
 		# Parse students list if it's a string (for FormData) or use directly (for JSON)
 		students = data['students']
