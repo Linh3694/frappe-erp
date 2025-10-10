@@ -54,7 +54,7 @@ def get_class_leave_requests(class_id=None):
             "SIS Student Leave Request",
             filters={"student_id": ["in", student_ids]},
             fields=[
-                "name", "student_name", "parent_name", "reason", "other_reason",
+                "name", "student_name", "parent_name", "reason", "other_reason", "student_code",
                 "start_date", "end_date", "total_days", "description",
                 "submitted_at", "creation", "modified", "student_id", "parent_id"
             ],
