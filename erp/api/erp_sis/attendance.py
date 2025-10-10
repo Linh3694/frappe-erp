@@ -59,6 +59,83 @@ def get_class_attendance(class_id=None, date=None, period=None):
 		return error_response(message="Failed to fetch attendance", code="GET_ATTENDANCE_ERROR")
 
 
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def batch_get_class_attendance(class_id=None, date=None, periods=None):
+	"""Get attendance for multiple periods in a single request.
+	
+	Request body:
+	{
+		"class_id": "CLASS-001",
+		"date": "2024-01-15",
+		"periods": ["1", "2", "3", ..., "homeroom"]
+	}
+	
+	Returns:
+	{
+		"success": true,
+		"data": {
+			"1": [{student_id, status, ...}, ...],
+			"2": [{student_id, status, ...}, ...],
+			"homeroom": [{student_id, status, ...}, ...]
+		}
+	}
+	"""
+	try:
+		body = _get_json_body() or {}
+		if class_id is None:
+			class_id = body.get('class_id') or frappe.request.args.get("class_id")
+		if date is None:
+			date = body.get('date') or frappe.request.args.get("date")
+		if periods is None:
+			periods = body.get('periods')
+		
+		if not class_id or not date or not periods:
+			return error_response(message="Missing required parameters: class_id, date, periods", code="MISSING_PARAMETERS")
+		
+		if isinstance(periods, str):
+			try:
+				periods = json.loads(periods)
+			except Exception:
+				periods = []
+		
+		if not isinstance(periods, list) or not periods:
+			return error_response(message="periods must be a non-empty array", code="INVALID_PERIODS")
+		
+		frappe.logger().info(f"🔍 [Backend] batch_get_class_attendance: class={class_id}, date={date}, periods={len(periods)}")
+		
+		# Batch query all periods at once
+		rows = frappe.get_all(
+			"SIS Class Attendance",
+			filters={
+				"class_id": class_id,
+				"date": date,
+				"period": ["in", periods]
+			},
+			fields=[
+				"name", "student_id", "student_code", "student_name", 
+				"class_id", "date", "period", "status", "remarks"
+			]
+		)
+		
+		# Group by period
+		result = {}
+		for period in periods:
+			result[period] = []
+		
+		for row in rows:
+			period = row.get('period')
+			if period in result:
+				result[period].append(row)
+		
+		frappe.logger().info(f"✅ [Backend] batch_get_class_attendance: Found {len(rows)} total records across {len(periods)} periods")
+		
+		return success_response(data=result, message="Batch attendance fetched successfully")
+	except Exception as e:
+		frappe.log_error(f"batch_get_class_attendance error: {str(e)}")
+		frappe.logger().error(f"❌ [Backend] batch_get_class_attendance error: {str(e)}")
+		return error_response(message="Failed to fetch batch attendance", code="BATCH_ATTENDANCE_ERROR")
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"]) 
 def save_class_attendance(items=None, overwrite=None):
 	"""Upsert class attendance records.

@@ -300,6 +300,93 @@ def get_student_data():
         )
 
 
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def batch_get_students():
+    """Get multiple students by IDs in a single request
+    
+    Request body:
+    {
+        "student_ids": ["STU-001", "STU-002", ...]
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": [
+            { "name": "STU-001", "student_name": "...", ... },
+            { "name": "STU-002", "student_name": "...", ... }
+        ]
+    }
+    """
+    try:
+        # Parse request data
+        data = {}
+        if frappe.request.data:
+            try:
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().error(f"batch_get_students: JSON parse failed: {str(e)}")
+                return error_response(
+                    message="Invalid JSON data",
+                    code="INVALID_JSON"
+                )
+        
+        # Get student_ids from request
+        student_ids = data.get('student_ids', [])
+        
+        if not student_ids or not isinstance(student_ids, list):
+            return validation_error_response(
+                message="student_ids is required and must be an array",
+                errors={"student_ids": ["Required array field"]}
+            )
+        
+        if len(student_ids) == 0:
+            return success_response(
+                data=[],
+                message="No students requested"
+            )
+        
+        frappe.logger().info(f"🔍 [Backend] batch_get_students: Fetching {len(student_ids)} students")
+        
+        # Get current user's campus (for permission check)
+        campus_id = get_current_campus_from_context()
+        
+        # Batch query all students by IDs
+        students = frappe.get_all(
+            "CRM Student",
+            filters={"name": ["in", student_ids]},
+            fields=[
+                "name",
+                "student_name", 
+                "student_code",
+                "dob",
+                "gender",
+                "campus_id",
+                "user_image"
+            ]
+        )
+        
+        # Filter by campus if campus_id is set (for multi-tenancy)
+        if campus_id:
+            students = [s for s in students if s.get('campus_id') == campus_id]
+        
+        frappe.logger().info(f"✅ [Backend] batch_get_students: Found {len(students)} students")
+        
+        return success_response(
+            data=students,
+            message=f"Successfully fetched {len(students)} students"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"batch_get_students error: {str(e)}")
+        frappe.logger().error(f"❌ [Backend] batch_get_students error: {str(e)}")
+        return error_response(
+            message="Failed to fetch students",
+            code="BATCH_GET_STUDENTS_ERROR"
+        )
+
+
 @frappe.whitelist(allow_guest=False)
 def create_student():
     """Create a new student - SIMPLE VERSION"""

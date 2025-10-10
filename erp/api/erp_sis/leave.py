@@ -25,6 +25,13 @@ def get_class_leave_requests(class_id=None):
         if not class_id:
             return validation_error_response("Thiếu class_id", {"class_id": ["Class ID là bắt buộc"]})
 
+        # Get pagination and search parameters
+        page = int(frappe.form_dict.get('page', 1))
+        limit = int(frappe.form_dict.get('limit', 20))
+        search = frappe.form_dict.get('search', '').strip()
+
+        offset = (page - 1) * limit
+
         # Check if class exists
         class_doc = frappe.get_doc("SIS Class", class_id)
         if not class_doc:
@@ -49,17 +56,44 @@ def get_class_leave_requests(class_id=None):
         if not student_ids:
             return success_response({"leave_requests": [], "total": 0})
 
-        # Get leave requests for these students
+        # Build filters for leave requests
+        filters = {"student_id": ["in", student_ids]}
+
+        # Add search filter if provided
+        if search:
+            # Search in student_name, student_code, or reason_display
+            search_filters = []
+            if search:
+                # We can't directly search in multiple fields, so we'll get all and filter later
+                # For better performance, we could implement full-text search or indexed search
+                pass
+
+        # Get total count first (without pagination)
+        total_count = frappe.db.count("SIS Student Leave Request", filters=filters)
+
+        # Get leave requests with pagination
         leave_requests = frappe.get_all(
             "SIS Student Leave Request",
-            filters={"student_id": ["in", student_ids]},
+            filters=filters,
             fields=[
                 "name", "student_name", "parent_name", "reason", "other_reason", "student_code",
                 "start_date", "end_date", "total_days", "description",
                 "submitted_at", "creation", "modified", "student_id", "parent_id"
             ],
-            order_by="creation desc"
+            order_by="creation desc",
+            limit=limit,
+            start=offset
         )
+
+        # Apply search filter client-side if search is provided
+        if search:
+            leave_requests = [
+                req for req in leave_requests
+                if (search.lower() in (req.get('student_name') or '').lower() or
+                    search.lower() in (req.get('student_code') or '').lower() or
+                    search.lower() in (req.get('reason') or '').lower() or
+                    search.lower() in (req.get('parent_name') or '').lower())
+            ]
 
         # Transform reason to Vietnamese for display
         reason_mapping = {
@@ -71,9 +105,15 @@ def get_class_leave_requests(class_id=None):
         for request in leave_requests:
             request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
 
+        # Calculate pagination info
+        total_pages = (total_count + limit - 1) // limit  # Ceiling division
+
         return success_response({
             "leave_requests": leave_requests,
-            "total": len(leave_requests),
+            "total": total_count,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
             "class_name": class_doc.title
         })
 
