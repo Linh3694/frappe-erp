@@ -95,7 +95,7 @@ def submit_leave_request():
 				"submitted_at": datetime.now()
 			})
 
-			leave_request.insert()
+			leave_request.insert(ignore_permissions=True)
 			created_requests.append({
 				"id": leave_request.name,
 				"student_id": student_id,
@@ -193,8 +193,8 @@ def update_leave_request():
 			if field in data:
 				leave_request.set(field, data[field])
 
-		# Validate and save
-		leave_request.save()
+	# Validate and save
+	leave_request.save(ignore_permissions=True)
 
 		return success_response({
 			"message": "Đã cập nhật đơn xin nghỉ phép thành công",
