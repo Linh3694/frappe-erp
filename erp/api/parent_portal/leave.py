@@ -29,17 +29,13 @@ def _get_current_parent():
 
 def _validate_parent_student_access(parent_id, student_ids):
 	"""Validate that parent has access to all students"""
-	frappe.logger().info(f"Validating access for parent: {parent_id}, students: {student_ids}")
 	for student_id in student_ids:
-		frappe.logger().info(f"Checking relationship for student: {student_id}")
 		# Check if relationship exists
 		exists = frappe.db.exists("CRM Family Relationship", {
 			"parent": parent_id,
 			"student": student_id
 		})
-		frappe.logger().info(f"Relationship exists: {exists}")
 		if not exists:
-			frappe.logger().info(f"No relationship found for parent {parent_id} and student {student_id}")
 			return False
 
 	return True
@@ -49,18 +45,12 @@ def _validate_parent_student_access(parent_id, student_ids):
 def submit_leave_request():
 	"""Submit leave request for multiple students"""
 	try:
-		# TEMPORARY: Try JSON first
-		data = json.loads(frappe.request.data or '{}')
-		frappe.logger().info(f"Submit leave request data: {data}")
+		data = frappe.form_dict
 
 		# Required fields validation (except students, handled separately)
 		required_fields = ['reason', 'start_date', 'end_date']
-		frappe.logger().info(f"Checking required fields: {required_fields}")
-		frappe.logger().info(f"Data keys: {list(data.keys())}")
 		for field in required_fields:
-			frappe.logger().info(f"Checking field '{field}': in data={field in data}, value={data.get(field)}")
 			if field not in data or not data[field]:
-				frappe.logger().info(f"Field '{field}' failed validation")
 				return validation_error_response(f"Thiếu trường bắt buộc: {field}", {field: [f"Trường {field} là bắt buộc"]})
 
 		# Validate reason
@@ -74,16 +64,13 @@ def submit_leave_request():
 
 		# Get current parent
 		parent_id = _get_current_parent()
-		frappe.logger().info(f"Current parent ID: {parent_id}")
 		if not parent_id:
 			return error_response("Không tìm thấy thông tin phụ huynh")
 
 		students = data['students']
-		frappe.logger().info(f"Raw students data: {students}, type: {type(students)}")
 		if isinstance(students, str):
 			try:
 				students = json.loads(students)
-				frappe.logger().info(f"Parsed students: {students}")
 			except:
 				return validation_error_response("Dữ liệu học sinh không hợp lệ", {"students": ["Định dạng danh sách học sinh không hợp lệ"]})
 
@@ -120,20 +107,19 @@ def submit_leave_request():
 
 			leave_request.insert(ignore_permissions=True)
 
-			# TEMPORARY: Skip file handling for JSON test
 			# Attach files if any
-			# if frappe.request.files:
-			# 	for file_key, file_obj in frappe.request.files.items():
-			# 		if file_key.startswith('documents'):
-			# 			file_doc = frappe.get_doc({
-			# 				"doctype": "File",
-			# 				"file_name": file_obj.filename,
-			# 				"attached_to_doctype": "SIS Student Leave Request",
-			# 				"attached_to_name": leave_request.name,
-			# 				"content": file_obj.stream.read(),
-			# 				"is_private": 1
-			# 			})
-			# 			file_doc.insert(ignore_permissions=True)
+			if frappe.request.files:
+				for file_key, file_obj in frappe.request.files.items():
+					if file_key.startswith('documents'):
+						file_doc = frappe.get_doc({
+							"doctype": "File",
+							"file_name": file_obj.filename,
+							"attached_to_doctype": "SIS Student Leave Request",
+							"attached_to_name": leave_request.name,
+							"content": file_obj.stream.read(),
+							"is_private": 1
+						})
+						file_doc.insert(ignore_permissions=True)
 
 			created_requests.append({
 				"id": leave_request.name,
@@ -205,8 +191,7 @@ def get_my_leave_requests(student_id=None):
 def update_leave_request():
 	"""Update leave request (within 24 hours)"""
 	try:
-		# TEMPORARY: Try JSON first
-		data = json.loads(frappe.request.data or '{}')
+		data = frappe.form_dict
 
 		# Required fields
 		if 'id' not in data:
@@ -233,20 +218,19 @@ def update_leave_request():
 			if field in data:
 				leave_request.set(field, data[field])
 
-		# TEMPORARY: Skip file handling for JSON test
 		# Handle file attachments if any
-		# if frappe.request.files:
-		# 	for file_key, file_obj in frappe.request.files.items():
-		# 		if file_key.startswith('documents'):
-		# 			file_doc = frappe.get_doc({
-		# 				"doctype": "File",
-		# 				"file_name": file_obj.filename,
-		# 				"attached_to_doctype": "SIS Student Leave Request",
-		# 				"attached_to_name": leave_request.name,
-		# 				"content": file_obj.stream.read(),
-		# 				"is_private": 1
-		# 			})
-		# 			file_doc.insert(ignore_permissions=True)
+		if frappe.request.files:
+			for file_key, file_obj in frappe.request.files.items():
+				if file_key.startswith('documents'):
+					file_doc = frappe.get_doc({
+						"doctype": "File",
+						"file_name": file_obj.filename,
+						"attached_to_doctype": "SIS Student Leave Request",
+						"attached_to_name": leave_request.name,
+						"content": file_obj.stream.read(),
+						"is_private": 1
+					})
+					file_doc.insert(ignore_permissions=True)
 
 		# Validate and save
 		leave_request.save(ignore_permissions=True)
@@ -267,11 +251,53 @@ def update_leave_request():
 
 
 @frappe.whitelist()
+def delete_leave_request():
+	"""Delete leave request"""
+	try:
+		data = frappe.form_dict
+
+		# Required field
+		if 'id' not in data:
+			return validation_error_response("Thiếu ID đơn xin nghỉ phép", {"id": ["ID đơn xin nghỉ phép là bắt buộc"]})
+
+		leave_request_id = data['id']
+
+		# Get leave request
+		leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
+
+		# Check ownership - only parent who created can delete
+		parent_id = _get_current_parent()
+		if not parent_id:
+			return error_response("Không tìm thấy thông tin phụ huynh")
+
+		if leave_request.parent_id != parent_id:
+			return error_response("Bạn không có quyền xóa đơn này")
+
+		# Check if within editable time (24 hours)
+		if leave_request.submitted_at:
+			submitted_time = datetime.strptime(str(leave_request.submitted_at), '%Y-%m-%d %H:%M:%S.%f')
+			time_diff = datetime.now() - submitted_time
+			if time_diff.total_seconds() > (24 * 60 * 60):
+				return error_response("Đã quá thời hạn xóa đơn (24 giờ)")
+
+		# Delete the request
+		frappe.delete_doc("SIS Student Leave Request", leave_request_id)
+
+		return success_response({"message": "Đã xóa đơn xin nghỉ phép thành công"})
+
+	except frappe.DoesNotExistError:
+		return error_response("Không tìm thấy đơn xin nghỉ phép")
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Parent Portal Delete Leave Request Error")
+		return error_response(f"Lỗi khi xóa đơn xin nghỉ phép: {str(e)}")
+
+
+@frappe.whitelist()
 def get_student_leave_requests(student_id):
 	"""Get leave requests for a specific student (for teachers/admins)"""
 	try:
-		if not student_id:
-			return validation_error_response("Thiếu student_id", {"student_id": ["Student ID là bắt buộc"]})
+	if not student_id:
+		return validation_error_response("Thiếu student_id", {"student_id": ["Student ID là bắt buộc"]})
 
 		# Check permissions (SIS Teacher, SIS Admin, SIS Manager, System Manager)
 		user_roles = frappe.get_roles(frappe.session.user)
