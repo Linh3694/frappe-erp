@@ -319,14 +319,18 @@ def batch_get_students():
     }
     """
     try:
+        frappe.logger().info("🚀 [Backend] batch_get_students called")
+        
         # Parse request data
         data = {}
         if frappe.request.data:
             try:
                 body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                frappe.logger().info(f"📥 [Backend] Raw request body: {body[:200] if len(str(body)) > 200 else body}")
                 data = json.loads(body) if body else {}
+                frappe.logger().info(f"📦 [Backend] Parsed data keys: {list(data.keys())}")
             except Exception as e:
-                frappe.logger().error(f"batch_get_students: JSON parse failed: {str(e)}")
+                frappe.logger().error(f"❌ [Backend] batch_get_students: JSON parse failed: {str(e)}")
                 return error_response(
                     message="Invalid JSON data",
                     code="INVALID_JSON"
@@ -379,10 +383,13 @@ def batch_get_students():
         )
         
     except Exception as e:
-        frappe.log_error(f"batch_get_students error: {str(e)}")
+        import traceback
+        error_detail = traceback.format_exc()
+        frappe.log_error(f"batch_get_students error: {error_detail}")
         frappe.logger().error(f"❌ [Backend] batch_get_students error: {str(e)}")
+        frappe.logger().error(f"❌ [Backend] Full traceback: {error_detail}")
         return error_response(
-            message="Failed to fetch students",
+            message=f"Failed to fetch students: {str(e)}",
             code="BATCH_GET_STUDENTS_ERROR"
         )
 
