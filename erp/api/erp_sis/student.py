@@ -102,7 +102,7 @@ def get_all_students(include_all_campuses=0):
                 "gender",
                 "campus_id",
                 "family_code",
-                "user_image", 
+                # user_image will be added from SIS Photo in enrichment step below
                 "creation",
                 "modified"
             ],
