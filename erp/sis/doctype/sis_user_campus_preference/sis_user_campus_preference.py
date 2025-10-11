@@ -45,7 +45,7 @@ class SISUserCampusPreference(Document):
             return frappe.get_doc("SIS User Campus Preference", preference_name)
         else:
             # Create new preference
-            from ..utils.campus_permissions import get_user_campuses
+            from erp.sis.utils.campus_permissions import get_user_campuses
             
             user_campuses = get_user_campuses(user)
             
@@ -80,7 +80,7 @@ class SISUserCampusPreference(Document):
         preference = SISUserCampusPreference.get_or_create_preference(user)
         
         # Validate campus access
-        from ..utils.campus_permissions import get_user_campuses
+        from erp.sis.utils.campus_permissions import get_user_campuses
         user_campuses = get_user_campuses(user)
         
         if campus not in user_campuses:
