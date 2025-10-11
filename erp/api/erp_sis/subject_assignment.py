@@ -234,6 +234,11 @@ def get_teacher_assignment_details(teacher_id=None):
                 GROUP_CONCAT(DISTINCT sa.actual_subject_id ORDER BY s.title_vn SEPARATOR '||') as subject_ids,
                 GROUP_CONCAT(DISTINCT s.title_vn ORDER BY s.title_vn SEPARATOR '||') as subject_titles,
                 
+                -- Time application info (for first subject in group)
+                GROUP_CONCAT(DISTINCT COALESCE(sa.application_type, 'full_year') ORDER BY s.title_vn SEPARATOR '||') as application_types,
+                GROUP_CONCAT(DISTINCT sa.start_date ORDER BY s.title_vn SEPARATOR '||') as start_dates,
+                GROUP_CONCAT(DISTINCT sa.end_date ORDER BY s.title_vn SEPARATOR '||') as end_dates,
+                
                 COUNT(DISTINCT sa.actual_subject_id) as subject_count
                 
             FROM `tabSIS Subject Assignment` sa
@@ -253,6 +258,9 @@ def get_teacher_assignment_details(teacher_id=None):
             row['assignment_ids'] = row['assignment_ids'].split('||') if row['assignment_ids'] else []
             row['subject_ids'] = row['subject_ids'].split('||') if row['subject_ids'] else []
             row['subject_titles'] = row['subject_titles'].split('||') if row['subject_titles'] else []
+            row['application_types'] = row['application_types'].split('||') if row['application_types'] else []
+            row['start_dates'] = row['start_dates'].split('||') if row['start_dates'] else []
+            row['end_dates'] = row['end_dates'].split('||') if row['end_dates'] else []
         
         # Get teacher info
         teacher_info_result = frappe.db.sql("""
@@ -463,9 +471,19 @@ def create_subject_assignment():
             for i, a in enumerate(assignments):
                 cid = a.get("class_id")
                 sids = a.get("actual_subject_ids") or ([] if a.get("actual_subject_id") is None else [a.get("actual_subject_id")])
-                frappe.logger().info(f"CREATE DEBUG - Assignment {i}: class_id={cid}, actual_subject_ids={sids}")
+                application_type = a.get("application_type", "full_year")
+                start_date = a.get("start_date")
+                end_date = a.get("end_date")
+                
+                frappe.logger().info(f"CREATE DEBUG - Assignment {i}: class_id={cid}, actual_subject_ids={sids}, application_type={application_type}")
                 if cid and sids:
-                    normalized_assignments.append({"class_id": cid, "actual_subject_ids": sids})
+                    normalized_assignments.append({
+                        "class_id": cid, 
+                        "actual_subject_ids": sids,
+                        "application_type": application_type,
+                        "start_date": start_date,
+                        "end_date": end_date
+                    })
                 else:
                     frappe.logger().warning(f"CREATE DEBUG - Skipping invalid assignment {i}: class_id={cid}, actual_subject_ids={sids}")
 
@@ -500,10 +518,17 @@ def create_subject_assignment():
             return not_found_response("Selected teacher does not exist or access denied")
         
         created_names = []
-        assignments_with_sync = []
+        affected_classes = set()
+        affected_subjects = set()
+        
+        # FAST: Create all assignments without syncing
         for item in normalized_assignments:
             cid = item.get("class_id")
             sids = item.get("actual_subject_ids") or []
+            application_type = item.get("application_type", "full_year")
+            start_date = item.get("start_date")
+            end_date = item.get("end_date")
+            
             # Validate and create for each actual subject
             for sid in sids:
                 subject_exists = frappe.db.exists(
@@ -537,43 +562,43 @@ def create_subject_assignment():
                 if existing:
                     continue
 
+                # Create with time application fields
                 assignment_doc = frappe.get_doc({
                     "doctype": "SIS Subject Assignment",
                     "teacher_id": teacher_id,
                     "actual_subject_id": sid,
                     "class_id": cid,
-                    "campus_id": campus_id
+                    "campus_id": campus_id,
+                    "application_type": application_type,
+                    "start_date": start_date if application_type == "from_date" else None,
+                    "end_date": end_date if end_date else None
                 })
                 assignment_doc.insert()
                 created_names.append(assignment_doc.name)
                 
-                # Auto-sync timetable sau khi tạo Subject Assignment
-                try:
-                    sync_data = {
-                        "assignment_id": assignment_doc.name,
-                        "old_teacher_id": None,  # Tạo mới nên không có teacher cũ
-                        "new_teacher_id": teacher_id,
-                        "class_id": cid,
-                        "actual_subject_id": sid
-                    }
-                    sync_result = _sync_timetable_from_date(sync_data, assignment_doc.creation)
-                    # Store sync result for later inclusion in response
-                    assignments_with_sync.append({
-                        "assignment_id": assignment_doc.name,
-                        "sync_result": sync_result
-                    })
-                    
-                    # Log sync result [[memory:7723612]]
-                    frappe.logger().info(f"CREATE DEBUG - Auto-sync completed for new assignment {assignment_doc.name}: {sync_result.get('summary', {})}")
-                except Exception as sync_error:
-                    frappe.log_error(f"Auto-sync timetable failed for new assignment {assignment_doc.name}: {str(sync_error)}")
-                    assignments_with_sync.append({
-                        "assignment_id": assignment_doc.name,
-                        "sync_error": str(sync_error)
-                    })
-                    # Không fail chính, chỉ log error
+                # Track for batch sync
+                if cid:
+                    affected_classes.add(cid)
+                affected_subjects.add(sid)
 
         frappe.db.commit()
+        
+        # OPTIMIZED: Batch sync timetable ONE time for all created assignments
+        sync_summary = {"rows_updated": 0, "rows_skipped": 0}
+        if created_names and affected_classes:
+            try:
+                frappe.logger().info(f"🎯 BATCH SYNC - Starting for {len(created_names)} assignments, {len(affected_classes)} classes, {len(affected_subjects)} subjects")
+                sync_result = _batch_sync_timetable_optimized(
+                    teacher_id=teacher_id,
+                    affected_classes=list(affected_classes),
+                    affected_subjects=list(affected_subjects),
+                    campus_id=campus_id
+                )
+                sync_summary = sync_result
+                frappe.logger().info(f"🎯 BATCH SYNC - Completed: {sync_summary}")
+            except Exception as sync_error:
+                frappe.log_error(f"Batch sync timetable failed: {str(sync_error)}")
+                frappe.logger().error(f"🎯 BATCH SYNC - Failed: {str(sync_error)}")
 
         # Auto-fix any existing SIS Subjects that don't have actual_subject_id linkage
         try:
@@ -608,11 +633,8 @@ def create_subject_assignment():
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Subject assignment created successfully"))
 
-        frappe.msgprint(_("Subject assignment created successfully"))
         if created_data and len(created_data) == 1:
             result = created_data[0]
-            # Find sync result for this assignment
-            sync_info = next((item for item in assignments_with_sync if item["assignment_id"] == result.name), {})
             return single_item_response({
                 "name": result.name,
                 "teacher_id": result.teacher_id,
@@ -622,13 +644,13 @@ def create_subject_assignment():
                 "teacher_name": result.teacher_name,
                 "subject_title": result.subject_title,
                 "class_title": result.class_title,
-                "timetable_sync": sync_info
-            }, f"Subject assignment created successfully. Timetable sync: {sync_info.get('sync_result', {}).get('summary', {}).get('rows_updated', 0)} rows updated")
+                "sync_summary": sync_summary
+            }, f"Subject assignment created successfully. Timetable sync: {sync_summary.get('rows_updated', 0)} rows updated")
         else:
             return list_response({
                 "assignments": created_data,
-                "timetable_sync_results": assignments_with_sync
-            }, f"Subject assignments created successfully. {len(assignments_with_sync)} assignments processed for timetable sync")
+                "sync_summary": sync_summary
+            }, f"Subject assignments created successfully. {len(created_names)} assignments created. Timetable sync: {sync_summary.get('rows_updated', 0)} rows updated")
         
     except Exception as e:
         # Check if any assignments were actually created before the error
@@ -676,9 +698,8 @@ def create_subject_assignment():
             else:
                 return list_response({
                     "assignments": created_data,
-                    "timetable_sync_results": assignments_with_sync,
                     "post_processing_warning": str(e)
-                }, f"Subject assignments created successfully. Warning: {str(e)}")
+                }, f"Subject assignments created successfully ({len(created_names)}). Warning: {str(e)}")
         else:
             # No assignments were created, this is a real error
             frappe.log_error(f"Error creating subject assignment: {str(e)}")
@@ -1633,7 +1654,10 @@ def batch_update_teacher_assignments(teacher_id, assignments, deleted_assignment
         "assignments": [
             {
                 "class_id": "class-1a",
-                "subject_ids": ["math", "english"]  // actual_subject_ids
+                "subject_ids": ["math", "english"],  // actual_subject_ids
+                "application_type": "full_year" or "from_date",
+                "start_date": "2025-01-15",  // required if from_date
+                "end_date": "2025-06-30"  // optional
             }
         ],
         "deleted_assignment_ids": ["SIS-SUBJECT-ASSIGNMENT-00123"]
@@ -1642,7 +1666,7 @@ def batch_update_teacher_assignments(teacher_id, assignments, deleted_assignment
     Strategy:
     1. Execute all DB changes FAST (no sync during loop)
     2. Collect affected classes + subjects
-    3. ONE batch sync at end
+    3. ONE batch sync at end with date filtering
     4. Return sync summary
     """
     try:
@@ -1686,11 +1710,19 @@ def batch_update_teacher_assignments(teacher_id, assignments, deleted_assignment
             for item in assignments:
                 class_id = item.get('class_id')
                 subject_ids = item.get('subject_ids', [])
+                application_type = item.get('application_type', 'full_year')
+                start_date = item.get('start_date')
+                end_date = item.get('end_date')
                 
                 if not class_id or not subject_ids:
                     continue
                 
                 affected_classes.add(class_id)
+                
+                # Validate date if from_date type
+                if application_type == 'from_date' and not start_date:
+                    frappe.logger().warning(f"Missing start_date for from_date assignment: {class_id}")
+                    continue
                 
                 for subject_id in subject_ids:
                     affected_subjects.add(subject_id)
@@ -1710,10 +1742,20 @@ def batch_update_teacher_assignments(teacher_id, assignments, deleted_assignment
                             "teacher_id": teacher_id,
                             "class_id": class_id,
                             "actual_subject_id": subject_id,
-                            "campus_id": campus_id
+                            "campus_id": campus_id,
+                            "application_type": application_type,
+                            "start_date": start_date if application_type == 'from_date' else None,
+                            "end_date": end_date if end_date else None
                         })
                         doc.insert(ignore_permissions=True)
                         created_count += 1
+                    else:
+                        # Update existing assignment with new dates
+                        frappe.db.set_value("SIS Subject Assignment", existing, {
+                            "application_type": application_type,
+                            "start_date": start_date if application_type == 'from_date' else None,
+                            "end_date": end_date if end_date else None
+                        }, update_modified=True)
             
             frappe.db.commit()
             
@@ -1811,20 +1853,25 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))),
     tuple(instance_ids + subject_ids), as_dict=True)
     
-    # OPTIMIZATION 4: Get all current assignments for this teacher (to know what to sync)
+    # OPTIMIZATION 4: Get all current assignments for this teacher (with date info)
     current_assignments = frappe.get_all(
         "SIS Subject Assignment",
         filters={
             "teacher_id": teacher_id,
             "campus_id": campus_id
         },
-        fields=["actual_subject_id", "class_id"]
+        fields=["actual_subject_id", "class_id", "application_type", "start_date", "end_date"]
     )
     
-    # Build lookup set for fast checking
-    teacher_assignment_set = set(
-        (a.actual_subject_id, a.class_id) for a in current_assignments
-    )
+    # Build lookup dict for fast checking (with date info)
+    teacher_assignment_map = {}
+    for a in current_assignments:
+        key = (a.actual_subject_id, a.class_id)
+        teacher_assignment_map[key] = {
+            "application_type": a.application_type or "full_year",
+            "start_date": a.start_date,
+            "end_date": a.end_date
+        }
     
     # OPTIMIZATION 5: Batch update (minimize DB calls)
     updated_rows = []
@@ -1837,11 +1884,39 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             skipped_rows.append(row.name)
             continue
         
-        # Get instance's class_id
-        instance_class_id = next((i.class_id for i in instances if i.name == row.parent), None)
+        # Get instance info (class_id and date)
+        instance_info = next((i for i in instances if i.name == row.parent), None)
+        if not instance_info:
+            skipped_rows.append(row.name)
+            continue
         
-        # Determine if teacher should be assigned to this row
-        should_be_assigned = (actual_subject, instance_class_id) in teacher_assignment_set
+        instance_class_id = instance_info.class_id
+        instance_start_date = instance_info.start_date
+        
+        # Check if assignment exists and get date info
+        assignment_key = (actual_subject, instance_class_id)
+        assignment_info = teacher_assignment_map.get(assignment_key)
+        
+        # Determine if teacher should be assigned to this row based on dates
+        should_be_assigned = False
+        if assignment_info:
+            application_type = assignment_info["application_type"]
+            assignment_start_date = assignment_info["start_date"]
+            assignment_end_date = assignment_info["end_date"]
+            
+            if application_type == "full_year":
+                # Apply to all timetable instances
+                should_be_assigned = True
+            elif application_type == "from_date" and assignment_start_date:
+                # Only apply from assignment start date
+                if instance_start_date and instance_start_date >= assignment_start_date:
+                    # Check end date if provided
+                    if assignment_end_date:
+                        should_be_assigned = instance_start_date <= assignment_end_date
+                    else:
+                        should_be_assigned = True
+                else:
+                    should_be_assigned = False
         
         is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
         
