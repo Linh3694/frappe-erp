@@ -265,3 +265,155 @@ def save_class_log():
         return error_response(message="Failed to save class log", code="SAVE_CLASS_LOG_ERROR")
 
 
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def batch_get_class_logs():
+    """
+    Get class logs for multiple periods in a single request
+    
+    POST body:
+    {
+        "class_id": "CLASS-001",
+        "date": "2025-10-10",
+        "periods": ["1", "2", "3", "4", ...]
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "1": { subject: {...}, students: [...] },
+            "2": { subject: {...}, students: [...] },
+            ...
+        }
+    }
+    """
+    try:
+        frappe.logger().info("🚀 [Backend] batch_get_class_logs called")
+        
+        body = _get_body() or {}
+        class_id = body.get('class_id')
+        date = body.get('date')
+        periods = body.get('periods') or []
+        
+        if not class_id or not date or not periods:
+            return error_response(
+                message="Missing required parameters: class_id, date, periods",
+                code="MISSING_PARAMS"
+            )
+        
+        frappe.logger().info(f"📅 [Backend] Getting class logs for {len(periods)} periods")
+        
+        # Get timetable instance for this class/date
+        inst_row = frappe.get_all(
+            "SIS Timetable Instance",
+            filters={
+                "class_id": class_id,
+                "start_date": ["<=", date],
+                "end_date": [">=", date],
+            },
+            fields=["name"], 
+            limit=1
+        )
+        
+        if not inst_row:
+            # No timetable instance = no logs yet, return empty structure
+            result = {period: {"subject": None, "students": []} for period in periods}
+            return success_response(data=result, message="No timetable instance found")
+        
+        timetable_instance = inst_row[0]['name']
+        
+        # Batch query: Get all subject logs for these periods at once
+        subject_logs = frappe.get_all(
+            "SIS Class Log Subject",
+            filters={
+                "timetable_instance_id": timetable_instance,
+                "log_date": date,
+                "period": ["in", periods]
+            },
+            fields=["name", "period", "class_id", "general_comment"]
+        )
+        
+        # Build map: period -> subject
+        subject_by_period = {log['period']: log for log in subject_logs}
+        
+        # Batch query: Get all student logs for these subjects at once
+        subject_ids = [log['name'] for log in subject_logs]
+        student_logs = []
+        
+        if subject_ids:
+            student_logs = frappe.get_all(
+                "SIS Class Log Student",
+                filters={"class_log_subject_id": ["in", subject_ids]},
+                fields=[
+                    "class_log_subject_id",
+                    "student_id",
+                    "class_student_id",
+                    "homework",
+                    "behavior",
+                    "participation",
+                    "issues",
+                    "is_top_performance"
+                ]
+            )
+        
+        # Build map: subject_id -> list of students
+        students_by_subject = {}
+        for student_log in student_logs:
+            subject_id = student_log['class_log_subject_id']
+            if subject_id not in students_by_subject:
+                students_by_subject[subject_id] = []
+            students_by_subject[subject_id].append(student_log)
+        
+        # Get class students for fallback (if no logs yet)
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            filters={"class_id": class_id},
+            fields=["name as class_student_id", "student_id"]
+        )
+        
+        fallback_students = [
+            {"student_id": s["student_id"], "class_student_id": s["class_student_id"]}
+            for s in class_students if s.get("student_id")
+        ]
+        
+        # Build result structure for each period
+        result = {}
+        for period in periods:
+            subject = subject_by_period.get(period)
+            
+            if subject:
+                # We have logs for this period
+                subject_id = subject['name']
+                students = students_by_subject.get(subject_id, fallback_students)
+                
+                result[period] = {
+                    "subject": {
+                        "name": subject_id,
+                        "timetable_instance_id": timetable_instance,
+                        "class_id": subject['class_id'],
+                        "general_comment": subject.get('general_comment')
+                    },
+                    "students": students
+                }
+            else:
+                # No logs yet for this period - return fallback structure
+                result[period] = {
+                    "subject": None,
+                    "students": fallback_students
+                }
+        
+        frappe.logger().info(f"✅ [Backend] Returning logs for {len(result)} periods")
+        
+        return success_response(
+            data=result,
+            message=f"Fetched class logs for {len(periods)} periods"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Backend] batch_get_class_logs error: {str(e)}")
+        frappe.log_error(f"batch_get_class_logs error: {str(e)}", "Batch Get Class Logs Error")
+        return error_response(
+            message=f"Failed to fetch batch class logs: {str(e)}",
+            code="BATCH_GET_CLASS_LOGS_ERROR"
+        )
+
