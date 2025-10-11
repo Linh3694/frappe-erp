@@ -118,10 +118,11 @@ def delete_push_subscription():
         }
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def get_vapid_public_key():
     """
     Lấy VAPID public key để frontend subscribe
+    Public endpoint - không cần authentication vì VAPID public key là public data
     
     Returns:
         dict: {"success": True, "vapid_public_key": "..."}
