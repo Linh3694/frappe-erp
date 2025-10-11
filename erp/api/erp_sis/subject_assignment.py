@@ -209,6 +209,11 @@ def get_teacher_assignment_details(teacher_id=None):
                 GROUP_CONCAT(DISTINCT sa.actual_subject_id ORDER BY s.title_vn SEPARATOR '||') as subject_ids,
                 GROUP_CONCAT(DISTINCT s.title_vn ORDER BY s.title_vn SEPARATOR '||') as subject_titles,
                 
+                -- Date fields aggregated
+                GROUP_CONCAT(DISTINCT IFNULL(sa.application_type, 'full_year') ORDER BY s.title_vn SEPARATOR '||') as application_types,
+                GROUP_CONCAT(DISTINCT sa.start_date ORDER BY s.title_vn SEPARATOR '||') as start_dates,
+                GROUP_CONCAT(DISTINCT sa.end_date ORDER BY s.title_vn SEPARATOR '||') as end_dates,
+                
                 COUNT(DISTINCT sa.actual_subject_id) as subject_count
                 
             FROM `tabSIS Subject Assignment` sa
@@ -228,10 +233,10 @@ def get_teacher_assignment_details(teacher_id=None):
             row['assignment_ids'] = row['assignment_ids'].split('||') if row['assignment_ids'] else []
             row['subject_ids'] = row['subject_ids'].split('||') if row['subject_ids'] else []
             row['subject_titles'] = row['subject_titles'].split('||') if row['subject_titles'] else []
-            # Add default values for compatibility with frontend expecting these fields
-            row['application_types'] = ['full_year'] * len(row['subject_ids'])
-            row['start_dates'] = [None] * len(row['subject_ids'])
-            row['end_dates'] = [None] * len(row['subject_ids'])
+            # Parse date fields
+            row['application_types'] = row['application_types'].split('||') if row['application_types'] else []
+            row['start_dates'] = [d if d != 'None' else None for d in (row['start_dates'].split('||') if row['start_dates'] else [])]
+            row['end_dates'] = [d if d != 'None' else None for d in (row['end_dates'].split('||') if row['end_dates'] else [])]
         
         # Get teacher info
         teacher_info_result = frappe.db.sql("""
@@ -538,13 +543,16 @@ def create_subject_assignment():
                     skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
                     continue
 
-                # Create assignment (application_type, start_date, end_date not in current schema)
+                # Create assignment with date fields
                 assignment_doc = frappe.get_doc({
                     "doctype": "SIS Subject Assignment",
                     "teacher_id": teacher_id,
                     "actual_subject_id": sid,
                     "class_id": cid,
-                    "campus_id": campus_id
+                    "campus_id": campus_id,
+                    "application_type": application_type,
+                    "start_date": start_date,
+                    "end_date": end_date
                 })
                 assignment_doc.insert()
                 created_names.append(assignment_doc.name)
@@ -1922,17 +1930,20 @@ def batch_update_teacher_assignments():
                     })
                     
                     if not existing:
-                        # Create new assignment (application_type, start_date, end_date not in current schema)
+                        # Create new assignment with date fields
                         doc = frappe.get_doc({
                             "doctype": "SIS Subject Assignment",
                             "teacher_id": teacher_id,
                             "class_id": class_id,
                             "actual_subject_id": subject_id,
-                            "campus_id": campus_id
+                            "campus_id": campus_id,
+                            "application_type": application_type,
+                            "start_date": start_date,
+                            "end_date": end_date
                         })
                         doc.insert(ignore_permissions=True)
                         created_count += 1
-                    # else: Existing assignment found, no update needed (date fields don't exist in schema)
+                    # else: Existing assignment found, no update needed
             
             frappe.db.commit()
             
@@ -2030,25 +2041,24 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))),
     tuple(instance_ids + subject_ids), as_dict=True)
     
-    # OPTIMIZATION 4: Get all current assignments for this teacher
-    # Note: application_type, start_date, end_date fields don't exist in current schema
+    # OPTIMIZATION 4: Get all current assignments for this teacher with date fields
     current_assignments = frappe.get_all(
         "SIS Subject Assignment",
         filters={
             "teacher_id": teacher_id,
             "campus_id": campus_id
         },
-        fields=["actual_subject_id", "class_id"]
+        fields=["actual_subject_id", "class_id", "application_type", "start_date", "end_date"]
     )
     
-    # Build lookup dict for fast checking (default to full_year behavior since date fields don't exist)
+    # Build lookup dict for fast checking with date fields
     teacher_assignment_map = {}
     for a in current_assignments:
         key = (a.actual_subject_id, a.class_id)
         teacher_assignment_map[key] = {
-            "application_type": "full_year",  # Default behavior
-            "start_date": None,
-            "end_date": None
+            "application_type": a.get("application_type") or "full_year",
+            "start_date": a.get("start_date"),
+            "end_date": a.get("end_date")
         }
     
     # OPTIMIZATION 5: Batch update (minimize DB calls)
