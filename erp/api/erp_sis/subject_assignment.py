@@ -1641,7 +1641,7 @@ def bulk_update_timetable_from_assignment():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def batch_update_teacher_assignments(teacher_id=None, assignments=None, deleted_assignment_ids=None):
+def batch_update_teacher_assignments():
     """
     🎯 OPTIMIZED: Bulk update all assignments for a teacher
     
@@ -1667,13 +1667,33 @@ def batch_update_teacher_assignments(teacher_id=None, assignments=None, deleted_
     4. Return sync summary
     """
     try:
-        # Get parameters from multiple sources
-        if not teacher_id:
-            teacher_id = frappe.form_dict.get('teacher_id')
-        if not assignments:
-            assignments = frappe.form_dict.get('assignments')
-        if not deleted_assignment_ids:
-            deleted_assignment_ids = frappe.form_dict.get('deleted_assignment_ids', [])
+        # Get data from request - follow same pattern as create_subject_assignment
+        data = {}
+        
+        # First try to get JSON data from request body
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+                else:
+                    data = frappe.local.form_dict
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, use form_dict
+                data = frappe.local.form_dict
+        else:
+            # Fallback to form_dict
+            data = frappe.local.form_dict
+        
+        # Log received data for debugging [[memory:7723612]]
+        frappe.logger().info(f"BATCH UPDATE DEBUG - Received data keys: {list(data.keys())}")
+        
+        # Extract values from data
+        teacher_id = data.get('teacher_id')
+        assignments = data.get('assignments', [])
+        deleted_assignment_ids = data.get('deleted_assignment_ids', [])
+        
+        frappe.logger().info(f"BATCH UPDATE DEBUG - teacher_id={teacher_id}, assignments count={len(assignments)}, deleted count={len(deleted_assignment_ids)}")
             
         # Validate required parameters
         if not teacher_id:
@@ -1681,7 +1701,7 @@ def batch_update_teacher_assignments(teacher_id=None, assignments=None, deleted_
                 message="Teacher ID is required",
                 errors={"teacher_id": ["Teacher ID is required"]}
             )
-        if not assignments:
+        if assignments is None:
             return validation_error_response(
                 message="Assignments are required",
                 errors={"assignments": ["Assignments are required"]}
@@ -1689,7 +1709,7 @@ def batch_update_teacher_assignments(teacher_id=None, assignments=None, deleted_
         
         campus_id = get_current_campus_from_context() or "campus-1"
         
-        # Parse input
+        # Parse input if string
         if isinstance(assignments, str):
             assignments = json.loads(assignments)
         if isinstance(deleted_assignment_ids, str):
