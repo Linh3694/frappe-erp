@@ -203,9 +203,12 @@ def get_all_students(include_all_campuses=0):
         )
         
     except Exception as e:
-        frappe.log_error(f"Error fetching students: {str(e)}")
+        error_msg = f"Error fetching students: {str(e)}"
+        frappe.logger().error(f"❌ [get_all_students] {error_msg}")
+        frappe.logger().error(f"❌ [get_all_students] Full traceback: {frappe.get_traceback()}")
+        frappe.log_error(error_msg)
         return error_response(
-            message="Error fetching students",
+            message=error_msg,
             code="FETCH_STUDENTS_ERROR"
         )
 
