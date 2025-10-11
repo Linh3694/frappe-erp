@@ -65,7 +65,7 @@ def get_teachers_with_assignment_summary(page=1, page_size=50, search_term=None)
                 
                 -- Education stages via subquery (efficient)
                 (
-                    SELECT GROUP_CONCAT(DISTINCT es.title_vn ORDER BY es.sort_order SEPARATOR ', ')
+                    SELECT GROUP_CONCAT(DISTINCT es.title_vn SEPARATOR ', ')
                     FROM `tabSIS Teacher Education Stage` tes
                     INNER JOIN `tabSIS Education Stage` es ON tes.education_stage_id = es.name
                     WHERE tes.teacher_id = t.name 
@@ -218,7 +218,6 @@ def get_teacher_assignment_details(teacher_id):
                 c.title as class_title,
                 c.education_grade as education_grade_id,
                 eg.title_vn as education_grade_name,
-                eg.sort_order,
                 
                 -- Subjects aggregated
                 GROUP_CONCAT(DISTINCT sa.name ORDER BY s.title_vn SEPARATOR '||') as assignment_ids,
@@ -233,8 +232,8 @@ def get_teacher_assignment_details(teacher_id):
             INNER JOIN `tabSIS Actual Subject` s ON sa.actual_subject_id = s.name
             WHERE sa.teacher_id = %s 
               AND sa.campus_id = %s
-            GROUP BY sa.class_id, c.title, c.education_grade, eg.title_vn, eg.sort_order
-            ORDER BY eg.sort_order, c.title
+            GROUP BY sa.class_id, c.title, c.education_grade, eg.title_vn
+            ORDER BY c.title
         """
         
         results = frappe.db.sql(query, (teacher_id, campus_id), as_dict=True)
@@ -252,7 +251,7 @@ def get_teacher_assignment_details(teacher_id):
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 t.user_id,
                 (
-                    SELECT GROUP_CONCAT(DISTINCT es.title_vn ORDER BY es.sort_order SEPARATOR ', ')
+                    SELECT GROUP_CONCAT(DISTINCT es.title_vn SEPARATOR ', ')
                     FROM `tabSIS Teacher Education Stage` tes
                     INNER JOIN `tabSIS Education Stage` es ON tes.education_stage_id = es.name
                     WHERE tes.teacher_id = t.name AND tes.is_active = 1
