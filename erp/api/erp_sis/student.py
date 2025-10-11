@@ -149,44 +149,48 @@ def get_all_students(include_all_campuses=0):
         # ✨ Enrich with photos from SIS Photo (batch query) - same as batch_get_students
         if len(students) > 0:
             try:
-                student_ids_for_photos = [s.get('name') for s in students]
-                frappe.logger().info(f"📸 Enriching {len(student_ids_for_photos)} students with photos from SIS Photo")
-                
-                # Get all active photos for these students in one query
-                photos = frappe.db.sql("""
-                    SELECT 
-                        student_id,
-                        photo,
-                        upload_date
-                    FROM `tabSIS Photo`
-                    WHERE student_id IN %(student_ids)s
-                        AND type = 'student'
-                        AND status = 'Active'
-                    ORDER BY upload_date DESC
-                """, {"student_ids": student_ids_for_photos}, as_dict=True)
-                
-                # Create mapping: student_id -> photo URL
-                photo_map = {}
-                for photo in photos:
-                    student_id = photo.get('student_id')
-                    if student_id and student_id not in photo_map:
-                        photo_url = photo.get('photo')
-                        if photo_url:
-                            # Convert to full URL if needed
-                            if photo_url.startswith('/files/'):
-                                photo_url = frappe.utils.get_url(photo_url)
-                            elif not photo_url.startswith('http'):
-                                photo_url = frappe.utils.get_url('/files/' + photo_url)
-                            photo_map[student_id] = photo_url
-                
-                # Enrich students with photo URLs (overwrites user_image from CRM Student if SIS Photo exists)
-                for student in students:
-                    student_id = student.get('name')
-                    sis_photo = photo_map.get(student_id)
-                    if sis_photo:
-                        student['user_image'] = sis_photo
-                
-                frappe.logger().info(f"✅ Enriched {len(photo_map)} students with SIS Photo images")
+                student_ids_for_photos = [s.get('name') for s in students if s.get('name')]
+                if not student_ids_for_photos:
+                    frappe.logger().info("📸 No valid student IDs to enrich with photos")
+                else:
+                    frappe.logger().info(f"📸 Enriching {len(student_ids_for_photos)} students with photos from SIS Photo")
+                    
+                    # Get all active photos for these students in one query
+                    # Handle tuple packing for SQL IN clause
+                    photos = frappe.db.sql("""
+                        SELECT 
+                            student_id,
+                            photo,
+                            upload_date
+                        FROM `tabSIS Photo`
+                        WHERE student_id IN %(student_ids)s
+                            AND type = 'student'
+                            AND status = 'Active'
+                        ORDER BY upload_date DESC
+                    """, {"student_ids": tuple(student_ids_for_photos) if len(student_ids_for_photos) > 1 else (student_ids_for_photos[0],)}, as_dict=True)
+                    
+                    # Create mapping: student_id -> photo URL
+                    photo_map = {}
+                    for photo in photos:
+                        student_id = photo.get('student_id')
+                        if student_id and student_id not in photo_map:
+                            photo_url = photo.get('photo')
+                            if photo_url:
+                                # Convert to full URL if needed
+                                if photo_url.startswith('/files/'):
+                                    photo_url = frappe.utils.get_url(photo_url)
+                                elif not photo_url.startswith('http'):
+                                    photo_url = frappe.utils.get_url('/files/' + photo_url)
+                                photo_map[student_id] = photo_url
+                    
+                    # Enrich students with photo URLs (overwrites user_image from CRM Student if SIS Photo exists)
+                    for student in students:
+                        student_id = student.get('name')
+                        sis_photo = photo_map.get(student_id)
+                        if sis_photo:
+                            student['user_image'] = sis_photo
+                    
+                    frappe.logger().info(f"✅ Enriched {len(photo_map)} students with SIS Photo images")
                 
             except Exception as e:
                 frappe.logger().error(f"❌ Failed to enrich students with photos: {str(e)}")
