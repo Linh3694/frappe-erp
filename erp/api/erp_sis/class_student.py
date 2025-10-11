@@ -772,3 +772,106 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
             message="Error unassigning student from class",
             code="UNASSIGN_STUDENT_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def batch_get_class_sizes():
+    """
+    Get student counts for multiple classes in a single request
+    
+    POST body:
+    {
+        "class_ids": ["CLASS-001", "CLASS-002", ...],
+        "school_year_id": "2024-2025" (optional)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "CLASS-001": 25,
+            "CLASS-002": 30,
+            ...
+        }
+    }
+    """
+    try:
+        frappe.logger().info("🚀 [Backend] batch_get_class_sizes called")
+        
+        # Parse request body
+        import json
+        body = {}
+        try:
+            if hasattr(frappe, 'request') and getattr(frappe.request, 'data', None):
+                body = json.loads(frappe.request.data.decode('utf-8'))
+        except Exception:
+            pass
+        
+        class_ids = body.get('class_ids', [])
+        school_year_id = body.get('school_year_id')
+        
+        if not class_ids or not isinstance(class_ids, list):
+            return error_response(
+                message="Missing required parameter: class_ids (must be an array)",
+                code="MISSING_PARAMS"
+            )
+        
+        frappe.logger().info(f"📊 [Backend] Getting sizes for {len(class_ids)} classes")
+        
+        # Build base filters
+        filters = {"class_id": ["in", class_ids]}
+        if school_year_id:
+            filters["school_year_id"] = school_year_id
+        
+        # Get campus filter from context
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+        if campus_id:
+            filters['campus_id'] = campus_id
+        
+        # Single query to get counts grouped by class_id
+        # Using frappe.db.sql for efficient GROUP BY query
+        query = """
+            SELECT class_id, COUNT(*) as count
+            FROM `tabSIS Class Student`
+            WHERE class_id IN %(class_ids)s
+        """
+        
+        params = {"class_ids": class_ids}
+        
+        if school_year_id:
+            query += " AND school_year_id = %(school_year_id)s"
+            params["school_year_id"] = school_year_id
+        
+        if campus_id:
+            query += " AND campus_id = %(campus_id)s"
+            params["campus_id"] = campus_id
+        
+        query += " GROUP BY class_id"
+        
+        results = frappe.db.sql(query, params, as_dict=True)
+        
+        # Build result map: class_id -> count
+        result = {}
+        for row in results:
+            result[row['class_id']] = row['count']
+        
+        # Ensure all requested class_ids are in result (even if 0 students)
+        for class_id in class_ids:
+            if class_id not in result:
+                result[class_id] = 0
+        
+        frappe.logger().info(f"✅ [Backend] Returning sizes for {len(result)} classes")
+        
+        return success_response(
+            data=result,
+            message=f"Fetched sizes for {len(class_ids)} classes"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Backend] batch_get_class_sizes error: {str(e)}")
+        frappe.log_error(f"batch_get_class_sizes error: {str(e)}", "Batch Get Class Sizes Error")
+        return error_response(
+            message=f"Failed to fetch batch class sizes: {str(e)}",
+            code="BATCH_GET_CLASS_SIZES_ERROR"
+        )
