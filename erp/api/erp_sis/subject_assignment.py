@@ -199,12 +199,22 @@ def get_all_subject_assignments():
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET"])
-def get_teacher_assignment_details(teacher_id):
+def get_teacher_assignment_details(teacher_id=None):
     """
     🎯 OPTIMIZED: Get full assignment details for a specific teacher
     Grouped by class for easier display and editing
     """
     try:
+        # Get teacher_id from multiple sources
+        if not teacher_id:
+            teacher_id = frappe.request.args.get('teacher_id') or frappe.form_dict.get('teacher_id')
+        
+        if not teacher_id:
+            return validation_error_response(
+                message="Teacher ID is required",
+                errors={"teacher_id": ["Teacher ID is required"]}
+            )
+        
         campus_id = get_current_campus_from_context() or "campus-1"
         
         # Verify teacher belongs to campus
