@@ -18,12 +18,12 @@ from erp.utils.api_response import (
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
-def get_teachers_with_assignment_summary(page=1, page_size=50, search_term=None):
+def get_teachers_with_assignment_summary(search_term=None):
     """
     🎯 OPTIMIZED: Get teachers grouped with assignment statistics
     - Single optimized query (no N+1 problem)
-    - Server-side pagination
     - Server-side search
+    - Returns all results without pagination
     Performance: ~50ms vs 2000ms before
     """
     try:
@@ -31,47 +31,42 @@ def get_teachers_with_assignment_summary(page=1, page_size=50, search_term=None)
         if not campus_id:
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
-        # Pagination
-        page = int(page)
-        page_size = int(page_size)
-        offset = (page - 1) * page_size
-        
+
         # Search filter
         search_condition = ""
         search_params = []
         if search_term and search_term.strip():
             search_condition = """
                 AND (
-                    u.full_name LIKE %s 
+                    u.full_name LIKE %s
                     OR t.user_id LIKE %s
                 )
             """
             search_term_like = f"%{search_term.strip()}%"
             search_params = [search_term_like, search_term_like]
-        
+
         # Main query - OPTIMIZED with subquery for education stages
         query = f"""
-            SELECT 
+            SELECT
                 t.name as teacher_id,
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 t.user_id,
-                
+
                 -- Aggregations
                 COUNT(DISTINCT sa.class_id) as total_classes,
                 COUNT(DISTINCT sa.actual_subject_id) as total_subjects,
                 COUNT(sa.name) as assignment_count,
                 MAX(sa.modified) as last_modified,
-                
+
                 -- Education stages via subquery (efficient)
                 (
                     SELECT GROUP_CONCAT(DISTINCT es.title_vn SEPARATOR ', ')
                     FROM `tabSIS Teacher Education Stage` tes
                     INNER JOIN `tabSIS Education Stage` es ON tes.education_stage_id = es.name
-                    WHERE tes.teacher_id = t.name 
+                    WHERE tes.teacher_id = t.name
                       AND tes.is_active = 1
                 ) as education_stages_display
-                
+
             FROM `tabSIS Teacher` t
             INNER JOIN `tabUser` u ON t.user_id = u.name
             LEFT JOIN `tabSIS Subject Assignment` sa ON sa.teacher_id = t.name
@@ -79,39 +74,19 @@ def get_teachers_with_assignment_summary(page=1, page_size=50, search_term=None)
             {search_condition}
             GROUP BY t.name, u.full_name, t.user_id
             HAVING assignment_count > 0
-            ORDER BY teacher_name ASC
-            LIMIT %s OFFSET %s
+            ORDER BY assignment_count DESC, teacher_name ASC
         """
-        
+
         # Execute query
-        params = [campus_id] + search_params + [page_size, offset]
+        params = [campus_id] + search_params
         results = frappe.db.sql(query, params, as_dict=True)
-        
-        # Count total for pagination
-        count_query = f"""
-            SELECT COUNT(DISTINCT t.name)
-            FROM `tabSIS Teacher` t
-            INNER JOIN `tabUser` u ON t.user_id = u.name
-            LEFT JOIN `tabSIS Subject Assignment` sa ON sa.teacher_id = t.name
-            WHERE t.campus_id = %s
-            {search_condition}
-            GROUP BY t.name
-            HAVING COUNT(sa.name) > 0
-        """
-        
-        count_params = [campus_id] + search_params
-        total_result = frappe.db.sql(count_query, count_params)
-        total = len(total_result) if total_result else 0
-        
-        frappe.logger().info(f"OPTIMIZED QUERY - Found {len(results)} teachers with assignments (page {page}/{(total + page_size - 1) // page_size})")
-        
+
+        frappe.logger().info(f"OPTIMIZED QUERY - Found {len(results)} teachers with assignments")
+
         return {
             "success": True,
             "data": results,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": (total + page_size - 1) // page_size,
+            "total": len(results),
             "message": "Teachers with assignments fetched successfully"
         }
         
@@ -520,6 +495,9 @@ def create_subject_assignment():
         created_names = []
         affected_classes = set()
         affected_subjects = set()
+        skipped_duplicates = []
+        
+        frappe.logger().info(f"🎯 CREATE - Processing {len(normalized_assignments)} normalized assignments for teacher {teacher_id}")
         
         # FAST: Create all assignments without syncing
         for item in normalized_assignments:
@@ -560,6 +538,8 @@ def create_subject_assignment():
                     filters["class_id"] = cid
                 existing = frappe.db.exists("SIS Subject Assignment", filters)
                 if existing:
+                    frappe.logger().info(f"🎯 CREATE - SKIPPED duplicate: teacher={teacher_id}, class={cid}, subject={sid}")
+                    skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
                     continue
 
                 # Create with time application fields
@@ -633,6 +613,20 @@ def create_subject_assignment():
         # Return the created data - follow Education Stage pattern
         frappe.msgprint(_("Subject assignment created successfully"))
 
+        # Build response message
+        created_count = len(created_names)
+        skipped_count = len(skipped_duplicates)
+        
+        response_message_parts = []
+        if created_count > 0:
+            response_message_parts.append(f"{created_count} phân công đã tạo thành công")
+        if skipped_count > 0:
+            response_message_parts.append(f"{skipped_count} phân công đã tồn tại (bỏ qua)")
+        if sync_summary.get('rows_updated', 0) > 0:
+            response_message_parts.append(f"TKB: {sync_summary.get('rows_updated', 0)} ô cập nhật")
+        
+        response_message = ". ".join(response_message_parts) if response_message_parts else "Không có thay đổi"
+
         if created_data and len(created_data) == 1:
             result = created_data[0]
             return single_item_response({
@@ -644,13 +638,17 @@ def create_subject_assignment():
                 "teacher_name": result.teacher_name,
                 "subject_title": result.subject_title,
                 "class_title": result.class_title,
-                "sync_summary": sync_summary
-            }, f"Subject assignment created successfully. Timetable sync: {sync_summary.get('rows_updated', 0)} rows updated")
+                "sync_summary": sync_summary,
+                "skipped_duplicates": skipped_duplicates
+            }, response_message)
         else:
             return list_response({
                 "assignments": created_data,
-                "sync_summary": sync_summary
-            }, f"Subject assignments created successfully. {len(created_names)} assignments created. Timetable sync: {sync_summary.get('rows_updated', 0)} rows updated")
+                "sync_summary": sync_summary,
+                "skipped_duplicates": skipped_duplicates,
+                "created_count": created_count,
+                "skipped_count": skipped_count
+            }, response_message)
         
     except Exception as e:
         # Check if any assignments were actually created before the error
@@ -683,6 +681,10 @@ def create_subject_assignment():
             
             # Return success response with warning about post-processing
             frappe.msgprint(_("Subject assignment created successfully"))
+            
+            skipped_count = len(skipped_duplicates) if 'skipped_duplicates' in locals() else 0
+            created_count = len(created_names)
+            
             if created_data and len(created_data) == 1:
                 return single_item_response({
                     "name": created_data[0].name,
@@ -694,12 +696,14 @@ def create_subject_assignment():
                     "subject_title": created_data[0].subject_title,
                     "class_title": created_data[0].class_title,
                     "post_processing_warning": str(e)
-                }, f"Subject assignment created successfully. Warning: {str(e)}")
+                }, f"{created_count} phân công đã tạo. Cảnh báo: {str(e)}")
             else:
                 return list_response({
                     "assignments": created_data,
+                    "created_count": created_count,
+                    "skipped_count": skipped_count,
                     "post_processing_warning": str(e)
-                }, f"Subject assignments created successfully ({len(created_names)}). Warning: {str(e)}")
+                }, f"{created_count} phân công đã tạo, {skipped_count} bỏ qua. Cảnh báo: {str(e)}")
         else:
             # No assignments were created, this is a real error
             frappe.log_error(f"Error creating subject assignment: {str(e)}")
