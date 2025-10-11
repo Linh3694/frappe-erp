@@ -209,11 +209,6 @@ def get_teacher_assignment_details(teacher_id=None):
                 GROUP_CONCAT(DISTINCT sa.actual_subject_id ORDER BY s.title_vn SEPARATOR '||') as subject_ids,
                 GROUP_CONCAT(DISTINCT s.title_vn ORDER BY s.title_vn SEPARATOR '||') as subject_titles,
                 
-                -- Time application info (for first subject in group)
-                GROUP_CONCAT(DISTINCT COALESCE(sa.application_type, 'full_year') ORDER BY s.title_vn SEPARATOR '||') as application_types,
-                GROUP_CONCAT(DISTINCT sa.start_date ORDER BY s.title_vn SEPARATOR '||') as start_dates,
-                GROUP_CONCAT(DISTINCT sa.end_date ORDER BY s.title_vn SEPARATOR '||') as end_dates,
-                
                 COUNT(DISTINCT sa.actual_subject_id) as subject_count
                 
             FROM `tabSIS Subject Assignment` sa
@@ -233,9 +228,10 @@ def get_teacher_assignment_details(teacher_id=None):
             row['assignment_ids'] = row['assignment_ids'].split('||') if row['assignment_ids'] else []
             row['subject_ids'] = row['subject_ids'].split('||') if row['subject_ids'] else []
             row['subject_titles'] = row['subject_titles'].split('||') if row['subject_titles'] else []
-            row['application_types'] = row['application_types'].split('||') if row['application_types'] else []
-            row['start_dates'] = row['start_dates'].split('||') if row['start_dates'] else []
-            row['end_dates'] = row['end_dates'].split('||') if row['end_dates'] else []
+            # Add default values for compatibility with frontend expecting these fields
+            row['application_types'] = ['full_year'] * len(row['subject_ids'])
+            row['start_dates'] = [None] * len(row['subject_ids'])
+            row['end_dates'] = [None] * len(row['subject_ids'])
         
         # Get teacher info
         teacher_info_result = frappe.db.sql("""
