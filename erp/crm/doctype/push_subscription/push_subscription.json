@@ -23,7 +23,7 @@
   },
   {
    "fieldname": "endpoint",
-   "fieldtype": "Data",
+   "fieldtype": "Text",
    "label": "Endpoint",
    "read_only": 1
   },
