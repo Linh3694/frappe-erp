@@ -1641,7 +1641,7 @@ def bulk_update_timetable_from_assignment():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def batch_update_teacher_assignments(teacher_id, assignments, deleted_assignment_ids=None):
+def batch_update_teacher_assignments(teacher_id=None, assignments=None, deleted_assignment_ids=None):
     """
     🎯 OPTIMIZED: Bulk update all assignments for a teacher
     
@@ -1667,14 +1667,31 @@ def batch_update_teacher_assignments(teacher_id, assignments, deleted_assignment
     4. Return sync summary
     """
     try:
+        # Get parameters from multiple sources
+        if not teacher_id:
+            teacher_id = frappe.form_dict.get('teacher_id')
+        if not assignments:
+            assignments = frappe.form_dict.get('assignments')
+        if not deleted_assignment_ids:
+            deleted_assignment_ids = frappe.form_dict.get('deleted_assignment_ids', [])
+            
+        # Validate required parameters
+        if not teacher_id:
+            return validation_error_response(
+                message="Teacher ID is required",
+                errors={"teacher_id": ["Teacher ID is required"]}
+            )
+        if not assignments:
+            return validation_error_response(
+                message="Assignments are required",
+                errors={"assignments": ["Assignments are required"]}
+            )
+        
         campus_id = get_current_campus_from_context() or "campus-1"
         
         # Parse input
         if isinstance(assignments, str):
             assignments = json.loads(assignments)
-        
-        if deleted_assignment_ids is None:
-            deleted_assignment_ids = frappe.form_dict.get('deleted_assignment_ids', [])
         if isinstance(deleted_assignment_ids, str):
             deleted_assignment_ids = json.loads(deleted_assignment_ids)
         
