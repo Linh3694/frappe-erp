@@ -24,18 +24,38 @@ except ImportError:
 
 
 @frappe.whitelist(allow_guest=False)
-def save_push_subscription(subscription_json):
+def save_push_subscription(subscription_json=None):
     """
     Lưu push subscription của user
-    
+
     Args:
         subscription_json: JSON string của push subscription từ frontend
-        
+
     Returns:
         dict: {"success": True, "message": "..."}
     """
     try:
         user = frappe.session.user
+
+        # Nếu subscription_json không được truyền như argument, thử lấy từ request body
+        if subscription_json is None:
+            if frappe.form_dict.get('subscription_json'):
+                subscription_json = frappe.form_dict.get('subscription_json')
+            else:
+                # Try to get from raw request body for JSON requests
+                import json
+                try:
+                    request_data = json.loads(frappe.request.get_data(as_text=True))
+                    subscription_json = request_data.get('subscription_json')
+                except:
+                    pass
+
+        if subscription_json is None:
+            return {
+                "success": False,
+                "message": "Missing subscription_json parameter"
+            }
+
         subscription = json.loads(subscription_json) if isinstance(subscription_json, str) else subscription_json
         
         # Validate subscription data
