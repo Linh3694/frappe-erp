@@ -228,3 +228,127 @@ def get_leave_request_details(leave_request_id=None):
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "ERP SIS Get Leave Request Details Error")
         return error_response(f"Lỗi khi lấy thông tin đơn nghỉ phép: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def batch_get_active_leaves():
+    """
+    Get active leaves for students on a specific date
+    Used by attendance view to show which students have approved leaves
+    
+    POST body:
+    {
+        "class_id": "CLASS-001",
+        "date": "2025-10-10"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "STU-001": {
+                "leave_id": "SIS-LEAVE-00001",
+                "reason": "sick_child",
+                "reason_display": "Con ốm",
+                "start_date": "2025-10-09",
+                "end_date": "2025-10-11",
+                "total_days": 3
+            },
+            ...
+        }
+    }
+    """
+    try:
+        frappe.logger().info("🚀 [Backend] batch_get_active_leaves called")
+        
+        # Parse request body
+        data = json.loads(frappe.request.data.decode('utf-8'))
+        class_id = data.get('class_id')
+        date = data.get('date')
+        
+        if not class_id or not date:
+            return validation_error_response("Thiếu tham số", {
+                "class_id": ["Class ID là bắt buộc"] if not class_id else [],
+                "date": ["Date là bắt buộc"] if not date else []
+            })
+        
+        frappe.logger().info(f"📅 [Backend] Getting leaves for class {class_id} on {date}")
+        
+        # Get all students in the class
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            filters={"class_id": class_id},
+            fields=["student_id"]
+        )
+        
+        student_ids = [cs.student_id for cs in class_students]
+        
+        if not student_ids:
+            frappe.logger().info("⚠️ [Backend] No students in class")
+            return success_response(data={}, message="No students in class")
+        
+        # Get active leaves for these students on the specified date
+        # Leave is active if: start_date <= date <= end_date
+        leaves = frappe.db.sql("""
+            SELECT 
+                name,
+                student_id,
+                student_name,
+                student_code,
+                reason,
+                other_reason,
+                start_date,
+                end_date,
+                total_days,
+                description
+            FROM `tabSIS Student Leave Request`
+            WHERE student_id IN %(student_ids)s
+                AND start_date <= %(date)s
+                AND end_date >= %(date)s
+            ORDER BY creation DESC
+        """, {
+            "student_ids": student_ids,
+            "date": date
+        }, as_dict=True)
+        
+        frappe.logger().info(f"📝 [Backend] Found {len(leaves)} active leaves")
+        
+        # Transform reason to Vietnamese
+        reason_mapping = {
+            'sick_child': 'Con ốm',
+            'family_matters': 'Gia đình có việc bận',
+            'other': 'Lý do khác'
+        }
+        
+        # Build result map: student_id -> leave info
+        result = {}
+        for leave in leaves:
+            # If student has multiple leaves on same day, take the most recent one
+            if leave.student_id not in result:
+                result[leave.student_id] = {
+                    "leave_id": leave.name,
+                    "student_name": leave.student_name,
+                    "student_code": leave.student_code,
+                    "reason": leave.reason,
+                    "reason_display": reason_mapping.get(leave.reason, leave.reason),
+                    "other_reason": leave.other_reason,
+                    "start_date": str(leave.start_date),
+                    "end_date": str(leave.end_date),
+                    "total_days": leave.total_days,
+                    "description": leave.description
+                }
+        
+        frappe.logger().info(f"✅ [Backend] Returning leaves for {len(result)} students")
+        
+        return success_response(
+            data=result,
+            message=f"Found {len(result)} students with active leaves"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Backend] batch_get_active_leaves error: {str(e)}")
+        frappe.log_error(f"batch_get_active_leaves error: {str(e)}", "Batch Get Active Leaves Error")
+        return error_response(
+            message=f"Failed to get active leaves: {str(e)}",
+            code="BATCH_GET_LEAVES_ERROR"
+        )
