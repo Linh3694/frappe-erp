@@ -147,16 +147,14 @@ def get_all_students(include_all_campuses=0):
             frappe.logger().error(f"Failed to enrich students with family codes: {str(e)}")
         
         # ✨ Enrich with photos from SIS Photo (batch query) - same as batch_get_students
-        if len(students) > 0:
-            try:
+        # Wrapped in try-except to ensure API returns data even if photo enrichment fails
+        try:
+            if len(students) > 0:
                 student_ids_for_photos = [s.get('name') for s in students if s.get('name')]
-                if not student_ids_for_photos:
-                    frappe.logger().info("📸 No valid student IDs to enrich with photos")
-                else:
-                    frappe.logger().info(f"📸 Enriching {len(student_ids_for_photos)} students with photos from SIS Photo")
+                if student_ids_for_photos:
+                    frappe.logger().info(f"📸 [get_all_students] Enriching {len(student_ids_for_photos)} students with photos from SIS Photo")
                     
                     # Get all active photos for these students in one query
-                    # Handle tuple packing for SQL IN clause
                     photos = frappe.db.sql("""
                         SELECT 
                             student_id,
@@ -167,7 +165,9 @@ def get_all_students(include_all_campuses=0):
                             AND type = 'student'
                             AND status = 'Active'
                         ORDER BY upload_date DESC
-                    """, {"student_ids": tuple(student_ids_for_photos) if len(student_ids_for_photos) > 1 else (student_ids_for_photos[0],)}, as_dict=True)
+                    """, {"student_ids": student_ids_for_photos}, as_dict=True)
+                    
+                    frappe.logger().info(f"📸 [get_all_students] Found {len(photos)} photos from SIS Photo")
                     
                     # Create mapping: student_id -> photo URL
                     photo_map = {}
@@ -190,10 +190,11 @@ def get_all_students(include_all_campuses=0):
                         if sis_photo:
                             student['user_image'] = sis_photo
                     
-                    frappe.logger().info(f"✅ Enriched {len(photo_map)} students with SIS Photo images")
-                
-            except Exception as e:
-                frappe.logger().error(f"❌ Failed to enrich students with photos: {str(e)}")
+                    frappe.logger().info(f"✅ [get_all_students] Enriched {len(photo_map)} students with SIS Photo images")
+        except Exception as e:
+            # Log error but DON'T fail the API - students without photos is better than no students at all
+            frappe.logger().error(f"❌ [get_all_students] Failed to enrich students with photos: {str(e)}")
+            frappe.logger().error(f"❌ [get_all_students] Traceback: {frappe.get_traceback()}")
         
         # Always return all students without pagination info
         return success_response(
