@@ -538,16 +538,13 @@ def create_subject_assignment():
                     skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
                     continue
 
-                # Create with time application fields
+                # Create assignment (application_type, start_date, end_date not in current schema)
                 assignment_doc = frappe.get_doc({
                     "doctype": "SIS Subject Assignment",
                     "teacher_id": teacher_id,
                     "actual_subject_id": sid,
                     "class_id": cid,
-                    "campus_id": campus_id,
-                    "application_type": application_type,
-                    "start_date": start_date if application_type == "from_date" else None,
-                    "end_date": end_date if end_date else None
+                    "campus_id": campus_id
                 })
                 assignment_doc.insert()
                 created_names.append(assignment_doc.name)
@@ -1736,26 +1733,17 @@ def batch_update_teacher_assignments(teacher_id, assignments, deleted_assignment
                     })
                     
                     if not existing:
-                        # Create new assignment (NO SYNC YET)
+                        # Create new assignment (application_type, start_date, end_date not in current schema)
                         doc = frappe.get_doc({
                             "doctype": "SIS Subject Assignment",
                             "teacher_id": teacher_id,
                             "class_id": class_id,
                             "actual_subject_id": subject_id,
-                            "campus_id": campus_id,
-                            "application_type": application_type,
-                            "start_date": start_date if application_type == 'from_date' else None,
-                            "end_date": end_date if end_date else None
+                            "campus_id": campus_id
                         })
                         doc.insert(ignore_permissions=True)
                         created_count += 1
-                    else:
-                        # Update existing assignment with new dates
-                        frappe.db.set_value("SIS Subject Assignment", existing, {
-                            "application_type": application_type,
-                            "start_date": start_date if application_type == 'from_date' else None,
-                            "end_date": end_date if end_date else None
-                        }, update_modified=True)
+                    # else: Existing assignment found, no update needed (date fields don't exist in schema)
             
             frappe.db.commit()
             
@@ -1853,24 +1841,25 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))),
     tuple(instance_ids + subject_ids), as_dict=True)
     
-    # OPTIMIZATION 4: Get all current assignments for this teacher (with date info)
+    # OPTIMIZATION 4: Get all current assignments for this teacher
+    # Note: application_type, start_date, end_date fields don't exist in current schema
     current_assignments = frappe.get_all(
         "SIS Subject Assignment",
         filters={
             "teacher_id": teacher_id,
             "campus_id": campus_id
         },
-        fields=["actual_subject_id", "class_id", "application_type", "start_date", "end_date"]
+        fields=["actual_subject_id", "class_id"]
     )
     
-    # Build lookup dict for fast checking (with date info)
+    # Build lookup dict for fast checking (default to full_year behavior since date fields don't exist)
     teacher_assignment_map = {}
     for a in current_assignments:
         key = (a.actual_subject_id, a.class_id)
         teacher_assignment_map[key] = {
-            "application_type": a.application_type or "full_year",
-            "start_date": a.start_date,
-            "end_date": a.end_date
+            "application_type": "full_year",  # Default behavior
+            "start_date": None,
+            "end_date": None
         }
     
     # OPTIMIZATION 5: Batch update (minimize DB calls)
