@@ -558,6 +558,7 @@ def create_subject_assignment():
         
         # OPTIMIZED: Batch sync timetable ONE time for all created assignments
         sync_summary = {"rows_updated": 0, "rows_skipped": 0}
+        teacher_timetable_sync_summary = {"created": 0, "updated": 0, "errors": 0}
         if created_names and affected_classes:
             try:
                 frappe.logger().info(f"🎯 BATCH SYNC - Starting for {len(created_names)} assignments, {len(affected_classes)} classes, {len(affected_subjects)} subjects")
@@ -569,6 +570,22 @@ def create_subject_assignment():
                 )
                 sync_summary = sync_result
                 frappe.logger().info(f"🎯 BATCH SYNC - Completed: {sync_summary}")
+                
+                # 🔧 FIX: Sync Teacher Timetable (materialized view) after Instance Row sync
+                if sync_summary.get("rows_updated", 0) > 0:
+                    try:
+                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Starting for teacher {teacher_id}, {len(affected_classes)} classes")
+                        teacher_sync_result = _sync_teacher_timetable_after_assignment(
+                            teacher_id=teacher_id,
+                            affected_classes=list(affected_classes),
+                            campus_id=campus_id
+                        )
+                        teacher_timetable_sync_summary = teacher_sync_result
+                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Completed: {teacher_sync_result}")
+                    except Exception as teacher_sync_error:
+                        frappe.logger().error(f"🎯 TEACHER TIMETABLE SYNC - Failed: {str(teacher_sync_error)}")
+                        # Don't fail the whole operation if Teacher Timetable sync fails
+                        
             except Exception as sync_error:
                 frappe.log_error(f"Batch sync timetable failed: {str(sync_error)}")
                 frappe.logger().error(f"🎯 BATCH SYNC - Failed: {str(sync_error)}")
@@ -617,6 +634,9 @@ def create_subject_assignment():
             response_message_parts.append(f"{skipped_count} phân công đã tồn tại (bỏ qua)")
         if sync_summary.get('rows_updated', 0) > 0:
             response_message_parts.append(f"TKB: {sync_summary.get('rows_updated', 0)} ô cập nhật")
+        if teacher_timetable_sync_summary.get('created', 0) > 0 or teacher_timetable_sync_summary.get('updated', 0) > 0:
+            total_synced = teacher_timetable_sync_summary.get('created', 0) + teacher_timetable_sync_summary.get('updated', 0)
+            response_message_parts.append(f"Teacher View: {total_synced} entries synced")
         
         response_message = ". ".join(response_message_parts) if response_message_parts else "Không có thay đổi"
 
@@ -905,6 +925,22 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                 # Sync từ ngày modified của assignment
                 sync_result = _sync_timetable_from_date(sync_data, assignment_doc.modified)
                 debug_info['sync_result'] = sync_result  # Store full sync result
+                
+                # 🔧 FIX: Also sync Teacher Timetable (materialized view) after Instance Row sync
+                if sync_result and sync_result.get('summary', {}).get('rows_updated', 0) > 0:
+                    try:
+                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Starting for updated assignment")
+                        affected_classes = [assignment_doc.class_id] if assignment_doc.class_id else []
+                        teacher_sync_result = _sync_teacher_timetable_after_assignment(
+                            teacher_id=teacher_id or assignment_doc.teacher_id,
+                            affected_classes=affected_classes,
+                            campus_id=campus_id
+                        )
+                        debug_info['teacher_timetable_sync'] = teacher_sync_result
+                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Completed: {teacher_sync_result}")
+                    except Exception as teacher_sync_error:
+                        frappe.logger().error(f"🎯 TEACHER TIMETABLE SYNC - Failed: {str(teacher_sync_error)}")
+                        debug_info['teacher_timetable_sync_error'] = str(teacher_sync_error)
                 
             except Exception as sync_error:
                 frappe.log_error(f"Auto-sync timetable failed for updated assignment {assignment_id}: {str(sync_error)}")
@@ -1998,6 +2034,162 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         "instances_checked": len(instances),
         "message": f"Synced {len(updated_rows)} timetable rows across {len(instances)} instances"
     }
+
+
+def _sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: list, campus_id: str) -> dict:
+    """
+    🔧 FIX: Sync Teacher Timetable (materialized view) after Subject Assignment sync
+    
+    This ensures that teacher timetable queries will return the correct data.
+    """
+    from datetime import datetime, timedelta
+    
+    created_count = 0
+    updated_count = 0
+    error_count = 0
+    
+    try:
+        frappe.logger().info(f"🔍 TEACHER TIMETABLE SYNC - Processing teacher {teacher_id}, classes: {affected_classes}")
+        
+        # Get current week dates for materialized view
+        today = frappe.utils.getdate()
+        
+        # Get all active timetable instances for affected classes
+        instances = frappe.db.sql("""
+            SELECT name, class_id, start_date, end_date
+            FROM `tabSIS Timetable Instance`
+            WHERE campus_id = %s
+              AND class_id IN ({})
+              AND end_date >= %s
+            ORDER BY start_date
+        """.format(','.join(['%s'] * len(affected_classes))), 
+        tuple([campus_id] + affected_classes + [today]), as_dict=True)
+        
+        frappe.logger().info(f"📊 TEACHER TIMETABLE SYNC - Found {len(instances)} active instances")
+        
+        if not instances:
+            return {"created": 0, "updated": 0, "errors": 0, "message": "No active instances found"}
+        
+        # For each instance, get rows where this teacher is assigned
+        for instance in instances:
+            try:
+                instance_id = instance.name
+                class_id = instance.class_id
+                start_date = instance.start_date or today
+                end_date = instance.end_date or (today + timedelta(days=365))
+                
+                # Get instance rows for this teacher
+                rows = frappe.db.sql("""
+                    SELECT 
+                        name,
+                        day_of_week,
+                        timetable_column_id,
+                        subject_id,
+                        teacher_1_id,
+                        teacher_2_id,
+                        room_id
+                    FROM `tabSIS Timetable Instance Row`
+                    WHERE parent = %s
+                      AND (teacher_1_id = %s OR teacher_2_id = %s)
+                """, (instance_id, teacher_id, teacher_id), as_dict=True)
+                
+                frappe.logger().info(f"  - Instance {instance_id}: Found {len(rows)} rows for teacher")
+                
+                if not rows:
+                    continue
+                
+                # Generate dates for this week (simplified approach)
+                # We'll use the current week's dates mapped to day_of_week
+                current_monday = today - timedelta(days=today.weekday())
+                day_map = {
+                    'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6
+                }
+                
+                # Process each row
+                for row in rows:
+                    try:
+                        day_of_week = row.day_of_week.lower() if row.day_of_week else 'mon'
+                        
+                        # Normalize day_of_week
+                        if day_of_week not in day_map:
+                            frappe.logger().warning(f"Invalid day_of_week: {day_of_week}, skipping")
+                            continue
+                        
+                        # Calculate date for this week
+                        day_offset = day_map[day_of_week]
+                        entry_date = current_monday + timedelta(days=day_offset)
+                        
+                        # Check if entry already exists
+                        existing = frappe.db.exists("SIS Teacher Timetable", {
+                            "teacher_id": teacher_id,
+                            "class_id": class_id,
+                            "day_of_week": day_of_week,
+                            "timetable_column_id": row.timetable_column_id,
+                            "date": entry_date
+                        })
+                        
+                        if existing:
+                            # Update existing entry
+                            try:
+                                frappe.db.set_value("SIS Teacher Timetable", existing, {
+                                    "subject_id": row.subject_id,
+                                    "room_id": row.room_id,
+                                    "timetable_instance_id": instance_id
+                                }, update_modified=False)
+                                updated_count += 1
+                            except Exception as update_error:
+                                frappe.logger().error(f"Error updating Teacher Timetable entry: {str(update_error)}")
+                                error_count += 1
+                        else:
+                            # Create new entry
+                            try:
+                                teacher_timetable_doc = frappe.get_doc({
+                                    "doctype": "SIS Teacher Timetable",
+                                    "teacher_id": teacher_id,
+                                    "class_id": class_id,
+                                    "day_of_week": day_of_week,
+                                    "timetable_column_id": row.timetable_column_id,
+                                    "subject_id": row.subject_id,
+                                    "room_id": row.room_id,
+                                    "date": entry_date,
+                                    "timetable_instance_id": instance_id
+                                })
+                                teacher_timetable_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+                                created_count += 1
+                            except Exception as create_error:
+                                frappe.logger().error(f"Error creating Teacher Timetable entry: {str(create_error)}")
+                                error_count += 1
+                                
+                    except Exception as row_error:
+                        frappe.logger().error(f"Error processing row {row.name}: {str(row_error)}")
+                        error_count += 1
+                        continue
+                        
+            except Exception as instance_error:
+                frappe.logger().error(f"Error processing instance {instance.name}: {str(instance_error)}")
+                error_count += 1
+                continue
+        
+        frappe.db.commit()
+        
+        frappe.logger().info(f"✅ TEACHER TIMETABLE SYNC - Created: {created_count}, Updated: {updated_count}, Errors: {error_count}")
+        
+        return {
+            "created": created_count,
+            "updated": updated_count,
+            "errors": error_count,
+            "message": f"Synced {created_count + updated_count} Teacher Timetable entries"
+        }
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ TEACHER TIMETABLE SYNC - Critical error: {str(e)}")
+        frappe.log_error(f"Teacher Timetable sync error: {str(e)}")
+        return {
+            "created": created_count,
+            "updated": updated_count,
+            "errors": error_count + 1,
+            "message": f"Sync failed: {str(e)}"
+        }
 
 
 def _fix_subject_linkages(campus_id: str):
