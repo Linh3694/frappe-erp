@@ -537,11 +537,32 @@ def create_subject_assignment():
                 }
                 if cid:
                     filters["class_id"] = cid
-                existing = frappe.db.exists("SIS Subject Assignment", filters)
-                if existing:
-                    frappe.logger().info(f"🎯 CREATE - SKIPPED duplicate: teacher={teacher_id}, class={cid}, subject={sid}")
-                    skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
-                    continue
+                
+                # 🔧 FIX: Allow multiple assignments with different start_dates
+                # Only check for duplicate if this is a full_year assignment
+                if application_type == "full_year":
+                    # For full_year, don't allow duplicates at all
+                    existing = frappe.db.exists("SIS Subject Assignment", filters)
+                    if existing:
+                        frappe.logger().info(f"🎯 CREATE - SKIPPED duplicate full_year: teacher={teacher_id}, class={cid}, subject={sid}")
+                        skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
+                        continue
+                elif application_type == "from_date" and start_date:
+                    # For from_date, check if there's a conflicting full_year assignment
+                    filters_full_year = {**filters, "application_type": "full_year"}
+                    existing_full_year = frappe.db.exists("SIS Subject Assignment", filters_full_year)
+                    if existing_full_year:
+                        frappe.logger().info(f"🎯 CREATE - SKIPPED: conflict with full_year assignment")
+                        skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing_full_year, "reason": "conflicts with full_year"})
+                        continue
+                    # Allow multiple from_date assignments for now (TODO: check date overlap)
+                else:
+                    # No application_type or start_date - treat as full_year
+                    existing = frappe.db.exists("SIS Subject Assignment", filters)
+                    if existing:
+                        frappe.logger().info(f"🎯 CREATE - SKIPPED duplicate: teacher={teacher_id}, class={cid}, subject={sid}")
+                        skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
+                        continue
 
                 # Create assignment with date fields
                 assignment_doc = frappe.get_doc({
