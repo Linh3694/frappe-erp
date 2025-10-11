@@ -2034,10 +2034,15 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     """.format(','.join(['%s'] * len(affected_subjects))), 
     tuple(affected_subjects + [campus_id]), as_dict=True)
     
+    frappe.logger().info(f"🔍 SYNC DEBUG - affected_subjects: {affected_subjects}")
+    frappe.logger().info(f"🔍 SYNC DEBUG - Found {len(subjects)} subjects with matching actual_subject_id")
+    
     for s in subjects:
         subject_map[s.name] = s.actual_subject_id
+        frappe.logger().info(f"  - Subject mapping: {s.name} → {s.actual_subject_id}")
     
     if not subject_map:
+        frappe.logger().error(f"❌ SYNC DEBUG - No subject mapping found! affected_subjects={affected_subjects}, campus={campus_id}")
         return {
             "rows_updated": 0, 
             "rows_skipped": 0, 
@@ -2048,6 +2053,9 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     # OPTIMIZATION 3: Batch get all rows (single query)
     instance_ids = [i.name for i in instances]
     subject_ids = list(subject_map.keys())
+    
+    frappe.logger().info(f"🔍 SYNC DEBUG - Querying rows: {len(instance_ids)} instances, {len(subject_ids)} subjects")
+    frappe.logger().info(f"  - subject_ids (SIS Subject): {subject_ids}")
     
     all_rows = frappe.db.sql("""
         SELECT 
@@ -2062,6 +2070,8 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))),
     tuple(instance_ids + subject_ids), as_dict=True)
     
+    frappe.logger().info(f"🔍 SYNC DEBUG - Found {len(all_rows)} timetable rows")
+    
     # OPTIMIZATION 4: Get all current assignments for this teacher with date fields
     current_assignments = frappe.get_all(
         "SIS Subject Assignment",
@@ -2074,6 +2084,7 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     
     # Build lookup dict for fast checking with date fields
     teacher_assignment_map = {}
+    frappe.logger().info(f"🔍 SYNC DEBUG - Building assignment map from {len(current_assignments)} assignments")
     for a in current_assignments:
         key = (a.actual_subject_id, a.class_id)
         teacher_assignment_map[key] = {
@@ -2081,6 +2092,7 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             "start_date": a.get("start_date"),
             "end_date": a.get("end_date")
         }
+        frappe.logger().info(f"  - Assignment: {key} → {teacher_assignment_map[key]}")
     
     # OPTIMIZATION 5: Batch update (minimize DB calls)
     updated_rows = []
@@ -2089,7 +2101,13 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     for row in all_rows:
         actual_subject = subject_map.get(row.subject_id)
         
-        if not actual_subject or actual_subject not in affected_subjects:
+        if not actual_subject:
+            frappe.logger().warning(f"⚠️ SYNC DEBUG - Row {row.name}: subject_id {row.subject_id} not in subject_map")
+            skipped_rows.append(row.name)
+            continue
+        
+        if actual_subject not in affected_subjects:
+            frappe.logger().warning(f"⚠️ SYNC DEBUG - Row {row.name}: actual_subject {actual_subject} not in affected_subjects {affected_subjects}")
             skipped_rows.append(row.name)
             continue
         
@@ -2105,6 +2123,12 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         # Check if assignment exists and get date info
         assignment_key = (actual_subject, instance_class_id)
         assignment_info = teacher_assignment_map.get(assignment_key)
+        
+        if not assignment_info:
+            frappe.logger().warning(f"⚠️ SYNC DEBUG - Row {row.name}: No assignment found for key {assignment_key}")
+            frappe.logger().warning(f"  - Available keys: {list(teacher_assignment_map.keys())}")
+            skipped_rows.append(row.name)
+            continue
         
         # Determine if teacher should be assigned to this row based on dates
         should_be_assigned = False
