@@ -1433,7 +1433,7 @@ def _fix_subject_linkages(campus_id: str):
         # Find SIS Subjects without actual_subject_id
         unlinked_subjects = frappe.get_all(
             "SIS Subject",
-            fields=["name", "title", "title_vn"],
+            fields=["name", "title"],
             filters={
                 "campus_id": campus_id,
                 "actual_subject_id": ["is", "not set"]
@@ -1443,7 +1443,7 @@ def _fix_subject_linkages(campus_id: str):
         fixed_count = 0
         for subj in unlinked_subjects:
             # Try to find matching Actual Subject
-            title_to_match = subj.get("title") or subj.get("title_vn")
+            title_to_match = subj.get("title")
             if not title_to_match:
                 continue
                 
@@ -1607,23 +1607,18 @@ def _sync_timetable_from_date(data: dict, from_date):
                     instance_debug["method"] = "title_match"
                     instance_debug["title_vn"] = actual_subject.title_vn
                     
-                    # Try multiple title fields to find matching subjects
-                    title_filters = [
-                        {"title": actual_subject.title_vn, "campus_id": campus_id},
-                        {"title_vn": actual_subject.title_vn, "campus_id": campus_id},
-                    ]
-                    
-                    for title_filter in title_filters:
-                        subject_ids = frappe.get_all(
-                            "SIS Subject",
-                            fields=["name"],
-                            filters=title_filter
-                        )
-                        if subject_ids:
-                            break
+                    # Try to find matching subjects by title
+                    subject_ids = frappe.get_all(
+                        "SIS Subject",
+                        fields=["name"],
+                        filters={
+                            "title": actual_subject.title_vn,
+                            "campus_id": campus_id
+                        }
+                    )
                     
                     instance_debug["found_subjects"] = len(subject_ids)
-                    instance_debug["title_filters_used"] = title_filters
+                    instance_debug["title_matched"] = actual_subject.title_vn
                     
                     # Update found subjects to have proper actual_subject_id link
                     updated_count = 0
