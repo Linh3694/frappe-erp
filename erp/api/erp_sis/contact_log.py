@@ -431,6 +431,7 @@ def get_contact_log_status(class_id, date=None):
             "SIS Class Log Student",
             filters={"subject_id": subject_id},
             fields=[
+                "name",
                 "student_id",
                 "badges",
                 "contact_log_comment",
@@ -447,6 +448,7 @@ def get_contact_log_status(class_id, date=None):
         status_map = {}
         for log in student_logs:
             status_map[log['student_id']] = {
+                "log_id": log['name'],  # Important: Include log ID for send/recall
                 "status": log.get('contact_log_status'),
                 "badges": log.get('badges'),
                 "comment": log.get('contact_log_comment'),
