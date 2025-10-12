@@ -471,8 +471,30 @@ def get_contact_log_status(class_id, date=None):
         # Validate teacher access
         _validate_homeroom_teacher_access(class_id)
         
+        # Find timetable instance for this class and date
+        timetable_instance = None
+        if date:
+            timetable_instances = frappe.get_all(
+                "SIS Timetable Instance",
+                filters={
+                    "class_id": class_id,
+                    "start_date": ["<=", date],
+                    "end_date": [">=", date]
+                },
+                fields=["name"],
+                limit=1
+            )
+            if timetable_instances:
+                timetable_instance = timetable_instances[0]['name']
+        
+        if not timetable_instance:
+            return success_response(data={}, message="No timetable instance found")
+        
         # Find class log subject
-        filters = {"class_id": class_id}
+        filters = {
+            "timetable_instance_id": timetable_instance,
+            "class_id": class_id
+        }
         if date:
             filters["log_date"] = date
         
