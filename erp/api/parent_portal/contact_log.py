@@ -93,19 +93,23 @@ def get_student_contact_logs():
     Only shows logs with status "Sent" (not Draft or Recalled)
     """
     try:
-        # Get request body
-        body = frappe.request.get_data(as_text=True)
-        if body:
-            try:
-                body = json.loads(body)
-            except json.JSONDecodeError:
-                body = {}
-        else:
-            body = {}
+        # Get request body - try multiple methods
+        body = {}
+        try:
+            request_data = frappe.request.get_data(as_text=True)
+            if request_data:
+                body = json.loads(request_data)
+        except Exception:
+            # Fallback to form_dict
+            body = frappe.form_dict
         
         student_id = body.get('student_id')
-        limit = body.get('limit', 50)
-        offset = body.get('offset', 0)
+        limit = int(body.get('limit', 50))
+        offset = int(body.get('offset', 0))
+        
+        print(f"📞 get_student_contact_logs called:")
+        print(f"   - student_id: {student_id}")
+        print(f"   - parent_email: {frappe.session.user}")
         
         if not student_id:
             return error_response(message="Missing student_id", code="MISSING_PARAMS")
