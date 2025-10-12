@@ -180,9 +180,13 @@ def get_student_contact_logs():
         )
     
     except Exception as e:
-        frappe.log_error(f"get_student_contact_logs error: {str(e)}")
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"❌ get_student_contact_logs error: {str(e)}")
+        print(error_detail)
+        frappe.log_error(f"get_student_contact_logs error: {str(e)}\n{error_detail}")
         return error_response(
-            message="Failed to get contact logs",
+            message=f"Failed to get contact logs: {str(e)[:200]}",
             code="GET_LOGS_ERROR"
         )
 
