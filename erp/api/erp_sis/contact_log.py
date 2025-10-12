@@ -338,6 +338,8 @@ def send_contact_log():
                 notification_sent = False
                 if parent_emails:
                     try:
+                        print(f"📨 Preparing to send notification to {len(parent_emails)} parent(s): {parent_emails}")
+                        
                         title = f"📝 Nhận xét từ giáo viên - {student_name}"
                         body_text = f"Giáo viên {teacher_name} đã gửi nhận xét cho {student_name}.{badges_text}"
                         
@@ -346,37 +348,47 @@ def send_contact_log():
                             body_text += f"\n💬 Nhận xét: {comment[:100]}{'...' if len(comment) > 100 else ''}"
                         
                         # Call notification-service API directly (internal network)
-                        # Direct call to avoid nginx routing issues
                         notification_service_url = frappe.conf.get("notification_service_url", "http://172.16.20.115:5001")
+                        
+                        payload = {
+                            "title": title,
+                            "body": body_text,
+                            "recipients": parent_emails,
+                            "type": "system", 
+                            "priority": "high",
+                            "channel": "push",
+                            "data": {
+                                "type": "contact_log",  # Custom type in data field
+                                "student_id": student_log.student_id,
+                                "student_name": student_name,
+                                "teacher_name": teacher_name,
+                                "log_id": log_id
+                            }
+                        }
+                        
+                        print(f"📨 Calling notification service: {notification_service_url}/api/notifications/send")
+                        print(f"📨 Payload: {payload}")
+                        
                         response = requests.post(
                             f"{notification_service_url}/api/notifications/send",
-                            json={
-                                "title": title,
-                                "body": body_text,
-                                "recipients": parent_emails,
-                                "type": "contact_log",
-                                "priority": "high",
-                                "channel": "push",
-                                "data": {
-                                    "type": "contact_log",
-                                    "student_id": student_log.student_id,
-                                    "student_name": student_name,
-                                    "teacher_name": teacher_name,
-                                    "log_id": log_id
-                                }
-                            },
+                            json=payload,
                             timeout=5
                         )
+                        
+                        print(f"📨 Notification service response status: {response.status_code}")
+                        print(f"📨 Notification service response body: {response.text[:200]}")
                         
                         if response.status_code == 200:
                             notification_sent = True
                             print(f"✅ Sent notification to {len(parent_emails)} parent(s)")
                         else:
-                            print(f"⚠️ Notification service returned: {response.status_code}")
+                            print(f"⚠️ Notification service returned: {response.status_code} - {response.text[:100]}")
                             
                     except Exception as e:
                         # Silently log but don't crash
-                        print(f"⚠️ Failed to send notifications: {str(e)[:100]}")
+                        print(f"⚠️ Failed to send notifications: {str(e)[:200]}")
+                        import traceback
+                        print(traceback.format_exc()[:500])
                 
                 # Always count as sent (notification is best-effort)
                 sent_count += 1
