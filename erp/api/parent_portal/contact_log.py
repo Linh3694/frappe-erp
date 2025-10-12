@@ -202,17 +202,19 @@ def mark_viewed():
     Increments the viewed count
     """
     try:
-        # Get request body
-        body = frappe.request.get_data(as_text=True)
-        if body:
-            try:
-                body = json.loads(body)
-            except json.JSONDecodeError:
-                body = {}
-        else:
-            body = {}
+        # Get request body - try multiple methods
+        body = {}
+        try:
+            request_data = frappe.request.get_data(as_text=True)
+            if request_data:
+                body = json.loads(request_data)
+        except Exception:
+            # Fallback to form_dict
+            body = frappe.form_dict
         
         log_id = body.get('log_id')
+        
+        print(f"👁️ mark_viewed called for log_id: {log_id}")
         
         if not log_id:
             return error_response(message="Missing log_id", code="MISSING_PARAMS")
