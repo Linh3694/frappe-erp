@@ -774,7 +774,24 @@ def get_student_timetable_week(student_id=None, week_start=None, week_end=None):
                 frappe.local.form_dict.get('student_id')
             )
 
+        # Get week_start and week_end from request args if not provided as parameters
+        if not week_start:
+            week_start = (
+                frappe.request.args.get('week_start') or
+                frappe.form_dict.get('week_start') or
+                frappe.local.form_dict.get('week_start')
+            )
+
+        if not week_end:
+            week_end = (
+                frappe.request.args.get('week_end') or
+                frappe.form_dict.get('week_end') or
+                frappe.local.form_dict.get('week_end')
+            )
+
         logs.append(f"🔍 DEBUG: Received student_id parameter: '{student_id}' (type: {type(student_id).__name__})")
+        logs.append(f"🔍 DEBUG: Received week_start parameter: '{week_start}' (type: {type(week_start).__name__})")
+        logs.append(f"🔍 DEBUG: Received week_end parameter: '{week_end}' (type: {type(week_end).__name__})")
         logs.append(f"🔍 DEBUG: frappe.request.args: {dict(frappe.request.args)}")
         logs.append(f"🔍 DEBUG: frappe.form_dict: {frappe.form_dict}")
 
