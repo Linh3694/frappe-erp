@@ -24,11 +24,23 @@ def _validate_homeroom_teacher_access(class_id):
     """Validate that current user is homeroom or vice-homeroom teacher for this class"""
     user = frappe.session.user
     
+    # Get teacher record(s) for current user
+    teacher_records = frappe.get_all(
+        "SIS Teacher",
+        filters={"user_id": user},
+        fields=["name"]
+    )
+    
+    if not teacher_records:
+        frappe.throw(_("Only homeroom or vice-homeroom teachers can manage contact logs"), frappe.PermissionError)
+    
+    teacher_ids = [t.name for t in teacher_records]
+    
     # Get class document
     class_doc = frappe.get_doc("SIS Class", class_id)
     
-    # Check if user is homeroom or vice-homeroom teacher
-    is_homeroom = (class_doc.homeroom_teacher == user) or (class_doc.vice_homeroom_teacher == user)
+    # Check if any teacher ID matches homeroom or vice-homeroom
+    is_homeroom = (class_doc.homeroom_teacher in teacher_ids) or (class_doc.vice_homeroom_teacher in teacher_ids)
     
     if not is_homeroom:
         frappe.throw(_("Only homeroom or vice-homeroom teachers can manage contact logs"), frappe.PermissionError)
