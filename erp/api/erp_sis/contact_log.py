@@ -54,18 +54,22 @@ def _get_student_parent_emails(student_id):
     relationships = frappe.get_all(
         "CRM Family Relationship",
         filters={"student": student_id},
-        fields=["parent"]
+        fields=["guardian"]
     )
     
     parent_emails = []
     for rel in relationships:
-        if rel.parent:
-            # Get guardian document
-            guardian = frappe.get_doc("CRM Guardian", rel.parent)
-            if guardian.guardian_id:
-                # Parent email format: guardian_id@parent.wellspring.edu.vn
-                email = f"{guardian.guardian_id}@parent.wellspring.edu.vn"
-                parent_emails.append(email)
+        if rel.guardian:
+            try:
+                # Get guardian document
+                guardian = frappe.get_doc("CRM Guardian", rel.guardian)
+                if guardian.guardian_id:
+                    # Parent email format: guardian_id@parent.wellspring.edu.vn
+                    email = f"{guardian.guardian_id}@parent.wellspring.edu.vn"
+                    parent_emails.append(email)
+            except Exception as e:
+                frappe.log_error(f"Failed to get guardian {rel.guardian}: {str(e)}")
+                continue
     
     return parent_emails
 
