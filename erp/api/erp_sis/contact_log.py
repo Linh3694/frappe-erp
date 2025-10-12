@@ -468,13 +468,17 @@ def recall_contact_log():
         return error_response(message="Failed to recall contact log", code="RECALL_CONTACT_LOG_ERROR")
 
 
-@frappe.whitelist(allow_guest=False, methods=["GET"])
-def get_contact_log_status(class_id=None, date=None):
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def get_contact_log_status():
     """
     Get contact log status for all students in a class
     Returns: { student_id: { status, sent_at, viewed_count, ... } }
     """
     try:
+        # Get params from GET or POST
+        class_id = frappe.form_dict.get('class_id')
+        date = frappe.form_dict.get('date')
+        
         if not class_id:
             return error_response(message="Missing class_id", code="MISSING_PARAMS")
         
