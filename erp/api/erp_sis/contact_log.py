@@ -337,6 +337,9 @@ def send_contact_log():
                 # Send push notification via notification-service (best effort)
                 notification_sent = False
                 if parent_emails:
+                    # Deduplicate parent emails to avoid MongoDB unique constraint error
+                    parent_emails = list(set(parent_emails))
+                    
                     try:
                         print(f"📨 Preparing to send notification to {len(parent_emails)} parent(s): {parent_emails}")
                         
