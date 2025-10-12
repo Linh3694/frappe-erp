@@ -475,16 +475,10 @@ def get_contact_log_status():
     Returns: { student_id: { status, sent_at, viewed_count, ... } }
     """
     try:
-        # Get params from GET or POST
-        class_id = frappe.form_dict.get('class_id') or frappe.request.args.get('class_id')
-        date = frappe.form_dict.get('date') or frappe.request.args.get('date')
-        
-        # Debug log
-        print(f"🔍 get_contact_log_status called with:")
-        print(f"   - form_dict: {frappe.form_dict}")
-        print(f"   - request.args: {frappe.request.args}")
-        print(f"   - class_id: {class_id}")
-        print(f"   - date: {date}")
+        # Get params from POST body or GET query params
+        body = _get_body() or {}
+        class_id = body.get('class_id') or frappe.form_dict.get('class_id') or frappe.request.args.get('class_id')
+        date = body.get('date') or frappe.form_dict.get('date') or frappe.request.args.get('date')
         
         if not class_id:
             return error_response(message="Missing class_id", code="MISSING_PARAMS")
