@@ -234,10 +234,13 @@ def mark_viewed():
         
         # Increment viewed count
         current_count = log.contact_log_viewed_count or 0
-        log.contact_log_viewed_count = current_count + 1
-        log.save()
+        new_count = current_count + 1
+        log.contact_log_viewed_count = new_count
+        log.save(ignore_permissions=True)  # Parent doesn't have write permission, but should be able to mark as viewed
         
         frappe.db.commit()
+        
+        print(f"✅ Marked log {log_id} as viewed: {current_count} -> {new_count}")
         
         return success_response(
             message="Marked as viewed",
