@@ -80,11 +80,7 @@ def _get_badge_name(badge_id):
 
 def _get_teacher_name(user_email):
     """Get teacher display name"""
-    teacher = frappe.get_value("SIS Teacher", {"user": user_email}, "teacher_name")
-    if teacher:
-        return teacher
-    
-    # Fallback to user full name
+    # Get full name from User
     user = frappe.get_value("User", user_email, "full_name")
     return user or user_email
 
