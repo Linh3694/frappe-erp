@@ -123,7 +123,45 @@ def save_contact_log():
         _validate_homeroom_teacher_access(class_id)
         
         saved_count = 0
+        log_ids = {}  # student_id -> log_id
         
+        # First, get or create subject
+        filters_subject = {"class_id": class_id}
+        if date:
+            filters_subject["log_date"] = date
+        
+        subject_rows = frappe.get_all(
+            "SIS Class Log Subject",
+            filters=filters_subject,
+            fields=["name"],
+            limit=1
+        )
+        
+        if not subject_rows:
+            # Need to create subject first
+            from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
+            campus_id = None
+            try:
+                campus_id = get_current_user_campus()
+                if not campus_id:
+                    campuses = get_user_campuses(frappe.session.user)
+                    campus_id = campuses[0] if campuses else None
+            except Exception:
+                pass
+            
+            subject_doc = frappe.get_doc({
+                "doctype": "SIS Class Log Subject",
+                "class_id": class_id,
+                "log_date": date,
+                "recorded_by": frappe.session.user,
+                "campus_id": campus_id
+            })
+            subject_doc.insert()
+            subject_id = subject_doc.name
+        else:
+            subject_id = subject_rows[0]['name']
+        
+        # Now process each student
         for student_data in students:
             student_id = student_data.get('student_id')
             badges = student_data.get('badges') or []
@@ -131,43 +169,6 @@ def save_contact_log():
             
             if not student_id:
                 continue
-            
-            # Find or create class log student record
-            # First, find the class log subject for this class/date
-            filters = {"class_id": class_id}
-            if date:
-                filters["log_date"] = date
-            
-            subject_rows = frappe.get_all(
-                "SIS Class Log Subject",
-                filters=filters,
-                fields=["name"],
-                limit=1
-            )
-            
-            if not subject_rows:
-                # Need to create subject first
-                from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
-                campus_id = None
-                try:
-                    campus_id = get_current_user_campus()
-                    if not campus_id:
-                        campuses = get_user_campuses(frappe.session.user)
-                        campus_id = campuses[0] if campuses else None
-                except Exception:
-                    pass
-                
-                subject_doc = frappe.get_doc({
-                    "doctype": "SIS Class Log Subject",
-                    "class_id": class_id,
-                    "log_date": date,
-                    "recorded_by": frappe.session.user,
-                    "campus_id": campus_id
-                })
-                subject_doc.insert()
-                subject_id = subject_doc.name
-            else:
-                subject_id = subject_rows[0]['name']
             
             # Find or create student log
             student_log_rows = frappe.get_all(
@@ -179,7 +180,8 @@ def save_contact_log():
             
             if student_log_rows:
                 # Update existing
-                student_log = frappe.get_doc("SIS Class Log Student", student_log_rows[0]['name'])
+                log_id = student_log_rows[0]['name']
+                student_log = frappe.get_doc("SIS Class Log Student", log_id)
                 student_log.badges = json.dumps(badges)
                 student_log.contact_log_comment = comment
                 student_log.contact_log_status = "Draft"
@@ -195,14 +197,19 @@ def save_contact_log():
                     "contact_log_status": "Draft"
                 })
                 student_log.insert()
+                log_id = student_log.name
             
+            log_ids[student_id] = log_id
             saved_count += 1
         
         frappe.db.commit()
         
         return success_response(
             message=f"Saved contact logs for {saved_count} students",
-            data={"saved_count": saved_count}
+            data={
+                "saved_count": saved_count,
+                "log_ids": log_ids  # Return log IDs so frontend can track them
+            }
         )
     
     except frappe.PermissionError as e:
