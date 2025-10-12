@@ -400,8 +400,13 @@ def send_contact_log():
         return error_response(message=str(e), code="PERMISSION_ERROR")
     except Exception as e:
         frappe.db.rollback()
-        frappe.log_error(f"send_contact_log error: {str(e)}")
-        return error_response(message="Failed to send contact log", code="SEND_CONTACT_LOG_ERROR")
+        import traceback
+        error_detail = traceback.format_exc()
+        frappe.log_error(f"send_contact_log error: {str(e)}\n{error_detail}")
+        return error_response(
+            message=f"Failed to send contact log: {str(e)}", 
+            code="SEND_CONTACT_LOG_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
