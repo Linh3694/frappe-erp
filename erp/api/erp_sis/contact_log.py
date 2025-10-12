@@ -182,6 +182,17 @@ def save_contact_log():
             if not student_id:
                 continue
             
+            # Get class_student_id from SIS Class Student
+            class_student = frappe.get_value(
+                "SIS Class Student",
+                filters={"class_id": class_id, "student_id": student_id},
+                fieldname="name"
+            )
+            
+            if not class_student:
+                frappe.log_error(f"No class student found for student_id={student_id}, class_id={class_id}")
+                continue
+            
             # Find or create student log
             student_log_rows = frappe.get_all(
                 "SIS Class Log Student",
@@ -204,6 +215,7 @@ def save_contact_log():
                     "doctype": "SIS Class Log Student",
                     "subject_id": subject_id,
                     "student_id": student_id,
+                    "class_student_id": class_student,
                     "badges": json.dumps(badges),
                     "contact_log_comment": comment,
                     "contact_log_status": "Draft"
