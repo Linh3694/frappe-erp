@@ -125,7 +125,7 @@ def get_student_contact_logs():
             )
         
         # Get student info
-        student_name = frappe.db.get_value("CRM Student", student_id, "full_name")
+        student_name = frappe.db.get_value("CRM Student", student_id, "student_name")
         
         # Query contact logs with status "Sent" only
         logs = frappe.get_all(
@@ -188,7 +188,7 @@ def get_student_contact_logs():
         error_detail = traceback.format_exc()
         print(f"❌ get_student_contact_logs error: {str(e)}")
         print(error_detail)
-        frappe.log_error(f"get_student_contact_logs error: {str(e)}\n{error_detail}")
+        # Don't use frappe.log_error to avoid nested CharacterLengthExceededError
         return error_response(
             message=f"Failed to get contact logs: {str(e)[:200]}",
             code="GET_LOGS_ERROR"
