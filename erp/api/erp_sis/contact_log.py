@@ -137,8 +137,33 @@ def save_contact_log():
         saved_count = 0
         log_ids = {}  # student_id -> log_id
         
-        # First, get or create subject
-        filters_subject = {"class_id": class_id}
+        # First, find timetable instance for this class and date
+        timetable_instance = None
+        if date:
+            timetable_instances = frappe.get_all(
+                "SIS Timetable Instance",
+                filters={
+                    "class_id": class_id,
+                    "start_date": ["<=", date],
+                    "end_date": [">=", date]
+                },
+                fields=["name"],
+                limit=1
+            )
+            if timetable_instances:
+                timetable_instance = timetable_instances[0]['name']
+        
+        if not timetable_instance:
+            return error_response(
+                message="No active timetable instance found for this class and date",
+                code="NO_TIMETABLE_INSTANCE"
+            )
+        
+        # Get or create subject
+        filters_subject = {
+            "timetable_instance_id": timetable_instance,
+            "class_id": class_id
+        }
         if date:
             filters_subject["log_date"] = date
         
@@ -163,6 +188,7 @@ def save_contact_log():
             
             subject_doc = frappe.get_doc({
                 "doctype": "SIS Class Log Subject",
+                "timetable_instance_id": timetable_instance,
                 "class_id": class_id,
                 "log_date": date,
                 "recorded_by": frappe.session.user,
