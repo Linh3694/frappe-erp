@@ -710,7 +710,8 @@ def get_teacher_info():
                 teacher_info = {
                     "teacher_id": teacher_id,
                     "teacher_name": "",
-                    "avatar_url": None
+                    "avatar_url": None,
+                    "gender": teacher.get("gender")  # Add gender field
                 }
 
                 if teacher.user_id:
