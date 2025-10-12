@@ -18,7 +18,17 @@
   "is_top_performance",
   "specific_comment",
   "value",
-  "campus_id"
+  "campus_id",
+  "section_break_contact_log",
+  "badges",
+  "contact_log_comment",
+  "column_break_1",
+  "contact_log_status",
+  "contact_log_sent_by",
+  "contact_log_sent_at",
+  "contact_log_recalled_by",
+  "contact_log_recalled_at",
+  "contact_log_viewed_count"
  ],
  "fields": [
   {"fieldname": "subject_id", "label": "Class Log Subject", "fieldtype": "Link", "options": "SIS Class Log Subject", "reqd": 1},
@@ -33,7 +43,17 @@
   {"fieldname": "value", "label": "Value", "fieldtype": "Float", "default": 0},
   {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"},
   {"fieldname": "issue", "label": "Issue (Legacy)", "fieldtype": "Link", "options": "SIS Class Log Score"},
-  {"fieldname": "top_performance", "label": "Top Performance (Legacy)", "fieldtype": "Link", "options": "SIS Class Log Score"}
+  {"fieldname": "top_performance", "label": "Top Performance (Legacy)", "fieldtype": "Link", "options": "SIS Class Log Score"},
+  {"fieldname": "section_break_contact_log", "label": "Contact Log", "fieldtype": "Section Break"},
+  {"fieldname": "badges", "label": "Badges (JSON)", "fieldtype": "Small Text", "description": "JSON array of badge IDs"},
+  {"fieldname": "contact_log_comment", "label": "Contact Log Comment", "fieldtype": "Small Text", "description": "Comment to be sent to parents"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "contact_log_status", "label": "Contact Log Status", "fieldtype": "Select", "options": "\nDraft\nSent\nRecalled", "default": "Draft"},
+  {"fieldname": "contact_log_sent_by", "label": "Sent By", "fieldtype": "Link", "options": "User"},
+  {"fieldname": "contact_log_sent_at", "label": "Sent At", "fieldtype": "Datetime"},
+  {"fieldname": "contact_log_recalled_by", "label": "Recalled By", "fieldtype": "Link", "options": "User"},
+  {"fieldname": "contact_log_recalled_at", "label": "Recalled At", "fieldtype": "Datetime"},
+  {"fieldname": "contact_log_viewed_count", "label": "Viewed Count", "fieldtype": "Int", "default": 0, "read_only": 1}
  ],
  "permissions": [
   {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},

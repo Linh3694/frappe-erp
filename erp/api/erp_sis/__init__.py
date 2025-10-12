@@ -10,4 +10,5 @@ from .calendar import *
 from .timetable import *
 from .attendance import *
 from .class_log import *
+from .contact_log import *
 from .daily_menu import *

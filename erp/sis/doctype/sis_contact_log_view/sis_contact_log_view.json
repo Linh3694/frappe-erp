@@ -1,0 +1,97 @@
+{
+ "actions": [],
+ "autoname": "format:SIS-CLV-{#####}",
+ "creation": "2025-10-12 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "class_log_student",
+  "parent_user",
+  "column_break_1",
+  "student_id",
+  "viewed_at",
+  "campus_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "class_log_student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Class Log Student",
+   "options": "SIS Class Log Student",
+   "reqd": 1
+  },
+  {
+   "fieldname": "parent_user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Parent User",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "reqd": 1
+  },
+  {
+   "fieldname": "viewed_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Viewed At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-10-12 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Contact Log View",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "SIS Teacher",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Parent",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
+
