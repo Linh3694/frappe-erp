@@ -1327,11 +1327,16 @@ def approve_report_card():
         site_path = frappe.get_site_path()
         public_files = os.path.join(site_path, 'public', 'files')
         
+        # Create sanitized year folder name
+        year_folder_name = school_year_doc.title_vn or school_year_doc.name
+        # Sanitize folder name (remove special characters)
+        year_folder_name = year_folder_name.replace('/', '-').replace('\\', '-')
+        
         # Folder structure: report_cards/{school_year}/{grade}/{class}
         folder_path = os.path.join(
             public_files,
             'report_cards',
-            school_year_doc.year_name or school_year_doc.name,
+            year_folder_name,
             grade_short_name,
             class_doc.short_title or class_doc.name
         )
@@ -1345,7 +1350,7 @@ def approve_report_card():
         pdf_path = os.path.join(folder_path, pdf_filename)
         
         # Relative path for storing in database (without site_path/public)
-        relative_path = f"/files/report_cards/{school_year_doc.year_name or school_year_doc.name}/{grade_short_name}/{class_doc.short_title or class_doc.name}/{pdf_filename}"
+        relative_path = f"/files/report_cards/{year_folder_name}/{grade_short_name}/{class_doc.short_title or class_doc.name}/{pdf_filename}"
         
         frappe.logger().info(f"📄 Generating PDF at: {pdf_path}")
         frappe.logger().info(f"   Relative path: {relative_path}")
