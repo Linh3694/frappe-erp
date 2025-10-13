@@ -54,15 +54,82 @@ def _get_teacher_full_name(user_email):
         return None
 
 
+def _get_teacher_info(user_email):
+    """Get teacher's detailed info including gender and avatar from SIS Teacher and User doctypes"""
+    if not user_email:
+        print(f"❌ No user_email provided")
+        return None
+
+    try:
+        print(f"🔍 Getting teacher info for user: {user_email}")
+
+        # Get SIS Teacher record
+        teacher_records = frappe.get_all(
+            "SIS Teacher",
+            filters={"user_id": user_email},
+            fields=["name", "gender"],
+            limit=1
+        )
+
+        teacher_info = None
+        if teacher_records:
+            teacher_doc = teacher_records[0]
+            teacher_info = {
+                "teacher_id": teacher_doc.name,
+                "user_id": user_email,
+                "gender": teacher_doc.gender
+            }
+
+            # Get user information including avatar
+            try:
+                user_info = frappe.get_all(
+                    "User",
+                    fields=[
+                        "name",
+                        "full_name",
+                        "first_name",
+                        "last_name",
+                        "user_image",
+                        "employee_code",
+                        "employee_id"
+                    ],
+                    filters={"name": user_email},
+                    limit=1
+                )
+
+                if user_info:
+                    user = user_info[0]
+                    teacher_info.update({
+                        "full_name": user.get("full_name"),
+                        "first_name": user.get("first_name"),
+                        "last_name": user.get("last_name"),
+                        "avatar_url": user.get("user_image"),  # user_image is the avatar field
+                        "employee_code": user.get("employee_code"),
+                        "employee_id": user.get("employee_id")
+                    })
+                    print(f"✅ Got teacher info: {user.get('full_name')}, gender: {teacher_doc.gender}, avatar: {user.get('user_image')}")
+                else:
+                    print(f"⚠️ No user info found for {user_email}")
+            except Exception as user_error:
+                print(f"❌ Error getting user info for {user_email}: {str(user_error)}")
+        else:
+            print(f"⚠️ No SIS Teacher record found for {user_email}")
+
+        return teacher_info
+    except Exception as e:
+        print(f"❌ Error getting teacher info for {user_email}: {str(e)}")
+        return None
+
+
 def _get_class_info(class_id):
-    """Get class information including homeroom teachers"""
+    """Get class information including homeroom teachers with detailed info"""
     try:
         print(f"🔍 Getting class info for {class_id}")
         class_doc = frappe.get_doc("SIS Class", class_id)
         print(f"📚 Class doc loaded: {class_doc.name}, title: {class_doc.title}")
 
-        homeroom_teacher_name = None
-        vice_homeroom_teacher_name = None
+        homeroom_teacher = None
+        vice_homeroom_teacher = None
 
         if class_doc.homeroom_teacher:
             print(f"👨‍🏫 Processing homeroom teacher: {class_doc.homeroom_teacher}")
@@ -70,8 +137,8 @@ def _get_class_info(class_id):
             teacher_user = frappe.db.get_value("SIS Teacher", class_doc.homeroom_teacher, "user_id")
             print(f"📧 Homeroom teacher user_id: {teacher_user}")
             if teacher_user:
-                homeroom_teacher_name = _get_teacher_full_name(teacher_user)
-                print(f"🏷️ Homeroom teacher name: {homeroom_teacher_name}")
+                homeroom_teacher = _get_teacher_info(teacher_user)
+                print(f"🏷️ Homeroom teacher info: {homeroom_teacher}")
 
         if class_doc.vice_homeroom_teacher:
             print(f"👨‍🏫 Processing vice homeroom teacher: {class_doc.vice_homeroom_teacher}")
@@ -79,14 +146,14 @@ def _get_class_info(class_id):
             teacher_user = frappe.db.get_value("SIS Teacher", class_doc.vice_homeroom_teacher, "user_id")
             print(f"📧 Vice homeroom teacher user_id: {teacher_user}")
             if teacher_user:
-                vice_homeroom_teacher_name = _get_teacher_full_name(teacher_user)
-                print(f"🏷️ Vice homeroom teacher name: {vice_homeroom_teacher_name}")
+                vice_homeroom_teacher = _get_teacher_info(teacher_user)
+                print(f"🏷️ Vice homeroom teacher info: {vice_homeroom_teacher}")
 
         result = {
             "name": class_doc.name,
             "class_name": class_doc.title,
-            "homeroom_teacher": homeroom_teacher_name,
-            "vice_homeroom_teacher": vice_homeroom_teacher_name
+            "homeroom_teacher": homeroom_teacher,
+            "vice_homeroom_teacher": vice_homeroom_teacher
         }
         print(f"✅ Class info result: {result}")
         return result
