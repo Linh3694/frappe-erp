@@ -75,7 +75,7 @@ def get_student_report_cards():
             return error_response(
                 message="Missing student_id",
                 code="MISSING_PARAMS",
-                data={"logs": ["student_id is required"]}
+                logs=["student_id is required"]
             )
         
         # Verify parent has access to this student
@@ -86,7 +86,7 @@ def get_student_report_cards():
             return error_response(
                 message="You do not have permission to view this student's report cards",
                 code="PERMISSION_DENIED",
-                data={"logs": [f"Student {student_id} not in parent's student list: {parent_student_ids}"]}
+                logs=[f"Student {student_id} not in parent's student list: {parent_student_ids}"]
             )
         
         # Build filters
@@ -125,7 +125,7 @@ def get_student_report_cards():
             class_info = frappe.db.get_value(
                 "SIS Class",
                 report["class_id"],
-                ["short_title", "code"],
+                ["short_title", "title"],
                 as_dict=True
             ) or {}
             
@@ -136,7 +136,7 @@ def get_student_report_cards():
                 "form_id": report["form_id"],
                 "class_id": report["class_id"],
                 "class_short_title": class_info.get("short_title", ""),
-                "class_code": class_info.get("code", ""),
+                "class_code": class_info.get("title", ""),
                 "student_id": report["student_id"],
                 "school_year": report["school_year"],
                 "semester_part": report["semester_part"],
@@ -165,7 +165,7 @@ def get_student_report_cards():
         return error_response(
             message=f"Error fetching report cards: {str(e)}",
             code="SERVER_ERROR",
-            data={"logs": [str(e)]}
+            logs=[str(e), frappe.get_traceback()]
         )
 
 
@@ -201,7 +201,7 @@ def get_report_card_detail():
             return error_response(
                 message="Missing report_id",
                 code="MISSING_PARAMS",
-                data={"logs": ["report_id is required"]}
+                logs=["report_id is required"]
             )
         
         # Get report card basic info to verify access
@@ -211,7 +211,7 @@ def get_report_card_detail():
             return error_response(
                 message="Report card not found",
                 code="NOT_FOUND",
-                data={"logs": [f"Report {report_id} not found"]}
+                logs=[f"Report {report_id} not found"]
             )
         
         # Verify parent has access to this student
@@ -222,7 +222,7 @@ def get_report_card_detail():
             return error_response(
                 message="You do not have permission to view this report card",
                 code="PERMISSION_DENIED",
-                data={"logs": [f"Student {report.student_id} not in parent's student list"]}
+                logs=[f"Student {report.student_id} not in parent's student list"]
             )
         
         # Use the existing report_card_render API to get structured data
@@ -245,7 +245,7 @@ def get_report_card_detail():
         return error_response(
             message="You do not have permission to view this report card",
             code="PERMISSION_DENIED",
-            data={"logs": ["Permission denied"]}
+            logs=["Permission denied"]
         )
     except Exception as e:
         frappe.logger().error(f"❌ Error in get_report_card_detail: {str(e)}")
@@ -253,6 +253,6 @@ def get_report_card_detail():
         return error_response(
             message=f"Error fetching report card detail: {str(e)}",
             code="SERVER_ERROR",
-            data={"logs": [str(e)]}
+            logs=[str(e), frappe.get_traceback()]
         )
 
