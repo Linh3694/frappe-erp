@@ -60,13 +60,13 @@ def _get_class_info(class_id):
         
         if class_doc.homeroom_teacher:
             # Get teacher's user email first
-            teacher_user = frappe.db.get_value("SIS Teacher", class_doc.homeroom_teacher, "user")
+            teacher_user = frappe.db.get_value("SIS Teacher", class_doc.homeroom_teacher, "user_id")
             if teacher_user:
                 homeroom_teacher_name = _get_teacher_full_name(teacher_user)
         
         if class_doc.vice_homeroom_teacher:
             # Get teacher's user email first
-            teacher_user = frappe.db.get_value("SIS Teacher", class_doc.vice_homeroom_teacher, "user")
+            teacher_user = frappe.db.get_value("SIS Teacher", class_doc.vice_homeroom_teacher, "user_id")
             if teacher_user:
                 vice_homeroom_teacher_name = _get_teacher_full_name(teacher_user)
         
