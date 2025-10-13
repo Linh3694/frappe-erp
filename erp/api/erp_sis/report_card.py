@@ -39,6 +39,74 @@ def _current_campus_id() -> str:
     return campus_id
 
 
+def generate_pdf_with_playwright(report_id: str) -> bytes:
+    """
+    Generate PDF by rendering actual frontend page using Playwright.
+    This ensures 100% accurate rendering of all form types.
+    """
+    from playwright.sync_api import sync_playwright
+    import time
+    
+    # Get frontend URL from environment or site config
+    frontend_url = frappe.conf.get('frontend_url') or 'http://localhost:5173'
+    pdf_url = f"{frontend_url}/school/academic-year/report-card/view/{report_id}"
+    
+    frappe.logger().info(f"🎭 Generating PDF with Playwright from URL: {pdf_url}")
+    
+    with sync_playwright() as p:
+        # Launch browser in headless mode
+        browser = p.chromium.launch(headless=True)
+        
+        # Create context with authentication
+        context = browser.new_context(
+            viewport={'width': 1200, 'height': 1600},
+            device_scale_factor=2,  # For better quality
+        )
+        
+        # Set authentication cookie/token if needed
+        token = frappe.get_value("User", frappe.session.user, "api_key")
+        if token:
+            context.add_cookies([{
+                'name': 'frappe_token',
+                'value': token,
+                'domain': frontend_url.replace('http://', '').replace('https://', '').split(':')[0],
+                'path': '/'
+            }])
+        
+        # Create page and navigate
+        page = context.new_page()
+        
+        try:
+            # Navigate to report page
+            response = page.goto(pdf_url, wait_until='networkidle', timeout=30000)
+            
+            if not response or response.status >= 400:
+                raise Exception(f"Failed to load page: HTTP {response.status if response else 'unknown'}")
+            
+            # Wait for FormRenderer to load
+            page.wait_for_selector('.a4', timeout=15000)
+            
+            # Wait a bit more for background images to load
+            time.sleep(2)
+            
+            # Generate PDF
+            pdf_bytes = page.pdf(
+                format='A4',
+                print_background=True,
+                margin={'top': '0mm', 'right': '0mm', 'bottom': '0mm', 'left': '0mm'},
+                prefer_css_page_size=True,
+            )
+            
+            frappe.logger().info(f"✅ PDF generated: {len(pdf_bytes)} bytes")
+            
+            return pdf_bytes
+            
+        finally:
+            page.close()
+            context.close()
+            browser.close()
+
+
 def _doc_to_template_dict(doc) -> Dict[str, Any]:
     """Normalize Report Card Template document to API shape defined in ReportCard.md."""
     # Child tables may be absent depending on DocType creation step, so guard carefully
@@ -1361,30 +1429,44 @@ def approve_report_card():
         frappe.logger().info(f"📄 Generating PDF at: {pdf_path}")
         frappe.logger().info(f"   Relative path: {relative_path}")
         
-        # Generate PDF using Frappe's built-in PDF generation
+        # Generate PDF using headless browser to render actual frontend
         try:
-            # Generate HTML content from report data
-            html_content = render_report_card_html(report_data)
+            # Try using Playwright/Puppeteer for accurate PDF generation
+            pdf_content = None
+            generation_method = "unknown"
             
-            # Use Frappe's get_pdf to generate PDF
-            from frappe.utils.pdf import get_pdf
+            # Method 1: Try Playwright (recommended for production)
+            try:
+                pdf_content = generate_pdf_with_playwright(report_id)
+                generation_method = "playwright"
+                frappe.logger().info("✅ PDF generated using Playwright")
+            except ImportError:
+                frappe.logger().info("⚠️ Playwright not available, trying fallback methods...")
+            except Exception as e:
+                frappe.logger().warning(f"⚠️ Playwright generation failed: {str(e)}")
             
-            pdf_options = {
-                'page-size': 'A4',
-                'margin-top': '0mm',
-                'margin-bottom': '0mm',
-                'margin-left': '0mm',
-                'margin-right': '0mm',
-                'encoding': 'UTF-8',
-            }
-            
-            pdf_content = get_pdf(html_content, options=pdf_options)
+            # Method 2: Fallback to simple HTML rendering
+            if not pdf_content:
+                frappe.logger().info("Using fallback: Simple HTML to PDF conversion")
+                html_content = render_report_card_html(report_data)
+                
+                from frappe.utils.pdf import get_pdf
+                pdf_options = {
+                    'page-size': 'A4',
+                    'margin-top': '0mm',
+                    'margin-bottom': '0mm',
+                    'margin-left': '0mm',
+                    'margin-right': '0mm',
+                    'encoding': 'UTF-8',
+                }
+                pdf_content = get_pdf(html_content, options=pdf_options)
+                generation_method = "fallback_html"
             
             # Save PDF to file
             with open(pdf_path, 'wb') as f:
                 f.write(pdf_content)
             
-            frappe.logger().info(f"✅ PDF generated successfully at {pdf_path}")
+            frappe.logger().info(f"✅ PDF generated successfully using {generation_method} at {pdf_path}")
             
         except Exception as pdf_error:
             frappe.logger().error(f"❌ Error generating PDF: {str(pdf_error)}")
@@ -1441,34 +1523,82 @@ def render_report_card_html(report_data):
         student = report_data.get('student', {})
         report = report_data.get('report', {})
         subjects = report_data.get('subjects', [])
-        homeroom = report_data.get('homeroom', [])
+        
+        # Handle homeroom - can be dict with comments array or array directly
+        homeroom_data = report_data.get('homeroom', {})
+        if isinstance(homeroom_data, dict):
+            homeroom = homeroom_data.get('comments', [])
+        else:
+            homeroom = homeroom_data if isinstance(homeroom_data, list) else []
+        
         class_info = report_data.get('class', {})
         
         # Get background image URL
         bg_url = f"{frappe.utils.get_url()}/files/report_forms/{form_code}/page_1.png"
         
-        # Build subjects HTML
+        # Build subjects HTML with detailed info
         subjects_html = ""
         if subjects:
             subjects_html = "<div style='margin-top: 20px;'>"
-            subjects_html += "<h3 style='margin-bottom: 10px;'>Kết quả học tập</h3>"
-            subjects_html += "<table style='width: 100%; border-collapse: collapse; margin-top: 10px;'>"
-            subjects_html += "<thead><tr style='background-color: #f0f0f0;'>"
-            subjects_html += "<th style='border: 1px solid #ccc; padding: 8px; text-align: left;'>Môn học</th>"
-            subjects_html += "<th style='border: 1px solid #ccc; padding: 8px; text-align: center;'>Điểm</th>"
-            subjects_html += "</tr></thead><tbody>"
+            subjects_html += "<h3 style='margin-bottom: 10px;'>Kết quả học tập / Academic Results</h3>"
             
-            for subject in subjects:
-                subject_name = subject.get('subject_name', '') or subject.get('subject_id', '')
-                # Try to get score from various possible fields
-                score = subject.get('average', '') or subject.get('final_score', '') or subject.get('grade', '') or ''
+            for idx, subject in enumerate(subjects, 1):
+                # Support multiple field names for subject title
+                subject_name = (subject.get('title_vn', '') or 
+                               subject.get('subject_title', '') or 
+                               subject.get('subject_name', '') or 
+                               subject.get('subject_id', ''))
                 
-                subjects_html += "<tr>"
-                subjects_html += f"<td style='border: 1px solid #ccc; padding: 8px;'>{subject_name}</td>"
-                subjects_html += f"<td style='border: 1px solid #ccc; padding: 8px; text-align: center;'>{score}</td>"
-                subjects_html += "</tr>"
+                teacher_name = subject.get('teacher_name', '')
+                
+                subjects_html += f"<div style='margin-bottom: 15px; page-break-inside: avoid;'>"
+                subjects_html += f"<h4 style='margin: 5px 0; color: #002855;'>{idx}. {subject_name}"
+                if teacher_name:
+                    subjects_html += f" - Giáo viên: {teacher_name}"
+                subjects_html += "</h4>"
+                
+                # Test scores
+                test_scores = subject.get('test_scores', {})
+                if test_scores and isinstance(test_scores, dict):
+                    titles = test_scores.get('titles', [])
+                    values = test_scores.get('values', [])
+                    if titles:
+                        subjects_html += "<div style='margin: 5px 0;'><strong>Điểm kiểm tra:</strong> "
+                        score_items = []
+                        for i, title in enumerate(titles):
+                            val = values[i] if i < len(values) else ''
+                            score_items.append(f"{title}: {val if val else '-'}")
+                        subjects_html += ", ".join(score_items)
+                        subjects_html += "</div>"
+                
+                # Rubric assessment
+                rubric = subject.get('rubric', {})
+                if rubric and isinstance(rubric, dict):
+                    criteria = rubric.get('criteria', [])
+                    if criteria:
+                        subjects_html += "<div style='margin: 5px 0;'><strong>Đánh giá:</strong></div>"
+                        subjects_html += "<ul style='margin: 2px 0; padding-left: 20px;'>"
+                        for criterion in criteria:
+                            if isinstance(criterion, dict):
+                                label = criterion.get('label', '')
+                                value = criterion.get('value', '')
+                                if label:
+                                    subjects_html += f"<li>{label}: {value if value else '-'}</li>"
+                        subjects_html += "</ul>"
+                
+                # Comments
+                comments = subject.get('comments', [])
+                if comments:
+                    for comment in comments:
+                        if isinstance(comment, dict):
+                            label = comment.get('label', '') or comment.get('id', '')
+                            value = comment.get('value', '')
+                            if label and value:
+                                subjects_html += f"<div style='margin: 5px 0;'><strong>{label}:</strong> {value}</div>"
+                
+                subjects_html += "</div>"
             
-            subjects_html += "</tbody></table></div>"
+            subjects_html += "</div>"
         
         # Build homeroom comments HTML
         homeroom_html = ""
@@ -1476,11 +1606,12 @@ def render_report_card_html(report_data):
             homeroom_html = "<div style='margin-top: 20px;'>"
             homeroom_html += "<h3 style='margin-bottom: 10px;'>Nhận xét</h3>"
             for comment in homeroom:
-                title = comment.get('title', '')
+                # Support both 'label' and 'title' for backwards compatibility
+                label = comment.get('label', '') or comment.get('title', '')
                 value = comment.get('value', '') or comment.get('comment', '')
-                if title and value:
+                if label and value:
                     homeroom_html += f"<div style='margin-bottom: 10px;'>"
-                    homeroom_html += f"<strong>{title}:</strong>"
+                    homeroom_html += f"<strong>{label}:</strong>"
                     homeroom_html += f"<p style='margin: 5px 0; white-space: pre-wrap;'>{value}</p>"
                     homeroom_html += "</div>"
             homeroom_html += "</div>"

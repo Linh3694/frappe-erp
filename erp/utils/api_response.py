@@ -21,13 +21,12 @@ def success_response(
     if meta:
         response["meta"] = meta
 
-    if debug_info or logs:
-        combined_debug_info = {}
-        if debug_info:
-            combined_debug_info.update(debug_info)
-        if logs:
-            combined_debug_info["logs"] = logs
-        response["debug_info"] = combined_debug_info
+    # Add logs at top-level for frontend network access
+    if logs:
+        response["logs"] = logs
+
+    if debug_info:
+        response["debug_info"] = debug_info
 
     return response
 
@@ -51,15 +50,14 @@ def error_response(
     if code:
         response["code"] = code
 
-    if debug_info or logs:
+    # Add logs at top-level for frontend network access
+    if logs:
+        response["logs"] = logs
+
+    if debug_info:
         if 'errors' not in response:
             response['errors'] = {}
-        combined_debug_info = {}
-        if debug_info:
-            combined_debug_info.update(debug_info)
-        if logs:
-            combined_debug_info["logs"] = logs
-        response['errors']['debug_info'] = combined_debug_info
+        response['errors']['debug_info'] = debug_info
 
     return response
 
