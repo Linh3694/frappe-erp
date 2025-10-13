@@ -225,59 +225,34 @@ def get_report_card_detail():
                 logs=[f"Student {report.student_id} not in parent's student list"]
             )
         
-        # Get report data directly without permission checks
-        # Parse data_json
+        # Use admin API with permission override
+        # Temporarily set user to administrator to bypass permission checks
+        from erp.api.erp_sis.report_card_render import get_report_data
+        
+        # Save current user
+        current_user = frappe.session.user
+        
         try:
-            data_json = json.loads(report.data_json or "{}")
-        except Exception:
-            data_json = {}
-        
-        # Get student info (ignore permissions as we already verified parent access)
-        student = frappe.get_doc("CRM Student", report.student_id, ignore_permissions=True)
-        
-        # Get class info
-        class_info = frappe.db.get_value(
-            "SIS Class",
-            report.class_id,
-            ["short_title", "title"],
-            as_dict=True
-        ) or {}
-        
-        # Get form info (ignore permissions)
-        form = None
-        if report.form_id:
-            try:
-                form = frappe.get_doc("SIS Report Form", report.form_id, ignore_permissions=True)
-            except Exception:
-                frappe.logger().warning(f"Could not load form {report.form_id}")
-        
-        # Build response
-        response_data = {
-            "form_code": form.code if form else "PRIM_VN",
-            "data": data_json,
-            "student": {
-                "full_name": student.student_name,
-                "code": student.student_code,
-                "gender": student.gender if hasattr(student, 'gender') else None,
-                "dob": str(student.date_of_birth) if hasattr(student, 'date_of_birth') and student.date_of_birth else None
-            },
-            "class": {
-                "short_title": class_info.get("short_title", "")
-            },
-            "report": {
-                "title_vn": report.title,
-                "title_en": report.title
-            },
-            "subjects": data_json.get("subjects", []),
-            "homeroom": data_json.get("homeroom", [])
-        }
-        
-        frappe.logger().info(f"✅ Built report data for parent portal")
-        
-        return success_response(
-            data=response_data,
-            message="Report card loaded successfully"
-        )
+            # Temporarily switch to Administrator to bypass permissions
+            frappe.set_user("Administrator")
+            
+            # Call admin API to get fully transformed data
+            result = get_report_data(report_id=report_id)
+            
+            frappe.logger().info(f"✅ Got report data from admin API for parent portal")
+            
+            # Add approval info and PDF file path to result
+            if result.get('success') and result.get('data'):
+                result['data']['is_approved'] = report.is_approved or 0
+                result['data']['pdf_file'] = report.pdf_file or None
+                result['data']['approved_by'] = report.approved_by or None
+                result['data']['approved_at'] = report.approved_at or None
+            
+            return result
+            
+        finally:
+            # Always restore original user
+            frappe.set_user(current_user)
         
     except frappe.PermissionError:
         frappe.logger().error(f"❌ Permission denied for report {report_id}")

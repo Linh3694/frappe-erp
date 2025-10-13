@@ -1223,3 +1223,330 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
         return error_response("Error fetching class report templates")
 
 
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def approve_report_card():
+    """
+    Approve a report card and generate PDF
+    Only users with 'SIS Manager' or 'SIS BOD' role can approve
+    
+    Request body:
+        - report_id: Report card document name
+    
+    Returns:
+        Success response with PDF file path
+    """
+    import os
+    import json
+    from datetime import datetime
+    
+    try:
+        # Check user has required role
+        user = frappe.session.user
+        user_roles = frappe.get_roles(user)
+        
+        frappe.logger().info(f"📝 approve_report_card called by {user}")
+        frappe.logger().info(f"   User roles: {user_roles}")
+        
+        if "SIS Manager" not in user_roles and "SIS BOD" not in user_roles:
+            frappe.logger().error(f"❌ User {user} does not have required role")
+            return error_response(
+                message="Bạn không có quyền phê duyệt báo cáo học tập. Cần có role SIS Manager hoặc SIS BOD.",
+                code="PERMISSION_DENIED",
+                logs=[f"User {user} does not have SIS Manager or SIS BOD role"]
+            )
+        
+        # Get request body
+        body = {}
+        try:
+            request_data = frappe.request.get_data(as_text=True)
+            if request_data:
+                body = json.loads(request_data)
+        except Exception:
+            body = frappe.form_dict
+        
+        report_id = body.get('report_id')
+        
+        frappe.logger().info(f"   - report_id: {report_id}")
+        
+        if not report_id:
+            return error_response(
+                message="Missing report_id",
+                code="MISSING_PARAMS",
+                logs=["report_id is required"]
+            )
+        
+        # Get report card
+        try:
+            report = frappe.get_doc("SIS Student Report Card", report_id)
+        except frappe.DoesNotExistError:
+            return error_response(
+                message="Không tìm thấy báo cáo học tập",
+                code="NOT_FOUND",
+                logs=[f"Report {report_id} not found"]
+            )
+        
+        # Check if already approved
+        if report.is_approved:
+            return error_response(
+                message="Báo cáo học tập này đã được phê duyệt trước đó",
+                code="ALREADY_APPROVED",
+                logs=[f"Report {report_id} is already approved by {report.approved_by} at {report.approved_at}"]
+            )
+        
+        # Get report data for PDF generation
+        from erp.api.erp_sis.report_card_render import get_report_data
+        
+        result = get_report_data(report_id=report_id)
+        
+        if not result.get('success'):
+            return error_response(
+                message="Không thể lấy dữ liệu báo cáo để tạo PDF",
+                code="DATA_ERROR",
+                logs=[f"Failed to get report data: {result.get('message')}"]
+            )
+        
+        report_data = result.get('data', {})
+        
+        # Get class and education grade info for folder structure
+        class_doc = frappe.get_doc("SIS Class", report.class_id)
+        school_year_doc = frappe.get_doc("SIS School Year", report.school_year)
+        
+        # Get education grade short_name
+        grade_short_name = "unknown"
+        if class_doc.education_grade:
+            grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade)
+            grade_short_name = grade_doc.short_name or grade_doc.name
+        
+        # Get student info
+        student_doc = frappe.get_doc("CRM Student", report.student_id)
+        student_code = student_doc.code or student_doc.name
+        
+        # Create folder structure: year/grade/class
+        site_path = frappe.get_site_path()
+        public_files = os.path.join(site_path, 'public', 'files')
+        
+        # Folder structure: report_cards/{school_year}/{grade}/{class}
+        folder_path = os.path.join(
+            public_files,
+            'report_cards',
+            school_year_doc.year_name or school_year_doc.name,
+            grade_short_name,
+            class_doc.short_title or class_doc.name
+        )
+        
+        # Create folders if they don't exist
+        os.makedirs(folder_path, exist_ok=True)
+        
+        # Generate PDF filename: {student_code}_{semester_part}.pdf
+        semester_safe = report.semester_part.replace(' ', '_')
+        pdf_filename = f"{student_code}_{semester_safe}.pdf"
+        pdf_path = os.path.join(folder_path, pdf_filename)
+        
+        # Relative path for storing in database (without site_path/public)
+        relative_path = f"/files/report_cards/{school_year_doc.year_name or school_year_doc.name}/{grade_short_name}/{class_doc.short_title or class_doc.name}/{pdf_filename}"
+        
+        frappe.logger().info(f"📄 Generating PDF at: {pdf_path}")
+        frappe.logger().info(f"   Relative path: {relative_path}")
+        
+        # Generate PDF using Frappe's built-in PDF generation
+        try:
+            # Generate HTML content from report data
+            html_content = render_report_card_html(report_data)
+            
+            # Use Frappe's get_pdf to generate PDF
+            from frappe.utils.pdf import get_pdf
+            
+            pdf_options = {
+                'page-size': 'A4',
+                'margin-top': '0mm',
+                'margin-bottom': '0mm',
+                'margin-left': '0mm',
+                'margin-right': '0mm',
+                'encoding': 'UTF-8',
+            }
+            
+            pdf_content = get_pdf(html_content, options=pdf_options)
+            
+            # Save PDF to file
+            with open(pdf_path, 'wb') as f:
+                f.write(pdf_content)
+            
+            frappe.logger().info(f"✅ PDF generated successfully at {pdf_path}")
+            
+        except Exception as pdf_error:
+            frappe.logger().error(f"❌ Error generating PDF: {str(pdf_error)}")
+            frappe.logger().error(frappe.get_traceback())
+            return error_response(
+                message=f"Lỗi khi tạo PDF: {str(pdf_error)}",
+                code="PDF_GENERATION_ERROR",
+                logs=[str(pdf_error), frappe.get_traceback()]
+            )
+        
+        # Update report card with approval info
+        report.is_approved = 1
+        report.approved_by = user
+        report.approved_at = datetime.now()
+        report.pdf_file = relative_path
+        report.status = "published"
+        report.save(ignore_permissions=True)
+        
+        frappe.db.commit()
+        
+        frappe.logger().info(f"✅ Report {report_id} approved successfully")
+        
+        return success_response(
+            data={
+                "report_id": report_id,
+                "pdf_file": relative_path,
+                "approved_by": user,
+                "approved_at": report.approved_at
+            },
+            message="Báo cáo học tập đã được phê duyệt và tạo PDF thành công",
+            logs=[
+                f"Report {report_id} approved by {user}",
+                f"PDF saved at {relative_path}"
+            ]
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ Error in approve_report_card: {str(e)}")
+        frappe.logger().error(frappe.get_traceback())
+        return error_response(
+            message=f"Lỗi khi phê duyệt báo cáo: {str(e)}",
+            code="SERVER_ERROR",
+            logs=[str(e), frappe.get_traceback()]
+        )
+
+
+def render_report_card_html(report_data):
+    """
+    Render report card data to HTML for PDF generation
+    Uses the same rendering logic as frontend FormRenderer
+    """
+    try:
+        form_code = report_data.get('form_code', 'PRIM_VN')
+        student = report_data.get('student', {})
+        report = report_data.get('report', {})
+        subjects = report_data.get('subjects', [])
+        homeroom = report_data.get('homeroom', [])
+        class_info = report_data.get('class', {})
+        
+        # Get background image URL
+        bg_url = f"{frappe.utils.get_url()}/files/report_forms/{form_code}/page_1.png"
+        
+        # Build subjects HTML
+        subjects_html = ""
+        if subjects:
+            subjects_html = "<div style='margin-top: 20px;'>"
+            subjects_html += "<h3 style='margin-bottom: 10px;'>Kết quả học tập</h3>"
+            subjects_html += "<table style='width: 100%; border-collapse: collapse; margin-top: 10px;'>"
+            subjects_html += "<thead><tr style='background-color: #f0f0f0;'>"
+            subjects_html += "<th style='border: 1px solid #ccc; padding: 8px; text-align: left;'>Môn học</th>"
+            subjects_html += "<th style='border: 1px solid #ccc; padding: 8px; text-align: center;'>Điểm</th>"
+            subjects_html += "</tr></thead><tbody>"
+            
+            for subject in subjects:
+                subject_name = subject.get('subject_name', '') or subject.get('subject_id', '')
+                # Try to get score from various possible fields
+                score = subject.get('average', '') or subject.get('final_score', '') or subject.get('grade', '') or ''
+                
+                subjects_html += "<tr>"
+                subjects_html += f"<td style='border: 1px solid #ccc; padding: 8px;'>{subject_name}</td>"
+                subjects_html += f"<td style='border: 1px solid #ccc; padding: 8px; text-align: center;'>{score}</td>"
+                subjects_html += "</tr>"
+            
+            subjects_html += "</tbody></table></div>"
+        
+        # Build homeroom comments HTML
+        homeroom_html = ""
+        if homeroom:
+            homeroom_html = "<div style='margin-top: 20px;'>"
+            homeroom_html += "<h3 style='margin-bottom: 10px;'>Nhận xét</h3>"
+            for comment in homeroom:
+                title = comment.get('title', '')
+                value = comment.get('value', '') or comment.get('comment', '')
+                if title and value:
+                    homeroom_html += f"<div style='margin-bottom: 10px;'>"
+                    homeroom_html += f"<strong>{title}:</strong>"
+                    homeroom_html += f"<p style='margin: 5px 0; white-space: pre-wrap;'>{value}</p>"
+                    homeroom_html += "</div>"
+            homeroom_html += "</div>"
+        
+        # Complete HTML
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>{report.get('title_vn', 'Báo cáo học tập')}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;600;700;800&display=swap" rel="stylesheet">
+            <style>
+                @page {{ size: A4; margin: 0; }}
+                * {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }}
+                html, body {{ margin: 0 !important; padding: 0 !important; font-family: 'Mulish', Arial, sans-serif; }}
+                body {{ overflow: hidden; }}
+                .a4 {{ 
+                    position: relative; 
+                    width: 210mm; 
+                    height: 297mm; 
+                    background: white; 
+                    overflow: hidden; 
+                    page-break-after: always; 
+                    background-size: cover; 
+                    background-position: center; 
+                    background-repeat: no-repeat;
+                    background-image: url('{bg_url}');
+                }}
+                .a4-layer {{ 
+                    position: absolute; 
+                    inset: 0; 
+                    overflow: hidden; 
+                    z-index: 1; 
+                    padding: 40px;
+                }}
+                h1, h2, h3 {{ color: #002855; }}
+                table {{ width: 100%; border-collapse: collapse; }}
+                th, td {{ border: 1px solid #ccc; padding: 8px; }}
+                th {{ background-color: #f0f0f0; font-weight: 600; }}
+            </style>
+        </head>
+        <body>
+            <div class="a4">
+                <div class="a4-layer">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <h1 style="margin: 0;">{report.get('title_vn', 'Báo cáo học tập')}</h1>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <p><strong>Học sinh:</strong> {student.get('full_name', '')}</p>
+                        <p><strong>Mã học sinh:</strong> {student.get('code', '')}</p>
+                        <p><strong>Lớp:</strong> {class_info.get('short_title', '') or class_info.get('name', '')}</p>
+                    </div>
+                    
+                    {subjects_html}
+                    
+                    {homeroom_html}
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return html
+        
+    except Exception as e:
+        frappe.logger().error(f"Error rendering report card HTML: {str(e)}")
+        frappe.logger().error(frappe.get_traceback())
+        # Return a simple error HTML
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"><title>Error</title></head>
+        <body>
+            <h1>Error generating report card</h1>
+            <p>{str(e)}</p>
+        </body>
+        </html>
+        """
