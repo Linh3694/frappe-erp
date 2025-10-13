@@ -221,14 +221,21 @@ def get_report_card_detail():
         
         # Verify parent has access to this student
         parent_email = frappe.session.user
+        frappe.logger().info(f"   - parent_email: {parent_email}")
+        
         parent_student_ids = _get_parent_student_ids(parent_email)
+        frappe.logger().info(f"   - parent_student_ids: {parent_student_ids}")
+        frappe.logger().info(f"   - report.student_id: {report.student_id}")
         
         if report.student_id not in parent_student_ids:
+            frappe.logger().error(f"❌ Student {report.student_id} not in parent's student list {parent_student_ids}")
             return error_response(
                 message="You do not have permission to view this report card",
                 code="PERMISSION_DENIED",
-                logs=[f"Student {report.student_id} not in parent's student list"]
+                logs=[f"Student {report.student_id} not in parent's student list: {parent_student_ids}"]
             )
+        
+        frappe.logger().info(f"✓ Parent has access to student {report.student_id}")
         
         # Use admin API with permission override
         from erp.api.erp_sis.report_card_render import get_report_data
