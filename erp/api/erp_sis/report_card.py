@@ -49,7 +49,17 @@ def generate_pdf_with_playwright(report_id: str) -> bytes:
     
     # Get frontend URL from environment or site config
     frontend_url = frappe.conf.get('frontend_url') or 'http://localhost:5173'
-    pdf_url = f"{frontend_url}/school/academic-year/report-card/view/{report_id}"
+    
+    # Get API key for authentication
+    api_key = frappe.get_value("User", frappe.session.user, "api_key")
+    if not api_key:
+        # Generate temporary API key if not exists
+        from frappe.core.doctype.user.user import generate_keys
+        generate_keys(frappe.session.user)
+        api_key = frappe.get_value("User", frappe.session.user, "api_key")
+    
+    # Use print-only route with token for authentication
+    pdf_url = f"{frontend_url}/print/report-card/{report_id}?headless=true&token={api_key}"
     
     frappe.logger().info(f"🎭 Generating PDF with Playwright from URL: {pdf_url}")
     
@@ -62,16 +72,6 @@ def generate_pdf_with_playwright(report_id: str) -> bytes:
             viewport={'width': 1200, 'height': 1600},
             device_scale_factor=2,  # For better quality
         )
-        
-        # Set authentication cookie/token if needed
-        token = frappe.get_value("User", frappe.session.user, "api_key")
-        if token:
-            context.add_cookies([{
-                'name': 'frappe_token',
-                'value': token,
-                'domain': frontend_url.replace('http://', '').replace('https://', '').split(':')[0],
-                'path': '/'
-            }])
         
         # Create page and navigate
         page = context.new_page()
