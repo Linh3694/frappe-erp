@@ -39,72 +39,6 @@ def _current_campus_id() -> str:
     return campus_id
 
 
-def generate_pdf_with_playwright(report_id: str) -> bytes:
-    """
-    Generate PDF by rendering actual frontend page using Playwright.
-    This ensures 100% accurate rendering of all form types.
-    """
-    from playwright.sync_api import sync_playwright
-    import time
-    
-    # Get frontend URL from environment or site config
-    frontend_url = frappe.conf.get('frontend_url') or 'http://localhost:5173'
-    
-    # Get API key for authentication
-    api_key = frappe.get_value("User", frappe.session.user, "api_key")
-    if not api_key:
-        # Generate temporary API key if not exists
-        from frappe.core.doctype.user.user import generate_keys
-        generate_keys(frappe.session.user)
-        api_key = frappe.get_value("User", frappe.session.user, "api_key")
-    
-    # Use print-only route with token for authentication
-    pdf_url = f"{frontend_url}/print/report-card/{report_id}?headless=true&token={api_key}"
-    
-    frappe.logger().info(f"🎭 Generating PDF with Playwright from URL: {pdf_url}")
-    
-    with sync_playwright() as p:
-        # Launch browser in headless mode
-        browser = p.chromium.launch(headless=True)
-        
-        # Create context with authentication
-        context = browser.new_context(
-            viewport={'width': 1200, 'height': 1600},
-            device_scale_factor=2,  # For better quality
-        )
-        
-        # Create page and navigate
-        page = context.new_page()
-        
-        try:
-            # Navigate to report page
-            response = page.goto(pdf_url, wait_until='networkidle', timeout=30000)
-            
-            if not response or response.status >= 400:
-                raise Exception(f"Failed to load page: HTTP {response.status if response else 'unknown'}")
-            
-            # Wait for FormRenderer to load
-            page.wait_for_selector('.a4', timeout=15000)
-            
-            # Wait a bit more for background images to load
-            time.sleep(2)
-            
-            # Generate PDF
-            pdf_bytes = page.pdf(
-                format='A4',
-                print_background=True,
-                margin={'top': '0mm', 'right': '0mm', 'bottom': '0mm', 'left': '0mm'},
-                prefer_css_page_size=True,
-            )
-            
-            frappe.logger().info(f"✅ PDF generated: {len(pdf_bytes)} bytes")
-            
-            return pdf_bytes
-            
-        finally:
-            page.close()
-            context.close()
-            browser.close()
 
 
 def _doc_to_template_dict(doc) -> Dict[str, Any]:
@@ -1363,125 +1297,13 @@ def approve_report_card():
                 logs=[f"Report {report_id} is already approved by {report.approved_by} at {report.approved_at}"]
             )
         
-        # Get report data for PDF generation
-        from erp.api.erp_sis.report_card_render import get_report_data
-        
-        # Temporarily switch to Administrator to bypass permissions
-        current_user = frappe.session.user
-        try:
-            frappe.set_user("Administrator")
-            result = get_report_data(report_id=report_id)
-        finally:
-            frappe.set_user(current_user)
-        
-        if not result.get('success'):
-            return error_response(
-                message="Không thể lấy dữ liệu báo cáo để tạo PDF",
-                code="DATA_ERROR",
-                logs=[f"Failed to get report data: {result.get('message')}"]
-            )
-        
-        report_data = result.get('data', {})
-        
-        # Get class and education grade info for folder structure (ignore permissions)
-        class_doc = frappe.get_doc("SIS Class", report.class_id, ignore_permissions=True)
-        school_year_doc = frappe.get_doc("SIS School Year", report.school_year, ignore_permissions=True)
-        
-        # Get education grade code for folder structure
-        grade_short_name = "unknown"
-        if class_doc.education_grade:
-            grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade, ignore_permissions=True)
-            grade_short_name = grade_doc.grade_code or grade_doc.name
-        
-        # Get student info
-        student_doc = frappe.get_doc("CRM Student", report.student_id, ignore_permissions=True)
-        student_code = student_doc.student_code or student_doc.name
-        
-        # Create folder structure: year/grade/class
-        site_path = frappe.get_site_path()
-        public_files = os.path.join(site_path, 'public', 'files')
-        
-        # Create sanitized year folder name
-        year_folder_name = school_year_doc.title_vn or school_year_doc.name
-        # Sanitize folder name (remove special characters)
-        year_folder_name = year_folder_name.replace('/', '-').replace('\\', '-')
-        
-        # Folder structure: report_cards/{school_year}/{grade}/{class}
-        folder_path = os.path.join(
-            public_files,
-            'report_cards',
-            year_folder_name,
-            grade_short_name,
-            class_doc.short_title or class_doc.name
-        )
-        
-        # Create folders if they don't exist
-        os.makedirs(folder_path, exist_ok=True)
-        
-        # Generate PDF filename: {student_code}_{semester_part}.pdf
-        semester_safe = report.semester_part.replace(' ', '_')
-        pdf_filename = f"{student_code}_{semester_safe}.pdf"
-        pdf_path = os.path.join(folder_path, pdf_filename)
-        
-        # Relative path for storing in database (without site_path/public)
-        relative_path = f"/files/report_cards/{year_folder_name}/{grade_short_name}/{class_doc.short_title or class_doc.name}/{pdf_filename}"
-        
-        frappe.logger().info(f"📄 Generating PDF at: {pdf_path}")
-        frappe.logger().info(f"   Relative path: {relative_path}")
-        
-        # Generate PDF using headless browser to render actual frontend
-        try:
-            # Try using Playwright/Puppeteer for accurate PDF generation
-            pdf_content = None
-            generation_method = "unknown"
-            
-            # Method 1: Try Playwright (recommended for production)
-            try:
-                pdf_content = generate_pdf_with_playwright(report_id)
-                generation_method = "playwright"
-                frappe.logger().info("✅ PDF generated using Playwright")
-            except ImportError:
-                frappe.logger().info("⚠️ Playwright not available, trying fallback methods...")
-            except Exception as e:
-                frappe.logger().warning(f"⚠️ Playwright generation failed: {str(e)}")
-            
-            # Method 2: Fallback to simple HTML rendering
-            if not pdf_content:
-                frappe.logger().info("Using fallback: Simple HTML to PDF conversion")
-                html_content = render_report_card_html(report_data)
-                
-                from frappe.utils.pdf import get_pdf
-                pdf_options = {
-                    'page-size': 'A4',
-                    'margin-top': '0mm',
-                    'margin-bottom': '0mm',
-                    'margin-left': '0mm',
-                    'margin-right': '0mm',
-                    'encoding': 'UTF-8',
-                }
-                pdf_content = get_pdf(html_content, options=pdf_options)
-                generation_method = "fallback_html"
-            
-            # Save PDF to file
-            with open(pdf_path, 'wb') as f:
-                f.write(pdf_content)
-            
-            frappe.logger().info(f"✅ PDF generated successfully using {generation_method} at {pdf_path}")
-            
-        except Exception as pdf_error:
-            frappe.logger().error(f"❌ Error generating PDF: {str(pdf_error)}")
-            frappe.logger().error(frappe.get_traceback())
-            return error_response(
-                message=f"Lỗi khi tạo PDF: {str(pdf_error)}",
-                code="PDF_GENERATION_ERROR",
-                logs=[str(pdf_error), frappe.get_traceback()]
-            )
+        # Simply approve the report - no PDF generation needed
+        # Parents will download PDF directly from their browser using FormRenderer
         
         # Update report card with approval info
         report.is_approved = 1
         report.approved_by = user
         report.approved_at = datetime.now()
-        report.pdf_file = relative_path
         report.status = "published"
         report.save(ignore_permissions=True)
         
@@ -1492,14 +1314,13 @@ def approve_report_card():
         return success_response(
             data={
                 "report_id": report_id,
-                "pdf_file": relative_path,
                 "approved_by": user,
                 "approved_at": report.approved_at
             },
-            message="Báo cáo học tập đã được phê duyệt và tạo PDF thành công",
+            message="Báo cáo học tập đã được phê duyệt thành công. Phụ huynh có thể xem và tải PDF từ Parent Portal.",
             logs=[
                 f"Report {report_id} approved by {user}",
-                f"PDF saved at {relative_path}"
+                f"Parents can now view and download this report"
             ]
         )
         

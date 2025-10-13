@@ -92,8 +92,11 @@ def get_student_report_cards():
                 logs=[f"Student {student_id} not in parent's student list: {parent_student_ids}"]
             )
         
-        # Build filters
-        filters = {"student_id": student_id}
+        # Build filters - only show approved reports to parents
+        filters = {
+            "student_id": student_id,
+            "is_approved": 1  # Only show approved reports
+        }
         
         if school_year:
             filters["school_year"] = school_year
@@ -133,6 +136,18 @@ def get_student_report_cards():
                 as_dict=True
             ) or {}
             
+            # Get school year title (title_vn or title_en)
+            school_year_title = report["school_year"]  # Default to ID
+            if report.get("school_year"):
+                year_info = frappe.db.get_value(
+                    "SIS School Year",
+                    report["school_year"],
+                    ["title_vn", "title_en", "name"],
+                    as_dict=True
+                )
+                if year_info:
+                    school_year_title = year_info.get("title_vn") or year_info.get("title_en") or report["school_year"]
+            
             enriched_reports.append({
                 "name": report["name"],
                 "title": report["title"],
@@ -142,7 +157,7 @@ def get_student_report_cards():
                 "class_short_title": class_info.get("short_title", ""),
                 "class_code": class_info.get("title", ""),
                 "student_id": report["student_id"],
-                "school_year": report["school_year"],
+                "school_year": school_year_title,  # Use title_vn/title_en instead of ID
                 "semester_part": report["semester_part"],
                 "status": report["status"],
                 "creation": report["creation"],
@@ -257,6 +272,21 @@ def get_report_card_detail():
             )
         
         log_msg = f"✓ Parent has access to student {report.student_id}"
+        frappe.logger().info(log_msg)
+        logs.append(log_msg)
+        
+        # Check if report is approved
+        if not report.is_approved:
+            log_msg = f"❌ Report {report_id} is not approved yet"
+            frappe.logger().error(log_msg)
+            logs.append(log_msg)
+            return error_response(
+                message="Báo cáo học tập này chưa được phê duyệt",
+                code="NOT_APPROVED",
+                logs=logs
+            )
+        
+        log_msg = f"✓ Report {report_id} is approved"
         frappe.logger().info(log_msg)
         logs.append(log_msg)
         
