@@ -3,9 +3,9 @@ Report Card API for Parent Portal
 Parents can view their children's report cards
 """
 
-import json
 import frappe
 from frappe import _
+import json
 from erp.utils.api_response import success_response, error_response
 
 
@@ -204,10 +204,10 @@ def get_report_card_detail():
                 logs=["report_id is required"]
             )
         
-        # Get report card basic info to verify access
-        report = frappe.get_doc("SIS Student Report Card", report_id)
-        
-        if not report:
+        # Get report card basic info to verify access (ignore permissions for now, we'll check parent access below)
+        try:
+            report = frappe.get_doc("SIS Student Report Card", report_id, ignore_permissions=True)
+        except frappe.DoesNotExistError:
             return error_response(
                 message="Report card not found",
                 code="NOT_FOUND",
@@ -225,20 +225,59 @@ def get_report_card_detail():
                 logs=[f"Student {report.student_id} not in parent's student list"]
             )
         
-        # Use the existing report_card_render API to get structured data
-        from erp.api.erp_sis.report_card_render import get_report_data
-        
-        # Call the existing API (it expects report_id in form_dict)
-        original_form_dict = frappe.form_dict.copy()
-        frappe.form_dict['report_id'] = report_id
-        
+        # Get report data directly without permission checks
+        # Parse data_json
         try:
-            result = get_report_data(report_id=report_id)
-            frappe.logger().info(f"✅ Got report data from render API")
-            return result
-        finally:
-            # Restore original form_dict
-            frappe.form_dict = original_form_dict
+            data_json = json.loads(report.data_json or "{}")
+        except Exception:
+            data_json = {}
+        
+        # Get student info (ignore permissions as we already verified parent access)
+        student = frappe.get_doc("CRM Student", report.student_id, ignore_permissions=True)
+        
+        # Get class info
+        class_info = frappe.db.get_value(
+            "SIS Class",
+            report.class_id,
+            ["short_title", "title"],
+            as_dict=True
+        ) or {}
+        
+        # Get form info (ignore permissions)
+        form = None
+        if report.form_id:
+            try:
+                form = frappe.get_doc("SIS Report Form", report.form_id, ignore_permissions=True)
+            except Exception:
+                frappe.logger().warning(f"Could not load form {report.form_id}")
+        
+        # Build response
+        response_data = {
+            "form_code": form.code if form else "PRIM_VN",
+            "data": data_json,
+            "student": {
+                "full_name": student.student_name,
+                "code": student.student_code,
+                "gender": student.gender if hasattr(student, 'gender') else None,
+                "dob": str(student.date_of_birth) if hasattr(student, 'date_of_birth') and student.date_of_birth else None
+            },
+            "class": {
+                "short_title": class_info.get("short_title", "")
+            },
+            "report": {
+                "title_vn": report.title,
+                "title_en": report.title
+            },
+            "subjects": data_json.get("subjects", []),
+            "homeroom": data_json.get("homeroom", [])
+        }
+        
+        frappe.logger().info(f"✅ Built report data for parent portal")
+        
+        return success_response(
+            data=response_data,
+            message="Report card loaded successfully"
+        )
         
     except frappe.PermissionError:
         frappe.logger().error(f"❌ Permission denied for report {report_id}")
