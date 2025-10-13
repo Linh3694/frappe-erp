@@ -1321,7 +1321,7 @@ def approve_report_card():
         
         # Get student info
         student_doc = frappe.get_doc("CRM Student", report.student_id)
-        student_code = student_doc.code or student_doc.name
+        student_code = student_doc.student_code or student_doc.name
         
         # Create folder structure: year/grade/class
         site_path = frappe.get_site_path()
