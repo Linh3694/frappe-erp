@@ -41,41 +41,55 @@ def _get_parent_student_ids(parent_email):
 def _get_teacher_full_name(user_email):
     """Get teacher's full name from User doctype"""
     if not user_email:
+        print(f"❌ No user_email provided")
         return None
-    
+
     try:
+        print(f"🔍 Getting full_name for user: {user_email}")
         full_name = frappe.db.get_value("User", user_email, "full_name")
+        print(f"✅ Got full_name: {full_name}")
         return full_name
-    except Exception:
+    except Exception as e:
+        print(f"❌ Error getting full_name for {user_email}: {str(e)}")
         return None
 
 
 def _get_class_info(class_id):
     """Get class information including homeroom teachers"""
     try:
+        print(f"🔍 Getting class info for {class_id}")
         class_doc = frappe.get_doc("SIS Class", class_id)
-        
+        print(f"📚 Class doc loaded: {class_doc.name}, title: {class_doc.title}")
+
         homeroom_teacher_name = None
         vice_homeroom_teacher_name = None
-        
+
         if class_doc.homeroom_teacher:
+            print(f"👨‍🏫 Processing homeroom teacher: {class_doc.homeroom_teacher}")
             # Get teacher's user email first
             teacher_user = frappe.db.get_value("SIS Teacher", class_doc.homeroom_teacher, "user_id")
+            print(f"📧 Homeroom teacher user_id: {teacher_user}")
             if teacher_user:
                 homeroom_teacher_name = _get_teacher_full_name(teacher_user)
-        
+                print(f"🏷️ Homeroom teacher name: {homeroom_teacher_name}")
+
         if class_doc.vice_homeroom_teacher:
+            print(f"👨‍🏫 Processing vice homeroom teacher: {class_doc.vice_homeroom_teacher}")
             # Get teacher's user email first
             teacher_user = frappe.db.get_value("SIS Teacher", class_doc.vice_homeroom_teacher, "user_id")
+            print(f"📧 Vice homeroom teacher user_id: {teacher_user}")
             if teacher_user:
                 vice_homeroom_teacher_name = _get_teacher_full_name(teacher_user)
-        
-        return {
+                print(f"🏷️ Vice homeroom teacher name: {vice_homeroom_teacher_name}")
+
+        result = {
             "name": class_doc.name,
-            "class_name": class_doc.class_name,
+            "class_name": class_doc.title,
             "homeroom_teacher": homeroom_teacher_name,
             "vice_homeroom_teacher": vice_homeroom_teacher_name
         }
+        print(f"✅ Class info result: {result}")
+        return result
     except Exception as e:
         print(f"⚠️ Error getting class info for {class_id}: {str(e)}")
         return {
