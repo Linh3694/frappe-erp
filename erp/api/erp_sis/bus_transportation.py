@@ -13,22 +13,24 @@ def get_all_bus_transportation():
 	"""Get all bus transportation without pagination - always returns full dataset"""
 	try:
 		# Get current user's campus information from roles
-		campus_id = get_current_campus_from_context()
+		from erp.utils.campus_utils import get_all_campus_ids_from_user_roles
 
-		if not campus_id:
-			# Try to get first available campus as fallback
+		user = frappe.session.user
+		user_campus_ids = get_all_campus_ids_from_user_roles(user)
+
+		# Apply campus filtering for data isolation
+		filters = {}
+		if user_campus_ids:
+			filters = {"campus_id": ["in", user_campus_ids]}
+		else:
+			# Fallback: if no campus access found, get first available campus
 			try:
 				first_campus = frappe.get_all("SIS Campus", limit=1, fields=["name"])
 				if first_campus:
-					campus_id = first_campus[0].name
-				else:
-					# No campuses available, allow creation without campus filter
-					campus_id = None
+					filters = {"campus_id": first_campus[0].name}
+				# If no campuses at all, don't filter (shouldn't happen in normal operation)
 			except Exception:
-				campus_id = None
-
-		# Apply campus filtering for data isolation
-		filters = {"campus_id": campus_id}
+				pass
 
 		# Get all bus transportation
 		transportation = frappe.get_list(
@@ -129,21 +131,39 @@ def create_bus_transportation(**data):
 		status = data.get("status", "active")
 		doc.status = "Active" if status == "active" else "Inactive"
 
-		# Handle campus_id with validation
+		# Handle campus_id with validation - prioritize context campus
+		from erp.utils.campus_utils import get_all_campus_ids_from_user_roles
+
 		campus_id = data.get("campus_id")
-		if campus_id and not frappe.db.exists("SIS Campus", campus_id):
-			log_info(f"Campus {campus_id} does not exist, trying to find available campus")
-			try:
-				first_campus = frappe.get_all("SIS Campus", limit=1, fields=["name"])
-				if first_campus:
-					campus_id = first_campus[0].name
-					log_info(f"Using first available campus: {campus_id}")
-				else:
+		user = frappe.session.user
+		user_campus_ids = get_all_campus_ids_from_user_roles(user)
+
+		# First try to get campus from user context
+		context_campus = get_current_campus_from_context()
+		if context_campus and frappe.db.exists("SIS Campus", context_campus) and context_campus in user_campus_ids:
+			campus_id = context_campus
+			log_info(f"Using campus from context: {campus_id}")
+		elif campus_id and frappe.db.exists("SIS Campus", campus_id) and campus_id in user_campus_ids:
+			log_info(f"Using campus from request: {campus_id}")
+		else:
+			# Use first available campus that user has access to
+			if user_campus_ids:
+				campus_id = user_campus_ids[0]
+				log_info(f"Using first accessible campus: {campus_id}")
+			else:
+				log_info("No accessible campuses found, trying to find any available campus")
+				try:
+					first_campus = frappe.get_all("SIS Campus", limit=1, fields=["name"])
+					if first_campus:
+						campus_id = first_campus[0].name
+						log_info(f"Using first available campus: {campus_id}")
+					else:
+						campus_id = None
+						log_info("No campuses available, setting campus_id to None")
+				except Exception as e:
+					log_error(f"Error finding available campus: {str(e)}")
 					campus_id = None
-					log_info("No campuses available, setting campus_id to None")
-			except Exception as e:
-				log_error(f"Error finding available campus: {str(e)}")
-				campus_id = None
+
 		doc.campus_id = campus_id
 
 		doc.school_year_id = data.get("school_year_id")
