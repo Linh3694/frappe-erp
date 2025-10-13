@@ -1,3 +1,4 @@
+
 """
 Report Card API for Parent Portal
 Parents can view their children's report cards
@@ -230,15 +231,18 @@ def get_report_card_detail():
             )
         
         # Use admin API with permission override
-        # Temporarily set user to administrator to bypass permission checks
         from erp.api.erp_sis.report_card_render import get_report_data
         
-        # Save current user
-        current_user = frappe.session.user
+        frappe.logger().info(f"🔄 Bypassing permissions for parent portal access")
+        
+        # Save current permission state
+        old_ignore_permissions = frappe.flags.ignore_permissions
         
         try:
-            # Temporarily switch to Administrator to bypass permissions
-            frappe.set_user("Administrator")
+            # Set flag to ignore all permissions
+            frappe.flags.ignore_permissions = True
+            
+            frappe.logger().info(f"✓ ignore_permissions flag set to True")
             
             # Call admin API to get fully transformed data
             result = get_report_data(report_id=report_id)
@@ -251,22 +255,32 @@ def get_report_card_detail():
                 result['data']['pdf_file'] = report.pdf_file or None
                 result['data']['approved_by'] = report.approved_by or None
                 result['data']['approved_at'] = report.approved_at or None
+                
+                frappe.logger().info(f"✓ Added approval info: is_approved={result['data']['is_approved']}, pdf_file={result['data']['pdf_file']}")
             
             return result
             
+        except Exception as e:
+            frappe.logger().error(f"❌ Error in get_report_data: {str(e)}")
+            frappe.logger().error(frappe.get_traceback())
+            raise
         finally:
-            # Always restore original user
-            frappe.set_user(current_user)
+            # Restore original permission state
+            frappe.flags.ignore_permissions = old_ignore_permissions
+            frappe.logger().info(f"🔄 Restored ignore_permissions flag to {old_ignore_permissions}")
         
-    except frappe.PermissionError:
-        frappe.logger().error(f"❌ Permission denied for report {report_id}")
+    except frappe.PermissionError as pe:
+        frappe.logger().error(f"❌ Permission denied for report {report_id if 'report_id' in locals() else 'unknown'}")
+        frappe.logger().error(f"   Permission error: {str(pe)}")
+        frappe.logger().error(frappe.get_traceback())
         return error_response(
             message="You do not have permission to view this report card",
             code="PERMISSION_DENIED",
-            logs=["Permission denied"]
+            logs=["Permission denied", str(pe), frappe.get_traceback()]
         )
     except Exception as e:
         frappe.logger().error(f"❌ Error in get_report_card_detail: {str(e)}")
+        frappe.logger().error(f"   Exception type: {type(e).__name__}")
         frappe.logger().error(frappe.get_traceback())
         return error_response(
             message=f"Error fetching report card detail: {str(e)}",
