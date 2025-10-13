@@ -16,8 +16,16 @@ def get_all_bus_transportation():
 		campus_id = get_current_campus_from_context()
 
 		if not campus_id:
-			# Fallback to default if no campus found
-			campus_id = "campus-1"
+			# Try to get first available campus as fallback
+			try:
+				first_campus = frappe.get_all("SIS Campus", limit=1, fields=["name"])
+				if first_campus:
+					campus_id = first_campus[0].name
+				else:
+					# No campuses available, allow creation without campus filter
+					campus_id = None
+			except Exception:
+				campus_id = None
 
 		# Apply campus filtering for data isolation
 		filters = {"campus_id": campus_id}
@@ -120,7 +128,24 @@ def create_bus_transportation(**data):
 		# Map frontend status (lowercase) to backend status (capitalized)
 		status = data.get("status", "active")
 		doc.status = "Active" if status == "active" else "Inactive"
-		doc.campus_id = data.get("campus_id")
+
+		# Handle campus_id with validation
+		campus_id = data.get("campus_id")
+		if campus_id and not frappe.db.exists("SIS Campus", campus_id):
+			log_info(f"Campus {campus_id} does not exist, trying to find available campus")
+			try:
+				first_campus = frappe.get_all("SIS Campus", limit=1, fields=["name"])
+				if first_campus:
+					campus_id = first_campus[0].name
+					log_info(f"Using first available campus: {campus_id}")
+				else:
+					campus_id = None
+					log_info("No campuses available, setting campus_id to None")
+			except Exception as e:
+				log_error(f"Error finding available campus: {str(e)}")
+				campus_id = None
+		doc.campus_id = campus_id
+
 		doc.school_year_id = data.get("school_year_id")
 
 		log_info(f"Document before insert: {doc.as_dict()}")
