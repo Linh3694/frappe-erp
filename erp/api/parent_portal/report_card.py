@@ -263,16 +263,22 @@ def get_report_card_detail():
         # Use admin API with permission override
         from erp.api.erp_sis.report_card_render import get_report_data
         
-        log_msg = "🔄 Bypassing permissions for parent portal access"
+        log_msg = "🔄 Switching to Administrator context for parent portal access"
         frappe.logger().info(log_msg)
         logs.append(log_msg)
         
-        # Save current permission state
-        old_ignore_permissions = frappe.flags.ignore_permissions
+        # Save current user and permission state
+        current_user = frappe.session.user
+        old_ignore_permissions = getattr(frappe.flags, 'ignore_permissions', False)
         
         try:
-            # Set flag to ignore all permissions
+            # Switch to Administrator AND set ignore_permissions flag
+            frappe.set_user("Administrator")
             frappe.flags.ignore_permissions = True
+            
+            log_msg = f"✓ Switched user from {current_user} to {frappe.session.user}"
+            frappe.logger().info(log_msg)
+            logs.append(log_msg)
             
             log_msg = "✓ ignore_permissions flag set to True"
             frappe.logger().info(log_msg)
@@ -309,6 +315,10 @@ def get_report_card_detail():
                 if not result.get('logs'):
                     result['logs'] = []
                 result['logs'].extend(logs)
+                
+                log_msg = f"❌ get_report_data returned success=False, message={result.get('message')}"
+                frappe.logger().error(log_msg)
+                logs.append(log_msg)
             
             return result
             
@@ -320,9 +330,10 @@ def get_report_card_detail():
             logs.append(frappe.get_traceback())
             raise
         finally:
-            # Restore original permission state
+            # Restore original user and permission state
+            frappe.set_user(current_user)
             frappe.flags.ignore_permissions = old_ignore_permissions
-            log_msg = f"🔄 Restored ignore_permissions flag to {old_ignore_permissions}"
+            log_msg = f"🔄 Restored user to {current_user} and ignore_permissions to {old_ignore_permissions}"
             frappe.logger().info(log_msg)
             logs.append(log_msg)
         
