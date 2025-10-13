@@ -32,9 +32,3 @@ class SISBusDriver(Document):
 			}):
 				frappe.throw("Số điện thoại đã tồn tại")
 
-		if self.contractor:
-			if frappe.db.exists("SIS Bus Driver", {
-				"contractor": self.contractor,
-				"name": ("!=", self.name)
-			}):
-				frappe.throw("Nhà cung cấp đã tồn tại")
