@@ -1313,11 +1313,11 @@ def approve_report_card():
         class_doc = frappe.get_doc("SIS Class", report.class_id)
         school_year_doc = frappe.get_doc("SIS School Year", report.school_year)
         
-        # Get education grade short_name
+        # Get education grade code for folder structure
         grade_short_name = "unknown"
         if class_doc.education_grade:
             grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade)
-            grade_short_name = grade_doc.short_name or grade_doc.name
+            grade_short_name = grade_doc.grade_code or grade_doc.name
         
         # Get student info
         student_doc = frappe.get_doc("CRM Student", report.student_id)
