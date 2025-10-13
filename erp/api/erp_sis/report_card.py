@@ -1277,9 +1277,9 @@ def approve_report_card():
                 logs=["report_id is required"]
             )
         
-        # Get report card
+        # Get report card (ignore permissions as we already checked roles above)
         try:
-            report = frappe.get_doc("SIS Student Report Card", report_id)
+            report = frappe.get_doc("SIS Student Report Card", report_id, ignore_permissions=True)
         except frappe.DoesNotExistError:
             return error_response(
                 message="Không tìm thấy báo cáo học tập",
@@ -1298,7 +1298,13 @@ def approve_report_card():
         # Get report data for PDF generation
         from erp.api.erp_sis.report_card_render import get_report_data
         
-        result = get_report_data(report_id=report_id)
+        # Temporarily switch to Administrator to bypass permissions
+        current_user = frappe.session.user
+        try:
+            frappe.set_user("Administrator")
+            result = get_report_data(report_id=report_id)
+        finally:
+            frappe.set_user(current_user)
         
         if not result.get('success'):
             return error_response(
@@ -1309,18 +1315,18 @@ def approve_report_card():
         
         report_data = result.get('data', {})
         
-        # Get class and education grade info for folder structure
-        class_doc = frappe.get_doc("SIS Class", report.class_id)
-        school_year_doc = frappe.get_doc("SIS School Year", report.school_year)
+        # Get class and education grade info for folder structure (ignore permissions)
+        class_doc = frappe.get_doc("SIS Class", report.class_id, ignore_permissions=True)
+        school_year_doc = frappe.get_doc("SIS School Year", report.school_year, ignore_permissions=True)
         
         # Get education grade code for folder structure
         grade_short_name = "unknown"
         if class_doc.education_grade:
-            grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade)
+            grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade, ignore_permissions=True)
             grade_short_name = grade_doc.grade_code or grade_doc.name
         
         # Get student info
-        student_doc = frappe.get_doc("CRM Student", report.student_id)
+        student_doc = frappe.get_doc("CRM Student", report.student_id, ignore_permissions=True)
         student_code = student_doc.student_code or student_doc.name
         
         # Create folder structure: year/grade/class
