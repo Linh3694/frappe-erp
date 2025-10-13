@@ -812,7 +812,7 @@ def get_reports_by_class():
     reports = frappe.get_all(
         "SIS Student Report Card",
         fields=["name", "title", "template_id", "form_id", "class_id", "student_id",
-                "school_year", "semester_part", "status", "creation", "modified"],
+                "school_year", "semester_part", "status", "creation", "modified", "pdf_file", "is_approved"],
         filters=filters,
         order_by="modified desc"
     )
