@@ -14,12 +14,13 @@ def _get_parent_student_ids(parent_email):
     # Parent email format: guardian_id@parent.wellspring.edu.vn
     guardian_id = parent_email.split('@')[0]
     
-    # Find guardian
+    # Find guardian (ignore permissions since this is internal validation)
     guardians = frappe.get_all(
         "CRM Guardian",
         filters={"guardian_id": guardian_id},
         fields=["name"],
-        limit=1
+        limit=1,
+        ignore_permissions=True
     )
     
     if not guardians:
@@ -27,12 +28,13 @@ def _get_parent_student_ids(parent_email):
     
     guardian_name = guardians[0]['name']
     
-    # Find students through family relationships
+    # Find students through family relationships (ignore permissions)
     relationships = frappe.get_all(
         "CRM Family Relationship",
         filters={"guardian": guardian_name},
         fields=["student"],
-        pluck="student"
+        pluck="student",
+        ignore_permissions=True
     )
     
     return relationships
@@ -98,7 +100,7 @@ def get_student_report_cards():
         if semester_part:
             filters["semester_part"] = semester_part
         
-        # Query report cards
+        # Query report cards (ignore permissions since we verified parent access above)
         report_cards = frappe.get_all(
             "SIS Student Report Card",
             filters=filters,
@@ -115,18 +117,20 @@ def get_student_report_cards():
                 "creation",
                 "modified"
             ],
-            order_by="school_year desc, semester_part desc, modified desc"
+            order_by="school_year desc, semester_part desc, modified desc",
+            ignore_permissions=True
         )
         
         # Get additional info for each report card
         enriched_reports = []
         for report in report_cards:
-            # Get class info
+            # Get class info (ignore permissions)
             class_info = frappe.db.get_value(
                 "SIS Class",
                 report["class_id"],
                 ["short_title", "title"],
-                as_dict=True
+                as_dict=True,
+                ignore_permissions=True
             ) or {}
             
             enriched_reports.append({
