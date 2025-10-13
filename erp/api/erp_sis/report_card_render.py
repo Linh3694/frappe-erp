@@ -30,15 +30,19 @@ def _payload() -> Dict[str, Any]:
 
 def _load_form(form_id: str):
     form = frappe.get_doc("SIS Report Card Form", form_id)
-    if form.campus_id != _campus():
-        frappe.throw("Access denied", frappe.PermissionError)
+    # Skip campus check if permissions are being ignored (e.g., parent portal access)
+    if not getattr(frappe.flags, 'ignore_permissions', False):
+        if form.campus_id != _campus():
+            frappe.throw("Access denied", frappe.PermissionError)
     return form
 
 
 def _load_report(report_id: str):
     report = frappe.get_doc("SIS Student Report Card", report_id)
-    if report.campus_id != _campus():
-        frappe.throw("Access denied", frappe.PermissionError)
+    # Skip campus check if permissions are being ignored (e.g., parent portal access)
+    if not getattr(frappe.flags, 'ignore_permissions', False):
+        if report.campus_id != _campus():
+            frappe.throw("Access denied", frappe.PermissionError)
     return report
 
 
