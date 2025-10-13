@@ -125,13 +125,12 @@ def get_student_report_cards():
         # Get additional info for each report card
         enriched_reports = []
         for report in report_cards:
-            # Get class info (ignore permissions)
+            # Get class info (frappe.db.get_value doesn't check permissions by default)
             class_info = frappe.db.get_value(
                 "SIS Class",
                 report["class_id"],
                 ["short_title", "title"],
-                as_dict=True,
-                ignore_permissions=True
+                as_dict=True
             ) or {}
             
             enriched_reports.append({
@@ -186,6 +185,8 @@ def get_report_card_detail():
     Returns:
         Structured report data for frontend rendering
     """
+    logs = []  # Collect logs to return in response
+    
     try:
         # Get request body
         body = {}
@@ -198,49 +199,73 @@ def get_report_card_detail():
         
         report_id = body.get('report_id')
         
-        frappe.logger().info(f"📖 get_report_card_detail called:")
-        frappe.logger().info(f"   - report_id: {report_id}")
-        frappe.logger().info(f"   - parent_email: {frappe.session.user}")
+        log_msg = f"📖 get_report_card_detail called with report_id: {report_id}, parent: {frappe.session.user}"
+        frappe.logger().info(log_msg)
+        logs.append(log_msg)
         
         if not report_id:
             return error_response(
                 message="Missing report_id",
                 code="MISSING_PARAMS",
-                logs=["report_id is required"]
+                logs=["report_id is required"] + logs
             )
         
         # Get report card basic info to verify access (ignore permissions for now, we'll check parent access below)
         try:
+            log_msg = f"Loading report {report_id}..."
+            frappe.logger().info(log_msg)
+            logs.append(log_msg)
+            
             report = frappe.get_doc("SIS Student Report Card", report_id, ignore_permissions=True)
+            
+            log_msg = f"✓ Report loaded: student_id={report.student_id}"
+            frappe.logger().info(log_msg)
+            logs.append(log_msg)
         except frappe.DoesNotExistError:
+            log_msg = f"❌ Report {report_id} not found"
+            frappe.logger().error(log_msg)
+            logs.append(log_msg)
             return error_response(
                 message="Report card not found",
                 code="NOT_FOUND",
-                logs=[f"Report {report_id} not found"]
+                logs=logs
             )
         
         # Verify parent has access to this student
         parent_email = frappe.session.user
-        frappe.logger().info(f"   - parent_email: {parent_email}")
+        log_msg = f"Verifying parent {parent_email} access..."
+        frappe.logger().info(log_msg)
+        logs.append(log_msg)
         
         parent_student_ids = _get_parent_student_ids(parent_email)
-        frappe.logger().info(f"   - parent_student_ids: {parent_student_ids}")
-        frappe.logger().info(f"   - report.student_id: {report.student_id}")
+        log_msg = f"Parent has access to students: {parent_student_ids}"
+        frappe.logger().info(log_msg)
+        logs.append(log_msg)
+        
+        log_msg = f"Report belongs to student: {report.student_id}"
+        frappe.logger().info(log_msg)
+        logs.append(log_msg)
         
         if report.student_id not in parent_student_ids:
-            frappe.logger().error(f"❌ Student {report.student_id} not in parent's student list {parent_student_ids}")
+            log_msg = f"❌ Access denied: Student {report.student_id} not in parent's student list {parent_student_ids}"
+            frappe.logger().error(log_msg)
+            logs.append(log_msg)
             return error_response(
                 message="You do not have permission to view this report card",
                 code="PERMISSION_DENIED",
-                logs=[f"Student {report.student_id} not in parent's student list: {parent_student_ids}"]
+                logs=logs
             )
         
-        frappe.logger().info(f"✓ Parent has access to student {report.student_id}")
+        log_msg = f"✓ Parent has access to student {report.student_id}"
+        frappe.logger().info(log_msg)
+        logs.append(log_msg)
         
         # Use admin API with permission override
         from erp.api.erp_sis.report_card_render import get_report_data
         
-        frappe.logger().info(f"🔄 Bypassing permissions for parent portal access")
+        log_msg = "🔄 Bypassing permissions for parent portal access"
+        frappe.logger().info(log_msg)
+        logs.append(log_msg)
         
         # Save current permission state
         old_ignore_permissions = frappe.flags.ignore_permissions
@@ -249,12 +274,20 @@ def get_report_card_detail():
             # Set flag to ignore all permissions
             frappe.flags.ignore_permissions = True
             
-            frappe.logger().info(f"✓ ignore_permissions flag set to True")
+            log_msg = "✓ ignore_permissions flag set to True"
+            frappe.logger().info(log_msg)
+            logs.append(log_msg)
             
             # Call admin API to get fully transformed data
+            log_msg = f"Calling get_report_data for report {report_id}..."
+            frappe.logger().info(log_msg)
+            logs.append(log_msg)
+            
             result = get_report_data(report_id=report_id)
             
-            frappe.logger().info(f"✅ Got report data from admin API for parent portal")
+            log_msg = f"✅ Got report data from admin API, success={result.get('success')}"
+            frappe.logger().info(log_msg)
+            logs.append(log_msg)
             
             # Add approval info and PDF file path to result
             if result.get('success') and result.get('data'):
@@ -263,35 +296,56 @@ def get_report_card_detail():
                 result['data']['approved_by'] = report.approved_by or None
                 result['data']['approved_at'] = report.approved_at or None
                 
-                frappe.logger().info(f"✓ Added approval info: is_approved={result['data']['is_approved']}, pdf_file={result['data']['pdf_file']}")
+                log_msg = f"✓ Added approval info: is_approved={result['data']['is_approved']}, pdf_file={result['data']['pdf_file']}"
+                frappe.logger().info(log_msg)
+                logs.append(log_msg)
+                
+                # Add logs to result
+                if not result.get('logs'):
+                    result['logs'] = []
+                result['logs'].extend(logs)
+            else:
+                # If get_report_data failed, add our logs to its response
+                if not result.get('logs'):
+                    result['logs'] = []
+                result['logs'].extend(logs)
             
             return result
             
         except Exception as e:
-            frappe.logger().error(f"❌ Error in get_report_data: {str(e)}")
+            log_msg = f"❌ Error in get_report_data: {str(e)}"
+            frappe.logger().error(log_msg)
             frappe.logger().error(frappe.get_traceback())
+            logs.append(log_msg)
+            logs.append(frappe.get_traceback())
             raise
         finally:
             # Restore original permission state
             frappe.flags.ignore_permissions = old_ignore_permissions
-            frappe.logger().info(f"🔄 Restored ignore_permissions flag to {old_ignore_permissions}")
+            log_msg = f"🔄 Restored ignore_permissions flag to {old_ignore_permissions}"
+            frappe.logger().info(log_msg)
+            logs.append(log_msg)
         
     except frappe.PermissionError as pe:
-        frappe.logger().error(f"❌ Permission denied for report {report_id if 'report_id' in locals() else 'unknown'}")
-        frappe.logger().error(f"   Permission error: {str(pe)}")
+        log_msg = f"❌ Permission denied: {str(pe)}"
+        frappe.logger().error(log_msg)
         frappe.logger().error(frappe.get_traceback())
+        logs.append(log_msg)
+        logs.append(frappe.get_traceback())
         return error_response(
             message="You do not have permission to view this report card",
             code="PERMISSION_DENIED",
-            logs=["Permission denied", str(pe), frappe.get_traceback()]
+            logs=logs
         )
     except Exception as e:
-        frappe.logger().error(f"❌ Error in get_report_card_detail: {str(e)}")
-        frappe.logger().error(f"   Exception type: {type(e).__name__}")
+        log_msg = f"❌ Error in get_report_card_detail: {str(e)} (type: {type(e).__name__})"
+        frappe.logger().error(log_msg)
         frappe.logger().error(frappe.get_traceback())
+        logs.append(log_msg)
+        logs.append(frappe.get_traceback())
         return error_response(
             message=f"Error fetching report card detail: {str(e)}",
             code="SERVER_ERROR",
-            logs=[str(e), frappe.get_traceback()]
+            logs=logs
         )
 
