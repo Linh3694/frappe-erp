@@ -455,9 +455,12 @@ def delete_bus_route():
 			message="Bus route deleted successfully"
 		)
 	except Exception as e:
-		frappe.log_error(f"Error deleting bus route: {str(e)}")
 		frappe.db.rollback()
-		return error_response(f"Failed to delete bus route: {str(e)}")
+		error_msg = str(e)
+		# Remove HTML tags from error message for cleaner display
+		import re
+		clean_msg = re.sub('<[^<]+?>', '', error_msg)
+		return error_response(f"Failed to delete bus route: {clean_msg}")
 
 @frappe.whitelist()
 def get_available_monitors():
