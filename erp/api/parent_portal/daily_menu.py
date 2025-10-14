@@ -287,7 +287,13 @@ def get_daily_menu_by_date(date=None):
         )
 
         if not daily_menus:
-            return not_found_response("Daily Menu not found for this date")
+            # Return success with empty data instead of error
+            empty_menu_data = {
+                "name": "",
+                "menu_date": date,
+                "meals": []
+            }
+            return single_item_response(empty_menu_data, "No menu available for this date")
 
         menu = daily_menus[0]
 
