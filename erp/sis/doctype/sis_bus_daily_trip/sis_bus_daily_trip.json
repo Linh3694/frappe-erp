@@ -97,7 +97,6 @@
    "fieldtype": "Link",
    "label": "Monitor 2",
    "options": "SIS Bus Monitor",
-   "reqd": 1,
    "in_list_view": 1
   },
   {

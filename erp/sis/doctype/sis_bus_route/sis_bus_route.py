@@ -82,17 +82,22 @@ class SISBusRoute(Document):
 
 	def after_insert(self):
 		"""Create daily trips when route is created"""
+		frappe.logger().info(f"📍 after_insert called for route {self.name}, status={self.status}")
 		if self.status == "Active":
 			try:
 				frappe.logger().info(f"🚀 Starting daily trips creation for new route {self.name}")
 				self.create_daily_trips()
-				frappe.logger().info(f"✅ Daily trips creation completed for route {self.name}")
+				frappe.db.commit()  # Explicitly commit daily trips
+				frappe.logger().info(f"✅ Daily trips creation completed and committed for route {self.name}")
 			except Exception as e:
 				# Log error but don't block route creation
-				error_msg = f"❌ Failed to create daily trips for route {self.name}: {str(e)}"
+				import traceback
+				error_msg = f"❌ Failed to create daily trips for route {self.name}: {str(e)}\n{traceback.format_exc()}"
 				frappe.log_error(error_msg, "Bus Route Daily Trips Creation Error")
 				frappe.logger().error(error_msg)
 				# Don't raise exception to avoid blocking route creation
+		else:
+			frappe.logger().info(f"⏭️ Skipping daily trips creation - route status is {self.status}")
 
 	def on_update(self):
 		"""Create daily trips when status changes to Active"""
