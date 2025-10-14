@@ -266,8 +266,8 @@ def create_bus_route():
 				data['campus_id'] = "campus-1"
 				frappe.logger().info("No campus context found, using default campus-1")
 
-		# Validate that monitors are different
-		if data.get("monitor1_id") == data.get("monitor2_id"):
+		# Validate that monitors are different (only if both are provided)
+		if data.get("monitor1_id") and data.get("monitor2_id") and data.get("monitor1_id") == data.get("monitor2_id"):
 			return error_response("Monitor 1 và Monitor 2 không được giống nhau")
 
 		# Check if monitors are already assigned to other routes
@@ -366,8 +366,8 @@ def update_bus_route():
 		if not name:
 			return error_response("Bus route name is required")
 
-		# Validate that monitors are different
-		if data.get("monitor1_id") == data.get("monitor2_id"):
+		# Validate that monitors are different (only if both are provided)
+		if data.get("monitor1_id") and data.get("monitor2_id") and data.get("monitor1_id") == data.get("monitor2_id"):
 			return error_response("Monitor 1 và Monitor 2 không được giống nhau")
 
 		# Check if monitors are already assigned to other routes
@@ -858,7 +858,7 @@ def create_daily_trip():
 			frappe.logger().info(f"No request data, using form_dict for create_daily_trip: {data}")
 
 		# Validate required fields
-		required_fields = ['route_id', 'trip_date', 'weekday', 'trip_type', 'vehicle_id', 'driver_id', 'monitor1_id', 'monitor2_id', 'trip_status']
+		required_fields = ['route_id', 'trip_date', 'weekday', 'trip_type', 'vehicle_id', 'driver_id', 'monitor1_id', 'trip_status']
 		for field in required_fields:
 			if not data.get(field):
 				return error_response(f"Field '{field}' is required")
