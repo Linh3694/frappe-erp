@@ -439,51 +439,98 @@ def update_bus_route():
 		return error_response(f"Failed to update bus route: {str(e)}")
 
 @frappe.whitelist()
-def delete_bus_route():
-	"""Delete a bus route"""
+def get_route_deletion_info():
+	"""Get information about what will be deleted with the route"""
 	try:
 		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
-		force_delete = frappe.local.form_dict.get('force_delete') or frappe.request.args.get('force_delete')
 		
 		if not name:
 			return error_response("Bus route name is required")
 		
-		# Check for linked student routes
-		linked_students = frappe.db.sql("""
-			SELECT 
-				brs.name,
-				brs.student_id,
-				s.student_code,
-				s.student_name
-			FROM `tabSIS Bus Route Student` brs
-			LEFT JOIN `tabCRM Student` s ON s.name = brs.student_id
-			WHERE brs.route_id = %s
-		""", name, as_dict=True)
+		# Count linked student routes
+		student_count = frappe.db.count(
+			"SIS Bus Route Student",
+			filters={"route_id": name}
+		)
 		
-		student_count = len(linked_students)
+		# Count linked daily trips
+		daily_trip_count = frappe.db.count(
+			"SIS Bus Daily Trip",
+			filters={"route_id": name}
+		)
 		
-		# If there are linked students and no force delete confirmation
-		if student_count > 0 and not force_delete:
-			frappe.response["message"] = {
-				"success": False,
-				"requires_confirmation": True,
-				"message": f"Tuyến đường này có {student_count} học sinh. Xóa tuyến đường sẽ đồng thời xóa tất cả phân công học sinh.",
+		return success_response(
+			data={
 				"student_count": student_count,
-				"students": linked_students
+				"daily_trip_count": daily_trip_count
 			}
-			return
+		)
+	except Exception as e:
+		return error_response(f"Failed to get deletion info: {str(e)}")
+
+@frappe.whitelist()
+def delete_bus_route():
+	"""Delete a bus route and all related records"""
+	try:
+		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
 		
-		# Delete linked student routes first
+		if not name:
+			return error_response("Bus route name is required")
+		
+		# Count linked student routes
+		student_routes = frappe.db.get_all(
+			"SIS Bus Route Student",
+			filters={"route_id": name},
+			pluck="name"
+		)
+		student_count = len(student_routes)
+		
+		# Count linked daily trips
+		daily_trips = frappe.db.get_all(
+			"SIS Bus Daily Trip",
+			filters={"route_id": name},
+			pluck="name"
+		)
+		daily_trip_count = len(daily_trips)
+		
+		# Delete all daily trip students first
+		if daily_trip_count > 0:
+			for trip_name in daily_trips:
+				# Delete all students in this daily trip
+				trip_students = frappe.db.get_all(
+					"SIS Bus Daily Trip Student",
+					filters={"daily_trip_id": trip_name},
+					pluck="name"
+				)
+				for student_name in trip_students:
+					frappe.delete_doc("SIS Bus Daily Trip Student", student_name, force=True)
+				
+				# Delete the daily trip
+				frappe.delete_doc("SIS Bus Daily Trip", trip_name, force=True)
+		
+		# Delete linked student routes
 		if student_count > 0:
-			for student in linked_students:
-				frappe.delete_doc("SIS Bus Route Student", student.name, force=True)
+			for student_route_name in student_routes:
+				frappe.delete_doc("SIS Bus Route Student", student_route_name, force=True)
 		
 		# Delete the bus route
 		frappe.delete_doc("SIS Bus Route", name, force=True)
 		frappe.db.commit()
 
+		# Build success message
+		parts = []
+		if daily_trip_count > 0:
+			parts.append(f"{daily_trip_count} tuyến phụ hàng ngày")
+		if student_count > 0:
+			parts.append(f"{student_count} phân công học sinh")
+		
+		detail_msg = ""
+		if parts:
+			detail_msg = f" và {', '.join(parts)}"
+		
 		return success_response(
-			message=f"Bus route deleted successfully. {student_count} student assignment(s) were also removed." if student_count > 0 else "Bus route deleted successfully",
+			message=f"Xóa tuyến đường thành công{detail_msg}.",
+			deleted_daily_trip_count=daily_trip_count,
 			deleted_student_count=student_count
 		)
 	except Exception as e:
