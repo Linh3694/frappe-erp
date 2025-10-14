@@ -464,13 +464,14 @@ def delete_bus_route():
 		
 		# If there are linked students and no force delete confirmation
 		if student_count > 0 and not force_delete:
-			return {
+			frappe.response["message"] = {
 				"success": False,
 				"requires_confirmation": True,
 				"message": f"Tuyến đường này có {student_count} học sinh. Xóa tuyến đường sẽ đồng thời xóa tất cả phân công học sinh.",
 				"student_count": student_count,
 				"students": linked_students
 			}
+			return
 		
 		# Delete linked student routes first
 		if student_count > 0:
