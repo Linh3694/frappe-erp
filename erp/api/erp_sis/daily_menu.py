@@ -394,141 +394,141 @@ def create_daily_menu():
                 meal_type_reference = meal_data.get("meal_type_reference", "")
 
                 # Handle new breakfast_options structure
-            if meal_type == "breakfast" and "breakfast_options" in meal_data:
-                breakfast_options = meal_data["breakfast_options"]
-                for option_key in ["option1", "option2", "external"]:
-                    option_data = breakfast_options.get(option_key)
-                    if option_data:
-                        menu_category_id = option_data.get("menu_category_id", "")
-                        # This maintains the fixed 3-option structure
+                if meal_type == "breakfast" and "breakfast_options" in meal_data:
+                    breakfast_options = meal_data["breakfast_options"]
+                    for option_key in ["option1", "option2", "external"]:
+                        option_data = breakfast_options.get(option_key)
+                        if option_data:
+                            menu_category_id = option_data.get("menu_category_id", "")
+                            # This maintains the fixed 3-option structure
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": option_key,  # Use option_key as reference
+                                "menu_category_id": menu_category_id,
+                                "display_name": option_data.get("display_name", ""),
+                                "display_name_en": option_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
+
+                # Handle lunch set configurations
+                elif meal_type == "lunch":
+                    # Handle set_a_config
+                    if meal_data.get("set_a_config", {}).get("enabled"):
+                        config = meal_data["set_a_config"]
+                        for item_data in config.get("items", []):
+                            menu_category_id = item_data.get("menu_category_id", "")
+                            # Always create item for lunch set configs, even if menu_category_id is empty
+                            # This maintains the fixed structure
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "set_a",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
+
+                    # Handle set_au_config
+                    if meal_data.get("set_au_config", {}).get("enabled"):
+                        config = meal_data["set_au_config"]
+                        for item_data in config.get("items", []):
+                            menu_category_id = item_data.get("menu_category_id", "")
+                            # Always create item for lunch set configs, even if menu_category_id is empty
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "set_au",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
+
+                    # Handle eat_clean_config
+                    if meal_data.get("eat_clean_config", {}).get("enabled"):
+                        config = meal_data["eat_clean_config"]
+                        for item_data in config.get("items", []):
+                            menu_category_id = item_data.get("menu_category_id", "")
+                            # Always create item for lunch set configs, even if menu_category_id is empty
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "eat_clean",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": ""
+                            })
+
+                    # Handle buffet_config
+                    if meal_data.get("buffet_config", {}).get("enabled"):
+                        buffet_config = meal_data["buffet_config"]
+                        buffet_name_vn = buffet_config.get("name_vn", "")
+                        buffet_name_en = buffet_config.get("name_en", "")
+                        for item_data in buffet_config.get("items", []):
+                            menu_category_id = item_data.get("menu_category_id", "")
+                            # Always create item for buffet config, even if menu_category_id is empty
+                            all_items.append({
+                                "doctype": "SIS Daily Menu Item",
+                                "meal_type": meal_type,
+                                "meal_type_reference": "buffet",
+                                "menu_category_id": menu_category_id,
+                                "display_name": item_data.get("display_name", ""),
+                                "display_name_en": item_data.get("display_name_en", ""),
+                                "education_stage": "",
+                                "buffet_name_vn": buffet_name_vn,
+                                "buffet_name_en": buffet_name_en
+                            })
+
+                # Handle new dinner_options structure
+                elif meal_type == "dinner" and "dinner_options" in meal_data:
+                    dinner_options = meal_data["dinner_options"]
+
+                    # Add snack item
+                    if dinner_options.get("snack", {}).get("menu_category_id"):
+                        snack_data = dinner_options["snack"]
                         all_items.append({
                             "doctype": "SIS Daily Menu Item",
                             "meal_type": meal_type,
-                            "meal_type_reference": option_key,  # Use option_key as reference
-                            "menu_category_id": menu_category_id,
-                            "display_name": option_data.get("display_name", ""),
-                            "display_name_en": option_data.get("display_name_en", ""),
-                            "education_stage": ""
+                            "meal_type_reference": "snack",
+                            "menu_category_id": snack_data.get("menu_category_id"),
+                            "display_name": snack_data.get("display_name", "Món nhẹ"),
+                            "display_name_en": snack_data.get("display_name_en", "Snack"),
+                            "education_stage": normalize_education_stage(snack_data.get("education_stage", ""))
                         })
 
-            # Handle lunch set configurations
-            elif meal_type == "lunch":
-                # Handle set_a_config
-                if meal_data.get("set_a_config", {}).get("enabled"):
-                    config = meal_data["set_a_config"]
-                    for item_data in config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id", "")
-                        # Always create item for lunch set configs, even if menu_category_id is empty
-                        # This maintains the fixed structure
+                    # Add drink item
+                    if dinner_options.get("drink", {}).get("menu_category_id"):
+                        drink_data = dinner_options["drink"]
                         all_items.append({
                             "doctype": "SIS Daily Menu Item",
                             "meal_type": meal_type,
-                            "meal_type_reference": "set_a",
-                            "menu_category_id": menu_category_id,
+                            "meal_type_reference": "drink",
+                            "menu_category_id": drink_data.get("menu_category_id"),
+                            "display_name": drink_data.get("display_name", "Đồ uống"),
+                            "display_name_en": drink_data.get("display_name_en", "Drink"),
+                            "education_stage": normalize_education_stage(drink_data.get("education_stage", ""))
+                        })
+
+                # Handle legacy items array (for backward compatibility)
+                else:
+                    for item_data in meal_data.get("items", []):
+                        # Only allow education_stage for dinner meals
+                        education_stage = ""
+                        if meal_type == "dinner":
+                            education_stage = normalize_education_stage(item_data.get("education_stage", ""))
+
+                        all_items.append({
+                            "doctype": "SIS Daily Menu Item",
+                            "meal_type": meal_type,
+                            "meal_type_reference": meal_type_reference,
+                            "menu_category_id": item_data.get("menu_category_id"),
                             "display_name": item_data.get("display_name", ""),
                             "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": ""
+                            "education_stage": education_stage
                         })
-
-                # Handle set_au_config
-                if meal_data.get("set_au_config", {}).get("enabled"):
-                    config = meal_data["set_au_config"]
-                    for item_data in config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id", "")
-                        # Always create item for lunch set configs, even if menu_category_id is empty
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "set_au",
-                            "menu_category_id": menu_category_id,
-                            "display_name": item_data.get("display_name", ""),
-                            "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": ""
-                        })
-
-                # Handle eat_clean_config
-                if meal_data.get("eat_clean_config", {}).get("enabled"):
-                    config = meal_data["eat_clean_config"]
-                    for item_data in config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id", "")
-                        # Always create item for lunch set configs, even if menu_category_id is empty
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "eat_clean",
-                            "menu_category_id": menu_category_id,
-                            "display_name": item_data.get("display_name", ""),
-                            "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": ""
-                        })
-
-                # Handle buffet_config
-                if meal_data.get("buffet_config", {}).get("enabled"):
-                    buffet_config = meal_data["buffet_config"]
-                    buffet_name_vn = buffet_config.get("name_vn", "")
-                    buffet_name_en = buffet_config.get("name_en", "")
-                    for item_data in buffet_config.get("items", []):
-                        menu_category_id = item_data.get("menu_category_id", "")
-                        # Always create item for buffet config, even if menu_category_id is empty
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "buffet",
-                            "menu_category_id": menu_category_id,
-                            "display_name": item_data.get("display_name", ""),
-                            "display_name_en": item_data.get("display_name_en", ""),
-                            "education_stage": "",
-                            "buffet_name_vn": buffet_name_vn,
-                            "buffet_name_en": buffet_name_en
-                        })
-
-            # Handle new dinner_options structure
-            elif meal_type == "dinner" and "dinner_options" in meal_data:
-                dinner_options = meal_data["dinner_options"]
-
-                # Add snack item
-                if dinner_options.get("snack", {}).get("menu_category_id"):
-                    snack_data = dinner_options["snack"]
-                    all_items.append({
-                        "doctype": "SIS Daily Menu Item",
-                        "meal_type": meal_type,
-                        "meal_type_reference": "snack",
-                        "menu_category_id": snack_data.get("menu_category_id"),
-                        "display_name": snack_data.get("display_name", "Món nhẹ"),
-                        "display_name_en": snack_data.get("display_name_en", "Snack"),
-                        "education_stage": normalize_education_stage(snack_data.get("education_stage", ""))
-                    })
-
-                # Add drink item
-                if dinner_options.get("drink", {}).get("menu_category_id"):
-                    drink_data = dinner_options["drink"]
-                    all_items.append({
-                        "doctype": "SIS Daily Menu Item",
-                        "meal_type": meal_type,
-                        "meal_type_reference": "drink",
-                        "menu_category_id": drink_data.get("menu_category_id"),
-                        "display_name": drink_data.get("display_name", "Đồ uống"),
-                        "display_name_en": drink_data.get("display_name_en", "Drink"),
-                        "education_stage": normalize_education_stage(drink_data.get("education_stage", ""))
-                    })
-
-            # Handle legacy items array (for backward compatibility)
-            else:
-                for item_data in meal_data.get("items", []):
-                    # Only allow education_stage for dinner meals
-                    education_stage = ""
-                    if meal_type == "dinner":
-                        education_stage = normalize_education_stage(item_data.get("education_stage", ""))
-
-                    all_items.append({
-                        "doctype": "SIS Daily Menu Item",
-                        "meal_type": meal_type,
-                        "meal_type_reference": meal_type_reference,
-                        "menu_category_id": item_data.get("menu_category_id"),
-                        "display_name": item_data.get("display_name", ""),
-                        "display_name_en": item_data.get("display_name_en", ""),
-                        "education_stage": education_stage
-                    })
 
             # Create daily menu document with all items
             daily_menu_doc = frappe.get_doc({
