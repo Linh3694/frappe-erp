@@ -511,37 +511,14 @@ def create_daily_menu():
                                 "buffet_name_en": buffet_name_en
                             })
 
-                # Handle new dinner_options structure
-                elif meal_type == "dinner" and "dinner_options" in meal_data:
-                    dinner_options = meal_data["dinner_options"]
+                # Handle dinner - now using items array with option_type instead of dinner_options
+                # This allows multiple snacks and drinks, not limited to 2 items
+                elif meal_type == "dinner":
+                    # Skip dinner_options structure - we use items array with option_type now
+                    # This will fall through to the else block below to handle items array
+                    pass
 
-                    # Add snack item
-                    if dinner_options.get("snack", {}).get("menu_category_id"):
-                        snack_data = dinner_options["snack"]
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "snack",
-                            "menu_category_id": snack_data.get("menu_category_id"),
-                            "display_name": snack_data.get("display_name", "Món nhẹ"),
-                            "display_name_en": snack_data.get("display_name_en", "Snack"),
-                            "education_stage": normalize_education_stage(snack_data.get("education_stage", ""))
-                        })
-
-                    # Add drink item
-                    if dinner_options.get("drink", {}).get("menu_category_id"):
-                        drink_data = dinner_options["drink"]
-                        all_items.append({
-                            "doctype": "SIS Daily Menu Item",
-                            "meal_type": meal_type,
-                            "meal_type_reference": "drink",
-                            "menu_category_id": drink_data.get("menu_category_id"),
-                            "display_name": drink_data.get("display_name", "Đồ uống"),
-                            "display_name_en": drink_data.get("display_name_en", "Drink"),
-                            "education_stage": normalize_education_stage(drink_data.get("education_stage", ""))
-                        })
-
-                # Handle legacy items array (for backward compatibility)
+                # Handle items array (for dinner and backward compatibility)
                 else:
                     for item_data in meal_data.get("items", []):
                         # Only allow education_stage for dinner meals
@@ -736,37 +713,14 @@ def update_daily_menu():
                                     "buffet_name_en": buffet_name_en
                                 })
 
-                    # Handle new dinner_options structure
-                    elif meal_type == "dinner" and "dinner_options" in meal_data:
-                        dinner_options = meal_data["dinner_options"]
+                    # Handle dinner - now using items array with option_type instead of dinner_options
+                    # This allows multiple snacks and drinks, not limited to 2 items
+                    elif meal_type == "dinner":
+                        # Skip dinner_options structure - we use items array with option_type now
+                        # This will fall through to the else block below to handle items array
+                        pass
 
-                        # Add snack item
-                        if dinner_options.get("snack", {}).get("menu_category_id"):
-                            snack_data = dinner_options["snack"]
-                            daily_menu_doc.append("items", {
-                                "doctype": "SIS Daily Menu Item",
-                                "meal_type": meal_type,
-                                "meal_type_reference": "snack",
-                                "menu_category_id": snack_data.get("menu_category_id"),
-                                "display_name": snack_data.get("display_name", "Món nhẹ"),
-                                "display_name_en": snack_data.get("display_name_en", "Snack"),
-                                "education_stage": normalize_education_stage(snack_data.get("education_stage", ""))
-                            })
-
-                        # Add drink item
-                        if dinner_options.get("drink", {}).get("menu_category_id"):
-                            drink_data = dinner_options["drink"]
-                            daily_menu_doc.append("items", {
-                                "doctype": "SIS Daily Menu Item",
-                                "meal_type": meal_type,
-                                "meal_type_reference": "drink",
-                                "menu_category_id": drink_data.get("menu_category_id"),
-                                "display_name": drink_data.get("display_name", "Đồ uống"),
-                                "display_name_en": drink_data.get("display_name_en", "Drink"),
-                                "education_stage": normalize_education_stage(drink_data.get("education_stage", ""))
-                            })
-
-                    # Handle legacy items array (for backward compatibility)
+                    # Handle items array (for dinner and backward compatibility)
                     else:
                         for item_data in meal_data.get("items", []):
                             # Only allow education_stage for dinner meals
