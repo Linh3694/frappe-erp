@@ -36,7 +36,7 @@ def get_news_tags():
                 code="DOCTYPE_NOT_FOUND"
             )
 
-        filters = {"campus_id": campus_id, "is_active": 1}
+        filters = {"campus_id": campus_id}
         frappe.logger().info(f"Using filters: {filters}")
 
         # Get news tags
@@ -95,9 +95,7 @@ def create_news_tag():
             "campus_id": campus_id,
             "name_en": data.get("name_en"),
             "name_vn": data.get("name_vn"),
-            "color": data.get("color", "#3B82F6"),
-            "description": data.get("description"),
-            "is_active": data.get("is_active", 1)
+            "color": data.get("color", "#3B82F6")
         })
 
         tag.insert()
@@ -111,9 +109,7 @@ def create_news_tag():
                 "name_en": created_tag.name_en,
                 "name_vn": created_tag.name_vn,
                 "color": created_tag.color,
-                "description": created_tag.description,
                 "campus_id": created_tag.campus_id,
-                "is_active": created_tag.is_active,
                 "created_at": created_tag.created_at,
                 "created_by": created_tag.created_by,
                 "updated_at": created_tag.updated_at,
