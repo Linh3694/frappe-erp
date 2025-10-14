@@ -222,9 +222,19 @@ def create_interface():
                 code="GUEST_NOT_ALLOWED"
             )
 
+        # Get data from request - try both form_dict and JSON body
         data = frappe.form_dict
+        if not data or not data.get('title'):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+            except Exception as e:
+                logs.append(f"Failed to parse JSON from request: {str(e)}")
+        
         logs.append(f"Create interface called by user: {frappe.session.user}")
-        logs.append(f"Request data: title={data.get('title')}, is_active={data.get('is_active')}")
+        logs.append(f"Request data: title={data.get('title')}, image_url={data.get('image_url')}, is_active={data.get('is_active')}")
 
         # Validate required fields
         errors = {}
@@ -401,9 +411,20 @@ def update_interface(interface_id=None):
                 code="GUEST_NOT_ALLOWED"
             )
 
-        # Get interface_id from parameter or form_dict
+        # Get data from request - try both form_dict and JSON body
+        data = frappe.form_dict
+        if not data or not data.get('title'):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+            except Exception as e:
+                logs.append(f"Failed to parse JSON from request: {str(e)}")
+
+        # Get interface_id from parameter or data
         if not interface_id:
-            interface_id = frappe.form_dict.get("interface_id")
+            interface_id = data.get("interface_id")
 
         if not interface_id:
             logs.append("No interface_id provided")
@@ -413,10 +434,9 @@ def update_interface(interface_id=None):
                 code="MISSING_INTERFACE_ID"
             )
 
-        data = frappe.form_dict
         logs.append(f"Update interface called by user: {frappe.session.user}")
         logs.append(f"Interface ID: {interface_id}")
-        logs.append(f"Request data: title={data.get('title')}, is_active={data.get('is_active')}")
+        logs.append(f"Request data: title={data.get('title')}, image_url={data.get('image_url')}, is_active={data.get('is_active')}")
 
         # Get existing interface
         interface_doc = frappe.get_doc("SIS Interface", interface_id)
@@ -474,9 +494,20 @@ def delete_interface(interface_id=None):
                 code="GUEST_NOT_ALLOWED"
             )
 
-        # Get interface_id from parameter or form_dict
+        # Get data from request - try both form_dict and JSON body
+        data = frappe.form_dict
+        if not interface_id and (not data or not data.get('interface_id')):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+            except Exception as e:
+                logs.append(f"Failed to parse JSON from request: {str(e)}")
+
+        # Get interface_id from parameter or data
         if not interface_id:
-            interface_id = frappe.form_dict.get("interface_id")
+            interface_id = data.get("interface_id")
 
         if not interface_id:
             logs.append("No interface_id provided")
@@ -544,9 +575,20 @@ def toggle_interface_status(interface_id=None):
                 code="GUEST_NOT_ALLOWED"
             )
 
-        # Get interface_id from parameter or form_dict
+        # Get data from request - try both form_dict and JSON body
+        data = frappe.form_dict
+        if not interface_id and (not data or not data.get('interface_id')):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+            except Exception as e:
+                logs.append(f"Failed to parse JSON from request: {str(e)}")
+
+        # Get interface_id from parameter or data
         if not interface_id:
-            interface_id = frappe.form_dict.get("interface_id")
+            interface_id = data.get("interface_id")
 
         if not interface_id:
             logs.append("No interface_id provided")
