@@ -88,7 +88,7 @@ def get_news_articles():
                 "title_vn",
                 "summary_en",
                 "summary_vn",
-                "education_stage_id",
+                "education_stage_ids",
                 "status",
                 "cover_image",
                 "published_at",
@@ -171,7 +171,7 @@ def get_news_article():
             "summary_vn": article.summary_vn,
             "content_en": article.content_en,
             "content_vn": article.content_vn,
-            "education_stage_id": article.education_stage_id,
+            "education_stage_ids": article.education_stage_ids,
             "status": article.status,
             "cover_image": article.cover_image,
             "published_at": article.published_at,
@@ -227,7 +227,7 @@ def create_news_article():
             "summary_vn": data.get("summary_vn"),
             "content_en": data.get("content_en"),
             "content_vn": data.get("content_vn"),
-            "education_stage_id": data.get("education_stage_id"),
+            "education_stage_ids": data.get("education_stage_ids"),
             "cover_image": data.get("cover_image"),
             "status": data.get("status", "draft")
         })
@@ -269,7 +269,7 @@ def create_news_article():
             "summary_vn": created_article.summary_vn,
             "content_en": created_article.content_en,
             "content_vn": created_article.content_vn,
-            "education_stage_id": created_article.education_stage_id,
+            "education_stage_ids": created_article.education_stage_ids,
             "status": created_article.status,
             "cover_image": created_article.cover_image,
             "published_at": created_article.published_at,
@@ -328,8 +328,8 @@ def update_news_article():
             article.content_en = data.content_en
         if "content_vn" in data:
             article.content_vn = data.content_vn
-        if "education_stage_id" in data:
-            article.education_stage_id = data.education_stage_id
+        if "education_stage_ids" in data:
+            article.education_stage_ids = data.education_stage_ids
         if "cover_image" in data:
             article.cover_image = data.cover_image
         if "status" in data:
@@ -376,7 +376,7 @@ def update_news_article():
             "summary_vn": updated_article.summary_vn,
             "content_en": updated_article.content_en,
             "content_vn": updated_article.content_vn,
-            "education_stage_id": updated_article.education_stage_id,
+            "education_stage_ids": updated_article.education_stage_ids,
             "status": updated_article.status,
             "cover_image": updated_article.cover_image,
             "published_at": updated_article.published_at,

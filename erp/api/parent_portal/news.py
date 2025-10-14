@@ -46,13 +46,14 @@ def get_news_articles():
 
         # Student ID for education stage filtering
         student_id = data.get("student_id")
+        student_education_stage_id = None
         if student_id:
             # Get student's education stage
             student = frappe.get_doc("SIS Student", student_id)
             if student.enrollment_status == "enrolled" and student.class_id:
                 class_doc = frappe.get_doc("SIS Class", student.class_id)
                 if class_doc.education_stage_id:
-                    filters["education_stage_id"] = ["in", ["", class_doc.education_stage_id]]
+                    student_education_stage_id = class_doc.education_stage_id
 
         # Tag filter
         tag_ids = data.get("tag_ids")
@@ -90,7 +91,7 @@ def get_news_articles():
                 "title_vn",
                 "summary_en",
                 "summary_vn",
-                "education_stage_id",
+                "education_stage_ids",
                 "cover_image",
                 "published_at",
                 "published_by"
@@ -104,7 +105,8 @@ def get_news_articles():
         # Get total count for pagination
         total_count = frappe.db.count("SIS News Article", filters=filters)
 
-        # Enrich articles with tag information
+        # Enrich articles with tag information and filter by education stage
+        filtered_articles = []
         for article in articles:
             article_tags = frappe.get_all(
                 "SIS News Article Tag",
@@ -113,25 +115,51 @@ def get_news_articles():
             )
             article["tags"] = article_tags
 
-            # Get education stage name
-            if article.education_stage_id:
+            # Filter by student's education stage if provided
+            should_include = True
+            if student_education_stage_id:
                 try:
-                    stage = frappe.get_doc("SIS Education Stage", article.education_stage_id)
-                    article["education_stage_name_en"] = stage.title_en
-                    article["education_stage_name_vn"] = stage.title_vn
+                    education_stage_ids = json.loads(article.education_stage_ids or "[]")
+                    should_include = student_education_stage_id in education_stage_ids
+                except:
+                    should_include = False  # If parsing fails, exclude the article
+
+            if should_include:
+                # Get education stage names for display
+                try:
+                    education_stage_ids = json.loads(article.education_stage_ids or "[]")
+                    if education_stage_ids:
+                        stages_info = []
+                        for stage_id in education_stage_ids[:2]:  # Show max 2 stages
+                            try:
+                                stage = frappe.get_doc("SIS Education Stage", stage_id)
+                                stages_info.append(f"{stage.title_en}")
+                            except:
+                                pass
+                        if stages_info:
+                            article["education_stage_name_en"] = ", ".join(stages_info)
+                        if len(education_stage_ids) > 2:
+                            article["education_stage_name_en"] += f" +{len(education_stage_ids) - 2}"
                 except:
                     pass
 
-        frappe.logger().info(f"Parent portal - Successfully retrieved {len(articles)} published news articles")
+                filtered_articles.append(article)
+
+        # Apply pagination to filtered results
+        start_index = (page - 1) * limit
+        end_index = start_index + limit
+        paginated_articles = filtered_articles[start_index:end_index]
+
+        frappe.logger().info(f"Parent portal - Successfully retrieved {len(filtered_articles)} filtered news articles")
 
         return list_response(
-            data=articles,
+            data=paginated_articles,
             message="News articles fetched successfully",
             pagination={
                 "page": page,
                 "limit": limit,
-                "total": total_count,
-                "total_pages": (total_count + limit - 1) // limit
+                "total": len(filtered_articles),
+                "total_pages": (len(filtered_articles) + limit - 1) // limit
             }
         )
 
@@ -173,14 +201,26 @@ def get_news_article():
             fields=["news_tag_id", "tag_name_en", "tag_name_vn", "tag_color"]
         )
 
-        # Get education stage name
+        # Get education stage names
         education_stage_name_en = None
         education_stage_name_vn = None
-        if article.education_stage_id:
+        if article.education_stage_ids:
             try:
-                stage = frappe.get_doc("SIS Education Stage", article.education_stage_id)
-                education_stage_name_en = stage.title_en
-                education_stage_name_vn = stage.title_vn
+                education_stage_ids = json.loads(article.education_stage_ids or "[]")
+                if education_stage_ids:
+                    stages_info_en = []
+                    stages_info_vn = []
+                    for stage_id in education_stage_ids:
+                        try:
+                            stage = frappe.get_doc("SIS Education Stage", stage_id)
+                            stages_info_en.append(stage.title_en)
+                            stages_info_vn.append(stage.title_vn)
+                        except:
+                            pass
+                    if stages_info_en:
+                        education_stage_name_en = ", ".join(stages_info_en)
+                    if stages_info_vn:
+                        education_stage_name_vn = ", ".join(stages_info_vn)
             except:
                 pass
 
@@ -192,7 +232,7 @@ def get_news_article():
             "summary_vn": article.summary_vn,
             "content_en": article.content_en,
             "content_vn": article.content_vn,
-            "education_stage_id": article.education_stage_id,
+            "education_stage_ids": json.loads(article.education_stage_ids or "[]"),
             "education_stage_name_en": education_stage_name_en,
             "education_stage_name_vn": education_stage_name_vn,
             "cover_image": article.cover_image,

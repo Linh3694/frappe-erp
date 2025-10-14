@@ -20,7 +20,7 @@
   "campus_id",
   "title_en",
   "title_vn",
-  "education_stage_id",
+  "education_stage_ids",
   "status",
   "published_at",
   "published_by",
@@ -73,6 +73,12 @@
    "label": "Educational Stage",
    "options": "SIS Education Stage",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "education_stage_ids",
+   "fieldtype": "Small Text",
+   "label": "Educational Stage IDs",
+   "description": "JSON array of education stage IDs"
   },
   {
    "fieldname": "status",
