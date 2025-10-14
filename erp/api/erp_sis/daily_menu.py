@@ -48,8 +48,8 @@ def convert_items_to_meals_structure(items, menu_name):
             "menu_type": "custom",
             "meal_type_reference": "",
             "name": f"dinner_{menu_name}",
-            "dinner_items": [],  # Use dinner_items array instead of dinner_options
-            "dinner_options": {  # Keep for backward compatibility
+            "dinner_items": [],  
+            "dinner_options": { 
                 "snack": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""},
                 "drink": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""}
             }
@@ -511,15 +511,9 @@ def create_daily_menu():
                                 "buffet_name_en": buffet_name_en
                             })
 
-                # Handle dinner - now using items array with option_type instead of dinner_options
-                # This allows multiple snacks and drinks, not limited to 2 items
-                elif meal_type == "dinner":
-                    # Skip dinner_options structure - we use items array with option_type now
-                    # This will fall through to the else block below to handle items array
-                    pass
-
-                # Handle items array (for dinner and backward compatibility)
-                else:
+                # Handle items array (for dinner and other meal types with items array)
+                # This now properly handles dinner items instead of the broken elif block
+                if meal_data.get("items"):
                     for item_data in meal_data.get("items", []):
                         # Only allow education_stage for dinner meals
                         education_stage = ""
@@ -713,15 +707,9 @@ def update_daily_menu():
                                     "buffet_name_en": buffet_name_en
                                 })
 
-                    # Handle dinner - now using items array with option_type instead of dinner_options
-                    # This allows multiple snacks and drinks, not limited to 2 items
-                    elif meal_type == "dinner":
-                        # Skip dinner_options structure - we use items array with option_type now
-                        # This will fall through to the else block below to handle items array
-                        pass
-
-                    # Handle items array (for dinner and backward compatibility)
-                    else:
+                    # Handle items array (for dinner and other meal types with items array)
+                    # This now properly handles dinner items instead of the broken elif block
+                    if meal_data.get("items"):
                         for item_data in meal_data.get("items", []):
                             # Only allow education_stage for dinner meals
                             education_stage = ""
