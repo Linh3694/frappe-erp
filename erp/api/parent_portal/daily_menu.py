@@ -220,7 +220,7 @@ def get_detailed_menu_items(items):
     return list(meals_result.values())
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True, methods=['GET'])
 def get_daily_menu_by_id(daily_menu_id=None):
     """Get a specific daily menu by ID with detailed item information for parent portal"""
     try:
