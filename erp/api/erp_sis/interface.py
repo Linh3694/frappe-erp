@@ -193,7 +193,6 @@ def create_interface():
         return {
             "success": True,
             "message": _("Interface created successfully"),
-            "interface_id": interface_doc.name,
             "data": {
                 "name": interface_doc.name,
                 "title": interface_doc.title,
