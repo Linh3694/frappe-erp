@@ -704,25 +704,15 @@ def add_student_to_route():
 def remove_student_from_route():
 	"""Remove a student from a bus route schedule"""
 	try:
-		route_id = frappe.local.form_dict.get('route_id') or frappe.request.args.get('route_id')
-		route_student_name = frappe.local.form_dict.get('route_student_name') or frappe.request.args.get('route_student_name')
-		
-		if not route_id:
-			return error_response("Route ID is required")
-		if not route_student_name:
-			return error_response("Route student name is required")
+		# Get route_student_id from query params (frontend sends this)
+		route_student_id = frappe.local.form_dict.get('route_student_id') or frappe.request.args.get('route_student_id')
 
-		# Get the route document
-		route_doc = frappe.get_doc("SIS Bus Route", route_id)
-		
-		# Find and remove the student from child table
-		for idx, student in enumerate(route_doc.route_students):
-			if student.name == route_student_name:
-				route_doc.remove(student)
-				break
-		
-		# Save the parent document
-		route_doc.save()
+		if not route_student_id:
+			return error_response("Route student ID is required")
+
+		# Delete the SIS Bus Route Student document directly
+		# (It's a standalone DocType, not a child table)
+		frappe.delete_doc("SIS Bus Route Student", route_student_id)
 		frappe.db.commit()
 
 		return success_response(
@@ -737,13 +727,11 @@ def remove_student_from_route():
 def update_student_in_route():
 	"""Update a student in a bus route schedule"""
 	try:
-		route_id = frappe.local.form_dict.get('route_id') or frappe.request.args.get('route_id')
-		route_student_name = frappe.local.form_dict.get('route_student_name') or frappe.request.args.get('route_student_name')
-		
-		if not route_id:
-			return error_response("Route ID is required")
-		if not route_student_name:
-			return error_response("Route student name is required")
+		# Get route_student_id from params (frontend sends this)
+		route_student_id = frappe.local.form_dict.get('route_student_id') or frappe.request.args.get('route_student_id')
+
+		if not route_student_id:
+			return error_response("Route student ID is required")
 
 		# Get update data
 		data = {}
@@ -760,29 +748,21 @@ def update_student_in_route():
 		else:
 			data = frappe.local.form_dict
 
-		# Get the route document
-		route_doc = frappe.get_doc("SIS Bus Route", route_id)
-		
-		# Find and update the student in child table
-		updated_student = None
-		for student in route_doc.route_students:
-			if student.name == route_student_name:
-				# Update fields
-				for key, value in data.items():
-					if hasattr(student, key) and key not in ['name', 'parent', 'parenttype', 'parentfield', 'route_id', 'route_student_name']:
-						setattr(student, key, value)
-				updated_student = student
-				break
-		
-		if not updated_student:
-			return error_response("Student not found in route")
-		
-		# Save the parent document
-		route_doc.save()
+		# Get the SIS Bus Route Student document directly
+		# (It's a standalone DocType, not a child table)
+		student_doc = frappe.get_doc("SIS Bus Route Student", route_student_id)
+
+		# Update fields
+		for key, value in data.items():
+			if hasattr(student_doc, key) and key not in ['name', 'route_student_id']:
+				setattr(student_doc, key, value)
+
+		# Save the document
+		student_doc.save()
 		frappe.db.commit()
 
 		return success_response(
-			data=updated_student.as_dict(),
+			data=student_doc.as_dict(),
 			message="Student updated in route successfully"
 		)
 	except Exception as e:
