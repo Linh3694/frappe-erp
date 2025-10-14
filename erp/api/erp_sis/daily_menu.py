@@ -48,11 +48,7 @@ def convert_items_to_meals_structure(items, menu_name):
             "menu_type": "custom",
             "meal_type_reference": "",
             "name": f"dinner_{menu_name}",
-            "dinner_items": [],  
-            "dinner_options": { 
-                "snack": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""},
-                "drink": {"menu_category_id": "", "display_name": "", "display_name_en": "", "education_stage": ""}
-            }
+            "dinner_items": []  # Array supports multiple snacks and drinks
         }
     }
 
@@ -155,68 +151,19 @@ def convert_items_to_meals_structure(items, menu_name):
                     "display_name_en": item.display_name_en or ""
                 })
 
-        # Handle dinner options - use dinner_items array for new format
+        # Handle dinner - use dinner_items array to support multiple snacks/drinks
         elif meal_type == "dinner":
             meal_type_reference = item.meal_type_reference or ""
-
-            # Add to dinner_items array (new format)
-            if meal_type_reference in ["snack", "drink"]:
-                meals_result[meal_type]["dinner_items"].append({
-                    "id": f"item_{len(meals_result[meal_type]['dinner_items'])}",
-                    "option_type": meal_type_reference,
-                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
-                    "display_name": item.display_name or "",
-                    "display_name_en": item.display_name_en or "",
-                    "education_stage": item.education_stage or ""
-                })
             
-            # Also maintain backward compatibility with dinner_options
-            if meal_type_reference == "snack":
-                meals_result[meal_type]["dinner_options"]["snack"] = {
-                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
-                    "display_name": item.display_name or "",
-                    "display_name_en": item.display_name_en or "",
-                    "education_stage": item.education_stage or ""
-                }
-            elif meal_type_reference == "drink":
-                meals_result[meal_type]["dinner_options"]["drink"] = {
-                    "menu_category_id": convert_menu_category_id(item.menu_category_id),
-                    "display_name": item.display_name or "",
-                    "display_name_en": item.display_name_en or "",
-                    "education_stage": item.education_stage or ""
-                }
-            # Fallback: assign to first available option and add to dinner_items
-            elif not meal_type_reference:
-                if not meals_result[meal_type]["dinner_options"]["snack"]["menu_category_id"]:
-                    meals_result[meal_type]["dinner_options"]["snack"] = {
-                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
-                        "display_name": item.display_name or "",
-                        "display_name_en": item.display_name_en or "",
-                        "education_stage": item.education_stage or ""
-                    }
-                    meals_result[meal_type]["dinner_items"].append({
-                        "id": f"item_{len(meals_result[meal_type]['dinner_items'])}",
-                        "option_type": "snack",
-                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
-                        "display_name": item.display_name or "",
-                        "display_name_en": item.display_name_en or "",
-                        "education_stage": item.education_stage or ""
-                    })
-                elif not meals_result[meal_type]["dinner_options"]["drink"]["menu_category_id"]:
-                    meals_result[meal_type]["dinner_options"]["drink"] = {
-                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
-                        "display_name": item.display_name or "",
-                        "display_name_en": item.display_name_en or "",
-                        "education_stage": item.education_stage or ""
-                    }
-                    meals_result[meal_type]["dinner_items"].append({
-                        "id": f"item_{len(meals_result[meal_type]['dinner_items'])}",
-                        "option_type": "drink",
-                        "menu_category_id": convert_menu_category_id(item.menu_category_id),
-                        "display_name": item.display_name or "",
-                        "display_name_en": item.display_name_en or "",
-                        "education_stage": item.education_stage or ""
-                    })
+            # Add all dinner items to dinner_items array
+            meals_result[meal_type]["dinner_items"].append({
+                "id": f"item_{len(meals_result[meal_type]['dinner_items'])}",
+                "option_type": meal_type_reference if meal_type_reference else "",
+                "menu_category_id": convert_menu_category_id(item.menu_category_id),
+                "display_name": item.display_name or "",
+                "display_name_en": item.display_name_en or "",
+                "education_stage": item.education_stage or ""
+            })
 
         # Handle legacy items array for backward compatibility
         else:
