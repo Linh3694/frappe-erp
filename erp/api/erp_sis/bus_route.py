@@ -456,7 +456,7 @@ def delete_bus_route():
 				s.student_code,
 				s.full_name as student_name
 			FROM `tabSIS Bus Route Student` brs
-			LEFT JOIN `tabSIS Student` s ON s.name = brs.student_id
+			LEFT JOIN `tabCRM Student` s ON s.name = brs.student_id
 			WHERE brs.route_id = %s
 		""", name, as_dict=True)
 		
