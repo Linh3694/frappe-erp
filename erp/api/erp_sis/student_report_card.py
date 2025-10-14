@@ -960,6 +960,19 @@ def update_report_section():
             frappe.logger().info(f"Payload keys: {list(payload.keys())}")
         else:
             frappe.logger().warning(f"Payload is not dict: {payload}")
+        
+        # Validation
+        if not report_id:
+            return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
+        if not section:
+            return validation_error_response(message="section is required", errors={"section": ["Required"]})
+        
+        # Load report document
+        campus_id = _campus()
+        doc = frappe.get_doc("SIS Student Report Card", report_id)
+        if doc.campus_id != campus_id:
+            return forbidden_response("Access denied")
+        
         # Merge section into data_json
         json_data = json.loads(doc.data_json or "{}")
 
