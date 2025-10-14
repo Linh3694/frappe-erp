@@ -311,3 +311,71 @@ def get_daily_menu_by_date(date=None):
     except Exception as e:
         frappe.log_error(f"Error fetching daily menu for date {date}: {str(e)}")
         return error_response(f"Error fetching daily menu: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=True, methods=['GET'])
+def get_buffet_events_by_month(month=None, year=None):
+    """Get buffet events for a specific month by scanning all daily menus"""
+    try:
+        # Get month and year from parameter or from request
+        if not month:
+            month = get_request_param('month')
+        if not year:
+            year = get_request_param('year')
+
+        if not month or not year:
+            return validation_error_response("Month and year are required", {"month": ["Month is required"], "year": ["Year is required"]})
+
+        try:
+            month_num = int(month)
+            year_num = int(year)
+        except ValueError:
+            return validation_error_response("Invalid month or year format", {"month": ["Must be a number"], "year": ["Must be a number"]})
+
+        # Calculate start and end date of month
+        import calendar
+        start_date = f"{year_num}-{month_num:02d}-01"
+        last_day = calendar.monthrange(year_num, month_num)[1]
+        end_date = f"{year_num}-{month_num:02d}-{last_day:02d}"
+
+        # Get all daily menus for the month
+        daily_menus = frappe.get_all(
+            "SIS Daily Menu",
+            filters={
+                "menu_date": ["between", [start_date, end_date]]
+            },
+            fields=["name", "menu_date"]
+        )
+
+        buffet_events = []
+
+        # Scan each daily menu for buffet events
+        for menu in daily_menus:
+            try:
+                daily_menu_doc = frappe.get_doc("SIS Daily Menu", menu.name)
+
+                # Convert items to check for buffet
+                meals_data = get_detailed_menu_items(daily_menu_doc.items)
+
+                # Check if any meal has buffet enabled
+                for meal in meals_data:
+                    if meal.get("buffet_config", {}).get("enabled", False):
+                        buffet_name_vn = meal["buffet_config"].get("name_vn", "")
+                        buffet_name_en = meal["buffet_config"].get("name_en", "")
+
+                        buffet_events.append({
+                            "date": menu.menu_date,
+                            "name": buffet_name_vn or buffet_name_en or "Buffet",
+                            "type": "buffet"
+                        })
+                        break  # Only add one buffet event per day
+
+            except Exception as e:
+                frappe.log_error(f"Error processing menu {menu.name}: {str(e)}")
+                continue
+
+        return list_response(buffet_events, f"Buffet events for {month_num:02d}/{year_num} retrieved successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching buffet events for month {month}/{year}: {str(e)}")
+        return error_response(f"Error fetching buffet events: {str(e)}")
