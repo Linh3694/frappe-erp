@@ -467,7 +467,7 @@ def delete_bus_route():
 			return {
 				"success": False,
 				"requires_confirmation": True,
-				"message": f"This route has {student_count} student(s) assigned. Deleting this route will also remove all student assignments.",
+				"message": f"Tuyến đường này có {student_count} học sinh. Xóa tuyến đường sẽ đồng thời xóa tất cả phân công học sinh.",
 				"student_count": student_count,
 				"students": linked_students
 			}
