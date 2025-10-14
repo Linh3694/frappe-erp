@@ -529,9 +529,11 @@ def delete_bus_route():
 			detail_msg = f" và {', '.join(parts)}"
 		
 		return success_response(
-			message=f"Xóa tuyến đường thành công{detail_msg}.",
-			deleted_daily_trip_count=daily_trip_count,
-			deleted_student_count=student_count
+			data={
+				"deleted_daily_trip_count": daily_trip_count,
+				"deleted_student_count": student_count
+			},
+			message=f"Xóa tuyến đường thành công{detail_msg}."
 		)
 	except Exception as e:
 		frappe.db.rollback()
