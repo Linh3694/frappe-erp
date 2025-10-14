@@ -170,45 +170,60 @@ def get_all_bus_routes():
 @frappe.whitelist()
 def get_bus_route():
 	"""Get a single bus route by name"""
+	logs = []
 	try:
+		logs.append("🔍 Starting get_bus_route")
 		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
+		logs.append(f"📋 Route name: {name}")
+		
 		if not name:
-			return error_response("Bus route name is required")
-			
+			return error_response("Bus route name is required", logs=logs)
+		
+		logs.append("🔄 Getting SIS Bus Route document...")
 		doc = frappe.get_doc("SIS Bus Route", name)
 		route_data = doc.as_dict()
+		logs.append(f"✅ Got route document: {route_data.get('route_name')}")
 
 		# Get related entity details
 		if route_data.get('vehicle_id'):
+			logs.append(f"🚌 Loading vehicle: {route_data.get('vehicle_id')}")
 			vehicle = frappe.get_doc("SIS Bus Transportation", route_data['vehicle_id'])
 			route_data.update({
 				"vehicle_code": vehicle.vehicle_code,
 				"vehicle_type": vehicle.vehicle_type,
 				"license_plate": vehicle.license_plate
 			})
+			logs.append("✅ Vehicle loaded")
 
 		if route_data.get('driver_id'):
+			logs.append(f"👨‍✈️ Loading driver: {route_data.get('driver_id')}")
 			driver = frappe.get_doc("SIS Bus Driver", route_data['driver_id'])
 			route_data.update({
 				"driver_name": driver.full_name,
 				"driver_phone": driver.phone_number
 			})
+			logs.append("✅ Driver loaded")
 
 		if route_data.get('monitor1_id'):
+			logs.append(f"👤 Loading monitor1: {route_data.get('monitor1_id')}")
 			monitor1 = frappe.get_doc("SIS Bus Monitor", route_data['monitor1_id'])
 			route_data.update({
 				"monitor1_name": monitor1.full_name,
 				"monitor1_phone": monitor1.phone_number
 			})
+			logs.append("✅ Monitor1 loaded")
 
 		if route_data.get('monitor2_id'):
+			logs.append(f"👤 Loading monitor2: {route_data.get('monitor2_id')}")
 			monitor2 = frappe.get_doc("SIS Bus Monitor", route_data['monitor2_id'])
 			route_data.update({
 				"monitor2_name": monitor2.full_name,
 				"monitor2_phone": monitor2.phone_number
 			})
+			logs.append("✅ Monitor2 loaded")
 
 		# Get route students - query separately since it's not a child table
+		logs.append(f"👨‍🎓 Loading route students for route_id: {name}")
 		students = frappe.get_all(
 			"SIS Bus Route Student",
 			filters={"route_id": name},
@@ -216,16 +231,23 @@ def get_bus_route():
 					"trip_type", "pickup_order", "pickup_location", "drop_off_location", "notes"],
 			order_by="weekday, trip_type, pickup_order"
 		)
+		logs.append(f"✅ Loaded {len(students)} route students")
 
 		route_data.update({"route_students": students})
+		logs.append("🎉 Success!")
 
 		return success_response(
 			data=route_data,
-			message="Bus route retrieved successfully"
+			message="Bus route retrieved successfully",
+			logs=logs
 		)
 	except Exception as e:
-		frappe.log_error(f"Error getting bus route: {str(e)}")
-		return error_response(f"Bus route not found: {str(e)}")
+		import traceback
+		error_trace = traceback.format_exc()
+		logs.append(f"❌ ERROR: {str(e)}")
+		logs.append(f"📜 Traceback: {error_trace}")
+		frappe.log_error(f"Error getting bus route: {str(e)}\n{error_trace}")
+		return error_response(f"Bus route not found: {str(e)}", logs=logs)
 
 @frappe.whitelist()
 def create_bus_route():
