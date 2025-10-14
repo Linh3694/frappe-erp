@@ -261,3 +261,47 @@ def get_daily_menu_by_id(daily_menu_id=None):
     except Exception as e:
         frappe.log_error(f"Error fetching daily menu {daily_menu_id}: {str(e)}")
         return error_response(f"Error fetching daily menu: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=True, methods=['GET'])
+def get_daily_menu_by_date(date=None):
+    """Get daily menu by date for parent portal"""
+    try:
+        # Get date from parameter or from request
+        if not date:
+            date = get_request_param('date')
+
+        if not date:
+            return validation_error_response("Date is required", {"date": ["Date is required"]})
+
+        # Find daily menu by date
+        daily_menus = frappe.get_all(
+            "SIS Daily Menu",
+            filters={
+                "menu_date": date
+            },
+            fields=[
+                "name", "menu_date",
+                "creation", "modified"
+            ]
+        )
+
+        if not daily_menus:
+            return not_found_response("Daily Menu not found for this date")
+
+        menu = daily_menus[0]
+
+        # Get menu items directly
+        daily_menu_doc = frappe.get_doc("SIS Daily Menu", menu.name)
+
+        # Convert flat items to detailed meals structure for parent portal
+        menu_data = {
+            "name": menu.name,
+            "menu_date": menu.menu_date,
+            "meals": get_detailed_menu_items(daily_menu_doc.items)
+        }
+        return single_item_response(menu_data, "Daily Menu fetched successfully")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching daily menu for date {date}: {str(e)}")
+        return error_response(f"Error fetching daily menu: {str(e)}")
