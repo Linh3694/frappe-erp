@@ -208,10 +208,14 @@ def get_bus_route():
 				"monitor2_phone": monitor2.phone_number
 			})
 
-		# Get route students from child table
-		students = []
-		if hasattr(doc, 'route_students') and doc.route_students:
-			students = [student.as_dict() for student in doc.route_students]
+		# Get route students - query separately since it's not a child table
+		students = frappe.get_all(
+			"SIS Bus Route Student",
+			filters={"route_id": name},
+			fields=["name", "route_id", "student_id", "class_student_id", "weekday", 
+					"trip_type", "pickup_order", "pickup_location", "drop_off_location", "notes"],
+			order_by="weekday, trip_type, pickup_order"
+		)
 
 		route_data.update({"route_students": students})
 
