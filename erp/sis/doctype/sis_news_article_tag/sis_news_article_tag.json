@@ -1,0 +1,67 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "hash",
+ "beta": 0,
+ "creation": "2024-10-14 10:00:00.000000",
+ "custom": 0,
+ "description": "News Article Tag Mapping",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "news_tag_id",
+  "tag_name_en",
+  "tag_name_vn",
+  "tag_color"
+ ],
+ "fields": [
+  {
+   "fieldname": "news_tag_id",
+   "fieldtype": "Link",
+   "label": "News Tag",
+   "options": "SIS News Tag",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "tag_name_en",
+   "fieldtype": "Data",
+   "label": "Tag Name (EN)",
+   "read_only": 1,
+   "fetch_from": "news_tag_id.name_en"
+  },
+  {
+   "fieldname": "tag_name_vn",
+   "fieldtype": "Data",
+   "label": "Tag Name (VN)",
+   "read_only": 1,
+   "fetch_from": "news_tag_id.name_vn"
+  },
+  {
+   "fieldname": "tag_color",
+   "fieldtype": "Color",
+   "label": "Tag Color",
+   "read_only": 1,
+   "fetch_from": "news_tag_id.color"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-10-14 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS News Article Tag",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
