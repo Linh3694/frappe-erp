@@ -617,6 +617,7 @@ def _initialize_report_data_from_template(template, class_id: Optional[str]) -> 
     return base
 
 
+@frappe.whitelist(allow_guest=False, methods=["POST"])
 def create_reports_for_class(template_id: Optional[str] = None, class_id: Optional[str] = None):
     """Generate draft student report cards for all students in a class based on a template."""
     try:
