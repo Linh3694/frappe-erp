@@ -450,9 +450,14 @@ def delete_bus_route():
 		
 		# Check for linked student routes
 		linked_students = frappe.db.sql("""
-			SELECT name, student_id, student_name
-			FROM `tabSIS Bus Route Student`
-			WHERE route_id = %s
+			SELECT 
+				brs.name,
+				brs.student_id,
+				s.student_code,
+				s.full_name as student_name
+			FROM `tabSIS Bus Route Student` brs
+			LEFT JOIN `tabSIS Student` s ON s.name = brs.student_id
+			WHERE brs.route_id = %s
 		""", name, as_dict=True)
 		
 		student_count = len(linked_students)
