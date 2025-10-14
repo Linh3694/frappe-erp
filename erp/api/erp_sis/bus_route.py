@@ -1,6 +1,4 @@
-# -*- coding: utf-8 -*-
-# Copyright (c) 2025, Frappe Technologies and contributors
-# For license information, please see license.txt
+
 
 import json
 import frappe
@@ -445,14 +443,42 @@ def delete_bus_route():
 	"""Delete a bus route"""
 	try:
 		name = frappe.local.form_dict.get('name') or frappe.request.args.get('name')
+		force_delete = frappe.local.form_dict.get('force_delete') or frappe.request.args.get('force_delete')
+		
 		if not name:
 			return error_response("Bus route name is required")
-			
-		frappe.delete_doc("SIS Bus Route", name)
+		
+		# Check for linked student routes
+		linked_students = frappe.db.sql("""
+			SELECT name, student_id, student_name
+			FROM `tabSIS Bus Route Student`
+			WHERE route_id = %s
+		""", name, as_dict=True)
+		
+		student_count = len(linked_students)
+		
+		# If there are linked students and no force delete confirmation
+		if student_count > 0 and not force_delete:
+			return {
+				"success": False,
+				"requires_confirmation": True,
+				"message": f"This route has {student_count} student(s) assigned. Deleting this route will also remove all student assignments.",
+				"student_count": student_count,
+				"students": linked_students
+			}
+		
+		# Delete linked student routes first
+		if student_count > 0:
+			for student in linked_students:
+				frappe.delete_doc("SIS Bus Route Student", student.name, force=True)
+		
+		# Delete the bus route
+		frappe.delete_doc("SIS Bus Route", name, force=True)
 		frappe.db.commit()
 
 		return success_response(
-			message="Bus route deleted successfully"
+			message=f"Bus route deleted successfully. {student_count} student assignment(s) were also removed." if student_count > 0 else "Bus route deleted successfully",
+			deleted_student_count=student_count
 		)
 	except Exception as e:
 		frappe.db.rollback()
