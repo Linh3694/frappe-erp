@@ -118,16 +118,20 @@ def get_news_articles():
 
         frappe.logger().info(f"Successfully retrieved {len(articles)} news articles")
 
-        return list_response(
-            data=articles,
-            message="News articles fetched successfully",
-            pagination={
-                "page": page,
-                "limit": limit,
-                "total": total_count,
-                "total_pages": (total_count + limit - 1) // limit
-            }
-        )
+        # Return paginated response if there are more pages, otherwise return list response
+        if total_count > limit:
+            return paginated_response(
+                data=articles,
+                current_page=page,
+                total_count=total_count,
+                per_page=limit,
+                message="News articles fetched successfully"
+            )
+        else:
+            return list_response(
+                data=articles,
+                message="News articles fetched successfully"
+            )
 
     except Exception as e:
         frappe.logger().error(f"Error fetching news articles: {str(e)}")
