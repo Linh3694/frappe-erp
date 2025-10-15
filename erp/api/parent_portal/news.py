@@ -198,7 +198,7 @@ def get_news_article():
         article_id = data.get("article_id")
 
         if not article_id:
-            return validation_error_response("Article ID is required")
+            return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
 
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
