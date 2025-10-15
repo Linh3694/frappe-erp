@@ -46,11 +46,22 @@ def submit_leave_request():
 	"""Submit leave request for multiple students"""
 	try:
 		data = frappe.form_dict
+		
+		# DEBUG: Log everything
+		frappe.logger().info(f"===== SUBMIT LEAVE REQUEST DEBUG =====")
+		frappe.logger().info(f"frappe.form_dict: {frappe.form_dict}")
+		frappe.logger().info(f"frappe.request.method: {frappe.request.method}")
+		frappe.logger().info(f"frappe.request.form: {frappe.request.form}")
+		frappe.logger().info(f"frappe.request.files: {frappe.request.files}")
+		frappe.logger().info(f"'reason' in data: {'reason' in data}")
+		frappe.logger().info(f"data.get('reason'): {data.get('reason')}")
+		frappe.logger().info(f"type of data.get('reason'): {type(data.get('reason'))}")
 
 		# Required fields validation (except students, handled separately)
 		required_fields = ['reason', 'start_date', 'end_date']
 		for field in required_fields:
 			if field not in data or not data[field]:
+				frappe.logger().error(f"Missing field: {field}, value: {data.get(field)}")
 				return validation_error_response(f"Thiếu trường bắt buộc: {field}", {field: [f"Trường {field} là bắt buộc"]})
 
 		# Validate reason
