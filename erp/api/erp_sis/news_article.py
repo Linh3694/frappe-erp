@@ -305,26 +305,50 @@ def get_news_article():
 def create_news_article():
     """Create a new news article"""
     try:
-        # Get data from request - try both form_dict and JSON body
-        data = frappe.local.form_dict
-        frappe.logger().info(f"Initial form_dict data: {data}")
+        # IMPORTANT: Check for files first to detect multipart form data
+        files = frappe.request.files
+        has_files = files and 'cover_image' in files
+        
         frappe.logger().info(f"Request method: {frappe.request.method}")
         frappe.logger().info(f"Request content type: {frappe.request.content_type}")
+        frappe.logger().info(f"Has files: {has_files}")
 
-        # Log all form data keys and values for debugging
-        if data:
-            for key, value in data.items():
-                frappe.logger().info(f"Form data {key}: {value} (type: {type(value)})")
-
-        if not data or not data.get('title_en'):
-            # Try parsing JSON from request body
+        # Get data from request - handle multipart form data properly
+        data = {}
+        
+        if has_files:
+            # For multipart form data with files, use werkzeug parser to avoid encoding issues
             try:
-                if frappe.request.data:
-                    import json
-                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                    frappe.logger().info(f"Parsed JSON data: {data}")
+                from werkzeug.formparser import parse_form_data
+                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
+                
+                # Convert form data to dict
+                for key in form.keys():
+                    data[key] = form.get(key)
+                    
+                frappe.logger().info(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
+                
             except Exception as e:
-                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+                frappe.logger().error(f"Failed to parse multipart form data: {str(e)}")
+                # Fallback to form_dict
+                data = frappe.local.form_dict
+        else:
+            # No files, use standard parsing
+            data = frappe.local.form_dict
+            frappe.logger().info(f"Using standard form_dict: {data}")
+            
+            # If form_dict is empty, try JSON body
+            if not data or not data.get('title_en'):
+                try:
+                    if frappe.request.data:
+                        data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                        frappe.logger().info(f"Parsed JSON data: {data}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+        
+        # Log parsed data for debugging
+        for key, value in data.items():
+            frappe.logger().info(f"Form data {key}: {value} (type: {type(value)})")
 
         # Get current user's campus information
         campus_id = get_current_campus_from_context()
@@ -332,23 +356,13 @@ def create_news_article():
             campus_id = "campus-1"
 
         # Override campus_id to ensure user can't create for other campuses
-        if isinstance(data, dict):
-            data['campus_id'] = campus_id
-        else:
-            # If data is not a dict (like frappe form_dict), set attribute
-            data.campus_id = campus_id
-
-        frappe.logger().info(f"Final data before validation: title_en='{data.get('title_en') if isinstance(data, dict) else getattr(data, 'title_en', None)}', title_vn='{data.get('title_vn') if isinstance(data, dict) else getattr(data, 'title_vn', None)}'")
+        data['campus_id'] = campus_id
 
         # Validate required fields
-        def get_field_value(field_name):
-            if isinstance(data, dict):
-                return data.get(field_name, "")
-            else:
-                return getattr(data, field_name, "")
-
-        title_en = str(get_field_value("title_en")).strip()
-        title_vn = str(get_field_value("title_vn")).strip()
+        title_en = str(data.get("title_en", "")).strip()
+        title_vn = str(data.get("title_vn", "")).strip()
+        
+        frappe.logger().info(f"Final data before validation: title_en='{title_en}', title_vn='{title_vn}'")
 
         if not title_en or not title_vn:
             frappe.logger().error(f"Validation failed: title_en='{title_en}', title_vn='{title_vn}'")
@@ -373,18 +387,18 @@ def create_news_article():
             "campus_id": campus_id,
             "title_en": title_en,
             "title_vn": title_vn,
-            "summary_en": get_field_value("summary_en"),
-            "summary_vn": get_field_value("summary_vn"),
-            "content_en": get_field_value("content_en"),
-            "content_vn": get_field_value("content_vn"),
-            "education_stage_ids": get_field_value("education_stage_ids"),
-            "featured": get_field_value("featured") or 0,
-            "cover_image": cover_image_url or get_field_value("cover_image"),
-            "status": get_field_value("status") or "draft"
+            "summary_en": data.get("summary_en", ""),
+            "summary_vn": data.get("summary_vn", ""),
+            "content_en": data.get("content_en", ""),
+            "content_vn": data.get("content_vn", ""),
+            "education_stage_ids": data.get("education_stage_ids", ""),
+            "featured": data.get("featured") or 0,
+            "cover_image": cover_image_url or data.get("cover_image", ""),
+            "status": data.get("status", "draft")
         })
 
         # Handle tags
-        tag_ids_str = get_field_value("tag_ids")
+        tag_ids_str = data.get("tag_ids")
         if tag_ids_str:
             try:
                 if isinstance(tag_ids_str, str):
@@ -459,35 +473,52 @@ def create_news_article():
 def update_news_article():
     """Update an existing news article"""
     try:
-        # Get data from request - try both form_dict and JSON body
-        data = frappe.local.form_dict
-        frappe.logger().info(f"Initial form_dict data: {data}")
+        # IMPORTANT: Check for files first to detect multipart form data
+        files = frappe.request.files
+        has_files = files and 'cover_image' in files
+        
         frappe.logger().info(f"Request method: {frappe.request.method}")
         frappe.logger().info(f"Request content type: {frappe.request.content_type}")
+        frappe.logger().info(f"Has files: {has_files}")
 
-        # Log all form data keys and values for debugging
-        if data:
-            for key, value in data.items():
-                frappe.logger().info(f"Form data {key}: {value} (type: {type(value)})")
-
-        if not data or not data.get('article_id'):
-            # Try parsing JSON from request body
+        # Get data from request - handle multipart form data properly
+        data = {}
+        
+        if has_files:
+            # For multipart form data with files, use werkzeug parser to avoid encoding issues
             try:
-                if frappe.request.data:
-                    import json
-                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                    frappe.logger().info(f"Parsed JSON data: {data}")
+                from werkzeug.formparser import parse_form_data
+                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
+                
+                # Convert form data to dict
+                for key in form.keys():
+                    data[key] = form.get(key)
+                    
+                frappe.logger().info(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
+                
             except Exception as e:
-                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+                frappe.logger().error(f"Failed to parse multipart form data: {str(e)}")
+                # Fallback to form_dict
+                data = frappe.local.form_dict
+        else:
+            # No files, use standard parsing
+            data = frappe.local.form_dict
+            frappe.logger().info(f"Using standard form_dict: {data}")
+            
+            # If form_dict is empty, try JSON body
+            if not data or not data.get('article_id'):
+                try:
+                    if frappe.request.data:
+                        data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                        frappe.logger().info(f"Parsed JSON data: {data}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+        
+        # Log parsed data for debugging
+        for key, value in data.items():
+            frappe.logger().info(f"Form data {key}: {value} (type: {type(value)})")
 
-        # Helper function to get field value from either dict or object
-        def get_field_value(field_name):
-            if isinstance(data, dict):
-                return data.get(field_name, "")
-            else:
-                return getattr(data, field_name, "")
-
-        article_id = get_field_value("article_id")
+        article_id = data.get("article_id")
 
         if not article_id:
             return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
@@ -501,8 +532,10 @@ def update_news_article():
             return forbidden_response("You don't have access to this article")
 
         # Validate required fields for update
-        title_en = str(get_field_value("title_en")).strip()
-        title_vn = str(get_field_value("title_vn")).strip()
+        title_en = str(data.get("title_en", "")).strip()
+        title_vn = str(data.get("title_vn", "")).strip()
+        
+        frappe.logger().info(f"Validating update: title_en='{title_en}', title_vn='{title_vn}'")
 
         if not title_en or not title_vn:
             frappe.logger().error(f"Validation failed: title_en='{title_en}', title_vn='{title_vn}'")
