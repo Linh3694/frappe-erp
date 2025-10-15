@@ -196,6 +196,11 @@ def get_news_article():
     try:
         data = frappe.local.form_dict
         article_id = data.get("article_id")
+        
+        # Debug logging
+        frappe.logger().info(f"Parent portal - get_news_article called")
+        frappe.logger().info(f"Parent portal - form_dict: {data}")
+        frappe.logger().info(f"Parent portal - article_id: {article_id}")
 
         if not article_id:
             return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
