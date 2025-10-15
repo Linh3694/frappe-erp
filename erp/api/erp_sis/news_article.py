@@ -149,7 +149,7 @@ def get_news_article():
         article_id = data.get("article_id")
 
         if not article_id:
-            return validation_error_response("Article ID is required")
+            return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
 
         # Get current user's campus information
         campus_id = get_current_campus_from_context()
@@ -209,7 +209,19 @@ def get_news_article():
 def create_news_article():
     """Create a new news article"""
     try:
+        # Get data from request - try both form_dict and JSON body
         data = frappe.local.form_dict
+        frappe.logger().info(f"Initial form_dict data: {data}")
+
+        if not data or not data.get('title_en'):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                    frappe.logger().info(f"Parsed JSON data: {data}")
+            except Exception as e:
+                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
 
         # Get current user's campus information
         campus_id = get_current_campus_from_context()
@@ -219,8 +231,14 @@ def create_news_article():
         # Override campus_id to ensure user can't create for other campuses
         data.campus_id = campus_id
 
+        frappe.logger().info(f"Final data before validation: title_en='{data.get('title_en')}', title_vn='{data.get('title_vn')}'")
+
         # Validate required fields
-        if not data.get("title_en") or not data.get("title_vn"):
+        title_en = data.get("title_en", "").strip()
+        title_vn = data.get("title_vn", "").strip()
+
+        if not title_en or not title_vn:
+            frappe.logger().error(f"Validation failed: title_en='{title_en}', title_vn='{title_vn}'")
             return validation_error_response("Both English and Vietnamese titles are required", {"title": ["Both English and Vietnamese titles are required"]})
 
         # Create the article
@@ -296,7 +314,7 @@ def create_news_article():
         )
 
     except frappe.DuplicateEntryError:
-        return validation_error_response("An article with this title already exists")
+        return validation_error_response("An article with this title already exists", {"title": ["An article with this title already exists"]})
     except Exception as e:
         frappe.logger().error(f"Error creating news article: {str(e)}")
         return error_response(
@@ -309,11 +327,21 @@ def create_news_article():
 def update_news_article():
     """Update an existing news article"""
     try:
+        # Get data from request - try both form_dict and JSON body
         data = frappe.local.form_dict
+        if not data or not data.get('article_id'):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+            except Exception as e:
+                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+
         article_id = data.get("article_id")
 
         if not article_id:
-            return validation_error_response("Article ID is required")
+            return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
 
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
@@ -360,7 +388,7 @@ def update_news_article():
                     # Validate tag exists and belongs to same campus
                     tag_doc = frappe.get_doc("SIS News Tag", tag_id)
                     if tag_doc.campus_id != article.campus_id:
-                        return validation_error_response(f"Tag '{tag_doc.name_en}' belongs to different campus")
+                        return validation_error_response(f"Tag '{tag_doc.name_en}' belongs to different campus", {"tags": [f"Tag '{tag_doc.name_en}' belongs to different campus"]})
 
                     article.append("tags", {
                         "news_tag_id": tag_id
@@ -408,7 +436,7 @@ def update_news_article():
     except frappe.DoesNotExistError:
         return not_found_response("News article not found")
     except frappe.DuplicateEntryError:
-        return validation_error_response("An article with this title already exists")
+        return validation_error_response("An article with this title already exists", {"title": ["An article with this title already exists"]})
     except Exception as e:
         frappe.logger().error(f"Error updating news article: {str(e)}")
         return error_response(
@@ -425,7 +453,7 @@ def delete_news_article():
         article_id = data.get("article_id")
 
         if not article_id:
-            return validation_error_response("Article ID is required")
+            return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
 
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
@@ -460,7 +488,7 @@ def publish_news_article():
         article_id = data.get("article_id")
 
         if not article_id:
-            return validation_error_response("Article ID is required")
+            return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
 
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
@@ -496,7 +524,7 @@ def unpublish_news_article():
         article_id = data.get("article_id")
 
         if not article_id:
-            return validation_error_response("Article ID is required")
+            return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
 
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
