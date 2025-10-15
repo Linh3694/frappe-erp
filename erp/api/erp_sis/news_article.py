@@ -243,15 +243,21 @@ def get_news_article():
     try:
         data = frappe.local.form_dict
         
-        # Debug logging
-        frappe.logger().info(f"get_news_article - form_dict keys: {list(data.keys())}")
-        frappe.logger().info(f"get_news_article - form_dict data: {data}")
-        
+        # Debug: Check what we received
         article_id = data.get("article_id")
-        frappe.logger().info(f"get_news_article - article_id: {article_id}")
-
+        
+        # Return debug info in error response
         if not article_id:
-            return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
+            debug_info = {
+                "form_dict_keys": list(data.keys()),
+                "form_dict_values": {k: str(v)[:100] for k, v in data.items()},  # Limit to 100 chars
+                "article_id_value": article_id,
+                "cmd_value": data.get("cmd")
+            }
+            return validation_error_response(
+                f"Article ID is required. Debug: {debug_info}", 
+                {"article_id": [f"Article ID is required. Received keys: {list(data.keys())}"]}
+            )
 
         # Get current user's campus information
         campus_id = get_current_campus_from_context()
