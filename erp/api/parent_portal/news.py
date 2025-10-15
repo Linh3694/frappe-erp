@@ -199,11 +199,20 @@ def get_news_article(article_id=None):
         frappe.logger().info(f"article_id parameter: {article_id}")
         frappe.logger().info(f"frappe.form_dict: {frappe.form_dict}")
         frappe.logger().info(f"frappe.local.form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"Request method: {frappe.request.method if hasattr(frappe, 'request') else 'N/A'}")
         
-        # Try to get from form_dict if parameter is None
+        # For GET requests, Frappe automatically maps query params to function params
+        # For POST requests, we need to get from form_dict
         if not article_id:
+            # Try form_dict for POST requests
             article_id = frappe.form_dict.get("article_id") or frappe.local.form_dict.get("article_id")
             frappe.logger().info(f"Got from form_dict: {article_id}")
+            
+            # Also try kwargs as last resort
+            if not article_id:
+                kwargs = frappe.local.form_dict
+                article_id = kwargs.get("article_id")
+                frappe.logger().info(f"Got from kwargs: {article_id}")
 
         if not article_id:
             frappe.logger().error("Article ID is still None after all attempts")
