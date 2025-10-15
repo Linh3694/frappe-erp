@@ -830,3 +830,192 @@ def unpublish_news_article():
             message=f"Failed to unpublish news article: {str(e)}",
             code="UNPUBLISH_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def upload_content_image():
+    """
+    Upload image for article content (markdown content images)
+    - Converts to WebP for optimization
+    - Resizes if too large (max width 1920px)
+    - Saves to /files/News_Articles/content/
+    """
+    logs = []
+    
+    try:
+        # Validate user authentication
+        if frappe.session.user == "Guest":
+            logs.append("Guest user attempted to upload content image")
+            return forbidden_response(
+                message="Vui lòng đăng nhập để tải ảnh lên",
+                code="GUEST_NOT_ALLOWED"
+            )
+        
+        logs.append(f"Upload content image called by user: {frappe.session.user}")
+        
+        # Get uploaded file from request
+        files = frappe.request.files
+        if not files or 'image' not in files:
+            logs.append("No image file found in request")
+            return validation_error_response(
+                message="Không tìm thấy file ảnh",
+                errors={"image": ["File ảnh là bắt buộc"]},
+                code="MISSING_IMAGE_FILE"
+            )
+        
+        image_file = files['image']
+        logs.append(f"Received file: {image_file.filename}")
+        
+        # Validate file type
+        allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']
+        file_extension = image_file.filename.rsplit('.', 1)[1].lower() if '.' in image_file.filename else ''
+        
+        if file_extension not in allowed_extensions:
+            error_msg = f"Loại file không hợp lệ. Chỉ chấp nhận: {', '.join(allowed_extensions)}"
+            logs.append(f"Invalid file type: {file_extension}")
+            return validation_error_response(
+                message=error_msg,
+                errors={"image": [error_msg]},
+                code="INVALID_FILE_TYPE"
+            )
+        
+        logs.append(f"File extension validated: {file_extension}")
+        
+        # Read file content
+        file_content = image_file.read()
+        
+        # Validate file size (max 10MB for content images)
+        max_size = 10 * 1024 * 1024  # 10MB
+        if len(file_content) > max_size:
+            error_msg = "Kích thước file quá lớn. Tối đa cho phép: 10MB"
+            logs.append(f"File too large: {len(file_content)} bytes")
+            return validation_error_response(
+                message=error_msg,
+                errors={"image": [error_msg]},
+                code="FILE_TOO_LARGE"
+            )
+        
+        logs.append(f"Original file size: {len(file_content)} bytes ({len(file_content) / 1024 / 1024:.2f} MB)")
+        
+        # Process and convert image to WebP
+        image_url, compression_info = process_content_image(file_content, image_file.filename, logs)
+        
+        logs.append(f"Image uploaded successfully: {image_url}")
+        logs.append(f"Compression info: {compression_info}")
+        
+        # Return success response with image URL
+        return success_response(
+            data={
+                "image_url": image_url,
+                "compression_info": compression_info
+            },
+            message="Tải ảnh lên thành công",
+            logs=logs
+        )
+    
+    except Exception as e:
+        logs.append(f"Upload content image error: {str(e)}")
+        frappe.log_error(f"Upload content image error: {str(e)}", "News Article Content Image Upload")
+        return error_response(
+            message=f"Lỗi khi tải ảnh lên: {str(e)}",
+            code="UPLOAD_ERROR",
+            logs=logs
+        )
+
+
+def process_content_image(file_content, original_filename, logs=None):
+    """
+    Process and convert content image to WebP with optimization
+    - Auto-orient using EXIF data
+    - Resize if width > 1920px
+    - Convert to WebP format with quality 90
+    """
+    if logs is None:
+        logs = []
+    
+    try:
+        original_size = len(file_content)
+        
+        # Open image with PIL
+        image = Image.open(io.BytesIO(file_content))
+        logs.append(f"Image opened - Size: {image.size}, Mode: {image.mode}, Format: {image.format}")
+        
+        # Normalize orientation using EXIF data
+        try:
+            image = ImageOps.exif_transpose(image)
+            logs.append("EXIF orientation normalized")
+        except Exception as exif_error:
+            logs.append(f"EXIF transpose skipped: {str(exif_error)}")
+        
+        # Convert to RGB if necessary (WebP supports RGB and RGBA)
+        if image.mode not in ['RGB', 'RGBA']:
+            original_mode = image.mode
+            image = image.convert('RGB')
+            logs.append(f"Converted image mode from {original_mode} to RGB")
+        
+        # Resize if width exceeds maximum (1920px for content images)
+        max_width = 1920
+        if image.width > max_width:
+            ratio = max_width / image.width
+            new_height = int(image.height * ratio)
+            original_size_str = f"{image.width}x{image.height}"
+            image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
+            logs.append(f"Resized image from {original_size_str} to {image.width}x{image.height}")
+        
+        # Generate unique filename with UUID
+        file_id = str(uuid.uuid4())
+        name_no_ext = os.path.splitext(original_filename)[0] if '.' in original_filename else original_filename
+        # Sanitize filename - remove special characters
+        name_no_ext = "".join(c for c in name_no_ext if c.isalnum() or c in ('-', '_'))
+        final_filename = f"content_{name_no_ext}_{file_id}.webp"
+        
+        logs.append(f"Generated filename: {final_filename}")
+        
+        # Convert to WebP format
+        output = io.BytesIO()
+        # quality=90: Balance between quality and file size
+        # method=6: Maximum compression effort
+        # lossless=False: Allow lossy compression for better size reduction
+        image.save(output, format='WEBP', quality=90, method=6, lossless=False)
+        
+        processed_content = output.getvalue()
+        compressed_size = len(processed_content)
+        
+        # Calculate compression ratio
+        compression_ratio = (1 - compressed_size / original_size) * 100
+        
+        compression_info = {
+            "original_size": original_size,
+            "compressed_size": compressed_size,
+            "compression_ratio": round(compression_ratio, 1),
+            "original_format": os.path.splitext(original_filename)[1].upper() if '.' in original_filename else 'UNKNOWN',
+            "final_format": "WEBP",
+            "dimensions": f"{image.width}x{image.height}"
+        }
+        
+        logs.append(f"WebP conversion complete: {original_size} bytes -> {compressed_size} bytes ({compression_ratio:.1f}% reduction)")
+        
+        # Create upload directory if it doesn't exist
+        upload_dir = frappe.get_site_path("public", "files", "News_Articles", "content")
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir, exist_ok=True)
+            logs.append(f"Created upload directory: {upload_dir}")
+        
+        # Save file to disk
+        file_path = os.path.join(upload_dir, final_filename)
+        with open(file_path, 'wb') as f:
+            f.write(processed_content)
+        
+        logs.append(f"File saved to: {file_path}")
+        
+        # Create public URL
+        image_url = f"/files/News_Articles/content/{final_filename}"
+        
+        frappe.logger().info(f"Content image processed successfully: {original_filename} -> {final_filename}")
+        
+        return image_url, compression_info
+    
+    except Exception as e:
+        logs.append(f"Content image processing error: {str(e)}")
+        frappe.log_error(f"Content image processing error: {str(e)}", "News Article Content Image Processing")
+        raise e
