@@ -308,6 +308,13 @@ def create_news_article():
         # Get data from request - try both form_dict and JSON body
         data = frappe.local.form_dict
         frappe.logger().info(f"Initial form_dict data: {data}")
+        frappe.logger().info(f"Request method: {frappe.request.method}")
+        frappe.logger().info(f"Request content type: {frappe.request.content_type}")
+
+        # Log all form data keys and values for debugging
+        if data:
+            for key, value in data.items():
+                frappe.logger().info(f"Form data {key}: {value} (type: {type(value)})")
 
         if not data or not data.get('title_en'):
             # Try parsing JSON from request body
@@ -325,13 +332,23 @@ def create_news_article():
             campus_id = "campus-1"
 
         # Override campus_id to ensure user can't create for other campuses
-        data['campus_id'] = campus_id
+        if isinstance(data, dict):
+            data['campus_id'] = campus_id
+        else:
+            # If data is not a dict (like frappe form_dict), set attribute
+            data.campus_id = campus_id
 
-        frappe.logger().info(f"Final data before validation: title_en='{data.get('title_en')}', title_vn='{data.get('title_vn')}'")
+        frappe.logger().info(f"Final data before validation: title_en='{data.get('title_en') if isinstance(data, dict) else getattr(data, 'title_en', None)}', title_vn='{data.get('title_vn') if isinstance(data, dict) else getattr(data, 'title_vn', None)}'")
 
         # Validate required fields
-        title_en = data.get("title_en", "").strip()
-        title_vn = data.get("title_vn", "").strip()
+        def get_field_value(field_name):
+            if isinstance(data, dict):
+                return data.get(field_name, "")
+            else:
+                return getattr(data, field_name, "")
+
+        title_en = str(get_field_value("title_en")).strip()
+        title_vn = str(get_field_value("title_vn")).strip()
 
         if not title_en or not title_vn:
             frappe.logger().error(f"Validation failed: title_en='{title_en}', title_vn='{title_vn}'")
@@ -356,32 +373,38 @@ def create_news_article():
             "campus_id": campus_id,
             "title_en": title_en,
             "title_vn": title_vn,
-            "summary_en": data.get("summary_en"),
-            "summary_vn": data.get("summary_vn"),
-            "content_en": data.get("content_en"),
-            "content_vn": data.get("content_vn"),
-            "education_stage_ids": data.get("education_stage_ids"),
-            "featured": data.get("featured", 0),
-            "cover_image": cover_image_url or data.get("cover_image"),
-            "status": data.get("status", "draft")
+            "summary_en": get_field_value("summary_en"),
+            "summary_vn": get_field_value("summary_vn"),
+            "content_en": get_field_value("content_en"),
+            "content_vn": get_field_value("content_vn"),
+            "education_stage_ids": get_field_value("education_stage_ids"),
+            "featured": get_field_value("featured") or 0,
+            "cover_image": cover_image_url or get_field_value("cover_image"),
+            "status": get_field_value("status") or "draft"
         })
 
         # Handle tags
-        tag_ids = data.get("tag_ids")
-        if tag_ids:
-            if isinstance(tag_ids, str):
-                tag_ids = json.loads(tag_ids)
+        tag_ids_str = get_field_value("tag_ids")
+        if tag_ids_str:
+            try:
+                if isinstance(tag_ids_str, str):
+                    tag_ids = json.loads(tag_ids_str)
+                else:
+                    tag_ids = tag_ids_str
 
-            if tag_ids:
-                for tag_id in tag_ids:
-                    # Validate tag exists and belongs to same campus
-                    tag_doc = frappe.get_doc("SIS News Tag", tag_id)
-                    if tag_doc.campus_id != campus_id:
-                        return validation_error_response(f"Tag '{tag_doc.name_en}' belongs to different campus", {"tags": [f"Tag '{tag_doc.name_en}' belongs to different campus"]})
+                if tag_ids:
+                    for tag_id in tag_ids:
+                        # Validate tag exists and belongs to same campus
+                        tag_doc = frappe.get_doc("SIS News Tag", tag_id)
+                        if tag_doc.campus_id != campus_id:
+                            return validation_error_response(f"Tag '{tag_doc.name_en}' belongs to different campus", {"tags": [f"Tag '{tag_doc.name_en}' belongs to different campus"]})
 
-                    article.append("tags", {
-                        "news_tag_id": tag_id
-                    })
+                        article.append("tags", {
+                            "news_tag_id": tag_id
+                        })
+            except json.JSONDecodeError as e:
+                frappe.logger().error(f"Failed to parse tag_ids JSON: {tag_ids_str}, error: {str(e)}")
+                return validation_error_response("Invalid tag_ids format", {"tag_ids": ["Invalid JSON format"]})
 
         article.insert()
 
@@ -438,16 +461,33 @@ def update_news_article():
     try:
         # Get data from request - try both form_dict and JSON body
         data = frappe.local.form_dict
+        frappe.logger().info(f"Initial form_dict data: {data}")
+        frappe.logger().info(f"Request method: {frappe.request.method}")
+        frappe.logger().info(f"Request content type: {frappe.request.content_type}")
+
+        # Log all form data keys and values for debugging
+        if data:
+            for key, value in data.items():
+                frappe.logger().info(f"Form data {key}: {value} (type: {type(value)})")
+
         if not data or not data.get('article_id'):
             # Try parsing JSON from request body
             try:
                 if frappe.request.data:
                     import json
                     data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                    frappe.logger().info(f"Parsed JSON data: {data}")
             except Exception as e:
                 frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
 
-        article_id = data.get("article_id")
+        # Helper function to get field value from either dict or object
+        def get_field_value(field_name):
+            if isinstance(data, dict):
+                return data.get(field_name, "")
+            else:
+                return getattr(data, field_name, "")
+
+        article_id = get_field_value("article_id")
 
         if not article_id:
             return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
@@ -459,6 +499,14 @@ def update_news_article():
         campus_id = get_current_campus_from_context()
         if campus_id and article.campus_id != campus_id:
             return forbidden_response("You don't have access to this article")
+
+        # Validate required fields for update
+        title_en = str(get_field_value("title_en")).strip()
+        title_vn = str(get_field_value("title_vn")).strip()
+
+        if not title_en or not title_vn:
+            frappe.logger().error(f"Validation failed: title_en='{title_en}', title_vn='{title_vn}'")
+            return validation_error_response("Both English and Vietnamese titles are required", {"title": ["Both English and Vietnamese titles are required"]})
 
         # Handle image upload
         cover_image_url = None
