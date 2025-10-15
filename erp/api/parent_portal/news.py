@@ -206,8 +206,16 @@ def get_news_article(article_id=None):
             frappe.logger().info(f"Request URL: {frappe.request.url}")
             frappe.logger().info(f"Request args (query params): {frappe.request.args}")
             frappe.logger().info(f"Request form: {frappe.request.form}")
-            frappe.logger().info(f"Request data: {frappe.request.data}")
-            frappe.logger().info(f"Request json: {frappe.request.json if frappe.request.is_json else 'Not JSON'}")
+            frappe.logger().info(f"Request data (raw): {frappe.request.data}")
+            frappe.logger().info(f"Request Content-Type: {frappe.request.content_type}")
+            frappe.logger().info(f"Request headers: {dict(frappe.request.headers)}")
+            try:
+                if frappe.request.is_json:
+                    frappe.logger().info(f"Request json: {frappe.request.get_json(force=True, silent=True)}")
+                else:
+                    frappe.logger().info(f"Request is not JSON")
+            except Exception as json_err:
+                frappe.logger().info(f"Could not parse JSON: {str(json_err)}")
         
         # For GET requests, Frappe automatically maps query params to function params
         # For POST requests, we need to get from form_dict
