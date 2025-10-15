@@ -21,14 +21,9 @@ def get_news_articles():
     try:
         data = frappe.local.form_dict
 
-        # Get campus_id from request params (for guest users) or user context
+        # Get campus_id from request params (optional for guest users)
         campus_id = data.get("campus_id") or get_current_campus_from_context()
         frappe.logger().info(f"Parent portal - Campus_id from params: {data.get('campus_id')}, from context: {get_current_campus_from_context()}")
-
-        if not campus_id:
-            # Fallback to default campus
-            campus_id = "CAMPUS-00001"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
         # Check if SIS News Article doctype exists
         if not frappe.db.exists("DocType", "SIS News Article"):
@@ -40,12 +35,15 @@ def get_news_articles():
 
         # Build filters - only published articles
         filters = {
-            "campus_id": campus_id,
             "status": "published"
         }
         
+        # Add campus filter only if campus_id is provided
+        if campus_id:
+            filters["campus_id"] = campus_id
+        
         # Log filters for debugging
-        backend_log = f"Fetching news with campus_id={campus_id}, status=published"
+        backend_log = f"Fetching news with filters={filters}"
         frappe.logger().info(f"Parent portal - {backend_log}")
 
         # Student ID for education stage filtering
@@ -155,7 +153,7 @@ def get_news_articles():
         end_index = start_index + limit
         paginated_articles = filtered_articles[start_index:end_index]
 
-        success_log = f"Successfully retrieved {len(filtered_articles)} filtered news articles (campus={campus_id}, total_before_filter={len(articles)}, student_id={student_id})"
+        success_log = f"Successfully retrieved {len(filtered_articles)} filtered news articles (campus={campus_id or 'all'}, total_before_filter={len(articles)}, student_id={student_id})"
         frappe.logger().info(f"Parent portal - {success_log}")
 
         return list_response(
@@ -170,7 +168,7 @@ def get_news_articles():
                 },
                 "backend_log": success_log,
                 "filters_used": {
-                    "campus_id": campus_id,
+                    "campus_id": campus_id or None,
                     "status": "published",
                     "student_id": student_id
                 }
@@ -277,14 +275,9 @@ def get_news_tags():
     try:
         data = frappe.local.form_dict
         
-        # Get campus_id from request params (for guest users) or user context
+        # Get campus_id from request params (optional for guest users)
         campus_id = data.get("campus_id") or get_current_campus_from_context()
         frappe.logger().info(f"Parent portal - Campus_id from params: {data.get('campus_id')}, from context: {get_current_campus_from_context()}")
-
-        if not campus_id:
-            # Fallback to default campus
-            campus_id = "CAMPUS-00001"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
         # Check if SIS News Tag doctype exists
         if not frappe.db.exists("DocType", "SIS News Tag"):
@@ -294,7 +287,13 @@ def get_news_tags():
                 code="DOCTYPE_NOT_FOUND"
             )
 
-        filters = {"campus_id": campus_id, "is_active": 1}
+        # Build filters - is_active tags only
+        filters = {"is_active": 1}
+        
+        # Add campus filter only if campus_id is provided
+        if campus_id:
+            filters["campus_id"] = campus_id
+            
         frappe.logger().info(f"Parent portal - Using filters: {filters}")
 
         # Get active news tags
