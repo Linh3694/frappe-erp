@@ -92,6 +92,7 @@ def get_news_articles():
                 "summary_en",
                 "summary_vn",
                 "education_stage_ids",
+                "featured",
                 "cover_image",
                 "published_at",
                 "published_by"
@@ -233,6 +234,7 @@ def get_news_article():
             "content_en": article.content_en,
             "content_vn": article.content_vn,
             "education_stage_ids": json.loads(article.education_stage_ids or "[]"),
+            "featured": article.featured,
             "education_stage_name_en": education_stage_name_en,
             "education_stage_name_vn": education_stage_name_vn,
             "cover_image": article.cover_image,

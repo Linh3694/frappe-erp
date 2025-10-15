@@ -21,6 +21,7 @@
   "title_en",
   "title_vn",
   "education_stage_ids",
+  "featured",
   "status",
   "published_at",
   "published_by",
@@ -79,6 +80,12 @@
    "fieldtype": "Small Text",
    "label": "Educational Stage IDs",
    "description": "JSON array of education stage IDs"
+  },
+  {
+   "fieldname": "featured",
+   "fieldtype": "Check",
+   "label": "Featured Article",
+   "description": "Mark this article as featured"
   },
   {
    "fieldname": "status",

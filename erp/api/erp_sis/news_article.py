@@ -89,6 +89,7 @@ def get_news_articles():
                 "summary_en",
                 "summary_vn",
                 "education_stage_ids",
+                "featured",
                 "status",
                 "cover_image",
                 "published_at",
@@ -172,6 +173,7 @@ def get_news_article():
             "content_en": article.content_en,
             "content_vn": article.content_vn,
             "education_stage_ids": article.education_stage_ids,
+            "featured": article.featured,
             "status": article.status,
             "cover_image": article.cover_image,
             "published_at": article.published_at,
@@ -228,6 +230,7 @@ def create_news_article():
             "content_en": data.get("content_en"),
             "content_vn": data.get("content_vn"),
             "education_stage_ids": data.get("education_stage_ids"),
+            "featured": data.get("featured", 0),
             "cover_image": data.get("cover_image"),
             "status": data.get("status", "draft")
         })
@@ -270,6 +273,7 @@ def create_news_article():
             "content_en": created_article.content_en,
             "content_vn": created_article.content_vn,
             "education_stage_ids": created_article.education_stage_ids,
+            "featured": created_article.featured,
             "status": created_article.status,
             "cover_image": created_article.cover_image,
             "published_at": created_article.published_at,
@@ -330,6 +334,8 @@ def update_news_article():
             article.content_vn = data.content_vn
         if "education_stage_ids" in data:
             article.education_stage_ids = data.education_stage_ids
+        if "featured" in data:
+            article.featured = data.featured
         if "cover_image" in data:
             article.cover_image = data.cover_image
         if "status" in data:
@@ -377,6 +383,7 @@ def update_news_article():
             "content_en": updated_article.content_en,
             "content_vn": updated_article.content_vn,
             "education_stage_ids": updated_article.education_stage_ids,
+            "featured": updated_article.featured,
             "status": updated_article.status,
             "cover_image": updated_article.cover_image,
             "published_at": updated_article.published_at,
