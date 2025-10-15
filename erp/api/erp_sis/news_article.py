@@ -12,7 +12,8 @@ from erp.utils.api_response import (
     single_item_response,
     validation_error_response,
     not_found_response,
-    forbidden_response
+    forbidden_response,
+    paginated_response
 )
 import os
 import uuid
@@ -630,27 +631,27 @@ def update_news_article():
 
         # Update fields
         if "title_en" in data:
-            article.title_en = data.title_en
+            article.title_en = data["title_en"]
         if "title_vn" in data:
-            article.title_vn = data.title_vn
+            article.title_vn = data["title_vn"]
         if "summary_en" in data:
-            article.summary_en = data.summary_en
+            article.summary_en = data["summary_en"]
         if "summary_vn" in data:
-            article.summary_vn = data.summary_vn
+            article.summary_vn = data["summary_vn"]
         if "content_en" in data:
-            article.content_en = data.content_en
+            article.content_en = data["content_en"]
         if "content_vn" in data:
-            article.content_vn = data.content_vn
+            article.content_vn = data["content_vn"]
         if "education_stage_ids" in data:
-            article.education_stage_ids = data.education_stage_ids
+            article.education_stage_ids = data["education_stage_ids"]
         if "featured" in data:
-            article.featured = data.featured
+            article.featured = data["featured"]
         if cover_image_url:
             article.cover_image = cover_image_url
         elif "cover_image" in data:
-            article.cover_image = data.cover_image
+            article.cover_image = data["cover_image"]
         if "status" in data:
-            article.status = data.status
+            article.status = data["status"]
 
         # Handle tags update
         tag_ids = data.get("tag_ids")
