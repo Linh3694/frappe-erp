@@ -199,7 +199,15 @@ def get_news_article(article_id=None):
         frappe.logger().info(f"article_id parameter: {article_id}")
         frappe.logger().info(f"frappe.form_dict: {frappe.form_dict}")
         frappe.logger().info(f"frappe.local.form_dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"Request method: {frappe.request.method if hasattr(frappe, 'request') else 'N/A'}")
+        
+        # Log request details
+        if hasattr(frappe, 'request'):
+            frappe.logger().info(f"Request method: {frappe.request.method}")
+            frappe.logger().info(f"Request URL: {frappe.request.url}")
+            frappe.logger().info(f"Request args (query params): {frappe.request.args}")
+            frappe.logger().info(f"Request form: {frappe.request.form}")
+            frappe.logger().info(f"Request data: {frappe.request.data}")
+            frappe.logger().info(f"Request json: {frappe.request.json if frappe.request.is_json else 'Not JSON'}")
         
         # For GET requests, Frappe automatically maps query params to function params
         # For POST requests, we need to get from form_dict
@@ -208,15 +216,27 @@ def get_news_article(article_id=None):
             article_id = frappe.form_dict.get("article_id") or frappe.local.form_dict.get("article_id")
             frappe.logger().info(f"Got from form_dict: {article_id}")
             
-            # Also try kwargs as last resort
-            if not article_id:
-                kwargs = frappe.local.form_dict
-                article_id = kwargs.get("article_id")
-                frappe.logger().info(f"Got from kwargs: {article_id}")
+            # Try request.args for GET requests
+            if not article_id and hasattr(frappe, 'request'):
+                article_id = frappe.request.args.get("article_id")
+                frappe.logger().info(f"Got from request.args: {article_id}")
 
         if not article_id:
-            frappe.logger().error("Article ID is still None after all attempts")
-            return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
+            error_msg = f"Article ID is still None after all attempts"
+            frappe.logger().error(error_msg)
+            # Include debug info in response
+            debug_data = {
+                "form_dict": str(frappe.form_dict),
+                "method": frappe.request.method if hasattr(frappe, 'request') else 'N/A',
+                "url": frappe.request.url if hasattr(frappe, 'request') else 'N/A',
+                "request_args": str(frappe.request.args) if hasattr(frappe, 'request') else 'N/A'
+            }
+            frappe.logger().error(f"Debug info: {debug_data}")
+            return validation_error_response(
+                "Article ID is required", 
+                {"article_id": ["Article ID is required"]},
+                debug_info=debug_data
+            )
 
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
