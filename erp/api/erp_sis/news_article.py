@@ -229,7 +229,7 @@ def create_news_article():
             campus_id = "campus-1"
 
         # Override campus_id to ensure user can't create for other campuses
-        data.campus_id = campus_id
+        data['campus_id'] = campus_id
 
         frappe.logger().info(f"Final data before validation: title_en='{data.get('title_en')}', title_vn='{data.get('title_vn')}'")
 
