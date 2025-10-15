@@ -312,43 +312,63 @@ def create_news_article():
         frappe.logger().info(f"Request method: {frappe.request.method}")
         frappe.logger().info(f"Request content type: {frappe.request.content_type}")
         frappe.logger().info(f"Has files: {has_files}")
+        frappe.logger().info(f"Request files keys: {list(files.keys()) if files else 'None'}")
 
         # Get data from request - handle multipart form data properly
         data = {}
         
-        if has_files:
-            # For multipart form data with files, use werkzeug parser to avoid encoding issues
-            try:
-                from werkzeug.formparser import parse_form_data
-                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
-                
-                # Convert form data to dict
-                for key in form.keys():
-                    data[key] = form.get(key)
+        # Try multiple methods to get form data when files are present
+        if has_files or (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type):
+            # Method 1: Try frappe.request.form (Werkzeug's ImmutableMultiDict)
+            if hasattr(frappe.request, 'form') and frappe.request.form:
+                frappe.logger().info(f"Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
+                for key in frappe.request.form.keys():
+                    data[key] = frappe.request.form.get(key)
+                    frappe.logger().info(f"request.form[{key}] = {data[key]}")
+            
+            # Method 2: If request.form is empty, try form_dict
+            if not data:
+                frappe.logger().info("request.form is empty, trying form_dict")
+                data = dict(frappe.local.form_dict)
+                frappe.logger().info(f"form_dict keys: {list(data.keys())}")
+            
+            # Method 3: Last resort - try werkzeug parser on fresh stream
+            if not data or not data.get('title_en'):
+                frappe.logger().info("form_dict is empty, trying werkzeug parser")
+                try:
+                    from werkzeug.formparser import parse_form_data
+                    stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=False)
                     
-                frappe.logger().info(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
-                
-            except Exception as e:
-                frappe.logger().error(f"Failed to parse multipart form data: {str(e)}")
-                # Fallback to form_dict
-                data = frappe.local.form_dict
+                    # Convert form data to dict
+                    for key in form.keys():
+                        data[key] = form.get(key)
+                        frappe.logger().info(f"werkzeug form[{key}] = {data[key]}")
+                        
+                    frappe.logger().info(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
+                    
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse multipart form data: {str(e)}")
+                    import traceback
+                    frappe.logger().error(traceback.format_exc())
         else:
             # No files, use standard parsing
-            data = frappe.local.form_dict
-            frappe.logger().info(f"Using standard form_dict: {data}")
+            data = dict(frappe.local.form_dict)
+            frappe.logger().info(f"Using standard form_dict: {list(data.keys())}")
             
             # If form_dict is empty, try JSON body
             if not data or not data.get('title_en'):
                 try:
                     if frappe.request.data:
                         data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                        frappe.logger().info(f"Parsed JSON data: {data}")
+                        frappe.logger().info(f"Parsed JSON data: {list(data.keys())}")
                 except Exception as e:
                     frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
         
-        # Log parsed data for debugging
+        # Log final parsed data for debugging
+        frappe.logger().info(f"Final parsed data keys: {list(data.keys())}")
         for key, value in data.items():
-            frappe.logger().info(f"Form data {key}: {value} (type: {type(value)})")
+            if key != 'cmd':  # Skip cmd to reduce noise
+                frappe.logger().info(f"Form data {key}: {value[:100] if isinstance(value, str) and len(value) > 100 else value} (type: {type(value).__name__})")
 
         # Get current user's campus information
         campus_id = get_current_campus_from_context()
@@ -476,47 +496,62 @@ def update_news_article():
         # IMPORTANT: Check for files first to detect multipart form data
         files = frappe.request.files
         has_files = files and 'cover_image' in files
-        
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Request content type: {frappe.request.content_type}")
-        frappe.logger().info(f"Has files: {has_files}")
 
         # Get data from request - handle multipart form data properly
         data = {}
         
-        if has_files:
-            # For multipart form data with files, use werkzeug parser to avoid encoding issues
-            try:
-                from werkzeug.formparser import parse_form_data
-                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
-                
-                # Convert form data to dict
-                for key in form.keys():
-                    data[key] = form.get(key)
+        # Try multiple methods to get form data when files are present
+        if has_files or (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type):
+            # Method 1: Try frappe.request.form (Werkzeug's ImmutableMultiDict)
+            if hasattr(frappe.request, 'form') and frappe.request.form:
+                frappe.logger().info(f"Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
+                for key in frappe.request.form.keys():
+                    data[key] = frappe.request.form.get(key)
+                    frappe.logger().info(f"request.form[{key}] = {data[key]}")
+            
+            # Method 2: If request.form is empty, try form_dict
+            if not data:
+                frappe.logger().info("request.form is empty, trying form_dict")
+                data = dict(frappe.local.form_dict)
+                frappe.logger().info(f"form_dict keys: {list(data.keys())}")
+            
+            # Method 3: Last resort - try werkzeug parser on fresh stream
+            if not data or not data.get('title_en'):
+                frappe.logger().info("form_dict is empty, trying werkzeug parser")
+                try:
+                    from werkzeug.formparser import parse_form_data
+                    stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=False)
                     
-                frappe.logger().info(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
-                
-            except Exception as e:
-                frappe.logger().error(f"Failed to parse multipart form data: {str(e)}")
-                # Fallback to form_dict
-                data = frappe.local.form_dict
+                    # Convert form data to dict
+                    for key in form.keys():
+                        data[key] = form.get(key)
+                        frappe.logger().info(f"werkzeug form[{key}] = {data[key]}")
+                        
+                    frappe.logger().info(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
+                    
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse multipart form data: {str(e)}")
+                    import traceback
+                    frappe.logger().error(traceback.format_exc())
         else:
             # No files, use standard parsing
-            data = frappe.local.form_dict
-            frappe.logger().info(f"Using standard form_dict: {data}")
+            data = dict(frappe.local.form_dict)
+            frappe.logger().info(f"Using standard form_dict: {list(data.keys())}")
             
             # If form_dict is empty, try JSON body
             if not data or not data.get('article_id'):
                 try:
                     if frappe.request.data:
                         data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                        frappe.logger().info(f"Parsed JSON data: {data}")
+                        frappe.logger().info(f"Parsed JSON data: {list(data.keys())}")
                 except Exception as e:
                     frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
         
-        # Log parsed data for debugging
+        # Log final parsed data for debugging
+        frappe.logger().info(f"Final parsed data keys: {list(data.keys())}")
         for key, value in data.items():
-            frappe.logger().info(f"Form data {key}: {value} (type: {type(value)})")
+            if key != 'cmd':  # Skip cmd to reduce noise
+                frappe.logger().info(f"Form data {key}: {value[:100] if isinstance(value, str) and len(value) > 100 else value} (type: {type(value).__name__})")
 
         article_id = data.get("article_id")
 
