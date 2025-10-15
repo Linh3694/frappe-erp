@@ -177,6 +177,12 @@ def get_news_articles():
                     "status": "published",
                     "student_id": student_id
                 },
+                "debug_info": {
+                    "user": frappe.session.user,
+                    "is_guest": frappe.session.user == "Guest",
+                    "campus_from_params": data.get("campus_id"),
+                    "final_campus": campus_id
+                },
                 "code_version": "v2.1_guest_no_campus"  # Marker để verify code mới
             }
         )
