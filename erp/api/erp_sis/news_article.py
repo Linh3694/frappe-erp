@@ -241,22 +241,37 @@ def get_news_articles():
 def get_news_article():
     """Get a single news article by ID"""
     try:
+        # Try multiple sources for article_id
         data = frappe.local.form_dict
         
-        # Debug: Check what we received
-        article_id = data.get("article_id")
+        # Try from request.form (for POST form-urlencoded)
+        article_id = data.get("article_id") or frappe.request.form.get("article_id")
+        
+        # Try from request.args (for GET query params)
+        if not article_id:
+            article_id = frappe.request.args.get("article_id")
+        
+        # Try from JSON body
+        if not article_id:
+            try:
+                json_data = frappe.request.get_json(silent=True)
+                if json_data:
+                    article_id = json_data.get("article_id")
+            except:
+                pass
         
         # Return debug info in error response
         if not article_id:
             debug_info = {
-                "form_dict_keys": list(data.keys()),
-                "form_dict_values": {k: str(v)[:100] for k, v in data.items()},  # Limit to 100 chars
-                "article_id_value": article_id,
-                "cmd_value": data.get("cmd")
+                "form_dict": {k: str(v)[:100] for k, v in data.items()},
+                "request_form": dict(frappe.request.form) if frappe.request.form else None,
+                "request_args": dict(frappe.request.args) if frappe.request.args else None,
+                "request_data": str(frappe.request.data[:200]) if frappe.request.data else None,
+                "content_type": frappe.request.content_type
             }
             return validation_error_response(
                 f"Article ID is required. Debug: {debug_info}", 
-                {"article_id": [f"Article ID is required. Received keys: {list(data.keys())}"]}
+                {"article_id": ["Article ID is required"]}
             )
 
         # Get current user's campus information
