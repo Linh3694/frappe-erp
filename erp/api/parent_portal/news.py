@@ -194,10 +194,19 @@ def get_news_articles():
 def get_news_article(article_id=None):
     """Get a single published news article by ID for parent portal"""
     try:
-        # Debug logging
-        frappe.logger().info(f"Parent portal - get_news_article called with article_id: {article_id}")
+        # Extensive debug logging
+        frappe.logger().info(f"===== get_news_article called =====")
+        frappe.logger().info(f"article_id parameter: {article_id}")
+        frappe.logger().info(f"frappe.form_dict: {frappe.form_dict}")
+        frappe.logger().info(f"frappe.local.form_dict: {frappe.local.form_dict}")
+        
+        # Try to get from form_dict if parameter is None
+        if not article_id:
+            article_id = frappe.form_dict.get("article_id") or frappe.local.form_dict.get("article_id")
+            frappe.logger().info(f"Got from form_dict: {article_id}")
 
         if not article_id:
+            frappe.logger().error("Article ID is still None after all attempts")
             return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
 
         # Get the article
@@ -263,9 +272,13 @@ def get_news_article(article_id=None):
         )
 
     except frappe.DoesNotExistError:
+        frappe.logger().error("Parent portal - Article does not exist")
         return not_found_response("Article not found")
     except Exception as e:
         frappe.logger().error(f"Parent portal - Error fetching news article: {str(e)}")
+        frappe.logger().error(f"Exception type: {type(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
         return error_response(
             message="Failed to fetch news article",
             code="FETCH_ERROR"
