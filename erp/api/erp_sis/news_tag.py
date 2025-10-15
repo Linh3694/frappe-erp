@@ -87,7 +87,7 @@ def create_news_tag():
 
         # Validate required fields
         if not data.get("name_en") or not data.get("name_vn"):
-            return validation_error_response("Both English and Vietnamese names are required")
+            return validation_error_response("Both English and Vietnamese names are required", {"name": ["Both English and Vietnamese names are required"]})
 
         # Create the tag
         tag = frappe.get_doc({
@@ -119,7 +119,7 @@ def create_news_tag():
         )
 
     except frappe.DuplicateEntryError:
-        return validation_error_response("A tag with this name already exists")
+        return validation_error_response("A tag with this name already exists", {"name": ["A tag with this name already exists"]})
     except Exception as e:
         frappe.logger().error(f"Error creating news tag: {str(e)}")
         return error_response(
@@ -136,7 +136,7 @@ def update_news_tag():
         tag_id = data.get("tag_id")
 
         if not tag_id:
-            return validation_error_response("Tag ID is required")
+            return validation_error_response("Tag ID is required", {"tag_id": ["Tag ID is required"]})
 
         # Get the tag
         tag = frappe.get_doc("SIS News Tag", tag_id)
@@ -180,7 +180,7 @@ def update_news_tag():
     except frappe.DoesNotExistError:
         return not_found_response("News tag not found")
     except frappe.DuplicateEntryError:
-        return validation_error_response("A tag with this name already exists")
+        return validation_error_response("A tag with this name already exists", {"name": ["A tag with this name already exists"]})
     except Exception as e:
         frappe.logger().error(f"Error updating news tag: {str(e)}")
         return error_response(
@@ -197,7 +197,7 @@ def delete_news_tag():
         tag_id = data.get("tag_id")
 
         if not tag_id:
-            return validation_error_response("Tag ID is required")
+            return validation_error_response("Tag ID is required", {"tag_id": ["Tag ID is required"]})
 
         # Get the tag
         tag = frappe.get_doc("SIS News Tag", tag_id)
@@ -210,7 +210,7 @@ def delete_news_tag():
         # Check if tag is being used in articles
         articles_count = frappe.db.count("SIS News Article Tag", {"news_tag_id": tag_id})
         if articles_count > 0:
-            return validation_error_response(f"Cannot delete tag. It is being used in {articles_count} article(s)")
+            return validation_error_response(f"Cannot delete tag. It is being used in {articles_count} article(s)", {"tag": [f"Cannot delete tag. It is being used in {articles_count} article(s)"]})
 
         # Delete the tag
         tag.delete()
