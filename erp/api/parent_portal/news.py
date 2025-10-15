@@ -26,8 +26,8 @@ def get_news_articles():
         frappe.logger().info(f"Parent portal - Current campus_id: {campus_id}")
 
         if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
+            # Fallback to default campus
+            campus_id = "CAMPUS-00001"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
         # Check if SIS News Article doctype exists
@@ -43,6 +43,10 @@ def get_news_articles():
             "campus_id": campus_id,
             "status": "published"
         }
+        
+        # Log filters for debugging
+        backend_log = f"Fetching news with campus_id={campus_id}, status=published"
+        frappe.logger().info(f"Parent portal - {backend_log}")
 
         # Student ID for education stage filtering
         student_id = data.get("student_id")
@@ -151,7 +155,8 @@ def get_news_articles():
         end_index = start_index + limit
         paginated_articles = filtered_articles[start_index:end_index]
 
-        frappe.logger().info(f"Parent portal - Successfully retrieved {len(filtered_articles)} filtered news articles")
+        success_log = f"Successfully retrieved {len(filtered_articles)} filtered news articles (campus={campus_id}, total_before_filter={len(articles)}, student_id={student_id})"
+        frappe.logger().info(f"Parent portal - {success_log}")
 
         return list_response(
             data=paginated_articles,
@@ -162,6 +167,12 @@ def get_news_articles():
                     "limit": limit,
                     "total": len(filtered_articles),
                     "total_pages": (len(filtered_articles) + limit - 1) // limit
+                },
+                "backend_log": success_log,
+                "filters_used": {
+                    "campus_id": campus_id,
+                    "status": "published",
+                    "student_id": student_id
                 }
             }
         )
@@ -269,8 +280,8 @@ def get_news_tags():
         frappe.logger().info(f"Parent portal - Current campus_id: {campus_id}")
 
         if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
+            # Fallback to default campus
+            campus_id = "CAMPUS-00001"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
         # Check if SIS News Tag doctype exists
