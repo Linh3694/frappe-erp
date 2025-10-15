@@ -46,9 +46,11 @@ def submit_leave_request():
 	"""Submit leave request for multiple students"""
 	try:
 		# When files are present, use frappe.request.form instead of frappe.form_dict
-		if frappe.request.files:
+		# Check if files exist AND not empty
+		has_files = frappe.request.files and len(frappe.request.files) > 0
+		if has_files:
 			data = frappe.request.form
-			frappe.logger().info("Using frappe.request.form (has files)")
+			frappe.logger().info(f"Using frappe.request.form (has {len(frappe.request.files)} files)")
 		else:
 			data = frappe.form_dict
 			frappe.logger().info("Using frappe.form_dict (no files)")
