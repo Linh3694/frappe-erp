@@ -317,8 +317,13 @@ def create_news_article():
         # Get data from request - handle multipart form data properly
         data = {}
         
-        # Try multiple methods to get form data when files are present
-        if has_files or (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type):
+        # Check if request is multipart (either has files OR content-type is multipart)
+        is_multipart = (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type)
+        
+        frappe.logger().info(f"Is multipart: {is_multipart}")
+        
+        # Try multiple methods to get form data when request is multipart
+        if is_multipart:
             # Method 1: Try frappe.request.form (Werkzeug's ImmutableMultiDict)
             if hasattr(frappe.request, 'form') and frappe.request.form:
                 frappe.logger().info(f"Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
@@ -500,8 +505,13 @@ def update_news_article():
         # Get data from request - handle multipart form data properly
         data = {}
         
-        # Try multiple methods to get form data when files are present
-        if has_files or (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type):
+        # Check if request is multipart (either has files OR content-type is multipart)
+        is_multipart = (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type)
+        
+        frappe.logger().info(f"Is multipart: {is_multipart}, Has files: {has_files}")
+        
+        # Try multiple methods to get form data when request is multipart
+        if is_multipart:
             # Method 1: Try frappe.request.form (Werkzeug's ImmutableMultiDict)
             if hasattr(frappe.request, 'form') and frappe.request.form:
                 frappe.logger().info(f"Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
