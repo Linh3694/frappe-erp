@@ -22,6 +22,96 @@ import mimetypes
 import base64
 
 
+def handle_image_upload():
+    """Handle image upload for news articles"""
+    try:
+        # Get file from request.files (proper way to handle file uploads)
+        files = frappe.request.files
+        if not files or 'cover_image' not in files:
+            return None
+
+        uploaded_file = files['cover_image']
+        file_name = uploaded_file.filename
+
+        if not file_name:
+            frappe.logger().warning("Uploaded file has no filename")
+            return None
+
+        # Validate file type
+        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp']
+        if uploaded_file.content_type not in allowed_types:
+            frappe.logger().error(f"Invalid file type: {uploaded_file.content_type}")
+            raise ValueError("Only image files (JPEG, PNG, GIF, BMP, WebP) are allowed")
+
+        # Read file content as bytes
+        try:
+            file_content = uploaded_file.read()
+            frappe.logger().info(f"Successfully read file content, size: {len(file_content)} bytes")
+        except Exception as read_error:
+            frappe.logger().error(f"Error reading file content: {str(read_error)}")
+            raise ValueError("Failed to read uploaded file")
+
+        # Validate file size (max 5MB)
+        max_size = 5 * 1024 * 1024  # 5MB
+        if len(file_content) > max_size:
+            frappe.logger().error(f"File too large: {len(file_content)} bytes")
+            raise ValueError("File size must be less than 5MB")
+
+        # Save file directly to avoid encoding issues
+        import os
+        import uuid
+
+        # Generate new filename with UUID to avoid conflicts
+        original_extension = os.path.splitext(file_name)[1] if file_name else '.jpg'
+        if not original_extension:
+            # Fallback to determine extension from content type
+            if uploaded_file and hasattr(uploaded_file, 'content_type'):
+                if 'jpeg' in uploaded_file.content_type or 'jpg' in uploaded_file.content_type:
+                    original_extension = '.jpg'
+                elif 'png' in uploaded_file.content_type:
+                    original_extension = '.png'
+                elif 'gif' in uploaded_file.content_type:
+                    original_extension = '.gif'
+                elif 'bmp' in uploaded_file.content_type:
+                    original_extension = '.bmp'
+                elif 'webp' in uploaded_file.content_type:
+                    original_extension = '.webp'
+                else:
+                    original_extension = '.jpg'
+
+        # Create unique filename
+        unique_id = str(uuid.uuid4())
+        new_file_name = f"news_article_{unique_id}{original_extension}"
+
+        frappe.logger().info(f"Original filename: {file_name}, New filename: {new_file_name}")
+
+        # Create News_Articles directory if it doesn't exist
+        upload_dir = frappe.get_site_path("public", "files", "News_Articles")
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir, exist_ok=True)
+
+        # Save file directly to file system
+        file_path = os.path.join(upload_dir, new_file_name)
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(file_content)
+            frappe.logger().info(f"Successfully saved file to: {file_path}")
+        except Exception as write_error:
+            frappe.logger().error(f"Error writing file to disk: {str(write_error)}")
+            raise ValueError("Error saving file to disk")
+
+        # Create file URL
+        file_url = f"/files/News_Articles/{new_file_name}"
+
+        frappe.logger().info(f"File saved to: {file_path}, URL: {file_url}")
+
+        return file_url
+
+    except Exception as e:
+        frappe.logger().error(f"Error handling image upload: {str(e)}")
+        raise e
+
+
 @frappe.whitelist(allow_guest=False)
 def get_news_articles():
     """Get news articles with filtering"""
@@ -247,19 +337,32 @@ def create_news_article():
             frappe.logger().error(f"Validation failed: title_en='{title_en}', title_vn='{title_vn}'")
             return validation_error_response("Both English and Vietnamese titles are required", {"title": ["Both English and Vietnamese titles are required"]})
 
+        # Handle image upload
+        cover_image_url = None
+        try:
+            cover_image_url = handle_image_upload()
+            if cover_image_url:
+                frappe.logger().info(f"Image uploaded successfully: {cover_image_url}")
+        except ValueError as e:
+            frappe.logger().error(f"Image upload validation error: {str(e)}")
+            return validation_error_response(str(e), {"cover_image": [str(e)]})
+        except Exception as e:
+            frappe.logger().error(f"Unexpected error during image upload: {str(e)}")
+            return validation_error_response("Failed to upload image", {"cover_image": ["Failed to upload image"]})
+
         # Create the article
         article = frappe.get_doc({
             "doctype": "SIS News Article",
             "campus_id": campus_id,
-            "title_en": data.get("title_en"),
-            "title_vn": data.get("title_vn"),
+            "title_en": title_en,
+            "title_vn": title_vn,
             "summary_en": data.get("summary_en"),
             "summary_vn": data.get("summary_vn"),
             "content_en": data.get("content_en"),
             "content_vn": data.get("content_vn"),
             "education_stage_ids": data.get("education_stage_ids"),
             "featured": data.get("featured", 0),
-            "cover_image": data.get("cover_image"),
+            "cover_image": cover_image_url or data.get("cover_image"),
             "status": data.get("status", "draft")
         })
 
@@ -357,6 +460,19 @@ def update_news_article():
         if campus_id and article.campus_id != campus_id:
             return forbidden_response("You don't have access to this article")
 
+        # Handle image upload
+        cover_image_url = None
+        try:
+            cover_image_url = handle_image_upload()
+            if cover_image_url:
+                frappe.logger().info(f"Image uploaded successfully: {cover_image_url}")
+        except ValueError as e:
+            frappe.logger().error(f"Image upload validation error: {str(e)}")
+            return validation_error_response(str(e), {"cover_image": [str(e)]})
+        except Exception as e:
+            frappe.logger().error(f"Unexpected error during image upload: {str(e)}")
+            return validation_error_response("Failed to upload image", {"cover_image": ["Failed to upload image"]})
+
         # Update fields
         if "title_en" in data:
             article.title_en = data.title_en
@@ -374,7 +490,9 @@ def update_news_article():
             article.education_stage_ids = data.education_stage_ids
         if "featured" in data:
             article.featured = data.featured
-        if "cover_image" in data:
+        if cover_image_url:
+            article.cover_image = cover_image_url
+        elif "cover_image" in data:
             article.cover_image = data.cover_image
         if "status" in data:
             article.status = data.status
