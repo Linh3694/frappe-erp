@@ -200,18 +200,14 @@ def get_news_article():
         if not article_id:
             return validation_error_response("Article ID is required")
 
-        # Get current user's campus information
-        campus_id = get_current_campus_from_context()
-
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
 
-        # Check if article is published and user has access to this campus
+        # Check if article is published
         if article.status != "published":
             return not_found_response("Article not found")
 
-        if campus_id and article.campus_id != campus_id:
-            return not_found_response("Article not found")
+        # No campus check for parent portal - allow viewing all published articles
 
         # Get tags
         article_tags = frappe.get_all(
