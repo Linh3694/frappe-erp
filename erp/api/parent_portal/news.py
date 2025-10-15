@@ -21,9 +21,9 @@ def get_news_articles():
     try:
         data = frappe.local.form_dict
 
-        # Get current user's campus information
-        campus_id = get_current_campus_from_context()
-        frappe.logger().info(f"Parent portal - Current campus_id: {campus_id}")
+        # Get campus_id from request params (for guest users) or user context
+        campus_id = data.get("campus_id") or get_current_campus_from_context()
+        frappe.logger().info(f"Parent portal - Campus_id from params: {data.get('campus_id')}, from context: {get_current_campus_from_context()}")
 
         if not campus_id:
             # Fallback to default campus
@@ -275,9 +275,11 @@ def get_news_article():
 def get_news_tags():
     """Get active news tags for current campus (parent portal)"""
     try:
-        # Get current user's campus information
-        campus_id = get_current_campus_from_context()
-        frappe.logger().info(f"Parent portal - Current campus_id: {campus_id}")
+        data = frappe.local.form_dict
+        
+        # Get campus_id from request params (for guest users) or user context
+        campus_id = data.get("campus_id") or get_current_campus_from_context()
+        frappe.logger().info(f"Parent portal - Campus_id from params: {data.get('campus_id')}, from context: {get_current_campus_from_context()}")
 
         if not campus_id:
             # Fallback to default campus
