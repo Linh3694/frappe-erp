@@ -21,9 +21,14 @@ def get_news_articles():
     try:
         data = frappe.local.form_dict
 
-        # Get campus_id from request params (optional for guest users)
-        campus_id = data.get("campus_id") or get_current_campus_from_context()
-        frappe.logger().info(f"Parent portal - Campus_id from params: {data.get('campus_id')}, from context: {get_current_campus_from_context()}")
+        # Get campus_id from request params only (don't use context for guest users)
+        campus_id = data.get("campus_id")
+        
+        # Only fallback to user context if user is logged in (not guest)
+        if not campus_id and frappe.session.user != "Guest":
+            campus_id = get_current_campus_from_context()
+            
+        frappe.logger().info(f"Parent portal - Campus_id from params: {data.get('campus_id')}, user: {frappe.session.user}, final campus_id: {campus_id}")
 
         # Check if SIS News Article doctype exists
         if not frappe.db.exists("DocType", "SIS News Article"):
@@ -172,7 +177,7 @@ def get_news_articles():
                     "status": "published",
                     "student_id": student_id
                 },
-                "code_version": "v2.0_campus_optional"  # Marker để verify code mới
+                "code_version": "v2.1_guest_no_campus"  # Marker để verify code mới
             }
         )
 
@@ -276,9 +281,14 @@ def get_news_tags():
     try:
         data = frappe.local.form_dict
         
-        # Get campus_id from request params (optional for guest users)
-        campus_id = data.get("campus_id") or get_current_campus_from_context()
-        frappe.logger().info(f"Parent portal - Campus_id from params: {data.get('campus_id')}, from context: {get_current_campus_from_context()}")
+        # Get campus_id from request params only (don't use context for guest users)
+        campus_id = data.get("campus_id")
+        
+        # Only fallback to user context if user is logged in (not guest)
+        if not campus_id and frappe.session.user != "Guest":
+            campus_id = get_current_campus_from_context()
+            
+        frappe.logger().info(f"Parent portal - Campus_id from params: {data.get('campus_id')}, user: {frappe.session.user}, final campus_id: {campus_id}")
 
         # Check if SIS News Tag doctype exists
         if not frappe.db.exists("DocType", "SIS News Tag"):
