@@ -832,6 +832,177 @@ def unpublish_news_article():
         )
 
 
+@frappe.whitelist(allow_guest=False)
+def get_published_news_articles_for_parents():
+    """
+    Get published news articles for parent portal
+    - Only returns published articles
+    - Supports pagination
+    - Supports search by title
+    - Returns articles from user's campus
+    """
+    try:
+        data = frappe.local.form_dict
+        
+        # Get current user's campus information
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            # Fallback to default if no campus found
+            campus_id = "campus-1"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+        
+        # Build filters - only published articles
+        filters = {
+            "campus_id": campus_id,
+            "status": "published"
+        }
+        
+        # Search by title
+        search_term = data.get("search", "").strip()
+        if search_term:
+            filters["title_vn"] = ["like", f"%{search_term}%"]
+        
+        # Pagination
+        page = int(data.get("page", 1))
+        limit = int(data.get("limit", 10))
+        offset = (page - 1) * limit
+        
+        # Get articles with pagination
+        articles = frappe.get_all(
+            "SIS News Article",
+            fields=[
+                "name",
+                "title_en",
+                "title_vn",
+                "summary_en",
+                "summary_vn",
+                "education_stage_ids",
+                "featured",
+                "status",
+                "cover_image",
+                "published_at",
+                "published_by",
+                "campus_id",
+                "creation",
+                "modified"
+            ],
+            filters=filters,
+            order_by="published_at desc, modified desc",
+            limit_page_length=limit,
+            limit_start=offset
+        )
+        
+        # Get total count for pagination
+        total_count = frappe.db.count("SIS News Article", filters=filters)
+        
+        # Enrich articles with tag information
+        for article in articles:
+            article_tags = frappe.get_all(
+                "SIS News Article Tag",
+                filters={"parent": article.name},
+                fields=["news_tag_id", "tag_name_en", "tag_name_vn", "tag_color"]
+            )
+            article["tags"] = article_tags
+        
+        frappe.logger().info(f"✅ Retrieved {len(articles)} published news articles for parents")
+        
+        # Return paginated response
+        return paginated_response(
+            data=articles,
+            current_page=page,
+            total_count=total_count,
+            per_page=limit,
+            message="Published news articles fetched successfully"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ Error fetching published news articles: {str(e)}")
+        return error_response(
+            message=f"Failed to fetch published news articles: {str(e)}",
+            code="FETCH_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_news_article_detail_for_parents():
+    """
+    Get detailed information of a single published news article for parent portal
+    - Returns full content (content_vn, content_en)
+    - Only returns if article is published
+    """
+    try:
+        data = frappe.local.form_dict
+        article_id = data.get("article_id")
+        
+        if not article_id:
+            return validation_error_response(
+                "Article ID is required",
+                {"article_id": ["Article ID is required"]}
+            )
+        
+        # Check if article exists
+        if not frappe.db.exists("SIS News Article", article_id):
+            return not_found_response(f"News article {article_id} not found")
+        
+        # Get article with all fields
+        article = frappe.get_doc("SIS News Article", article_id)
+        
+        # Check if article is published
+        if article.status != "published":
+            return forbidden_response("This article is not published yet")
+        
+        # Get current user's campus
+        campus_id = get_current_campus_from_context()
+        
+        # Check if user has access to this campus's article
+        if campus_id and article.campus_id != campus_id:
+            frappe.logger().warning(f"User campus {campus_id} != article campus {article.campus_id}")
+            # Allow viewing for now, but log the mismatch
+        
+        # Get tags
+        article_tags = frappe.get_all(
+            "SIS News Article Tag",
+            filters={"parent": article.name},
+            fields=["news_tag_id", "tag_name_en", "tag_name_vn", "tag_color"]
+        )
+        
+        # Prepare response data
+        article_data = {
+            "name": article.name,
+            "title_en": article.title_en,
+            "title_vn": article.title_vn,
+            "summary_en": article.summary_en,
+            "summary_vn": article.summary_vn,
+            "content_en": article.content_en,
+            "content_vn": article.content_vn,
+            "education_stage_ids": article.education_stage_ids,
+            "featured": article.featured,
+            "status": article.status,
+            "cover_image": article.cover_image,
+            "published_at": article.published_at,
+            "published_by": article.published_by,
+            "campus_id": article.campus_id,
+            "creation": article.creation,
+            "modified": article.modified,
+            "tags": article_tags
+        }
+        
+        frappe.logger().info(f"✅ Retrieved news article detail: {article_id}")
+        
+        return success_response(
+            data=article_data,
+            message="News article detail fetched successfully"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ Error fetching news article detail: {str(e)}")
+        return error_response(
+            message=f"Failed to fetch news article detail: {str(e)}",
+            code="FETCH_ERROR"
+        )
+
+
 @frappe.whitelist(allow_guest=False, methods=['POST'])
 def upload_content_image():
     """
