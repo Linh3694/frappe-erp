@@ -45,7 +45,13 @@ def _validate_parent_student_access(parent_id, student_ids):
 def submit_leave_request():
 	"""Submit leave request for multiple students"""
 	try:
-		data = frappe.form_dict
+		# When files are present, use frappe.request.form instead of frappe.form_dict
+		if frappe.request.files:
+			data = frappe.request.form
+			frappe.logger().info("Using frappe.request.form (has files)")
+		else:
+			data = frappe.form_dict
+			frappe.logger().info("Using frappe.form_dict (no files)")
 		
 		# DEBUG: Log everything
 		frappe.logger().info(f"===== SUBMIT LEAVE REQUEST DEBUG =====")
@@ -202,7 +208,11 @@ def get_my_leave_requests(student_id=None):
 def update_leave_request():
 	"""Update leave request (within 24 hours)"""
 	try:
-		data = frappe.form_dict
+		# When files are present, use frappe.request.form instead of frappe.form_dict
+		if frappe.request.files:
+			data = frappe.request.form
+		else:
+			data = frappe.form_dict
 
 		# Required fields
 		if 'id' not in data:
