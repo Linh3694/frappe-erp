@@ -10,8 +10,11 @@ class SISNewsArticle(Document):
         """Set audit fields and handle publish logic"""
         current_user = frappe.session.user
 
-        # Get SIS Teacher record for current user
+        # Get SIS Teacher record for current user, fallback to email if not found
         teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+        if not teacher:
+            # If no teacher record found, use the user email directly
+            teacher = current_user
 
         if not self.created_at:
             self.created_at = frappe.utils.now()
