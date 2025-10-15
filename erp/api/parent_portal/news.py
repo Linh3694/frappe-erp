@@ -171,7 +171,8 @@ def get_news_articles():
                     "campus_id": campus_id or None,
                     "status": "published",
                     "student_id": student_id
-                }
+                },
+                "code_version": "v2.0_campus_optional"  # Marker để verify code mới
             }
         )
 
