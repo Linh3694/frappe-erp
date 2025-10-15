@@ -221,7 +221,7 @@ def create_news_article():
 
         # Validate required fields
         if not data.get("title_en") or not data.get("title_vn"):
-            return validation_error_response("Both English and Vietnamese titles are required")
+            return validation_error_response("Both English and Vietnamese titles are required", {"title": ["Both English and Vietnamese titles are required"]})
 
         # Create the article
         article = frappe.get_doc({
@@ -250,7 +250,7 @@ def create_news_article():
                     # Validate tag exists and belongs to same campus
                     tag_doc = frappe.get_doc("SIS News Tag", tag_id)
                     if tag_doc.campus_id != campus_id:
-                        return validation_error_response(f"Tag '{tag_doc.name_en}' belongs to different campus")
+                        return validation_error_response(f"Tag '{tag_doc.name_en}' belongs to different campus", {"tags": [f"Tag '{tag_doc.name_en}' belongs to different campus"]})
 
                     article.append("tags", {
                         "news_tag_id": tag_id
