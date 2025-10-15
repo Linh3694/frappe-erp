@@ -345,16 +345,7 @@ def send_contact_log():
                         
                         # New simplified title and body format
                         title = "Sổ liên lạc"
-                        body_text = f"Học sinh {student_name} có nhận xét mới về ngày học."
-                        
-                        # Add comment if exists (keep for additional context)
-                        if student_log.contact_log_comment:
-                            comment = student_log.contact_log_comment
-                            body_text += f"\n💬 {comment[:100]}{'...' if len(comment) > 100 else ''}"
-                        
-                        # Add badges if exists
-                        if badges_text:
-                            body_text += badges_text
+                        body_text = f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay."
                         
                         # Call notification-service API directly (internal network)
                         notification_service_url = frappe.conf.get("notification_service_url", "http://172.16.20.115:5001")
