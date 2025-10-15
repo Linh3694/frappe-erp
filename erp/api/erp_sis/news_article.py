@@ -242,7 +242,13 @@ def get_news_article():
     """Get a single news article by ID"""
     try:
         data = frappe.local.form_dict
+        
+        # Debug logging
+        frappe.logger().info(f"get_news_article - form_dict keys: {list(data.keys())}")
+        frappe.logger().info(f"get_news_article - form_dict data: {data}")
+        
         article_id = data.get("article_id")
+        frappe.logger().info(f"get_news_article - article_id: {article_id}")
 
         if not article_id:
             return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
@@ -304,15 +310,17 @@ def get_news_article():
 @frappe.whitelist(allow_guest=False)
 def create_news_article():
     """Create a new news article"""
+    logs = []  # Collect logs to return in response
+    
     try:
         # IMPORTANT: Check for files first to detect multipart form data
         files = frappe.request.files
         has_files = files and 'cover_image' in files
         
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Request content type: {frappe.request.content_type}")
-        frappe.logger().info(f"Has files: {has_files}")
-        frappe.logger().info(f"Request files keys: {list(files.keys()) if files else 'None'}")
+        logs.append(f"Request method: {frappe.request.method}")
+        logs.append(f"Request content type: {frappe.request.content_type}")
+        logs.append(f"Has files: {has_files}")
+        logs.append(f"Request files keys: {list(files.keys()) if files else 'None'}")
 
         # Get data from request - handle multipart form data properly
         data = {}
@@ -320,7 +328,7 @@ def create_news_article():
         # Check if request is multipart (either has files OR content-type is multipart)
         is_multipart = (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type)
         
-        frappe.logger().info(f"Is multipart: {is_multipart}")
+        logs.append(f"Is multipart: {is_multipart}")
         
         # Try multiple methods to get form data when request is multipart
         if is_multipart:
