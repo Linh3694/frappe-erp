@@ -45,22 +45,33 @@ def _validate_parent_student_access(parent_id, student_ids):
 def submit_leave_request():
 	"""Submit leave request for multiple students"""
 	try:
-		# When files are present, use frappe.request.form instead of frappe.form_dict
+		# Get data from appropriate source based on request type
 		# Check if files exist AND not empty
 		has_files = frappe.request.files and len(frappe.request.files) > 0
+		
 		if has_files:
+			# FormData with files - use request.form
 			data = frappe.request.form
 			frappe.logger().info(f"Using frappe.request.form (has {len(frappe.request.files)} files)")
+		elif frappe.request.is_json:
+			# JSON request - use request.json
+			data = frappe.request.json or {}
+			frappe.logger().info("Using frappe.request.json (JSON body)")
 		else:
+			# Fallback to form_dict
 			data = frappe.form_dict
-			frappe.logger().info("Using frappe.form_dict (no files)")
+			frappe.logger().info("Using frappe.form_dict (fallback)")
 		
 		# DEBUG: Log everything
 		frappe.logger().info(f"===== SUBMIT LEAVE REQUEST DEBUG =====")
 		frappe.logger().info(f"frappe.form_dict: {frappe.form_dict}")
 		frappe.logger().info(f"frappe.request.method: {frappe.request.method}")
+		frappe.logger().info(f"frappe.request.is_json: {frappe.request.is_json}")
 		frappe.logger().info(f"frappe.request.form: {frappe.request.form}")
 		frappe.logger().info(f"frappe.request.files: {frappe.request.files}")
+		if frappe.request.is_json:
+			frappe.logger().info(f"frappe.request.json: {frappe.request.json}")
+		frappe.logger().info(f"Final data source: {data}")
 		frappe.logger().info(f"'reason' in data: {'reason' in data}")
 		frappe.logger().info(f"data.get('reason'): {data.get('reason')}")
 		frappe.logger().info(f"type of data.get('reason'): {type(data.get('reason'))}")
@@ -210,10 +221,18 @@ def get_my_leave_requests(student_id=None):
 def update_leave_request():
 	"""Update leave request (within 24 hours)"""
 	try:
-		# When files are present, use frappe.request.form instead of frappe.form_dict
-		if frappe.request.files:
+		# Get data from appropriate source based on request type
+		# Check if files exist AND not empty
+		has_files = frappe.request.files and len(frappe.request.files) > 0
+		
+		if has_files:
+			# FormData with files - use request.form
 			data = frappe.request.form
+		elif frappe.request.is_json:
+			# JSON request - use request.json
+			data = frappe.request.json or {}
 		else:
+			# Fallback to form_dict
 			data = frappe.form_dict
 
 		# Required fields
