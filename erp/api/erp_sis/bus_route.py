@@ -1020,7 +1020,6 @@ def get_daily_trips():
 				creation, modified
 			FROM `tabSIS Bus Daily Trip`
 			ORDER BY trip_date DESC, route_id ASC
-			LIMIT 100
 		""", as_dict=True)
 
 		# Map field names to correct format
