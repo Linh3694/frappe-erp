@@ -8,18 +8,23 @@ from frappe.model.document import Document
 class SISNewsArticle(Document):
     def before_save(self):
         """Set audit fields and handle publish logic"""
+        current_user = frappe.session.user
+
+        # Get SIS Teacher record for current user
+        teacher = frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+
         if not self.created_at:
             self.created_at = frappe.utils.now()
         if not self.created_by:
-            self.created_by = frappe.session.user
+            self.created_by = teacher
 
         self.updated_at = frappe.utils.now()
-        self.updated_by = frappe.session.user
+        self.updated_by = teacher
 
         # Handle publish status change
         if self.status == "published" and not self.published_at:
             self.published_at = frappe.utils.now()
-            self.published_by = frappe.session.user
+            self.published_by = teacher
         elif self.status == "draft":
             # Reset publish info when changing back to draft
             self.published_at = None
