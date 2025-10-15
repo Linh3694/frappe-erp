@@ -75,7 +75,19 @@ def get_news_tags():
 def create_news_tag():
     """Create a new news tag"""
     try:
+        # Get data from request - try both form_dict and JSON body
         data = frappe.local.form_dict
+        frappe.logger().info(f"Initial form_dict data: {data}")
+
+        if not data or not data.get('name_en'):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                    frappe.logger().info(f"Parsed JSON data: {data}")
+            except Exception as e:
+                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
 
         # Get current user's campus information
         campus_id = get_current_campus_from_context()
@@ -83,18 +95,24 @@ def create_news_tag():
             campus_id = "campus-1"
 
         # Override campus_id to ensure user can't create for other campuses
-        data.campus_id = campus_id
+        data['campus_id'] = campus_id
+
+        frappe.logger().info(f"Final data before validation: name_en='{data.get('name_en')}', name_vn='{data.get('name_vn')}'")
 
         # Validate required fields
-        if not data.get("name_en") or not data.get("name_vn"):
+        name_en = data.get("name_en", "").strip()
+        name_vn = data.get("name_vn", "").strip()
+
+        if not name_en or not name_vn:
+            frappe.logger().error(f"Validation failed: name_en='{name_en}', name_vn='{name_vn}'")
             return validation_error_response("Both English and Vietnamese names are required", {"name": ["Both English and Vietnamese names are required"]})
 
         # Create the tag
         tag = frappe.get_doc({
             "doctype": "SIS News Tag",
             "campus_id": campus_id,
-            "name_en": data.get("name_en"),
-            "name_vn": data.get("name_vn"),
+            "name_en": name_en,
+            "name_vn": name_vn,
             "color": data.get("color", "#3B82F6")
         })
 
@@ -132,7 +150,17 @@ def create_news_tag():
 def update_news_tag():
     """Update an existing news tag"""
     try:
+        # Get data from request - try both form_dict and JSON body
         data = frappe.local.form_dict
+        if not data or not data.get('tag_id'):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+            except Exception as e:
+                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+
         tag_id = data.get("tag_id")
 
         if not tag_id:
@@ -193,7 +221,17 @@ def update_news_tag():
 def delete_news_tag():
     """Delete a news tag"""
     try:
+        # Get data from request - try both form_dict and JSON body
         data = frappe.local.form_dict
+        if not data or not data.get('tag_id'):
+            # Try parsing JSON from request body
+            try:
+                if frappe.request.data:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+            except Exception as e:
+                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+
         tag_id = data.get("tag_id")
 
         if not tag_id:
