@@ -15,7 +15,7 @@ from erp.utils.api_response import (
 )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def get_news_articles():
     """Get published news articles for parent portal with filtering"""
     try:
@@ -156,11 +156,13 @@ def get_news_articles():
         return list_response(
             data=paginated_articles,
             message="News articles fetched successfully",
-            pagination={
-                "page": page,
-                "limit": limit,
-                "total": len(filtered_articles),
-                "total_pages": (len(filtered_articles) + limit - 1) // limit
+            meta={
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": len(filtered_articles),
+                    "total_pages": (len(filtered_articles) + limit - 1) // limit
+                }
             }
         )
 
@@ -172,7 +174,7 @@ def get_news_articles():
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def get_news_article():
     """Get a single published news article by ID for parent portal"""
     try:

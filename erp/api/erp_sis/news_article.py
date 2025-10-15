@@ -847,16 +847,20 @@ def get_published_news_articles_for_parents():
         # Get current user's campus information
         campus_id = get_current_campus_from_context()
         
+        frappe.logger().info(f"🔍 User {frappe.session.user} campus_id from context: {campus_id}")
+        
         if not campus_id:
             # Fallback to default if no campus found
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+            campus_id = "CAMPUS-00001"
+            frappe.logger().warning(f"⚠️ No campus found for user {frappe.session.user}, using default: {campus_id}")
         
         # Build filters - only published articles
         filters = {
             "campus_id": campus_id,
             "status": "published"
         }
+        
+        frappe.logger().info(f"📊 Filters being used: {filters}")
         
         # Search by title
         search_term = data.get("search", "").strip()
@@ -896,6 +900,9 @@ def get_published_news_articles_for_parents():
         # Get total count for pagination
         total_count = frappe.db.count("SIS News Article", filters=filters)
         
+        frappe.logger().info(f"📈 Found {total_count} total articles matching filters")
+        frappe.logger().info(f"📄 Retrieved {len(articles)} articles for current page")
+        
         # Enrich articles with tag information
         for article in articles:
             article_tags = frappe.get_all(
@@ -905,16 +912,30 @@ def get_published_news_articles_for_parents():
             )
             article["tags"] = article_tags
         
+        if articles:
+            frappe.logger().info(f"✅ Sample article: {articles[0].get('name')} - campus: {articles[0].get('campus_id')}")
+        
         frappe.logger().info(f"✅ Retrieved {len(articles)} published news articles for parents")
         
-        # Return paginated response
-        return paginated_response(
+        # Return paginated response with debug info
+        response = paginated_response(
             data=articles,
             current_page=page,
             total_count=total_count,
             per_page=limit,
             message="Published news articles fetched successfully"
         )
+        
+        # Add debug info to response
+        response["debug_info"] = {
+            "user": frappe.session.user,
+            "campus_id_used": campus_id,
+            "filters_applied": filters,
+            "total_found": total_count,
+            "articles_returned": len(articles)
+        }
+        
+        return response
         
     except Exception as e:
         frappe.logger().error(f"❌ Error fetching published news articles: {str(e)}")
