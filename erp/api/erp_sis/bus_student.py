@@ -774,13 +774,21 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 				"message": f"No photo found for student {student_code}"
 			}
 
-		# Create subject in CompreFace
-		frappe.logger().info(f"About to create subject {student_code} with name {student_name}")
-		create_result = compreFace_service.create_subject(student_code, student_name)
-		frappe.logger().info(f"Create subject result: {create_result}")
+		# Check if subject already exists first
+		frappe.logger().info(f"Checking if subject {student_code} already exists...")
+		existing_check = compreFace_service.get_subject_info(student_code)
+
+		if existing_check["success"]:
+			frappe.logger().info(f"Subject {student_code} already exists, skipping creation")
+			create_result = {"success": True, "data": {"subject": student_code}, "message": f"Subject {student_code} already exists"}
+		else:
+			# Create subject in CompreFace
+			frappe.logger().info(f"Creating new subject {student_code} with name {student_name}")
+			create_result = compreFace_service.create_subject(student_code, student_name)
+			frappe.logger().info(f"Create subject result: {create_result}")
 
 		if not create_result["success"]:
-			frappe.logger().error(f"Subject creation failed for {student_code}: {create_result}")
+			frappe.logger().error(f"Subject setup failed for {student_code}: {create_result}")
 			return create_result
 
 		# Add face to subject
