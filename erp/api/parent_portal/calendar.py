@@ -83,7 +83,8 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None):
 
         student_id = relationships[0].student
 
-        # Get student's current class and school year
+        # Get student's current class, school year, and education stage
+        education_stage_id = None
         if not school_year_id:
             class_students = frappe.get_all(
                 "SIS Class Student",
@@ -96,6 +97,27 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None):
 
             if class_students:
                 school_year_id = class_students[0].school_year_id
+                class_id = class_students[0].class_id
+                
+                # Get class education_grade to determine education_stage
+                class_info = frappe.get_value(
+                    "SIS Class",
+                    class_id,
+                    ["education_grade"],
+                    as_dict=True
+                )
+                
+                if class_info and class_info.education_grade:
+                    # Get education_stage from education_grade
+                    grade_info = frappe.get_value(
+                        "SIS Education Grade",
+                        class_info.education_grade,
+                        ["education_stage_id"],
+                        as_dict=True
+                    )
+                    if grade_info:
+                        education_stage_id = grade_info.education_stage_id
+                        logs.append(f"Student education stage: {education_stage_id}")
 
         # Build filters
         filters = {}
@@ -137,6 +159,36 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None):
             {where_clause}
             ORDER BY start_date ASC
         """, params, as_dict=True)
+
+        # Filter events by education_stage if available
+        if education_stage_id:
+            filtered_events = []
+            for event in events:
+                # Get education stages for this event
+                event_stages = frappe.get_all(
+                    "SIS Calendar Education Stage",
+                    filters={"parent": event["name"]},
+                    fields=["education_stage_id"],
+                    pluck="education_stage_id"
+                )
+                
+                # Include event if it has the student's education stage
+                if education_stage_id in event_stages:
+                    event["education_stages"] = event_stages
+                    filtered_events.append(event)
+            
+            events = filtered_events
+            logs.append(f"Filtered to {len(events)} events for education stage {education_stage_id}")
+        else:
+            # If no education stage, still add education_stages to each event
+            for event in events:
+                event_stages = frappe.get_all(
+                    "SIS Calendar Education Stage",
+                    filters={"parent": event["name"]},
+                    fields=["education_stage_id"],
+                    pluck="education_stage_id"
+                )
+                event["education_stages"] = event_stages
 
         logs.append(f"Found {len(events)} calendar events")
 

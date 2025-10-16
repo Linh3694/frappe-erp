@@ -689,6 +689,31 @@ def _process_excel_file(job):
                 "classshorttitle": "class_short_title",
                 "short_title": "class_short_title",
                 "shorttitle": "class_short_title"
+            },
+            "SIS Calendar": {
+                # Map Excel columns for calendar events
+                "title": "title",
+                "calendar_title": "title",
+                "event_title": "title",
+                "type": "type",
+                "event_type": "type",
+                "education_stage": "education_stage",
+                "education_stages": "education_stages",
+                "stage": "education_stage",
+                "stages": "education_stages",
+                "start_date": "start_date",
+                "start": "start_date",
+                "from_date": "start_date",
+                "end_date": "end_date",
+                "end": "end_date",
+                "to_date": "end_date",
+                "school_year": "school_year",
+                "year": "school_year",
+                "school_year_id": "school_year",
+                "description": "description",
+                "desc": "description",
+                "note": "description",
+                "notes": "description"
             }
         }
 
@@ -1485,6 +1510,135 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 error_msg = f"Không thể tìm thấy {', '.join(resolution_errors)}"
                 raise frappe.ValidationError(error_msg)
 
+        elif doctype == "SIS Calendar":
+            import pandas as pd
+            
+            # Handle school year lookup
+            school_year_name = None
+            for key in ["school_year", "school_year_id", "year", "năm học"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    school_year_name = str(row_data[key]).strip()
+                    break
+            
+            if school_year_name and school_year_name != "nan":
+                school_year_id = frappe.db.get_value(
+                    "SIS School Year",
+                    {"title_vn": school_year_name},
+                    "name"
+                )
+                if not school_year_id:
+                    school_year_id = frappe.db.get_value(
+                        "SIS School Year",
+                        {"title_en": school_year_name},
+                        "name"
+                    )
+                if school_year_id:
+                    doc_data["school_year_id"] = school_year_id
+                else:
+                    raise frappe.ValidationError(f"Không tìm thấy năm học: '{school_year_name}'")
+            else:
+                raise frappe.ValidationError("Thiếu năm học (school_year)")
+            
+            # Handle education stages (support multiple stages separated by comma or semicolon)
+            education_stages_raw = None
+            for key in ["education_stage", "education_stages", "stage", "stages"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    education_stages_raw = str(row_data[key]).strip()
+                    break
+            
+            if not education_stages_raw or education_stages_raw == "nan":
+                raise frappe.ValidationError("Thiếu education stage")
+            
+            # Split by comma or semicolon
+            stage_names = [s.strip() for s in education_stages_raw.replace(';', ',').split(',') if s.strip()]
+            stage_ids = []
+            
+            for stage_name in stage_names:
+                education_stage_id = frappe.db.get_value(
+                    "SIS Education Stage",
+                    {"title_vn": stage_name, "campus_id": campus_id},
+                    "name"
+                )
+                
+                if not education_stage_id:
+                    # Try case insensitive
+                    all_stages = frappe.get_all(
+                        "SIS Education Stage",
+                        filters={"campus_id": campus_id},
+                        fields=["name", "title_vn", "title_en"]
+                    )
+                    for stage in all_stages:
+                        if (stage.get("title_vn", "").lower().strip() == stage_name.lower().strip() or
+                            stage.get("title_en", "").lower().strip() == stage_name.lower().strip()):
+                            education_stage_id = stage.get("name")
+                            break
+                
+                if education_stage_id:
+                    stage_ids.append(education_stage_id)
+                else:
+                    available_stages = [s.get("title_vn", "") for s in all_stages]
+                    raise frappe.ValidationError(
+                        f"Không tìm thấy education stage: '{stage_name}'. Available: {', '.join(available_stages[:5])}"
+                    )
+            
+            if not stage_ids:
+                raise frappe.ValidationError("Cần ít nhất 1 education stage")
+            
+            # Handle event type
+            event_type = str(row_data.get("type", "")).strip().lower()
+            valid_types = ["holiday", "school_event", "exam"]
+            if event_type not in valid_types:
+                raise frappe.ValidationError(
+                    f"Invalid type '{event_type}'. Must be one of: {', '.join(valid_types)}"
+                )
+            doc_data["type"] = event_type
+            
+            # Handle dates
+            try:
+                start_date_val = row_data.get("start_date")
+                end_date_val = row_data.get("end_date")
+                
+                if isinstance(start_date_val, str):
+                    doc_data["start_date"] = pd.to_datetime(start_date_val).strftime("%Y-%m-%d")
+                elif start_date_val:
+                    doc_data["start_date"] = pd.to_datetime(start_date_val).strftime("%Y-%m-%d")
+                else:
+                    raise frappe.ValidationError("Missing start_date")
+                
+                if isinstance(end_date_val, str):
+                    doc_data["end_date"] = pd.to_datetime(end_date_val).strftime("%Y-%m-%d")
+                elif end_date_val:
+                    doc_data["end_date"] = pd.to_datetime(end_date_val).strftime("%Y-%m-%d")
+                else:
+                    raise frappe.ValidationError("Missing end_date")
+            except Exception as e:
+                raise frappe.ValidationError(f"Invalid date format: {str(e)}")
+            
+            # Handle title and description
+            if row_data.get("title"):
+                doc_data["title"] = str(row_data["title"]).strip()
+            else:
+                raise frappe.ValidationError("Missing title")
+            
+            if row_data.get("description") and pd.notna(row_data.get("description")):
+                doc_data["description"] = str(row_data["description"]).strip()
+            
+            # Don't process via regular field mapping - we handle everything custom
+            # Create calendar event with child table
+            if not dry_run:
+                calendar_doc = frappe.get_doc({
+                    "doctype": "SIS Calendar",
+                    **doc_data,
+                    "education_stages": [
+                        {"education_stage_id": stage_id} for stage_id in stage_ids
+                    ]
+                })
+                calendar_doc.insert(ignore_permissions=True)
+                frappe.db.commit()
+                frappe.logger().info(f"Row {row_num} - Created calendar event: {calendar_doc.name}")
+            
+            return {"success": True, "message": f"Đã tạo sự kiện lịch: {doc_data.get('title')}"}
+
         # Special field processing before mapping
         # Convert gender values to lowercase for proper validation
         if 'gender' in row_data and row_data['gender']:
@@ -1506,7 +1660,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
         # Map Excel columns to DocType fields (regular fields)
         # Skip field mapping for doctypes that are handled entirely by custom logic
-        if doctype not in ["SIS Class Student"]:
+        if doctype not in ["SIS Class Student", "SIS Calendar"]:
             meta = frappe.get_meta(doctype)
             excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id", "education_stage"]
             for field in meta.fields:

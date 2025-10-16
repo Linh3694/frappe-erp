@@ -1,0 +1,45 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS-CAL-STAGE-{#####}",
+ "beta": 0,
+ "creation": "2025-01-16 10:00:00.000000",
+ "custom": 0,
+ "description": "Calendar Event Education Stage Mapping",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "education_stage_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "education_stage_id",
+   "fieldtype": "Link",
+   "label": "Education Stage",
+   "options": "SIS Education Stage",
+   "reqd": 1,
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-01-16 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Calendar Education Stage",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
+

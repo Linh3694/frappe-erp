@@ -23,7 +23,9 @@
   "start_date",
   "end_date",
   "description",
-  "school_year_id"
+  "school_year_id",
+  "education_stages_section",
+  "education_stages"
  ],
  "fields": [
   {
@@ -75,6 +77,18 @@
    "fieldtype": "Link",
    "label": "School Year",
    "options": "SIS School Year",
+   "reqd": 1
+  },
+  {
+   "fieldname": "education_stages_section",
+   "fieldtype": "Section Break",
+   "label": "Education Stages"
+  },
+  {
+   "fieldname": "education_stages",
+   "fieldtype": "Table",
+   "label": "Education Stages",
+   "options": "SIS Calendar Education Stage",
    "reqd": 1
   }
  ],

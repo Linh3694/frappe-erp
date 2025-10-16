@@ -48,10 +48,11 @@ def get_events(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     type: Optional[str] = None,
+    education_stage_ids: Optional[str] = None,
 ):
     """List SIS Calendar events with optional filters and pagination.
 
-    Query params supported: school_year_id, start_date, end_date, type
+    Query params supported: school_year_id, start_date, end_date, type, education_stage_ids
     """
     try:
         # Coerce pagination
@@ -63,6 +64,7 @@ def get_events(
         start_date = start_date or _get_request_arg("start_date")
         end_date = end_date or _get_request_arg("end_date")
         type = type or _get_request_arg("type")
+        education_stage_ids = education_stage_ids or _get_request_arg("education_stage_ids")
 
         filters: Dict[str, Any] = {}
         campus_id = _get_current_campus_id()
@@ -106,6 +108,28 @@ def get_events(
             {**params, "limit": limit, "offset": offset},
             as_dict=True,
         )
+        
+        # Add education_stages to each item and filter by education_stage_ids if provided
+        filtered_items = []
+        for item in items:
+            stages = frappe.get_all(
+                "SIS Calendar Education Stage",
+                filters={"parent": item["name"]},
+                fields=["education_stage_id"],
+                order_by="idx"
+            )
+            item["education_stages"] = [s["education_stage_id"] for s in stages]
+            
+            # Filter by education_stage_ids if provided
+            if education_stage_ids:
+                stage_list = [s.strip() for s in education_stage_ids.split(',') if s.strip()]
+                # Check if any of the requested stages match
+                if any(stage_id in item["education_stages"] for stage_id in stage_list):
+                    filtered_items.append(item)
+            else:
+                filtered_items.append(item)
+        
+        items = filtered_items
 
         # Count
         total_count = frappe.db.sql(
@@ -135,8 +159,13 @@ def create_event(
     end_date: Optional[str] = None,
     description: Optional[str] = None,
     school_year_id: Optional[str] = None,
+    education_stage_ids: Optional[str] = None,
 ):
-    """Create a new SIS Calendar event"""
+    """Create a new SIS Calendar event
+    
+    Args:
+        education_stage_ids: Comma-separated list of education stage IDs or JSON array
+    """
     try:
         # Merge inputs from request JSON or form
         data = {}
@@ -150,6 +179,21 @@ def create_event(
             except Exception:
                 pass
 
+        # Parse education_stage_ids
+        stage_ids_raw = education_stage_ids or data.get("education_stage_ids") or data.get("education_stages")
+        stage_ids_list = []
+        if stage_ids_raw:
+            if isinstance(stage_ids_raw, str):
+                # Try parse as JSON first
+                try:
+                    import json
+                    stage_ids_list = json.loads(stage_ids_raw)
+                except:
+                    # Fallback to comma-separated
+                    stage_ids_list = [s.strip() for s in stage_ids_raw.split(',') if s.strip()]
+            elif isinstance(stage_ids_raw, list):
+                stage_ids_list = stage_ids_raw
+        
         payload = {
             "campus_id": campus_id or data.get("campus_id") or _get_current_campus_id(),
             "title": title or data.get("title"),
@@ -172,6 +216,8 @@ def create_event(
         for f in ["title", "type", "start_date", "end_date", "school_year_id"]:
             if not payload.get(f):
                 errors[f] = ["Required"]
+        if not stage_ids_list:
+            errors["education_stages"] = ["At least one education stage is required"]
         if errors:
             return validation_error_response(
                 message="Missing required parameters", errors=errors
@@ -181,6 +227,9 @@ def create_event(
             {
                 "doctype": "SIS Calendar",
                 **payload,
+                "education_stages": [
+                    {"education_stage_id": stage_id} for stage_id in stage_ids_list
+                ]
             }
         )
         doc.insert()
@@ -192,6 +241,7 @@ def create_event(
                 "campus_id": doc.campus_id,
                 "title": doc.title,
                 "type": doc.type,
+                "education_stages": stage_ids_list,
                 "start_date": str(doc.start_date),
                 "end_date": str(doc.end_date),
                 "description": doc.description,
@@ -273,8 +323,21 @@ def update_event(name: Optional[str] = None, **kwargs):
         }
 
         updates = {k: v for k, v in data.items() if k in allowed_fields and v is not None}
+        
+        # Handle education_stages update
+        stage_ids_raw = data.get("education_stage_ids") or data.get("education_stages")
+        stage_ids_list = []
+        if stage_ids_raw:
+            if isinstance(stage_ids_raw, str):
+                try:
+                    import json
+                    stage_ids_list = json.loads(stage_ids_raw)
+                except:
+                    stage_ids_list = [s.strip() for s in stage_ids_raw.split(',') if s.strip()]
+            elif isinstance(stage_ids_raw, list):
+                stage_ids_list = stage_ids_raw
 
-        if not updates:
+        if not updates and not stage_ids_list:
             return validation_error_response(
                 message="No valid fields to update",
                 errors={"fields": ["Provide at least one updatable field"]},
@@ -283,8 +346,23 @@ def update_event(name: Optional[str] = None, **kwargs):
         doc = frappe.get_doc("SIS Calendar", name)
         for k, v in updates.items():
             setattr(doc, k, v)
+        
+        # Update education stages if provided
+        if stage_ids_list:
+            doc.education_stages = []
+            for stage_id in stage_ids_list:
+                doc.append("education_stages", {"education_stage_id": stage_id})
+        
         doc.save()
         frappe.db.commit()
+        
+        # Get updated education stages
+        stages = frappe.get_all(
+            "SIS Calendar Education Stage",
+            filters={"parent": doc.name},
+            fields=["education_stage_id"],
+            order_by="idx"
+        )
 
         return single_item_response(
             data={
@@ -292,6 +370,7 @@ def update_event(name: Optional[str] = None, **kwargs):
                 "campus_id": doc.campus_id,
                 "title": doc.title,
                 "type": doc.type,
+                "education_stages": [s["education_stage_id"] for s in stages],
                 "start_date": str(doc.start_date),
                 "end_date": str(doc.end_date),
                 "description": doc.description,
