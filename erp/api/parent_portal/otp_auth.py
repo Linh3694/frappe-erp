@@ -634,6 +634,77 @@ def get_guardian_comprehensive_data(guardian_name):
                                     rel_data["student_details"]["class_name"] = getattr(current_class["class_doc"], 'title', '')
                                     rel_data["student_details"]["grade"] = getattr(current_class["class_doc"], 'education_grade', None)
 
+                                    # Get homeroom teachers information
+                                    class_doc = current_class["class_doc"]
+                                    teachers_info = {}
+
+                                    # Get homeroom teacher
+                                    if getattr(class_doc, 'homeroom_teacher', None):
+                                        try:
+                                            homeroom_teacher = frappe.get_doc("SIS Teacher", class_doc.homeroom_teacher)
+
+                                            # Get user information from User doctype
+                                            user_info = None
+                                            if getattr(homeroom_teacher, 'user_id', None):
+                                                try:
+                                                    user = frappe.get_doc("User", homeroom_teacher.user_id)
+                                                    user_info = {
+                                                        "full_name": getattr(user, 'full_name', ''),
+                                                        "email": getattr(user, 'email', ''),
+                                                        "user_image": getattr(user, 'user_image', None),
+                                                        "mobile_no": getattr(user, 'mobile_no', ''),
+                                                        "phone": getattr(user, 'phone', '')
+                                                    }
+                                                except Exception as e:
+                                                    logs.append(f"⚠️ Could not get user info for homeroom teacher: {str(e)}")
+
+                                            teachers_info["homeroom_teacher"] = {
+                                                "name": homeroom_teacher.name,
+                                                "teacher_name": getattr(homeroom_teacher, 'teacher_name', ''),
+                                                "teacher_code": getattr(homeroom_teacher, 'teacher_code', ''),
+                                                "email": user_info.get('email') if user_info else getattr(homeroom_teacher, 'email', ''),
+                                                "phone": user_info.get('mobile_no') or user_info.get('phone') if user_info else getattr(homeroom_teacher, 'phone', ''),
+                                                "avatar": user_info.get('user_image') if user_info and user_info.get('user_image') else None,
+                                                "full_name": user_info.get('full_name') if user_info else getattr(homeroom_teacher, 'teacher_name', '')
+                                            }
+                                        except Exception as e:
+                                            logs.append(f"⚠️ Could not get homeroom teacher details: {str(e)}")
+
+                                    # Get vice homeroom teacher
+                                    if getattr(class_doc, 'vice_homeroom_teacher', None):
+                                        try:
+                                            vice_homeroom_teacher = frappe.get_doc("SIS Teacher", class_doc.vice_homeroom_teacher)
+
+                                            # Get user information from User doctype
+                                            user_info = None
+                                            if getattr(vice_homeroom_teacher, 'user_id', None):
+                                                try:
+                                                    user = frappe.get_doc("User", vice_homeroom_teacher.user_id)
+                                                    user_info = {
+                                                        "full_name": getattr(user, 'full_name', ''),
+                                                        "email": getattr(user, 'email', ''),
+                                                        "user_image": getattr(user, 'user_image', None),
+                                                        "mobile_no": getattr(user, 'mobile_no', ''),
+                                                        "phone": getattr(user, 'phone', '')
+                                                    }
+                                                except Exception as e:
+                                                    logs.append(f"⚠️ Could not get user info for vice homeroom teacher: {str(e)}")
+
+                                            teachers_info["vice_homeroom_teacher"] = {
+                                                "name": vice_homeroom_teacher.name,
+                                                "teacher_name": getattr(vice_homeroom_teacher, 'teacher_name', ''),
+                                                "teacher_code": getattr(vice_homeroom_teacher, 'teacher_code', ''),
+                                                "email": user_info.get('email') if user_info else getattr(vice_homeroom_teacher, 'email', ''),
+                                                "phone": user_info.get('mobile_no') or user_info.get('phone') if user_info else getattr(vice_homeroom_teacher, 'phone', ''),
+                                                "avatar": user_info.get('user_image') if user_info and user_info.get('user_image') else None,
+                                                "full_name": user_info.get('full_name') if user_info else getattr(vice_homeroom_teacher, 'teacher_name', '')
+                                            }
+                                        except Exception as e:
+                                            logs.append(f"⚠️ Could not get vice homeroom teacher details: {str(e)}")
+
+                                    if teachers_info:
+                                        rel_data["student_details"]["teachers"] = teachers_info
+
                                 # Get campus details
                                 if student.campus_id:
                                     try:
