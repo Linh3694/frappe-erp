@@ -429,7 +429,7 @@ def sync_bus_student_to_compreface():
 
 		# Proceed with sync
 		compreface_result = sync_student_to_compreface(
-			bus_student.student_code,
+			bus_student.student_id,  # Use student_id (CRM Student ID) not student_code
 			bus_student.full_name,
 			bus_student.campus_id,
 			bus_student.school_year_id
@@ -695,32 +695,32 @@ def remove_student_from_compreface(student_code: str) -> dict:
 
 # Background job functions for CompreFace synchronization
 
-def sync_student_to_compreface_background(student_code: str, student_name: str, campus_id: str, school_year_id: str):
+def sync_student_to_compreface_background(student_id: str, student_name: str, campus_id: str, school_year_id: str):
 	"""
 	Background job to sync student to CompreFace
 	This function runs in background queue to avoid blocking the main API response
 	"""
 	try:
-		frappe.logger().info(f"Starting background sync for student {student_code} to CompreFace")
+		frappe.logger().info(f"Starting background sync for student {student_id} to CompreFace")
 
-		result = sync_student_to_compreface(student_code, student_name, campus_id, school_year_id)
+		result = sync_student_to_compreface(student_id, student_name, campus_id, school_year_id)
 
 		if result["success"]:
-			frappe.logger().info(f"Background sync completed successfully for student {student_code}")
+			frappe.logger().info(f"Background sync completed successfully for student {student_id}")
 		else:
-			frappe.logger().error(f"Background sync failed for student {student_code}: {result.get('message', '')}")
+			frappe.logger().error(f"Background sync failed for student {student_id}: {result.get('message', '')}")
 
 			# Create a notification or log for failed sync
 			frappe.get_doc({
 				"doctype": "ERP Notification",
-				"title": f"CompreFace Sync Failed - {student_code}",
-				"message": f"Failed to sync student {student_code} to CompreFace: {result.get('message', '')}",
+				"title": f"CompreFace Sync Failed - {student_id}",
+				"message": f"Failed to sync student {student_id} to CompreFace: {result.get('message', '')}",
 				"notification_type": "alert",
 				"user": "Administrator"  # Or get current user
 			}).insert(ignore_permissions=True)
 
 	except Exception as e:
-		frappe.log_error(f"Background sync error for student {student_code}: {str(e)}", "Bus Student Background Job")
+		frappe.log_error(f"Background sync error for student {student_id}: {str(e)}", "Bus Student Background Job")
 
 
 def remove_student_from_compreface_background(student_code: str):
