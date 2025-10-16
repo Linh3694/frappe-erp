@@ -398,6 +398,29 @@ def get_available_routes():
 def check_compreface_subject(student_code=None):
 	"""Check if a student subject exists in CompreFace"""
 	try:
+		# Read student_code from request parameters if not provided
+		if not student_code:
+			# Try from form_dict first (for form-encoded data)
+			if frappe.local.form_dict:
+				student_code = frappe.local.form_dict.get("student_code")
+
+			# Try from request args (for query parameters)
+			if not student_code and hasattr(frappe.request, 'args'):
+				student_code = frappe.request.args.get("student_code")
+
+			# Try to parse JSON from request data
+			if not student_code and hasattr(frappe.request, 'data') and frappe.request.data:
+				try:
+					import json
+					raw_data = frappe.request.data
+					if isinstance(raw_data, bytes):
+						raw_data = raw_data.decode('utf-8')
+
+					json_data = json.loads(raw_data)
+					student_code = json_data.get("student_code")
+				except (json.JSONDecodeError, ValueError):
+					pass
+
 		if not student_code:
 			return error_response("Student code is required")
 
@@ -693,7 +716,13 @@ def get_student_photo_url(student_code: str, campus_id: str, school_year_id: str
 		Photo URL or empty string if not found
 	"""
 	try:
-		# Get the latest photo for this student
+		# First, find the CRM Student ID using the student_code
+		crm_student = frappe.db.get_value("CRM Student", {"student_code": student_code}, "name")
+		if not crm_student:
+			frappe.logger().warning(f"No CRM Student found for student_code: {student_code}")
+			return ""
+
+		# Get the latest photo for this student using CRM Student ID
 		photo = frappe.db.sql("""
 			SELECT photo
 			FROM `tabSIS Photo`
@@ -702,7 +731,7 @@ def get_student_photo_url(student_code: str, campus_id: str, school_year_id: str
 			AND status = 'Active'
 			ORDER BY upload_date DESC, creation DESC
 			LIMIT 1
-		""", (student_code,), as_dict=True)
+		""", (crm_student,), as_dict=True)
 
 		frappe.logger().info(f"Photo query for student {student_code}: found {len(photo) if photo else 0} photos")
 
@@ -713,7 +742,7 @@ def get_student_photo_url(student_code: str, campus_id: str, school_year_id: str
 			SELECT name, student_id, type, status, photo
 			FROM `tabSIS Photo`
 			WHERE student_id = %s
-		""", (student_code,), as_dict=True)
+		""", (crm_student,), as_dict=True)
 
 		frappe.logger().info(f"All photos for student {student_code}: {len(all_photos) if all_photos else 0} records")
 		if all_photos:
