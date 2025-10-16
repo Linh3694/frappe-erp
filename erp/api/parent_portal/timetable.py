@@ -624,14 +624,6 @@ def get_teacher_info():
     try:
         import json
 
-        # Debug: Log all form_dict data
-        logs.append(f"DEBUG: frappe.form_dict keys: {list(frappe.form_dict.keys())}")
-        logs.append(f"DEBUG: Raw form_dict: {dict(frappe.form_dict)}")
-
-        # Debug: Check request data
-        logs.append(f"DEBUG: frappe.request.data type: {type(frappe.request.data)}")
-        logs.append(f"DEBUG: frappe.request.data length: {len(frappe.request.data) if hasattr(frappe.request.data, '__len__') else 'N/A'}")
-
         teacher_ids = []
 
         # Try to parse from raw request data (JSON body)
