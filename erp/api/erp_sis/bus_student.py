@@ -115,7 +115,6 @@ def create_bus_student_from_sis(**data):
 	"""Create a new bus student from SIS student data"""
 	try:
 		student_id = data.get("student_id")
-		route_id = data.get("route_id")
 		status = data.get("status", "Active")
 
 		if not student_id or str(student_id).strip() == "":
