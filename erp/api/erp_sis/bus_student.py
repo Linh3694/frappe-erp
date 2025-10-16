@@ -205,6 +205,7 @@ def create_bus_student_from_sis():
 				frappe.logger().info(f"Student {student_data.student_code} already exists in CompreFace, skipping sync")
 			else:
 				# Student doesn't exist, proceed with sync
+				frappe.logger().info(f"Starting CompreFace sync for student {student_data.student_code}")
 				compreface_result = sync_student_to_compreface(
 					student_data.student_code,
 					student_data.full_name,
@@ -212,9 +213,26 @@ def create_bus_student_from_sis():
 					student_data.school_year_id
 				)
 
+				# Verify sync result by checking subject existence
+				if compreface_result["success"]:
+					frappe.logger().info(f"CompreFace sync reported success for {student_data.student_code}, verifying...")
+					# Add small delay and verify
+					import time
+					time.sleep(1)  # Wait 1 second for CompreFace to process
+
+					verify_check = compreFace_service.get_subject_info(student_data.student_code)
+					if verify_check["success"]:
+						frappe.logger().info(f"✅ CompreFace sync verified successfully for {student_data.student_code}")
+					else:
+						frappe.logger().warning(f"⚠️ CompreFace sync verification failed for {student_data.student_code} after success report")
+						compreface_result["success"] = False
+						compreface_result["message"] = "Sync verification failed"
+				else:
+					frappe.logger().warning(f"❌ CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
+
 				# If CompreFace sync fails, still create the bus student but log the error
 				if not compreface_result["success"]:
-					frappe.logger().warning(f"CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
+					frappe.logger().warning(f"CompreFace sync ultimately failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
 
 					# Create a notification for failed sync
 					frappe.get_doc({
