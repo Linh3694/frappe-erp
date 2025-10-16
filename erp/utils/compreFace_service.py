@@ -24,7 +24,7 @@ class CompreFaceService:
             "x-api-key": self.api_key
         }
 
-    def _get_image_base64(self, image_url: str) -> Optional[str]:
+    def _get_image_data(self, image_url: str) -> Optional[bytes]:
         """Convert image URL to base64 string with validation"""
         try:
             import io
@@ -42,6 +42,7 @@ class CompreFaceService:
                 image_data = response.content
 
             # Validate and resize image if needed
+            processed_image_data = image_data
             try:
                 img = Image.open(io.BytesIO(image_data))
 
@@ -57,14 +58,14 @@ class CompreFaceService:
                 # Convert back to JPEG bytes
                 output_buffer = io.BytesIO()
                 img.save(output_buffer, format='JPEG', quality=85)
-                image_data = output_buffer.getvalue()
+                processed_image_data = output_buffer.getvalue()
 
-                frappe.logger().info(f"Image processed successfully: {img.size}, {len(image_data)} bytes")
+                frappe.logger().info(f"Image processed successfully: {img.size}, {len(processed_image_data)} bytes")
 
             except Exception as img_error:
                 frappe.logger().warning(f"Image processing failed, using original: {str(img_error)}")
 
-            return base64.b64encode(image_data).decode('utf-8')
+            return processed_image_data
         except Exception as e:
             frappe.log_error(f"Error converting image to base64: {str(e)}", "CompreFace Service")
             return None
@@ -134,21 +135,28 @@ class CompreFaceService:
             Dict with success status and data
         """
         try:
-            # Convert image to base64
-            image_base64 = self._get_image_base64(image_url)
-            if not image_base64:
+            # Convert image to binary data
+            image_data = self._get_image_data(image_url)
+            if not image_data:
                 return {
                     "success": False,
                     "error": "Failed to process image",
-                    "message": "Could not convert image to base64"
+                    "message": "Could not convert image to binary data"
                 }
 
-            url = f"{self.recognition_api}/subjects/{subject_id}"
-            payload = {
-                "file": f"data:image/jpeg;base64,{image_base64}"
+            # CompreFace API to add face: POST /api/v1/recognition/faces
+            url = f"{self.recognition_api}/faces"
+
+            # Use multipart/form-data with binary image data
+            files = {
+                'file': ('image.jpg', image_data, 'image/jpeg')
+            }
+            data = {
+                'subject': subject_id
             }
 
-            response = requests.post(url, json=payload, headers=self._get_headers(), timeout=60)
+            frappe.logger().info(f"CompreFace add_face request: POST {url} for subject {subject_id} (multipart, {len(image_data)} bytes)")
+            response = requests.post(url, files=files, data=data, headers={'x-api-key': self.api_key}, timeout=60)
             response.raise_for_status()
 
             result = response.json()
@@ -201,22 +209,26 @@ class CompreFaceService:
             Dict with recognition results
         """
         try:
-            # Convert image to base64
-            image_base64 = self._get_image_base64(image_url)
-            if not image_base64:
+            # Convert image to binary data
+            image_data = self._get_image_data(image_url)
+            if not image_data:
                 return {
                     "success": False,
                     "error": "Failed to process image",
-                    "message": "Could not convert image to base64"
+                    "message": "Could not convert image to binary data"
                 }
 
             url = f"{self.recognition_api}/recognize"
-            payload = {
-                "file": f"data:image/jpeg;base64,{image_base64}",
-                "limit": limit
+
+            # Use multipart/form-data for recognition too
+            files = {
+                'file': ('image.jpg', image_data, 'image/jpeg')
+            }
+            data = {
+                'limit': limit
             }
 
-            response = requests.post(url, json=payload, headers=self._get_headers(), timeout=60)
+            response = requests.post(url, files=files, data=data, headers={'x-api-key': self.api_key}, timeout=60)
             response.raise_for_status()
 
             result = response.json()
@@ -232,6 +244,25 @@ class CompreFaceService:
                 "success": False,
                 "error": str(e),
                 "message": "Failed to recognize face"
+            }
+
+    def test_api_endpoints(self) -> Dict:
+        """
+        Test available API endpoints for debugging
+        """
+        try:
+            # Test recognition API root
+            url = f"{self.recognition_api}"
+            response = requests.get(url, headers=self._get_headers(), timeout=30)
+            return {
+                "success": True,
+                "status_code": response.status_code,
+                "response": response.text[:500]  # First 500 chars
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
             }
 
     def delete_subject(self, subject_id: str) -> Dict:
