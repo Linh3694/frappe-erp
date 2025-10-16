@@ -240,11 +240,17 @@ def create_bus_student_from_sis():
 						elif attempt < 2:  # Don't sleep after last attempt
 							time.sleep(2)  # Wait another 2 seconds
 
-					if not verification_success:
+					if verification_success:
+						# Update the bus student record to mark as registered
+						frappe.db.set_value("SIS Bus Student", student_data.name, "compreface_registered", 1)
+						frappe.logger().info(f"✅ Updated CompreFace registration status for {student_data.student_code}")
+					else:
 						# Log warning but don't fail the entire operation
 						# The face addition succeeded, verification might be unreliable with new API
 						frappe.logger().warning(f"⚠️ CompreFace sync verification failed for {student_data.student_code} after success report, but proceeding")
 						frappe.logger().info(f"Face addition was successful, verification may be unreliable with current API")
+						# Still mark as registered since the sync succeeded
+						frappe.db.set_value("SIS Bus Student", student_data.name, "compreface_registered", 1)
 				else:
 					frappe.logger().warning(f"❌ CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
 
@@ -393,7 +399,25 @@ def check_compreface_subject(student_code=None):
 		if not student_code:
 			return error_response("Student code is required")
 
-		# Try multiple times to check subject existence (similar to verification logic)
+		# First, check the database flag for reliable status
+		bus_student = frappe.db.get_value("SIS Bus Student",
+			{"student_code": student_code},
+			["name", "compreface_registered"],
+			as_dict=True
+		)
+
+		if bus_student and bus_student.get("compreface_registered"):
+			return success_response(
+				data={
+					"exists": True,
+					"subject_info": None,
+					"verification_method": "database_flag",
+					"bus_student_id": bus_student.name
+				},
+				message=f"Subject {student_code} is registered in CompreFace (confirmed by database)"
+			)
+
+		# Fallback to API check if database flag is not set
 		import time
 		subject_exists = False
 		subject_info = None
@@ -403,33 +427,19 @@ def check_compreface_subject(student_code=None):
 			if subject_check["success"]:
 				subject_exists = True
 				subject_info = subject_check.get("data", None)
+				# Update database flag if API check succeeds
+				if bus_student:
+					frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
 				break
 			elif attempt < 2:  # Don't sleep after last attempt
 				time.sleep(2)  # Wait 2 seconds between attempts
-
-		# If subject check is unreliable, check if we have recent sync records
-		if not subject_exists:
-			# Check if there's a recent successful sync for this student
-			recent_sync = frappe.db.sql("""
-				SELECT name, creation
-				FROM `tabERP Notification`
-				WHERE document_type = 'SIS Bus Student'
-				AND subject LIKE %s
-				AND message LIKE %s
-				AND creation > DATE_SUB(NOW(), INTERVAL 1 HOUR)
-				ORDER BY creation DESC
-				LIMIT 1
-			""", (f"%{student_code}%", "%face added to CompreFace%"), as_dict=True)
-
-			if recent_sync:
-				frappe.logger().info(f"Found recent sync record for {student_code}, assuming registered")
-				subject_exists = True
 
 		return success_response(
 			data={
 				"exists": subject_exists,
 				"subject_info": subject_info,
-				"verification_method": "api_check" if subject_info else "sync_record_check"
+				"verification_method": "api_check" if subject_info else "database_check",
+				"bus_student_id": bus_student.name if bus_student else None
 			},
 			message=f"Subject {student_code} {'exists' if subject_exists else 'does not exist'} in CompreFace"
 		)
@@ -549,12 +559,16 @@ def sync_bus_student_to_compreface():
 					time.sleep(2)  # Wait another 2 seconds
 
 			if verification_success:
+				# Update the bus student record to mark as registered
+				frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
 				return success_response(
 					message=f"Successfully synced student {bus_student.student_code} to CompreFace"
 				)
 			else:
 				# Log warning but return success since face addition worked
 				frappe.logger().warning(f"Sync verification failed for student {bus_student.student_code}, but face addition succeeded")
+				# Still mark as registered since the sync succeeded
+				frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
 				return success_response(
 					message=f"Student {bus_student.student_code} face added to CompreFace (verification unreliable)"
 				)

@@ -22,6 +22,7 @@
   "class_id",
   "route_id",
   "status",
+  "compreface_registered",
   "system_information",
   "campus_id",
   "school_year_id"
@@ -70,6 +71,14 @@
    "default": "Active",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "compreface_registered",
+   "fieldtype": "Check",
+   "label": "CompreFace Registered",
+   "default": 0,
+   "read_only": 1,
+   "description": "Whether this student is registered with CompreFace for face recognition"
   },
   {
    "fieldname": "system_information",
