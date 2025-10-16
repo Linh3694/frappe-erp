@@ -243,6 +243,7 @@ def create_bus_student_from_sis():
 					if verification_success:
 						# Update the bus student record to mark as registered
 						frappe.db.set_value("SIS Bus Student", student_data.name, "compreface_registered", 1)
+						frappe.db.commit()  # Ensure the change is committed
 						frappe.logger().info(f"✅ Updated CompreFace registration status for {student_data.student_code}")
 					else:
 						# Log warning but don't fail the entire operation
@@ -251,6 +252,7 @@ def create_bus_student_from_sis():
 						frappe.logger().info(f"Face addition was successful, verification may be unreliable with current API")
 						# Still mark as registered since the sync succeeded
 						frappe.db.set_value("SIS Bus Student", student_data.name, "compreface_registered", 1)
+						frappe.db.commit()  # Ensure the change is committed
 				else:
 					frappe.logger().warning(f"❌ CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
 
@@ -561,6 +563,7 @@ def sync_bus_student_to_compreface():
 			if verification_success:
 				# Update the bus student record to mark as registered
 				frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
+				frappe.db.commit()  # Ensure the change is committed
 				return success_response(
 					message=f"Successfully synced student {bus_student.student_code} to CompreFace"
 				)
@@ -569,6 +572,7 @@ def sync_bus_student_to_compreface():
 				frappe.logger().warning(f"Sync verification failed for student {bus_student.student_code}, but face addition succeeded")
 				# Still mark as registered since the sync succeeded
 				frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
+				frappe.db.commit()  # Ensure the change is committed
 				return success_response(
 					message=f"Student {bus_student.student_code} face added to CompreFace (verification unreliable)"
 				)
