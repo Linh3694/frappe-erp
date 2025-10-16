@@ -385,9 +385,32 @@ def check_compreface_subject(student_code=None):
 def sync_bus_student_to_compreface():
 	"""Sync a specific bus student to CompreFace"""
 	try:
-		student_id = frappe.form_dict.get("student_id")
+		# Try multiple sources for data
+		student_id = None
 
-		if not student_id:
+		# Try from form_dict first (for form-encoded data)
+		if frappe.local.form_dict:
+			student_id = frappe.local.form_dict.get("student_id")
+
+		# Try to parse JSON from request data
+		if not student_id and hasattr(frappe.request, 'data') and frappe.request.data:
+			try:
+				import json
+				raw_data = frappe.request.data
+				if isinstance(raw_data, bytes):
+					raw_data = raw_data.decode('utf-8')
+
+				json_data = json.loads(raw_data)
+				student_id = json_data.get("student_id")
+			except Exception as e:
+				pass  # JSON parse failed, continue to next method
+
+		# Last resort: try from frappe.form_dict
+		if not student_id and hasattr(frappe, 'form_dict') and frappe.form_dict:
+			student_id = frappe.form_dict.get("student_id")
+
+		if not student_id or str(student_id).strip() == "":
+			frappe.logger().error(f"Student ID validation failed in sync. student_id: '{student_id}'")
 			return error_response("Student ID is required")
 
 		# Get bus student details
