@@ -114,9 +114,6 @@ def create_bus_student(**data):
 def create_bus_student_from_sis():
 	"""Create a new bus student from SIS student data"""
 	try:
-		frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
-		frappe.logger().info(f"request data: {getattr(frappe.request, 'data', None)}")
-
 		# Try multiple sources for data
 		student_id = None
 		status = "Active"
@@ -125,7 +122,6 @@ def create_bus_student_from_sis():
 		if frappe.local.form_dict:
 			student_id = frappe.local.form_dict.get("student_id")
 			status = frappe.local.form_dict.get("status", "Active")
-			frappe.logger().info(f"From form_dict: student_id='{student_id}', status='{status}'")
 
 		# Try to parse JSON from request data
 		if not student_id and hasattr(frappe.request, 'data') and frappe.request.data:
@@ -134,22 +130,17 @@ def create_bus_student_from_sis():
 				raw_data = frappe.request.data
 				if isinstance(raw_data, bytes):
 					raw_data = raw_data.decode('utf-8')
-				frappe.logger().info(f"Raw request data: {raw_data}")
 
 				json_data = json.loads(raw_data)
 				student_id = json_data.get("student_id")
 				status = json_data.get("status", "Active")
-				frappe.logger().info(f"From JSON: student_id='{student_id}', status='{status}'")
 			except Exception as e:
-				frappe.logger().error(f"JSON parse failed: {str(e)}")
+				pass  # JSON parse failed, continue to next method
 
 		# Last resort: try from frappe.form_dict
 		if not student_id and hasattr(frappe, 'form_dict') and frappe.form_dict:
 			student_id = frappe.form_dict.get("student_id")
 			status = frappe.form_dict.get("status", "Active")
-			frappe.logger().info(f"From frappe.form_dict: student_id='{student_id}', status='{status}'")
-
-		frappe.logger().info(f"Final extracted student_id: '{student_id}', status: '{status}'")
 
 		if not student_id or str(student_id).strip() == "":
 			frappe.logger().error(f"Student ID validation failed. student_id: '{student_id}'")
@@ -206,26 +197,34 @@ def create_bus_student_from_sis():
 
 		# Sync to CompreFace in background if status is Active
 		if status == "Active":
-			compreface_result = sync_student_to_compreface(
-				student_data.student_code,
-				student_data.full_name,
-				student_data.campus_id,
-				student_data.school_year_id
-			)
+			# Check if student already exists in CompreFace
+			subject_check = compreFace_service.get_subject_info(student_data.student_code)
 
-			# If CompreFace sync fails, still create the bus student but log the error
-			if not compreface_result["success"]:
-				frappe.logger().warning(f"CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
+			if subject_check["success"]:
+				# Student already exists in CompreFace, skip sync
+				frappe.logger().info(f"Student {student_data.student_code} already exists in CompreFace, skipping sync")
+			else:
+				# Student doesn't exist, proceed with sync
+				compreface_result = sync_student_to_compreface(
+					student_data.student_code,
+					student_data.full_name,
+					student_data.campus_id,
+					student_data.school_year_id
+				)
 
-				# Create a notification for failed sync
-				frappe.get_doc({
-					"doctype": "ERP Notification",
-					"title": f"CompreFace Sync Failed - {student_data.student_code}",
-					"message": f"Failed to sync student {student_data.student_code} to CompreFace: {compreface_result.get('message', '')}",
-					"notification_type": "alert",
-					"user": frappe.session.user or "Administrator"
-				}).insert(ignore_permissions=True)
-				frappe.db.commit()
+				# If CompreFace sync fails, still create the bus student but log the error
+				if not compreface_result["success"]:
+					frappe.logger().warning(f"CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
+
+					# Create a notification for failed sync
+					frappe.get_doc({
+						"doctype": "ERP Notification",
+						"title": f"CompreFace Sync Failed - {student_data.student_code}",
+						"message": f"Failed to sync student {student_data.student_code} to CompreFace: {compreface_result.get('message', '')}",
+						"notification_type": "alert",
+						"user": frappe.session.user or "Administrator"
+					}).insert(ignore_permissions=True)
+					frappe.db.commit()
 
 		return success_response(
 			data={
@@ -340,6 +339,28 @@ def get_available_routes():
 		WHERE status = 'Hoạt động'
 		ORDER BY route_name
 	""", as_dict=True)
+
+
+@frappe.whitelist()
+def check_compreface_subject(student_code=None):
+	"""Check if a student subject exists in CompreFace"""
+	try:
+		if not student_code:
+			return error_response("Student code is required")
+
+		subject_check = compreFace_service.get_subject_info(student_code)
+
+		return success_response(
+			data={
+				"exists": subject_check["success"],
+				"subject_info": subject_check.get("data", None)
+			},
+			message=f"Subject {student_code} {'exists' if subject_check['success'] else 'does not exist'} in CompreFace"
+		)
+
+	except Exception as e:
+		frappe.log_error(f"Error checking CompreFace subject: {str(e)}")
+		return error_response(f"Failed to check CompreFace subject: {str(e)}")
 
 
 @frappe.whitelist()
