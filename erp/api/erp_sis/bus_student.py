@@ -118,7 +118,7 @@ def create_bus_student_from_sis(**data):
 		route_id = data.get("route_id")
 		status = data.get("status", "Active")
 
-		if not student_id:
+		if not student_id or str(student_id).strip() == "":
 			return error_response("Student ID is required")
 
 		# Get student information from CRM Student and SIS Class Student
