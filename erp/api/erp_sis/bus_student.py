@@ -109,6 +109,115 @@ def create_bus_student(**data):
 		frappe.db.rollback()
 		return error_response(f"Failed to create bus student: {str(e)}")
 
+
+@frappe.whitelist()
+def create_bus_student_from_sis(**data):
+	"""Create a new bus student from SIS student data"""
+	try:
+		student_id = data.get("student_id")
+		route_id = data.get("route_id")
+		status = data.get("status", "Active")
+
+		if not student_id:
+			return validation_error_response(
+				message="Student ID is required",
+				errors={"student_id": ["Required"]}
+			)
+
+		# Get student information from CRM Student and SIS Class Student
+		student_info = frappe.db.sql("""
+			SELECT
+				s.name as student_id,
+				s.student_name as full_name,
+				s.student_code,
+				s.dob,
+				s.gender,
+				s.campus_id,
+				cs.class_id,
+				cs.school_year_id,
+				c.title as class_name
+			FROM `tabCRM Student` s
+			INNER JOIN `tabSIS Class Student` cs ON s.name = cs.student_id
+			LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
+			WHERE s.name = %s
+				AND cs.class_type = 'regular'
+			ORDER BY cs.creation DESC
+			LIMIT 1
+		""", (student_id,), as_dict=True)
+
+		if not student_info:
+			return error_response("Student not found in SIS Class Student records")
+
+		student_data = student_info[0]
+
+		# Check if student is already assigned to bus
+		existing_bus_student = frappe.db.exists("SIS Bus Student", {
+			"student_code": student_data.student_code,
+			"campus_id": student_data.campus_id
+		})
+
+		if existing_bus_student:
+			return error_response(f"Student {student_data.student_code} is already assigned to bus service")
+
+		# Create bus student record
+		doc = frappe.get_doc({
+			"doctype": "SIS Bus Student",
+			"full_name": student_data.full_name,
+			"student_code": student_data.student_code,
+			"class_id": student_data.class_id,
+			"route_id": route_id,
+			"status": status,
+			"campus_id": student_data.campus_id,
+			"school_year_id": student_data.school_year_id
+		})
+
+		doc.insert()
+		frappe.db.commit()
+
+		# Sync to CompreFace in background if status is Active
+		if status == "Active":
+			compreface_result = sync_student_to_compreface(
+				student_data.student_code,
+				student_data.full_name,
+				student_data.campus_id,
+				student_data.school_year_id
+			)
+
+			# If CompreFace sync fails, still create the bus student but log the error
+			if not compreface_result["success"]:
+				frappe.logger().warning(f"CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
+
+				# Create a notification for failed sync
+				frappe.get_doc({
+					"doctype": "ERP Notification",
+					"title": f"CompreFace Sync Failed - {student_data.student_code}",
+					"message": f"Failed to sync student {student_data.student_code} to CompreFace: {compreface_result.get('message', '')}",
+					"notification_type": "Error",
+					"user": frappe.session.user or "Administrator"
+				}).insert(ignore_permissions=True)
+				frappe.db.commit()
+
+		return success_response(
+			data={
+				"name": doc.name,
+				"full_name": doc.full_name,
+				"student_code": doc.student_code,
+				"class_id": doc.class_id,
+				"route_id": doc.route_id,
+				"status": doc.status,
+				"campus_id": doc.campus_id,
+				"school_year_id": doc.school_year_id,
+				"created_at": doc.creation,
+				"updated_at": doc.modified
+			},
+			message="Bus student created successfully from SIS data"
+		)
+
+	except Exception as e:
+		frappe.log_error(f"Error creating bus student from SIS: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to create bus student from SIS: {str(e)}")
+
 @frappe.whitelist()
 def update_bus_student(name, **data):
 	"""Update an existing bus student"""
@@ -201,6 +310,102 @@ def get_available_routes():
 		WHERE status = 'Hoạt động'
 		ORDER BY route_name
 	""", as_dict=True)
+
+
+@frappe.whitelist()
+def get_students_for_bus_selection(search_term=None, school_year_id=None):
+	"""Get students available for bus assignment with search functionality"""
+	try:
+		# Get current user's campus information from roles
+		campus_id = get_current_campus_from_context()
+
+		if not campus_id:
+			campus_id = "campus-1"
+
+		# Build base query to get students from SIS Class Student
+		query = """
+			SELECT DISTINCT
+				s.name as student_id,
+				s.student_name as full_name,
+				s.student_code,
+				s.dob,
+				s.gender,
+				s.campus_id,
+				cs.class_id,
+				cs.school_year_id,
+				c.title as class_name,
+				sy.title_vn as school_year_name
+			FROM `tabCRM Student` s
+			INNER JOIN `tabSIS Class Student` cs ON s.name = cs.student_id
+			LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
+			LEFT JOIN `tabSIS School Year` sy ON cs.school_year_id = sy.name
+			WHERE s.campus_id = %s
+				AND cs.class_type = 'regular'
+		"""
+
+		params = [campus_id]
+
+		# Add school year filter if provided
+		if school_year_id:
+			query += " AND cs.school_year_id = %s"
+			params.append(school_year_id)
+
+		# Add search filter if provided
+		if search_term and str(search_term).strip():
+			search_pattern = f"%{str(search_term).strip()}%"
+			query += """
+				AND (LOWER(s.student_name) LIKE LOWER(%s)
+					OR LOWER(s.student_code) LIKE LOWER(%s)
+					OR LOWER(c.title) LIKE LOWER(%s))
+			"""
+			params.extend([search_pattern, search_pattern, search_pattern])
+
+		query += " ORDER BY s.student_name ASC"
+
+		students = frappe.db.sql(query, params, as_dict=True)
+
+		# Enrich with photo URLs
+		if students:
+			student_ids = [s.get('student_id') for s in students if s.get('student_id')]
+			if student_ids:
+				photos = frappe.db.sql("""
+					SELECT
+						student_id,
+						photo,
+						upload_date
+					FROM `tabSIS Photo`
+					WHERE student_id IN %(student_ids)s
+						AND type = 'student'
+						AND status = 'Active'
+					ORDER BY upload_date DESC
+				""", {"student_ids": student_ids}, as_dict=True)
+
+				# Create photo mapping
+				photo_map = {}
+				for photo in photos:
+					student_id = photo.get('student_id')
+					if student_id and student_id not in photo_map:
+						photo_url = photo.get('photo')
+						if photo_url:
+							if photo_url.startswith('/files/'):
+								photo_url = frappe.utils.get_url(photo_url)
+							elif not photo_url.startswith('http'):
+								photo_url = frappe.utils.get_url('/files/' + photo_url)
+							photo_map[student_id] = photo_url
+
+				# Add photo URLs to students
+				for student in students:
+					student_id = student.get('student_id')
+					student['photo_url'] = photo_map.get(student_id)
+
+		return success_response(
+			data=students,
+			message=f"Found {len(students)} students available for bus assignment"
+		)
+
+	except Exception as e:
+		frappe.log_error(f"Error getting students for bus selection: {str(e)}")
+		return error_response(f"Failed to get students for bus selection: {str(e)}")
 
 
 def get_student_photo_url(student_code: str, campus_id: str, school_year_id: str) -> str:
