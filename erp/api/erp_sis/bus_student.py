@@ -575,6 +575,25 @@ def get_student_photo_url(student_code: str, campus_id: str, school_year_id: str
 			LIMIT 1
 		""", (student_code,), as_dict=True)
 
+		frappe.logger().info(f"Photo query for student {student_code}: found {len(photo) if photo else 0} photos")
+
+		if photo:
+			frappe.logger().info(f"Photo data: {photo[0]}")
+
+		all_photos = frappe.db.sql("""
+			SELECT name, student_id, type, status, photo
+			FROM `tabSIS Photo`
+			WHERE student_id = %s
+		""", (student_code,), as_dict=True)
+
+		frappe.logger().info(f"All photos for student {student_code}: {len(all_photos) if all_photos else 0} records")
+		if all_photos:
+			frappe.logger().info(f"Sample photo records: {all_photos[:2]}")
+
+		# Debug: Check table structure
+		columns = frappe.db.sql("DESCRIBE `tabSIS Photo`", as_dict=True)
+		frappe.logger().info(f"SIS Photo table columns: {[col['Field'] for col in columns]}")
+
 		if photo and photo[0].photo:
 			# Convert relative URL to full URL
 			file_url = photo[0].photo
