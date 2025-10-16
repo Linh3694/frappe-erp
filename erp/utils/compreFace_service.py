@@ -25,16 +25,26 @@ class CompreFaceService:
         }
 
     def _get_image_data(self, image_url: str) -> Optional[bytes]:
-        """Convert image URL to base64 string with validation"""
+        """Convert image URL to binary data with validation"""
         try:
             import io
             from PIL import Image
+            import base64
 
             # Get image data
             if image_url.startswith('/files/') or image_url.startswith('files/'):
                 file_path = frappe.get_site_path('public', image_url.lstrip('/'))
                 with open(file_path, 'rb') as f:
                     image_data = f.read()
+            elif image_url.startswith('data:image/'):
+                # Handle data URL (base64 encoded image)
+                try:
+                    # Extract base64 data from data URL
+                    header, base64_data = image_url.split(',', 1)
+                    image_data = base64.b64decode(base64_data)
+                except (ValueError, base64.binascii.Error) as e:
+                    frappe.logger().error(f"Invalid data URL format: {str(e)}")
+                    return None
             else:
                 # If it's a full URL, download the image
                 response = requests.get(image_url, timeout=30)
@@ -144,16 +154,19 @@ class CompreFaceService:
                     "message": "Could not convert image to binary data"
                 }
 
-            # Try PUT /subjects/{subject} with multipart form data (older CompreFace API)
-            url = f"{self.recognition_api}/subjects/{subject_id}"
+            # Try POST /faces with subject parameter (newer CompreFace API)
+            url = f"{self.recognition_api}/faces"
 
-            # Use multipart/form-data with binary image data
+            # Use multipart/form-data with binary image data and subject parameter
             files = {
                 'file': ('image.jpg', image_data, 'image/jpeg')
             }
+            data = {
+                'subject': subject_id
+            }
 
-            frappe.logger().info(f"CompreFace add_face request: PUT {url} (multipart, {len(image_data)} bytes)")
-            response = requests.put(url, files=files, headers={'x-api-key': self.api_key}, timeout=60)
+            frappe.logger().info(f"CompreFace add_face request: POST {url} (multipart, subject: {subject_id}, {len(image_data)} bytes)")
+            response = requests.post(url, files=files, data=data, headers={'x-api-key': self.api_key}, timeout=60)
 
             frappe.logger().info(f"CompreFace response status: {response.status_code}")
             frappe.logger().info(f"CompreFace response headers: {dict(response.headers)}")
