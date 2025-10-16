@@ -775,9 +775,12 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 			}
 
 		# Create subject in CompreFace
+		frappe.logger().info(f"About to create subject {student_code} with name {student_name}")
 		create_result = compreFace_service.create_subject(student_code, student_name)
+		frappe.logger().info(f"Create subject result: {create_result}")
 
 		if not create_result["success"]:
+			frappe.logger().error(f"Subject creation failed for {student_code}: {create_result}")
 			return create_result
 
 		# Add face to subject
