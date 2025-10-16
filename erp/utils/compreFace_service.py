@@ -112,12 +112,14 @@ class CompreFaceService:
 
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 409:  # Subject already exists
+                frappe.logger().info(f"Subject {subject_id} already exists (409), treating as success")
                 return {
                     "success": True,
                     "data": {"subject": subject_id},
                     "message": f"Subject {subject_id} already exists"
                 }
             else:
+                frappe.logger().error(f"HTTP Error creating CompreFace subject {subject_id}: Status {e.response.status_code}, Response: {e.response.text if hasattr(e.response, 'text') else 'No response text'}")
                 frappe.log_error(f"HTTP Error creating CompreFace subject: {str(e)}", "CompreFace Service")
                 return {
                     "success": False,
