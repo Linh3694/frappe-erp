@@ -657,6 +657,7 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 	try:
 		# Get student's photo
 		photo_url = get_student_photo_url(student_code, campus_id, school_year_id)
+		frappe.logger().info(f"Syncing student {student_code} to CompreFace. Photo URL: {photo_url}")
 
 		if not photo_url:
 			return {
