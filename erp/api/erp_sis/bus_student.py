@@ -161,7 +161,6 @@ def create_bus_student_from_sis(**data):
 			"full_name": student_data.full_name,
 			"student_code": student_data.student_code,
 			"class_id": student_data.class_id,
-			"route_id": route_id,
 			"status": status,
 			"campus_id": student_data.campus_id,
 			"school_year_id": student_data.school_year_id
