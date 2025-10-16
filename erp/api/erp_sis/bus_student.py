@@ -119,10 +119,7 @@ def create_bus_student_from_sis(**data):
 		status = data.get("status", "Active")
 
 		if not student_id:
-			return validation_error_response(
-				message="Student ID is required",
-				errors={"student_id": ["Required"]}
-			)
+			return error_response("Student ID is required")
 
 		# Get student information from CRM Student and SIS Class Student
 		student_info = frappe.db.sql("""
