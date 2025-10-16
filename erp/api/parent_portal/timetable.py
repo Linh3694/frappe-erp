@@ -634,26 +634,37 @@ def get_teacher_info():
 
         teacher_ids = []
 
-        # Try to parse from raw request data (URL-encoded)
+        # Try to parse from raw request data (JSON body)
         if hasattr(frappe.request, 'data') and frappe.request.data:
             try:
-                # Parse URL-encoded data manually
+                # Parse JSON data
                 data_str = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else str(frappe.request.data)
                 logs.append(f"DEBUG: Raw request data: {data_str[:200]}...")  # First 200 chars
 
-                from urllib.parse import parse_qs
-                parsed_data = parse_qs(data_str)
-                logs.append(f"DEBUG: Parsed data keys: {list(parsed_data.keys())}")
+                # Try to parse as JSON first
+                try:
+                    parsed_json = json.loads(data_str)
+                    logs.append(f"DEBUG: Parsed JSON keys: {list(parsed_json.keys()) if isinstance(parsed_json, dict) else 'not a dict'}")
+                    
+                    if isinstance(parsed_json, dict) and 'teacher_ids' in parsed_json:
+                        teacher_ids = parsed_json['teacher_ids']
+                        logs.append(f"DEBUG: Found teacher_ids in JSON body: {teacher_ids}")
+                except json.JSONDecodeError:
+                    logs.append(f"DEBUG: Not valid JSON, trying URL-encoded parsing")
+                    # Fallback to URL-encoded parsing
+                    from urllib.parse import parse_qs
+                    parsed_data = parse_qs(data_str)
+                    logs.append(f"DEBUG: Parsed data keys: {list(parsed_data.keys())}")
 
-                # Extract teacher_ids
-                teacher_ids_params = []
-                for key, values in parsed_data.items():
-                    if key.startswith('teacher_ids[') and key.endswith(']'):
-                        teacher_ids_params.extend(values)
+                    # Extract teacher_ids
+                    teacher_ids_params = []
+                    for key, values in parsed_data.items():
+                        if key.startswith('teacher_ids[') and key.endswith(']'):
+                            teacher_ids_params.extend(values)
 
-                if teacher_ids_params:
-                    teacher_ids = teacher_ids_params
-                    logs.append(f"DEBUG: Found teacher_ids in raw data: {teacher_ids}")
+                    if teacher_ids_params:
+                        teacher_ids = teacher_ids_params
+                        logs.append(f"DEBUG: Found teacher_ids in URL-encoded data: {teacher_ids}")
 
             except Exception as e:
                 logs.append(f"DEBUG: Failed to parse raw request data: {e}")
