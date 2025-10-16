@@ -87,18 +87,27 @@ def create_bus_student(**data):
 
 		# Sync to CompreFace in background
 		if doc.status == "Active":  # Only sync active students
-			frappe.enqueue(
-				method="erp.api.erp_sis.bus_student.sync_student_to_compreface_background",
-				queue="default",
-				timeout=300,
-				job_name=f"sync_student_{doc.student_code}",
-				**{
-					"student_code": doc.student_code,
-					"student_name": doc.full_name,
-					"campus_id": doc.campus_id,
-					"school_year_id": doc.school_year_id
-				}
+			# Get student_id from CRM Student using student_code
+			student_record = frappe.get_all("CRM Student",
+				filters={"student_code": doc.student_code},
+				fields=["name"],
+				limit=1
 			)
+
+			if student_record:
+				crm_student_id = student_record[0].name
+				frappe.enqueue(
+					method="erp.api.erp_sis.bus_student.sync_student_to_compreface_background",
+					queue="default",
+					timeout=300,
+					job_name=f"sync_student_{doc.student_code}",
+					**{
+						"student_id": crm_student_id,  # Use CRM Student ID
+						"student_name": doc.full_name,
+						"campus_id": doc.campus_id,
+						"school_year_id": doc.school_year_id
+					}
+				)
 
 		return success_response(
 			data=doc.as_dict(),
@@ -279,18 +288,27 @@ def update_bus_student(name, **data):
 		if "status" in data:
 			if data["status"] == "Active" and old_status != "Active":
 				# Status changed to Active - sync to CompreFace
-				frappe.enqueue(
-					method="erp.api.erp_sis.bus_student.sync_student_to_compreface_background",
-					queue="default",
-					timeout=300,
-					job_name=f"sync_student_{doc.student_code}",
-					**{
-						"student_code": doc.student_code,
-						"student_name": doc.full_name,
-						"campus_id": doc.campus_id,
-						"school_year_id": doc.school_year_id
-					}
+				# Get student_id from CRM Student using student_code
+				student_record = frappe.get_all("CRM Student",
+					filters={"student_code": doc.student_code},
+					fields=["name"],
+					limit=1
 				)
+
+				if student_record:
+					crm_student_id = student_record[0].name
+					frappe.enqueue(
+						method="erp.api.erp_sis.bus_student.sync_student_to_compreface_background",
+						queue="default",
+						timeout=300,
+						job_name=f"sync_student_{doc.student_code}",
+						**{
+							"student_id": crm_student_id,  # Use CRM Student ID
+							"student_name": doc.full_name,
+							"campus_id": doc.campus_id,
+							"school_year_id": doc.school_year_id
+						}
+					)
 			elif data["status"] == "Inactive" and old_status == "Active":
 				# Status changed to Inactive - remove from CompreFace
 				frappe.enqueue(
@@ -427,9 +445,21 @@ def sync_bus_student_to_compreface():
 				message=f"Student {bus_student.student_code} already exists in CompreFace"
 			)
 
+		# Get student_id from CRM Student using student_code
+		student_record = frappe.get_all("CRM Student",
+			filters={"student_code": bus_student.student_code},
+			fields=["name"],
+			limit=1
+		)
+
+		if not student_record:
+			return error_response(f"CRM Student record not found for code {bus_student.student_code}")
+
+		crm_student_id = student_record[0].name
+
 		# Proceed with sync
 		compreface_result = sync_student_to_compreface(
-			bus_student.student_id,  # Use student_id (CRM Student ID) not student_code
+			crm_student_id,  # Use CRM Student ID
 			bus_student.full_name,
 			bus_student.campus_id,
 			bus_student.school_year_id
