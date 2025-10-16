@@ -222,7 +222,7 @@ def create_bus_student_from_sis():
 					"doctype": "ERP Notification",
 					"title": f"CompreFace Sync Failed - {student_data.student_code}",
 					"message": f"Failed to sync student {student_data.student_code} to CompreFace: {compreface_result.get('message', '')}",
-					"notification_type": "Error",
+					"notification_type": "alert",
 					"user": frappe.session.user or "Administrator"
 				}).insert(ignore_permissions=True)
 				frappe.db.commit()
@@ -582,7 +582,7 @@ def sync_student_to_compreface_background(student_code: str, student_name: str, 
 				"doctype": "ERP Notification",
 				"title": f"CompreFace Sync Failed - {student_code}",
 				"message": f"Failed to sync student {student_code} to CompreFace: {result.get('message', '')}",
-				"notification_type": "Error",
+				"notification_type": "alert",
 				"user": "Administrator"  # Or get current user
 			}).insert(ignore_permissions=True)
 
