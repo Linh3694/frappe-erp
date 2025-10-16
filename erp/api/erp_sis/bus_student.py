@@ -764,8 +764,9 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 			frappe.logger().error(f"CompreFace service test failed: {str(test_e)}")
 
 		# Get student's photo
+		frappe.logger().info(f"Getting photo URL for student {student_code}, campus {campus_id}, year {school_year_id}")
 		photo_url = get_student_photo_url(student_code, campus_id, school_year_id)
-		frappe.logger().info(f"Syncing student {student_code} to CompreFace. Photo URL: {photo_url}")
+		frappe.logger().info(f"Photo URL result: {photo_url}")
 
 		if not photo_url:
 			return {
@@ -792,7 +793,9 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 			return create_result
 
 		# Add face to subject
+		frappe.logger().info(f"About to add face for {student_code} with photo URL: {photo_url}")
 		add_face_result = compreFace_service.add_face_to_subject(student_code, photo_url)
+		frappe.logger().info(f"Add face result: {add_face_result}")
 
 		if add_face_result["success"]:
 			frappe.logger().info(f"Successfully synced student {student_code} to CompreFace")
