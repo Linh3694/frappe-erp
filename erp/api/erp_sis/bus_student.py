@@ -393,14 +393,45 @@ def check_compreface_subject(student_code=None):
 		if not student_code:
 			return error_response("Student code is required")
 
-		subject_check = compreFace_service.get_subject_info(student_code)
+		# Try multiple times to check subject existence (similar to verification logic)
+		import time
+		subject_exists = False
+		subject_info = None
+
+		for attempt in range(3):
+			subject_check = compreFace_service.get_subject_info(student_code)
+			if subject_check["success"]:
+				subject_exists = True
+				subject_info = subject_check.get("data", None)
+				break
+			elif attempt < 2:  # Don't sleep after last attempt
+				time.sleep(2)  # Wait 2 seconds between attempts
+
+		# If subject check is unreliable, check if we have recent sync records
+		if not subject_exists:
+			# Check if there's a recent successful sync for this student
+			recent_sync = frappe.db.sql("""
+				SELECT name, creation
+				FROM `tabERP Notification`
+				WHERE document_type = 'SIS Bus Student'
+				AND subject LIKE %s
+				AND message LIKE %s
+				AND creation > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+				ORDER BY creation DESC
+				LIMIT 1
+			""", (f"%{student_code}%", "%face added to CompreFace%"), as_dict=True)
+
+			if recent_sync:
+				frappe.logger().info(f"Found recent sync record for {student_code}, assuming registered")
+				subject_exists = True
 
 		return success_response(
 			data={
-				"exists": subject_check["success"],
-				"subject_info": subject_check.get("data", None)
+				"exists": subject_exists,
+				"subject_info": subject_info,
+				"verification_method": "api_check" if subject_info else "sync_record_check"
 			},
-			message=f"Subject {student_code} {'exists' if subject_check['success'] else 'does not exist'} in CompreFace"
+			message=f"Subject {student_code} {'exists' if subject_exists else 'does not exist'} in CompreFace"
 		)
 
 	except Exception as e:
