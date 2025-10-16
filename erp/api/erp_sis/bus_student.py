@@ -27,7 +27,7 @@ def get_all_bus_students():
 			SELECT
 				bs.name, bs.full_name, bs.student_code, bs.class_id,
 				bs.route_id, bs.status, bs.campus_id, bs.school_year_id,
-				bs.created_at, bs.updated_at,
+				bs.creation as created_at, bs.modified as updated_at,
 				r.route_name, c.class_name
 			FROM `tabSIS Bus Student` bs
 			LEFT JOIN `tabSIS Bus Route` r ON bs.route_id = r.name
@@ -54,7 +54,7 @@ def get_bus_student(name):
 			SELECT
 				bs.name, bs.full_name, bs.student_code, bs.class_id,
 				bs.route_id, bs.status, bs.campus_id, bs.school_year_id,
-				bs.created_at, bs.updated_at,
+				bs.creation as created_at, bs.modified as updated_at,
 				r.route_name, c.class_name
 			FROM `tabSIS Bus Student` bs
 			LEFT JOIN `tabSIS Bus Route` r ON bs.route_id = r.name
