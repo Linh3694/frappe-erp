@@ -110,14 +110,49 @@ def create_bus_student(**data):
 		return error_response(f"Failed to create bus student: {str(e)}")
 
 
-@frappe.whitelist()
-def create_bus_student_from_sis(**data):
+@frappe.whitelist(methods=["POST"])
+def create_bus_student_from_sis():
 	"""Create a new bus student from SIS student data"""
 	try:
-		student_id = data.get("student_id")
-		status = data.get("status", "Active")
+		frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
+		frappe.logger().info(f"request data: {getattr(frappe.request, 'data', None)}")
+
+		# Try multiple sources for data
+		student_id = None
+		status = "Active"
+
+		# Try from form_dict first (for form-encoded data)
+		if frappe.local.form_dict:
+			student_id = frappe.local.form_dict.get("student_id")
+			status = frappe.local.form_dict.get("status", "Active")
+			frappe.logger().info(f"From form_dict: student_id='{student_id}', status='{status}'")
+
+		# Try to parse JSON from request data
+		if not student_id and hasattr(frappe.request, 'data') and frappe.request.data:
+			try:
+				import json
+				raw_data = frappe.request.data
+				if isinstance(raw_data, bytes):
+					raw_data = raw_data.decode('utf-8')
+				frappe.logger().info(f"Raw request data: {raw_data}")
+
+				json_data = json.loads(raw_data)
+				student_id = json_data.get("student_id")
+				status = json_data.get("status", "Active")
+				frappe.logger().info(f"From JSON: student_id='{student_id}', status='{status}'")
+			except Exception as e:
+				frappe.logger().error(f"JSON parse failed: {str(e)}")
+
+		# Last resort: try from frappe.form_dict
+		if not student_id and hasattr(frappe, 'form_dict') and frappe.form_dict:
+			student_id = frappe.form_dict.get("student_id")
+			status = frappe.form_dict.get("status", "Active")
+			frappe.logger().info(f"From frappe.form_dict: student_id='{student_id}', status='{status}'")
+
+		frappe.logger().info(f"Final extracted student_id: '{student_id}', status: '{status}'")
 
 		if not student_id or str(student_id).strip() == "":
+			frappe.logger().error(f"Student ID validation failed. student_id: '{student_id}'")
 			return error_response("Student ID is required")
 
 		# Get student information from CRM Student and SIS Class Student
