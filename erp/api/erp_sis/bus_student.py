@@ -566,22 +566,23 @@ def get_student_photo_url(student_code: str, campus_id: str, school_year_id: str
 	try:
 		# Get the latest photo for this student
 		photo = frappe.db.sql("""
-			SELECT file_url
+			SELECT photo
 			FROM `tabSIS Photo`
-			WHERE photo_type = 'student'
-			AND student_code = %s
-			AND campus_id = %s
-			AND school_year_id = %s
-			ORDER BY creation DESC
+			WHERE type = 'student'
+			AND student_id = %s
+			AND status = 'Active'
+			ORDER BY upload_date DESC, creation DESC
 			LIMIT 1
-		""", (student_code, campus_id, school_year_id), as_dict=True)
+		""", (student_code,), as_dict=True)
 
-		if photo and photo[0].file_url:
+		if photo and photo[0].photo:
 			# Convert relative URL to full URL
-			file_url = photo[0].file_url
+			file_url = photo[0].photo
 			if file_url.startswith('/files/'):
 				site_url = frappe.utils.get_url()
 				return f"{site_url}{file_url}"
+			elif not file_url.startswith('http'):
+				return frappe.utils.get_url('/files/' + file_url)
 			return file_url
 
 		return ""
