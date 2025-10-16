@@ -381,6 +381,57 @@ def check_compreface_subject(student_code=None):
 		return error_response(f"Failed to check CompreFace subject: {str(e)}")
 
 
+@frappe.whitelist(methods=["POST"])
+def sync_bus_student_to_compreface():
+	"""Sync a specific bus student to CompreFace"""
+	try:
+		student_id = frappe.form_dict.get("student_id")
+
+		if not student_id:
+			return error_response("Student ID is required")
+
+		# Get bus student details
+		bus_student = frappe.get_doc("SIS Bus Student", student_id)
+
+		if not bus_student:
+			return error_response("Bus student not found")
+
+		# Check if already exists in CompreFace
+		subject_check = compreFace_service.get_subject_info(bus_student.student_code)
+
+		if subject_check["success"]:
+			return success_response(
+				message=f"Student {bus_student.student_code} already exists in CompreFace"
+			)
+
+		# Proceed with sync
+		compreface_result = sync_student_to_compreface(
+			bus_student.student_code,
+			bus_student.full_name,
+			bus_student.campus_id,
+			bus_student.school_year_id
+		)
+
+		# Verify sync result
+		if compreface_result["success"]:
+			import time
+			time.sleep(1)  # Wait for processing
+
+			verify_check = compreFace_service.get_subject_info(bus_student.student_code)
+			if verify_check["success"]:
+				return success_response(
+					message=f"Successfully synced student {bus_student.student_code} to CompreFace"
+				)
+			else:
+				return error_response(f"Sync verification failed for student {bus_student.student_code}")
+
+		return error_response(f"Failed to sync student {bus_student.student_code} to CompreFace: {compreface_result.get('message', '')}")
+
+	except Exception as e:
+		frappe.log_error(f"Error syncing bus student to CompreFace: {str(e)}")
+		return error_response(f"Failed to sync bus student to CompreFace: {str(e)}")
+
+
 @frappe.whitelist()
 def get_students_for_bus_selection(search_term=None, school_year_id=None):
 	"""Get students available for bus assignment with search functionality"""
