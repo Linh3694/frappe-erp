@@ -144,23 +144,24 @@ class CompreFaceService:
                     "message": "Could not convert image to binary data"
                 }
 
-            # CompreFace API to add face: POST /api/v1/recognition/faces
-            url = f"{self.recognition_api}/faces"
+            # Try PUT /subjects/{subject} with multipart form data (older CompreFace API)
+            url = f"{self.recognition_api}/subjects/{subject_id}"
 
             # Use multipart/form-data with binary image data
             files = {
                 'file': ('image.jpg', image_data, 'image/jpeg')
             }
-            data = {
-                'subject': subject_id
-            }
 
-            frappe.logger().info(f"CompreFace add_face request: POST {url} for subject {subject_id} (multipart, {len(image_data)} bytes)")
-            response = requests.post(url, files=files, data=data, headers={'x-api-key': self.api_key}, timeout=60)
+            frappe.logger().info(f"CompreFace add_face request: PUT {url} (multipart, {len(image_data)} bytes)")
+            response = requests.put(url, files=files, headers={'x-api-key': self.api_key}, timeout=60)
+
+            frappe.logger().info(f"CompreFace response status: {response.status_code}")
+            frappe.logger().info(f"CompreFace response headers: {dict(response.headers)}")
+
             response.raise_for_status()
 
             result = response.json()
-            frappe.logger().info(f"Face added to CompreFace subject: {subject_id}")
+            frappe.logger().info(f"Face added to CompreFace subject: {subject_id}, result: {result}")
 
             return {
                 "success": True,
@@ -251,14 +252,88 @@ class CompreFaceService:
         Test available API endpoints for debugging
         """
         try:
-            # Test recognition API root
-            url = f"{self.recognition_api}"
-            response = requests.get(url, headers=self._get_headers(), timeout=30)
+            # Test basic connectivity first
+            frappe.logger().info(f"Testing CompreFace connectivity to: {self.base_url}")
+            response = requests.get(self.base_url, timeout=10)
+            frappe.logger().info(f"Base URL response: {response.status_code}")
+
+            # Test recognition API subjects endpoint (the one that works)
+            url = f"{self.recognition_api}/subjects"
+            frappe.logger().info(f"Testing subjects API: {url}")
+            response = requests.get(url, headers=self._get_headers(), timeout=10)
+            frappe.logger().info(f"Subjects API response: {response.status_code}")
+            subjects = response.json()
+
+            # Test different add face endpoints
+            test_endpoints = [
+                f"{self.recognition_api}/faces",
+                f"{self.recognition_api}/subjects/test_subject"
+            ]
+
+            endpoint_tests = {}
+            for endpoint in test_endpoints:
+                try:
+                    # Test OPTIONS or HEAD to see what methods are allowed
+                    head_response = requests.head(endpoint, headers=self._get_headers(), timeout=5)
+                    endpoint_tests[endpoint] = {
+                        "status_code": head_response.status_code,
+                        "allowed_methods": head_response.headers.get('Allow', 'Unknown')
+                    }
+                except Exception as ep_e:
+                    endpoint_tests[endpoint] = {"error": str(ep_e)}
+
             return {
                 "success": True,
-                "status_code": response.status_code,
-                "response": response.text[:500]  # First 500 chars
+                "connectivity": "OK",
+                "subjects_count": len(subjects.get("subjects", [])),
+                "endpoint_tests": endpoint_tests
             }
+        except requests.exceptions.ConnectionError as e:
+            frappe.logger().error(f"Connection error to CompreFace: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Cannot connect to CompreFace server at {self.base_url}",
+                "details": str(e)
+            }
+        except Exception as e:
+            frappe.logger().error(f"CompreFace test error: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    def test_add_face(self) -> Dict:
+        """
+        Test add face functionality with a simple test
+        """
+        try:
+            # Create a simple test subject first
+            create_result = self.create_subject("test_student", "Test Student")
+            if not create_result["success"]:
+                return create_result
+
+            # Create a simple test image (1x1 pixel JPEG)
+            from PIL import Image
+            import io
+
+            # Create a small red square as test image
+            test_image = Image.new('RGB', (100, 100), color='red')
+            img_buffer = io.BytesIO()
+            test_image.save(img_buffer, format='JPEG')
+            test_image_data = img_buffer.getvalue()
+
+            # Try to add the test face
+            add_result = self.add_face_to_subject("test_student", "data:image/jpeg;base64," + base64.b64encode(test_image_data).decode('utf-8'))
+
+            # Clean up test subject
+            self.delete_subject("test_student")
+
+            return {
+                "success": add_result["success"],
+                "create_result": create_result,
+                "add_result": add_result
+            }
+
         except Exception as e:
             return {
                 "success": False,

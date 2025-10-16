@@ -399,6 +399,34 @@ def check_compreface_subject(student_code=None):
 		return error_response(f"Failed to check CompreFace subject: {str(e)}")
 
 
+@frappe.whitelist()
+def test_compreface_connectivity():
+	"""Test CompreFace server connectivity"""
+	try:
+		result = compreFace_service.test_api_endpoints()
+		return result
+	except Exception as e:
+		frappe.log_error(f"Error testing CompreFace connectivity: {str(e)}", "Bus Student API")
+		return {
+			"success": False,
+			"error": str(e)
+		}
+
+
+@frappe.whitelist()
+def test_compreface_add_face():
+	"""Test CompreFace add face functionality"""
+	try:
+		result = compreFace_service.test_add_face()
+		return result
+	except Exception as e:
+		frappe.log_error(f"Error testing CompreFace add face: {str(e)}", "Bus Student API")
+		return {
+			"success": False,
+			"error": str(e)
+		}
+
+
 @frappe.whitelist(methods=["POST"])
 def sync_bus_student_to_compreface():
 	"""Sync a specific bus student to CompreFace"""
@@ -655,6 +683,15 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 		Dict with sync result
 	"""
 	try:
+		frappe.logger().info(f"Starting CompreFace sync for student {student_code}")
+
+		# Test CompreFace service connectivity
+		try:
+			test_result = compreFace_service.test_api_endpoints()
+			frappe.logger().info(f"CompreFace service test: {test_result}")
+		except Exception as test_e:
+			frappe.logger().error(f"CompreFace service test failed: {str(test_e)}")
+
 		# Get student's photo
 		photo_url = get_student_photo_url(student_code, campus_id, school_year_id)
 		frappe.logger().info(f"Syncing student {student_code} to CompreFace. Photo URL: {photo_url}")
