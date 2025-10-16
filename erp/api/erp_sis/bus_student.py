@@ -223,7 +223,8 @@ def create_bus_student_from_sis():
 				)
 
 				# Verify sync result by checking subject existence
-				if compreface_result["success"]:
+				# Only mark as registered if we have a photo AND sync succeeded
+				if compreface_result["success"] and photo_url:
 					frappe.logger().info(f"CompreFace sync reported success for {student_data.student_code}, verifying...")
 					# Add small delay and verify
 					import time
@@ -250,9 +251,11 @@ def create_bus_student_from_sis():
 						# The face addition succeeded, verification might be unreliable with new API
 						frappe.logger().warning(f"⚠️ CompreFace sync verification failed for {student_data.student_code} after success report, but proceeding")
 						frappe.logger().info(f"Face addition was successful, verification may be unreliable with current API")
-						# Still mark as registered since the sync succeeded
+						# Still mark as registered since the sync succeeded and we have a photo
 						frappe.db.set_value("SIS Bus Student", student_data.name, "compreface_registered", 1)
 						frappe.db.commit()  # Ensure the change is committed
+				else:
+					frappe.logger().warning(f"⚠️ CompreFace sync completed but no photo found for {student_data.student_code}")
 				else:
 					frappe.logger().warning(f"❌ CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
 
@@ -404,9 +407,16 @@ def check_compreface_subject(student_code=None):
 			if frappe.local.form_dict:
 				student_code = frappe.local.form_dict.get("student_code")
 
-			# Try from request args (for query parameters)
-			if not student_code and hasattr(frappe.request, 'args'):
-				student_code = frappe.request.args.get("student_code")
+			# Try from request args (for query parameters like ?student_code=WS12010059)
+			if not student_code:
+				try:
+					# In Frappe, query parameters are available through frappe.form_dict
+					# But for direct access, we can check frappe.request
+					import frappe
+					if hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+						student_code = frappe.request.args.get("student_code")
+				except:
+					pass
 
 			# Try to parse JSON from request data
 			if not student_code and hasattr(frappe.request, 'data') and frappe.request.data:
@@ -568,8 +578,10 @@ def sync_bus_student_to_compreface():
 			bus_student.school_year_id
 		)
 
-		# Verify sync result
-		if compreface_result["success"]:
+		# Verify sync result - only mark as registered if we actually have a photo
+		photo_exists = bool(get_student_photo_url(bus_student.student_code, bus_student.campus_id, bus_student.school_year_id))
+
+		if compreface_result["success"] and photo_exists:
 			import time
 			time.sleep(2)  # Wait for processing
 
@@ -591,14 +603,18 @@ def sync_bus_student_to_compreface():
 					message=f"Successfully synced student {bus_student.student_code} to CompreFace"
 				)
 			else:
-				# Log warning but return success since face addition worked
+				# Log warning but return success since face addition worked and we have a photo
 				frappe.logger().warning(f"Sync verification failed for student {bus_student.student_code}, but face addition succeeded")
-				# Still mark as registered since the sync succeeded
 				frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
 				frappe.db.commit()  # Ensure the change is committed
 				return success_response(
 					message=f"Student {bus_student.student_code} face added to CompreFace (verification unreliable)"
 				)
+		else:
+			if not photo_exists:
+				return error_response(f"Cannot register student {bus_student.student_code}: No photo found")
+			else:
+				return error_response(f"Failed to sync student {bus_student.student_code} to CompreFace: {compreface_result.get('message', '')}")
 
 		return error_response(f"Failed to sync student {bus_student.student_code} to CompreFace: {compreface_result.get('message', '')}")
 
