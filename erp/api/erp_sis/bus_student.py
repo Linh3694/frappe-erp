@@ -638,15 +638,27 @@ def sync_bus_student_to_compreface():
 			time.sleep(2)  # Wait for processing
 
 			# Verify with complete check (multiple attempts)
+			verification_status = None
 			for attempt in range(3):
+				frappe.logger().info(f"[CompreFace Sync] Verification attempt {attempt + 1}/3 for {bus_student.student_code}")
 				verify_check = compreFace_service.check_subject_complete(bus_student.student_code)
+				
 				if verify_check["success"]:
 					verify_data = verify_check.get("data", {})
+					verification_status = verify_data.get("status", "unknown")
+					
+					frappe.logger().info(
+						f"[CompreFace Sync] Verification result: "
+						f"subject_exists={verify_data.get('subject_exists')}, "
+						f"has_photos={verify_data.get('has_photos')}, "
+						f"photos_count={verify_data.get('photos_count', 0)}"
+					)
+					
 					if verify_data.get("subject_exists") and verify_data.get("has_photos"):
 						# Successfully verified - mark as registered
 						frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
 						frappe.db.commit()
-						frappe.logger().info(f"Successfully synced and verified student {bus_student.student_code}")
+						frappe.logger().info(f"[CompreFace Sync] ✓ Successfully synced and verified student {bus_student.student_code}")
 						
 						return success_response(
 							data={
@@ -655,20 +667,47 @@ def sync_bus_student_to_compreface():
 							},
 							message=f"Successfully synced student {bus_student.student_code} to CompreFace"
 						)
+				
 				if attempt < 2:  # Don't sleep after last attempt
 					time.sleep(2)  # Wait another 2 seconds
 			
-			# Sync succeeded but verification failed - still return success but with a note
-			return success_response(
-				data={
-					"status": "synced_unverified"
-				},
-				message=f"Synced student {bus_student.student_code} but verification is pending"
-			)
+			# Verification failed after all attempts
+			if verification_status == "no_subject":
+				# Subject doesn't exist at all - sync actually failed
+				frappe.logger().error(
+					f"[CompreFace Sync] ✗ Sync reported success but subject does not exist in CompreFace. "
+					f"This indicates add_face_to_subject failed and subject was cleaned up."
+				)
+				return error_response(
+					f"Sync failed: Subject {bus_student.student_code} was not created in CompreFace. "
+					f"This usually means face detection failed or image quality is poor."
+				)
+			elif verification_status == "subject_only":
+				# Subject exists but no photos - partial success
+				frappe.logger().warning(
+					f"[CompreFace Sync] ⚠ Subject {bus_student.student_code} created but no photos added. "
+					f"Face detection may have failed."
+				)
+				return error_response(
+					f"Partial sync: Subject created but face not added for {bus_student.student_code}. "
+					f"Face may not be detected in the image."
+				)
+			else:
+				# Unknown status - can't verify
+				frappe.logger().warning(
+					f"[CompreFace Sync] ⚠ Cannot verify sync status for {bus_student.student_code} after 3 attempts"
+				)
+				return success_response(
+					data={
+						"status": "synced_unverified"
+					},
+					message=f"Synced student {bus_student.student_code} but verification is pending (please check manually)"
+				)
 		else:
 			error_msg = compreface_result.get("message", "Unknown error")
-			frappe.logger().error(f"Failed to sync student {bus_student.student_code}: {error_msg}")
-			return error_response(f"Failed to sync student {bus_student.student_code} to CompreFace: {error_msg}")
+			error_detail = compreface_result.get("error_detail", error_msg)
+			frappe.logger().error(f"[CompreFace Sync] ✗ Failed to sync student {bus_student.student_code}: {error_detail}")
+			return error_response(f"Failed to sync student {bus_student.student_code}: {error_detail}")
 
 	except Exception as e:
 		frappe.log_error(f"Error syncing bus student to CompreFace: {str(e)}")
@@ -851,20 +890,39 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 		Dict with sync result
 	"""
 	try:
-		frappe.logger().info(f"Starting CompreFace sync for student {student_code}")
+		frappe.logger().info(f"[CompreFace Sync] Starting for student {student_code}")
+
+		# Test connectivity first
+		try:
+			connectivity_test = compreFace_service.test_api_endpoints()
+			if not connectivity_test.get("success"):
+				error_msg = f"CompreFace server not accessible: {connectivity_test.get('error', 'Unknown error')}"
+				frappe.logger().error(f"[CompreFace Sync] {error_msg}")
+				return {
+					"success": False,
+					"error": "Connection Error",
+					"message": error_msg
+				}
+			frappe.logger().info(f"[CompreFace Sync] Server connectivity OK")
+		except Exception as conn_e:
+			error_msg = f"Failed to test CompreFace connectivity: {str(conn_e)}"
+			frappe.logger().error(f"[CompreFace Sync] {error_msg}")
 
 		# Get student's photo first
 		photo_url = get_student_photo_url(student_code, campus_id, school_year_id)
 
 		if not photo_url:
-			frappe.logger().warning(f"No photo found for student {student_code}")
+			frappe.logger().warning(f"[CompreFace Sync] No photo found for student {student_code}")
 			return {
 				"success": False,
 				"error": "No photo found",
 				"message": f"No photo found for student {student_code}. Please upload a photo first."
 			}
+		
+		frappe.logger().info(f"[CompreFace Sync] Photo URL found: {photo_url[:50]}...")
 
 		# Check complete status of subject in CompreFace
+		frappe.logger().info(f"[CompreFace Sync] Checking subject status for {student_code}")
 		status_check = compreFace_service.check_subject_complete(student_code)
 		
 		subject_exists = False
@@ -878,31 +936,39 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 			should_create_subject = not subject_exists
 			
 			frappe.logger().info(
-				f"CompreFace status for {student_code}: "
-				f"subject_exists={subject_exists}, has_photos={has_photos}"
+				f"[CompreFace Sync] Status for {student_code}: "
+				f"subject_exists={subject_exists}, has_photos={has_photos}, photos_count={status_data.get('photos_count', 0)}"
 			)
+		else:
+			frappe.logger().warning(f"[CompreFace Sync] Could not check status, proceeding with create attempt")
 
 		# Create subject if needed
 		if should_create_subject:
-			frappe.logger().info(f"Creating subject {student_code} in CompreFace")
+			frappe.logger().info(f"[CompreFace Sync] Creating subject {student_code} in CompreFace")
 			create_result = compreFace_service.create_subject(student_code, student_name)
 			
 			if not create_result["success"]:
-				frappe.logger().error(f"Failed to create subject {student_code}: {create_result.get('message', '')}")
+				error_detail = create_result.get("error_detail", create_result.get("error", "Unknown error"))
+				frappe.logger().error(
+					f"[CompreFace Sync] Failed to create subject {student_code}: "
+					f"Error: {create_result.get('error', 'N/A')}, Detail: {error_detail}"
+				)
 				return {
 					"success": False,
 					"error": create_result.get("error", "Unknown error"),
-					"message": f"Failed to create subject in CompreFace: {create_result.get('message', '')}"
+					"error_detail": error_detail,
+					"message": create_result.get("message", f"Failed to create subject: {error_detail}")
 				}
+			frappe.logger().info(f"[CompreFace Sync] Subject {student_code} created successfully")
 		else:
-			frappe.logger().info(f"Subject {student_code} already exists in CompreFace")
+			frappe.logger().info(f"[CompreFace Sync] Subject {student_code} already exists, skipping creation")
 
 		# Add face to subject
-		frappe.logger().info(f"Adding face to subject {student_code}")
+		frappe.logger().info(f"[CompreFace Sync] Adding face to subject {student_code}")
 		add_face_result = compreFace_service.add_face_to_subject(student_code, photo_url)
 
 		if add_face_result["success"]:
-			frappe.logger().info(f"Successfully synced student {student_code} to CompreFace")
+			frappe.logger().info(f"[CompreFace Sync] ✓ Successfully synced student {student_code}")
 			return {
 				"success": True,
 				"message": f"Student {student_code} synced to CompreFace successfully",
@@ -912,26 +978,34 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 				}
 			}
 		else:
-			error_msg = add_face_result.get("message", "Unknown error")
-			frappe.logger().error(f"Failed to add face for {student_code}: {error_msg}")
+			error_detail = add_face_result.get("error_detail", add_face_result.get("error", "Unknown error"))
+			error_msg = add_face_result.get("message", f"Failed to add face: {error_detail}")
+			frappe.logger().error(
+				f"[CompreFace Sync] ✗ Failed to add face for {student_code}: "
+				f"Error: {add_face_result.get('error', 'N/A')}, Detail: {error_detail}"
+			)
 			
 			# Only delete subject if we just created it AND face addition failed
 			if should_create_subject:
-				frappe.logger().info(f"Cleaning up newly created subject {student_code}")
+				frappe.logger().info(f"[CompreFace Sync] Cleaning up newly created subject {student_code}")
 				compreFace_service.delete_subject(student_code)
 			
 			return {
 				"success": False,
 				"error": add_face_result.get("error", "Unknown error"),
-				"message": f"Failed to add face to CompreFace: {error_msg}"
+				"error_detail": error_detail,
+				"message": error_msg
 			}
 
 	except Exception as e:
-		frappe.log_error(f"Error syncing student {student_code} to CompreFace: {str(e)}", "Bus Student API")
+		error_msg = f"Exception syncing student {student_code} to CompreFace: {type(e).__name__}: {str(e)}"
+		frappe.log_error(error_msg, "Bus Student API")
+		frappe.logger().error(f"[CompreFace Sync] {error_msg}")
 		return {
 			"success": False,
-			"error": str(e),
-			"message": f"Failed to sync student {student_code} to CompreFace: {str(e)}"
+			"error": type(e).__name__,
+			"error_detail": str(e),
+			"message": f"Failed to sync student {student_code}: {str(e)}"
 		}
 
 

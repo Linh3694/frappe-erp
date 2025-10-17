@@ -117,19 +117,45 @@ class CompreFaceService:
                     "message": f"Subject {subject_id} already exists"
                 }
             else:
-                frappe.log_error(f"HTTP Error creating CompreFace subject: {str(e)}", "CompreFace Service")
+                # Get detailed error from response
+                error_detail = "Unknown error"
+                try:
+                    error_response = e.response.json()
+                    error_detail = error_response.get("message", str(error_response))
+                except:
+                    error_detail = e.response.text if e.response.text else str(e)
+                
+                error_msg = f"HTTP {e.response.status_code} creating subject {subject_id}: {error_detail}"
+                frappe.log_error(error_msg, "CompreFace Service")
+                frappe.logger().error(error_msg)
+                
                 return {
                     "success": False,
                     "error": f"HTTP Error: {e.response.status_code}",
-                    "message": "Failed to create subject in CompreFace"
+                    "error_detail": error_detail,
+                    "message": f"Failed to create subject: {error_detail}"
                 }
 
-        except Exception as e:
-            frappe.log_error(f"Error creating CompreFace subject: {str(e)}", "CompreFace Service")
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"Cannot connect to CompreFace server at {self.base_url}: {str(e)}"
+            frappe.log_error(error_msg, "CompreFace Service")
+            frappe.logger().error(error_msg)
             return {
                 "success": False,
-                "error": str(e),
-                "message": "Failed to create subject in CompreFace"
+                "error": "Connection Error",
+                "error_detail": str(e),
+                "message": f"Cannot connect to CompreFace server: {str(e)}"
+            }
+
+        except Exception as e:
+            error_msg = f"Error creating CompreFace subject {subject_id}: {str(e)}"
+            frappe.log_error(error_msg, "CompreFace Service")
+            frappe.logger().error(error_msg)
+            return {
+                "success": False,
+                "error": type(e).__name__,
+                "error_detail": str(e),
+                "message": f"Failed to create subject: {str(e)}"
             }
 
     def add_face_to_subject(self, subject_id: str, image_url: str) -> Dict:
@@ -144,14 +170,20 @@ class CompreFaceService:
             Dict with success status and data
         """
         try:
+            frappe.logger().info(f"[CompreFace] Starting add_face for subject {subject_id}")
+            
             # Convert image to binary data
             image_data = self._get_image_data(image_url)
             if not image_data:
+                frappe.logger().error(f"[CompreFace] Failed to process image from URL: {image_url}")
                 return {
                     "success": False,
-                    "error": "Failed to process image",
-                    "message": "Could not convert image to binary data"
+                    "error": "Image Processing Error",
+                    "error_detail": "Could not convert image to binary data",
+                    "message": "Could not process image. Please check if the image file exists and is accessible."
                 }
+
+            frappe.logger().info(f"[CompreFace] Image processed successfully, size: {len(image_data)} bytes")
 
             # Try POST /faces with subject parameter (newer CompreFace API)
             url = f"{self.recognition_api}/faces"
@@ -164,11 +196,13 @@ class CompreFaceService:
                 'subject': subject_id
             }
 
+            frappe.logger().info(f"[CompreFace] Sending request to {url} with subject={subject_id}")
             response = requests.post(url, files=files, data=data, headers={'x-api-key': self.api_key}, timeout=60)
 
             response.raise_for_status()
 
             result = response.json()
+            frappe.logger().info(f"[CompreFace] ✓ Face added successfully to subject {subject_id}")
 
             return {
                 "success": True,
@@ -177,32 +211,53 @@ class CompreFaceService:
             }
 
         except requests.exceptions.HTTPError as e:
-            error_msg = f"HTTP Error adding face: {e.response.status_code}"
-            if e.response.status_code == 404:
-                error_msg = f"Subject {subject_id} not found"
-            elif e.response.status_code == 400:
-                error_msg = "Invalid image or face not detected"
-
-            # Log detailed response for debugging
+            # Get detailed error from response
+            error_detail = "Unknown error"
+            error_code = e.response.status_code
+            
             try:
-                error_details = e.response.json() if e.response.content else {}
-                frappe.logger().error(f"CompreFace add_face error for {subject_id}: {error_msg} - Details: {error_details}")
+                error_response = e.response.json() if e.response.content else {}
+                error_detail = error_response.get("message", str(error_response))
             except:
-                frappe.logger().error(f"CompreFace add_face error for {subject_id}: {error_msg} - Raw response: {e.response.text}")
+                error_detail = e.response.text if e.response.text else str(e)
+            
+            if error_code == 404:
+                error_msg = f"Subject {subject_id} not found in CompreFace"
+            elif error_code == 400:
+                error_msg = f"Face not detected or invalid image (HTTP 400): {error_detail}"
+            else:
+                error_msg = f"HTTP {error_code} error: {error_detail}"
 
-            frappe.log_error(f"{error_msg}: {str(e)}", "CompreFace Service")
+            frappe.logger().error(f"[CompreFace] ✗ add_face failed for {subject_id}: {error_msg}")
+            frappe.log_error(f"add_face HTTP error for {subject_id}: {error_msg}\nDetails: {error_detail}", "CompreFace Service")
+            
             return {
                 "success": False,
-                "error": error_msg,
-                "message": f"Failed to add face to subject {subject_id}"
+                "error": f"HTTP Error: {error_code}",
+                "error_detail": error_detail,
+                "message": error_msg
+            }
+
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"Cannot connect to CompreFace server at {self.base_url}: {str(e)}"
+            frappe.log_error(error_msg, "CompreFace Service")
+            frappe.logger().error(f"[CompreFace] {error_msg}")
+            return {
+                "success": False,
+                "error": "Connection Error",
+                "error_detail": str(e),
+                "message": f"Cannot connect to CompreFace server: {str(e)}"
             }
 
         except Exception as e:
-            frappe.log_error(f"Error adding face to CompreFace subject: {str(e)}", "CompreFace Service")
+            error_msg = f"Exception adding face to subject {subject_id}: {type(e).__name__}: {str(e)}"
+            frappe.log_error(error_msg, "CompreFace Service")
+            frappe.logger().error(f"[CompreFace] {error_msg}")
             return {
                 "success": False,
-                "error": str(e),
-                "message": f"Failed to add face to subject {subject_id}"
+                "error": type(e).__name__,
+                "error_detail": str(e),
+                "message": f"Failed to add face: {str(e)}"
             }
 
     def recognize_face(self, image_url: str, limit: int = 1) -> Dict:
