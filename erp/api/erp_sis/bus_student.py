@@ -535,6 +535,45 @@ def test_compreface_connectivity():
 
 
 @frappe.whitelist()
+def debug_compreface_status(student_code=None):
+	"""Debug endpoint to check CompreFace status in detail"""
+	try:
+		if not student_code:
+			student_code = frappe.form_dict.get("student_code")
+		
+		if not student_code:
+			return error_response("Student code is required")
+		
+		frappe.logger().info(f"[Debug] Checking CompreFace status for {student_code}")
+		
+		# 1. Check subject info directly
+		subject_info = compreFace_service.get_subject_info(student_code)
+		frappe.logger().info(f"[Debug] get_subject_info result: {subject_info}")
+		
+		# 2. Check photos count
+		photos_info = compreFace_service.get_subject_photos_count(student_code)
+		frappe.logger().info(f"[Debug] get_subject_photos_count result: {photos_info}")
+		
+		# 3. Check complete status
+		complete_status = compreFace_service.check_subject_complete(student_code)
+		frappe.logger().info(f"[Debug] check_subject_complete result: {complete_status}")
+		
+		return success_response(
+			data={
+				"student_code": student_code,
+				"subject_info": subject_info,
+				"photos_info": photos_info,
+				"complete_status": complete_status
+			},
+			message=f"Debug info for {student_code}"
+		)
+		
+	except Exception as e:
+		frappe.log_error(f"Error in debug endpoint: {str(e)}")
+		return error_response(f"Debug failed: {str(e)}")
+
+
+@frappe.whitelist()
 def test_compreface_add_face():
 	"""Test CompreFace add face functionality"""
 	try:
@@ -959,9 +998,14 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 					"error_detail": error_detail,
 					"message": create_result.get("message", f"Failed to create subject: {error_detail}")
 				}
-			frappe.logger().info(f"[CompreFace Sync] Subject {student_code} created successfully")
+			else:
+				# Check if it's a 409 (already exists) - this is OK
+				if "already exists" in create_result.get("message", "").lower():
+					frappe.logger().info(f"[CompreFace Sync] Subject {student_code} already exists (409), continuing with add_face")
+				else:
+					frappe.logger().info(f"[CompreFace Sync] Subject {student_code} created successfully")
 		else:
-			frappe.logger().info(f"[CompreFace Sync] Subject {student_code} already exists, skipping creation")
+			frappe.logger().info(f"[CompreFace Sync] Subject {student_code} already exists (from check), skipping creation")
 
 		# Add face to subject
 		frappe.logger().info(f"[CompreFace Sync] Adding face to subject {student_code}")

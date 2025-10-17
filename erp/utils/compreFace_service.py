@@ -96,6 +96,9 @@ class CompreFaceService:
                 "name": subject_name or subject_id
             }
 
+            frappe.logger().info(f"[CompreFace] Creating subject {subject_id} at URL: {url}")
+            frappe.logger().info(f"[CompreFace] API Key (first 8 chars): {self.api_key[:8]}...")
+            
             response = requests.post(url, json=payload, headers=self._get_headers(), timeout=30)
             response.raise_for_status()
 
