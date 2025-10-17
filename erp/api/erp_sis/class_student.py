@@ -11,6 +11,89 @@ from erp.utils.api_response import (
 )
 
 
+def sync_student_subjects_for_class_change(student_id, new_class_id, school_year_id, campus_id, old_class_id=None):
+    """
+    Sync SIS Student Subject records when a student changes class.
+    This ensures Student Subject table is always in sync with Class Student table.
+    
+    Args:
+        student_id: Student ID
+        new_class_id: New class ID the student is moving to
+        school_year_id: School year ID
+        campus_id: Campus ID
+        old_class_id: Optional old class ID (if known, for optimization)
+    
+    Returns:
+        dict: {"updated_count": int, "created_count": int, "logs": list}
+    """
+    logs = []
+    updated_count = 0
+    created_count = 0
+    
+    try:
+        # Step 1: Update existing Student Subject records from old class to new class
+        if old_class_id:
+            # We know the old class, update directly
+            result = frappe.db.sql("""
+                UPDATE `tabSIS Student Subject`
+                SET class_id = %s, modified = NOW()
+                WHERE student_id = %s
+                AND school_year_id = %s
+                AND campus_id = %s
+                AND class_id = %s
+            """, (new_class_id, student_id, school_year_id, campus_id, old_class_id))
+            updated_count = result
+            logs.append(f"✓ Updated {updated_count} Student Subject records from class {old_class_id} to {new_class_id}")
+        else:
+            # Don't know old class, update all mismatched records for this student
+            result = frappe.db.sql("""
+                UPDATE `tabSIS Student Subject`
+                SET class_id = %s, modified = NOW()
+                WHERE student_id = %s
+                AND school_year_id = %s
+                AND campus_id = %s
+                AND class_id != %s
+            """, (new_class_id, student_id, school_year_id, campus_id, new_class_id))
+            updated_count = result
+            logs.append(f"✓ Synced {updated_count} Student Subject records to class {new_class_id}")
+        
+        # Step 2: Verify sync was successful
+        mismatched = frappe.db.sql("""
+            SELECT COUNT(*) as count
+            FROM `tabSIS Student Subject`
+            WHERE student_id = %s
+            AND school_year_id = %s
+            AND campus_id = %s
+            AND class_id != %s
+        """, (student_id, school_year_id, campus_id, new_class_id), as_dict=True)
+        
+        if mismatched and mismatched[0]["count"] > 0:
+            logs.append(f"⚠️ Warning: {mismatched[0]['count']} Student Subject records still have mismatched class_id")
+        else:
+            logs.append("✓ All Student Subject records are now in sync with Class Student")
+        
+        frappe.logger().info(f"Synced Student Subject for student {student_id} to class {new_class_id}: updated={updated_count}")
+        
+        return {
+            "updated_count": updated_count,
+            "created_count": created_count,
+            "logs": logs,
+            "success": True
+        }
+        
+    except Exception as e:
+        error_msg = f"Error syncing Student Subject for student {student_id}: {str(e)}"
+        logs.append(f"✗ {error_msg}")
+        frappe.log_error(error_msg, "Student Subject Sync Error")
+        return {
+            "updated_count": updated_count,
+            "created_count": created_count,
+            "logs": logs,
+            "success": False,
+            "error": str(e)
+        }
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None):
     """Get all class students with pagination and filters"""
@@ -241,11 +324,34 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                 # If same class -> already handled above
                 # Otherwise migrate the oldest regular record to the new class
                 target_name = existing_regular[0]["name"]
+                old_class_id = existing_regular[0]["class_id"]
                 try:
                     frappe.db.set_value("SIS Class Student", target_name, {
                         "class_id": class_id,
                         "campus_id": campus_id,
                     }, update_modified=True)
+                    
+                    # 🆕 SYNC STUDENT SUBJECT: Update all Student Subject records to new class
+                    sync_result = sync_student_subjects_for_class_change(
+                        student_id=student_id,
+                        new_class_id=class_id,
+                        school_year_id=school_year_id,
+                        campus_id=campus_id,
+                        old_class_id=old_class_id
+                    )
+                    
+                    # Log sync results
+                    if sync_result.get("success"):
+                        frappe.logger().info(
+                            f"Student {student_id} moved from {old_class_id} to {class_id}. "
+                            f"Synced {sync_result.get('updated_count', 0)} Student Subject records."
+                        )
+                    else:
+                        frappe.logger().warning(
+                            f"Student {student_id} moved to {class_id} but Student Subject sync had issues: "
+                            f"{sync_result.get('error', 'Unknown error')}"
+                        )
+                    
                     # Deduplicate: remove any extra regular records beyond the first
                     for dup in existing_regular[1:]:
                         try:
@@ -262,8 +368,9 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                             "school_year_id": updated.school_year_id,
                             "class_type": updated.class_type,
                             "campus_id": updated.campus_id,
+                            "sync_info": sync_result  # Include sync info in response
                         },
-                        message="Student moved to new regular class"
+                        message=f"Student moved to new regular class. Synced {sync_result.get('updated_count', 0)} subject records."
                     )
                 except Exception as move_err:
                     frappe.logger().error(f"Failed to move regular class assignment: {str(move_err)}")
@@ -283,6 +390,23 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
             "campus_id": campus_id,
         })
         class_student.insert()
+        
+        # 🆕 SYNC STUDENT SUBJECT: Ensure any existing Student Subject records are synced to this class
+        sync_result = sync_student_subjects_for_class_change(
+            student_id=student_id,
+            new_class_id=class_id,
+            school_year_id=school_year_id,
+            campus_id=campus_id,
+            old_class_id=None  # Don't know old class for new assignment
+        )
+        
+        # Log sync results
+        if sync_result.get("updated_count", 0) > 0:
+            frappe.logger().info(
+                f"Student {student_id} assigned to {class_id}. "
+                f"Synced {sync_result.get('updated_count', 0)} existing Student Subject records."
+            )
+        
         frappe.db.commit()
 
         return single_item_response(
@@ -293,8 +417,9 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                 "school_year_id": class_student.school_year_id,
                 "class_type": class_student.class_type,
                 "campus_id": class_student.campus_id,
+                "sync_info": sync_result  # Include sync info in response
             },
-            message="Student assigned to class successfully"
+            message=f"Student assigned to class successfully. Synced {sync_result.get('updated_count', 0)} subject records."
         )
         
     except Exception as e:
@@ -874,4 +999,220 @@ def batch_get_class_sizes():
         return error_response(
             message=f"Failed to fetch batch class sizes: {str(e)}",
             code="BATCH_GET_CLASS_SIZES_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def check_student_subject_sync_status(class_ids=None):
+    """
+    Check if Student Subject records are in sync with Class Student records.
+    Returns a report of any mismatches that need to be fixed.
+    
+    This is useful for:
+    - Verifying data integrity after class transfers
+    - Identifying students who need their Student Subject records updated
+    - Troubleshooting report card creation issues
+    """
+    try:
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Get class_ids from request
+        if not class_ids:
+            data = {}
+            if hasattr(frappe, 'request') and frappe.request.data:
+                try:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                except:
+                    pass
+            class_ids = data.get('class_ids', [])
+        
+        if not class_ids:
+            return validation_error_response("class_ids is required")
+        
+        if not isinstance(class_ids, list):
+            class_ids = [class_ids]
+        
+        report = {
+            "classes_checked": len(class_ids),
+            "issues": [],
+            "students_with_mismatches": [],
+            "total_mismatches": 0
+        }
+        
+        for class_id in class_ids:
+            # Get students from Class Student (authoritative)
+            class_students = frappe.get_all(
+                "SIS Class Student",
+                fields=["student_id", "school_year_id"],
+                filters={
+                    "campus_id": campus_id,
+                    "class_id": class_id
+                }
+            )
+            
+            for cs in class_students:
+                student_id = cs["student_id"]
+                school_year_id = cs["school_year_id"]
+                
+                # Check if Student Subject has mismatched class_id
+                mismatched = frappe.db.sql("""
+                    SELECT COUNT(*) as count, 
+                           GROUP_CONCAT(DISTINCT class_id) as wrong_classes
+                    FROM `tabSIS Student Subject`
+                    WHERE student_id = %s
+                    AND school_year_id = %s
+                    AND campus_id = %s
+                    AND class_id != %s
+                """, (student_id, school_year_id, campus_id, class_id), as_dict=True)
+                
+                if mismatched and mismatched[0]["count"] > 0:
+                    report["issues"].append({
+                        "class_id": class_id,
+                        "student_id": student_id,
+                        "school_year_id": school_year_id,
+                        "mismatch_count": mismatched[0]["count"],
+                        "wrong_classes": mismatched[0]["wrong_classes"],
+                        "message": f"Student {student_id} is in class {class_id} but has {mismatched[0]['count']} Student Subject records with different class_id"
+                    })
+                    report["students_with_mismatches"].append(student_id)
+                    report["total_mismatches"] += mismatched[0]["count"]
+        
+        report["has_issues"] = len(report["issues"]) > 0
+        
+        if report["has_issues"]:
+            message = f"Found {len(report['issues'])} students with sync issues ({report['total_mismatches']} mismatched records)"
+        else:
+            message = "All Student Subject records are in sync with Class Student"
+        
+        return success_response(
+            data=report,
+            message=message
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error checking student subject sync status: {str(e)}")
+        return error_response(
+            message=f"Failed to check sync status: {str(e)}",
+            code="CHECK_SYNC_STATUS_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def fix_student_subject_sync(class_ids=None, auto_fix=False):
+    """
+    Fix Student Subject records that are out of sync with Class Student.
+    
+    This will update all Student Subject records to match the current class assignment
+    in Class Student table.
+    
+    Args:
+        class_ids: List of class IDs to fix (optional, if not provided will fix all)
+        auto_fix: If True, automatically fix all issues. If False, only report issues.
+    """
+    try:
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Get parameters from request
+        if class_ids is None:
+            data = {}
+            if hasattr(frappe, 'request') and frappe.request.data:
+                try:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                except:
+                    pass
+            class_ids = data.get('class_ids')
+            auto_fix = data.get('auto_fix', False)
+        
+        logs = []
+        fixed_count = 0
+        error_count = 0
+        
+        # Build filters for Class Student
+        filters = {"campus_id": campus_id}
+        if class_ids:
+            if not isinstance(class_ids, list):
+                class_ids = [class_ids]
+            filters["class_id"] = ["in", class_ids]
+            logs.append(f"Fixing sync for {len(class_ids)} classes")
+        else:
+            logs.append("Fixing sync for ALL classes in campus")
+        
+        # Get all class students
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            fields=["student_id", "class_id", "school_year_id"],
+            filters=filters
+        )
+        
+        logs.append(f"Found {len(class_students)} class student records to process")
+        
+        for cs in class_students:
+            student_id = cs["student_id"]
+            correct_class_id = cs["class_id"]
+            school_year_id = cs["school_year_id"]
+            
+            # Check for mismatches
+            mismatched = frappe.db.sql("""
+                SELECT name, class_id
+                FROM `tabSIS Student Subject`
+                WHERE student_id = %s
+                AND school_year_id = %s
+                AND campus_id = %s
+                AND class_id != %s
+            """, (student_id, school_year_id, campus_id, correct_class_id), as_dict=True)
+            
+            if mismatched:
+                if auto_fix:
+                    # Fix the mismatches
+                    try:
+                        result = sync_student_subjects_for_class_change(
+                            student_id=student_id,
+                            new_class_id=correct_class_id,
+                            school_year_id=school_year_id,
+                            campus_id=campus_id,
+                            old_class_id=None
+                        )
+                        if result.get("success"):
+                            fixed_count += result.get("updated_count", 0)
+                            logs.append(f"✓ Fixed {result.get('updated_count', 0)} records for student {student_id}")
+                        else:
+                            error_count += 1
+                            logs.append(f"✗ Failed to fix student {student_id}: {result.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        error_count += 1
+                        logs.append(f"✗ Error fixing student {student_id}: {str(e)}")
+                else:
+                    # Just report
+                    logs.append(f"⚠️ Student {student_id} has {len(mismatched)} mismatched records (auto_fix=False, not fixing)")
+        
+        if auto_fix:
+            frappe.db.commit()
+            message = f"Fixed {fixed_count} Student Subject records. Errors: {error_count}"
+        else:
+            message = "Dry run completed. Set auto_fix=True to apply fixes."
+        
+        return success_response(
+            data={
+                "fixed_count": fixed_count,
+                "error_count": error_count,
+                "logs": logs,
+                "auto_fix": auto_fix
+            },
+            message=message
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error fixing student subject sync: {str(e)}")
+        frappe.db.rollback()
+        return error_response(
+            message=f"Failed to fix sync: {str(e)}",
+            code="FIX_SYNC_ERROR"
         )

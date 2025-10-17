@@ -692,25 +692,26 @@ def create_student_reports_for_template():
         except frappe.DoesNotExistError:
             return not_found_response("Report card template not found")
         
-        # Get unique students from SIS Student Subject
+        # 🆕 FIX: Get students from SIS Class Student (authoritative source)
+        # This ensures we get ALL students in the class, including those recently transferred
+        # Previously used SIS Student Subject which may be out of sync after class transfers
         filters = {
             "campus_id": campus_id,
             "class_id": ["in", class_ids]
         }
         
-        student_subjects = frappe.get_all(
-            "SIS Student Subject",
+        class_students = frappe.get_all(
+            "SIS Class Student",
             fields=["student_id", "class_id"],
-            filters=filters,
-            distinct=True
+            filters=filters
         )
         
-        if not student_subjects:
+        if not class_students:
             return list_response([], "No students found for the selected classes")
         
         # Group students by class for processing
         students_by_class = {}
-        for record in student_subjects:
+        for record in class_students:
             class_id = record["class_id"]
             student_id = record["student_id"]
             
@@ -722,6 +723,11 @@ def create_student_reports_for_template():
                     "student_id": student_id,
                     "class_id": class_id
                 })
+        
+        frappe.logger().info(
+            f"Creating report cards for {sum(len(students) for students in students_by_class.values())} "
+            f"students across {len(students_by_class)} classes using SIS Class Student data"
+        )
         
         created_reports = []
         failed_students = []
