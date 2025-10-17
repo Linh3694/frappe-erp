@@ -525,22 +525,36 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
         )
         
         # Log sync results
-        if sync_result.get("updated_count", 0) > 0 or sync_result.get("created_count", 0) > 0:
+        updated = sync_result.get("updated_count", 0)
+        created = sync_result.get("created_count", 0)
+        
+        if updated > 0 or created > 0:
             frappe.logger().info(
                 f"Student {student_id} assigned to {class_id}. "
-                f"Updated {sync_result.get('updated_count', 0)} records, "
-                f"Created {sync_result.get('created_count', 0)} new subject records."
+                f"Updated {updated} records, Created {created} new subject records."
+            )
+        else:
+            # ⚠️ WARNING: No Student Subject records created/updated
+            frappe.logger().warning(
+                f"⚠️ Student {student_id} assigned to {class_id} but NO Student Subject records were created/updated. "
+                f"This may cause empty report cards! Check if timetable exists for this class. "
+                f"Logs: {sync_result.get('logs', [])}"
             )
         
         frappe.db.commit()
 
         # Build informative message
         sync_msg_parts = []
-        if sync_result.get('updated_count', 0) > 0:
-            sync_msg_parts.append(f"updated {sync_result.get('updated_count', 0)} existing")
-        if sync_result.get('created_count', 0) > 0:
-            sync_msg_parts.append(f"created {sync_result.get('created_count', 0)} new")
-        sync_msg = ", ".join(sync_msg_parts) if sync_msg_parts else "no changes needed"
+        if updated > 0:
+            sync_msg_parts.append(f"updated {updated} existing")
+        if created > 0:
+            sync_msg_parts.append(f"created {created} new")
+        
+        if not sync_msg_parts:
+            # No records created/updated - add warning
+            sync_msg = "⚠️ no subject records created - report cards may be empty"
+        else:
+            sync_msg = ", ".join(sync_msg_parts)
 
         return single_item_response(
             data={
@@ -1249,6 +1263,181 @@ def check_student_subject_sync_status(class_ids=None):
         return error_response(
             message=f"Failed to check sync status: {str(e)}",
             code="CHECK_SYNC_STATUS_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def create_student_subjects_from_timetable(class_id=None, student_id=None):
+    """
+    Manually create Student Subject records from class timetable.
+    
+    This is useful when:
+    - A student was added to a class before timetable was created
+    - Student Subject records are missing and report cards are empty
+    - Need to force refresh Student Subject records
+    
+    Args:
+        class_id: Class ID (optional, if not provided will process all classes)
+        student_id: Student ID (optional, if not provided will process all students in class)
+    
+    Returns:
+        success_response with created_count and logs
+    """
+    try:
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Get parameters from request
+        if class_id is None or student_id is None:
+            data = {}
+            if hasattr(frappe, 'request') and frappe.request.data:
+                try:
+                    import json
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                except:
+                    pass
+            class_id = class_id or data.get('class_id')
+            student_id = student_id or data.get('student_id')
+        
+        if not class_id:
+            return validation_error_response("class_id is required")
+        
+        logs = []
+        created_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        # Get timetable for this class
+        timetable_instances = frappe.get_all(
+            "SIS Timetable Instance",
+            fields=["name", "school_year_id"],
+            filters={
+                "campus_id": campus_id,
+                "class_id": class_id
+            }
+        )
+        
+        if not timetable_instances:
+            return error_response(
+                f"No timetable found for class {class_id}. "
+                "Please create a timetable first before creating student subjects.",
+                code="NO_TIMETABLE"
+            )
+        
+        instance_ids = [t["name"] for t in timetable_instances]
+        school_year_id = timetable_instances[0]["school_year_id"]
+        
+        logs.append(f"Found {len(timetable_instances)} timetable instance(s) for class {class_id}")
+        
+        # Get subjects from timetable
+        timetable_subjects = frappe.db.sql("""
+            SELECT DISTINCT subject_id
+            FROM `tabSIS Timetable Instance Row`
+            WHERE parent IN %s
+            AND subject_id IS NOT NULL
+            AND subject_id != ''
+        """, [instance_ids], as_dict=True)
+        
+        subject_ids = [s["subject_id"] for s in timetable_subjects if s.get("subject_id")]
+        logs.append(f"Found {len(subject_ids)} distinct subjects in timetable")
+        
+        if not subject_ids:
+            return error_response(
+                f"Timetable for class {class_id} has no subjects. "
+                "Please add subjects to timetable first.",
+                code="NO_SUBJECTS_IN_TIMETABLE"
+            )
+        
+        # Get students to process
+        if student_id:
+            # Process single student
+            students = [{"student_id": student_id}]
+            logs.append(f"Processing single student: {student_id}")
+        else:
+            # Process all students in class
+            students = frappe.get_all(
+                "SIS Class Student",
+                fields=["student_id"],
+                filters={
+                    "campus_id": campus_id,
+                    "class_id": class_id
+                }
+            )
+            logs.append(f"Processing {len(students)} students in class {class_id}")
+        
+        # For each student and subject, create Student Subject record if not exists
+        for student_record in students:
+            student_id = student_record["student_id"]
+            
+            for subject_id in subject_ids:
+                try:
+                    # Get actual_subject_id
+                    actual_subject_id = frappe.db.get_value("SIS Subject", subject_id, "actual_subject_id")
+                    
+                    if not actual_subject_id:
+                        logs.append(f"⚠️ Subject {subject_id} has no actual_subject_id, skipping")
+                        skipped_count += 1
+                        continue
+                    
+                    # Check if exists
+                    existing = frappe.db.exists(
+                        "SIS Student Subject",
+                        {
+                            "campus_id": campus_id,
+                            "student_id": student_id,
+                            "class_id": class_id,
+                            "subject_id": subject_id,
+                            "school_year_id": school_year_id
+                        }
+                    )
+                    
+                    if existing:
+                        skipped_count += 1
+                        continue
+                    
+                    # Create new record
+                    doc = frappe.get_doc({
+                        "doctype": "SIS Student Subject",
+                        "campus_id": campus_id,
+                        "student_id": student_id,
+                        "class_id": class_id,
+                        "subject_id": subject_id,
+                        "actual_subject_id": actual_subject_id,
+                        "school_year_id": school_year_id
+                    })
+                    doc.insert(ignore_permissions=True)
+                    created_count += 1
+                    
+                except Exception as e:
+                    error_count += 1
+                    logs.append(f"✗ Error creating Student Subject for student {student_id}, subject {subject_id}: {str(e)}")
+                    frappe.log_error(f"Error creating Student Subject: {str(e)}")
+        
+        frappe.db.commit()
+        
+        logs.append(f"✓ Created {created_count} new Student Subject records")
+        logs.append(f"Skipped {skipped_count} existing records")
+        if error_count > 0:
+            logs.append(f"✗ {error_count} errors occurred")
+        
+        return success_response(
+            data={
+                "created_count": created_count,
+                "skipped_count": skipped_count,
+                "error_count": error_count,
+                "logs": logs
+            },
+            message=f"Created {created_count} Student Subject records from timetable"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error creating student subjects from timetable: {str(e)}")
+        frappe.db.rollback()
+        return error_response(
+            message=f"Failed to create student subjects: {str(e)}",
+            code="CREATE_STUDENT_SUBJECTS_ERROR"
         )
 
 
