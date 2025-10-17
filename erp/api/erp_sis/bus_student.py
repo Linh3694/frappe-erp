@@ -215,6 +215,10 @@ def create_bus_student_from_sis():
 			else:
 				# Student doesn't exist, proceed with sync
 				frappe.logger().info(f"Starting CompreFace sync for student {student_data.student_code}")
+
+				# Get student's photo URL first
+				photo_url = get_student_photo_url(student_data.student_code, student_data.campus_id, student_data.school_year_id)
+
 				compreface_result = sync_student_to_compreface(
 					student_data.student_code,
 					student_data.full_name,
