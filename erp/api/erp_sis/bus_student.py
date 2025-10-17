@@ -392,33 +392,9 @@ def check_compreface_subject(student_code=None):
 	try:
 		# Read student_code from request parameters if not provided
 		if not student_code:
-			# Try from form_dict first (for form-encoded data)
-			if frappe.local.form_dict:
-				student_code = frappe.local.form_dict.get("student_code")
-
-			# Try from request args (for query parameters like ?student_code=WS12010059)
-			if not student_code:
-				try:
-					# In Frappe, query parameters are available through frappe.form_dict
-					# But for direct access, we can check frappe.request
-					import frappe
-					if hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
-						student_code = frappe.request.args.get("student_code")
-				except:
-					pass
-
-			# Try to parse JSON from request data
-			if not student_code and hasattr(frappe.request, 'data') and frappe.request.data:
-				try:
-					import json
-					raw_data = frappe.request.data
-					if isinstance(raw_data, bytes):
-						raw_data = raw_data.decode('utf-8')
-
-					json_data = json.loads(raw_data)
-					student_code = json_data.get("student_code")
-				except (json.JSONDecodeError, ValueError):
-					pass
+			# In Frappe, query parameters are available in frappe.form_dict for whitelisted methods
+			if hasattr(frappe, 'form_dict') and frappe.form_dict:
+				student_code = frappe.form_dict.get("student_code")
 
 		if not student_code:
 			return error_response("Student code is required")
