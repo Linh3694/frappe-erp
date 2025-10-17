@@ -1183,8 +1183,15 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 except Exception:
                     pass  # Silent cleanup failure
 
-                # Create instances for each class
+                # Create instances for each class with batch processing
+                BATCH_SIZE = 10  # Commit every 10 classes to reduce transaction overhead
+                total_classes = len(rows_by_class)
+                processed_classes = 0
+                
+                logs.append(f"📊 Starting to process {total_classes} classes with batch commit (size={BATCH_SIZE})")
+                
                 for class_id, class_rows in rows_by_class.items():
+                    processed_classes += 1
                     instance_start = import_data.get("start_date")
                     instance_end = import_data.get("end_date")
                     
@@ -1205,10 +1212,20 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             distinct_subjects = list({r.get('subject_id') for r in class_rows if r.get('subject_id')})
                             for subj in distinct_subjects:
                                 if subj:
-                                    actual_subj = frappe.db.get_value("SIS Subject", subj, "actual_subject_id")
-                                    importer.upsert_student_subjects(class_id, subj, actual_subj)
-                        except Exception:
-                            pass
+                                    try:
+                                        actual_subj = frappe.db.get_value("SIS Subject", subj, "actual_subject_id")
+                                        if not actual_subj:
+                                            logs.append(f"⚠️ Class {class_id}, Subject {subj}: No actual_subject_id mapping found")
+                                        importer.upsert_student_subjects(class_id, subj, actual_subj)
+                                        logs.append(f"✓ Class {class_id}, Subject {subj}: Student Subjects processed")
+                                    except Exception as subj_error:
+                                        error_msg = f"✗ Class {class_id}, Subject {subj}: Error processing Student Subjects - {str(subj_error)}"
+                                        logs.append(error_msg)
+                                        frappe.log_error(error_msg, "Timetable Import Student Subject Error")
+                        except Exception as e:
+                            error_msg = f"✗ Class {class_id}: Critical error in Student Subject processing - {str(e)}"
+                            logs.append(error_msg)
+                            frappe.log_error(error_msg, "Timetable Import Critical Error")
 
                         for row in class_rows:
                             pp_str = str(row.get("period_priority") or "").strip()
@@ -1254,34 +1271,51 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             instances_created += 1
                             rows_created += len(class_rows)
 
-                            # Sync Teacher & Student Timetable (non-blocking)
+                            # Defer materialized view sync to separate background job to avoid blocking import
                             try:
-                                sync_materialized_views_for_instance(
-                                    instance_doc.name, 
-                                    class_id, 
-                                    import_data.get("start_date"),
-                                    import_data.get("end_date"),
-                                    campus_id,
-                                    []  # Empty logs
+                                frappe.enqueue(
+                                    method='erp.api.erp_sis.timetable_excel_import.sync_materialized_views_for_instance',
+                                    queue='long',
+                                    timeout=1800,  # 30 minutes per class
+                                    is_async=True,
+                                    instance_id=instance_doc.name,
+                                    class_id=class_id,
+                                    start_date=import_data.get("start_date"),
+                                    end_date=import_data.get("end_date"),
+                                    campus_id=campus_id,
+                                    logs=[]
                                 )
-                            except Exception:
-                                # Fallback to simplified sync
-                                try:
-                                    sync_materialized_views_simplified(instance_doc.name, class_id, campus_id, [])
-                                except Exception:
-                                    pass  # Silent failure
+                                logs.append(f"⏰ Queued materialized view sync job for class {class_id}")
+                            except Exception as sync_error:
+                                logs.append(f"⚠️ Failed to queue sync job for class {class_id}: {str(sync_error)}")
 
                         except Exception:
                             continue  # Skip failed instance
                     except Exception as e:
                         logs.append(f"   ❌ Failed to create instance for class {class_id}: {str(e)}")
                         continue
+                    
+                    # Batch commit logic - commit every BATCH_SIZE classes
+                    if processed_classes % BATCH_SIZE == 0:
+                        try:
+                            frappe.db.commit()
+                            progress_pct = int(processed_classes / total_classes * 100)
+                            logs.append(f"📦 Batch commit: {processed_classes}/{total_classes} classes ({progress_pct}%) ✓")
+                        except Exception as commit_error:
+                            logs.append(f"⚠️ Batch commit warning at class {processed_classes}: {str(commit_error)}")
+                    else:
+                        # Progress logging without commit
+                        if processed_classes % 5 == 0:  # Log every 5 classes
+                            progress_pct = int(processed_classes / total_classes * 100)
+                            logs.append(f"⏳ Progress: {processed_classes}/{total_classes} classes ({progress_pct}%)")
                 
-                # Commit all changes
-                try:
-                    frappe.db.commit()
-                except Exception:
-                    pass
+                # Final commit for remaining classes
+                if processed_classes % BATCH_SIZE != 0:
+                    try:
+                        frappe.db.commit()
+                        logs.append(f"📦 Final commit: {processed_classes}/{total_classes} classes (100%) ✓")
+                    except Exception as final_commit_error:
+                        logs.append(f"⚠️ Final commit warning: {str(final_commit_error)}")
                 
                 # Summary
                 logs.append(f"✅ Tạo thành công {instances_created} instances, {rows_created} môn học cho {len(rows_by_class)} lớp")

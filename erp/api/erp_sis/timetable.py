@@ -1344,7 +1344,7 @@ def import_timetable():
             job = frappe.enqueue(
                 method='erp.api.erp_sis.timetable_excel_import.process_excel_import_background',
                 queue='long',
-                timeout=3600,  # 1 hour timeout
+                timeout=7200,  # 2 hour timeout - increased for handling 40+ classes
                 is_async=True,
                 **import_data
             )
