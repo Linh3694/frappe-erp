@@ -393,8 +393,7 @@ def check_compreface_subject(student_code=None):
 		# Read student_code from request parameters if not provided
 		if not student_code:
 			# In Frappe, query parameters are available in frappe.form_dict for whitelisted methods
-			if hasattr(frappe, 'form_dict') and frappe.form_dict:
-				student_code = frappe.form_dict.get("student_code")
+			student_code = frappe.form_dict.get("student_code")
 
 		if not student_code:
 			return error_response("Student code is required")
