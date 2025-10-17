@@ -392,11 +392,18 @@ def check_compreface_subject(student_code=None):
 	try:
 		# Read student_code from request parameters if not provided
 		if not student_code:
+			# Debug: Log what we have in form_dict
+			debug_info = f"check_compreface_subject called. frappe.form_dict: {frappe.form_dict}"
+			frappe.logger().info(debug_info)
+
 			# In Frappe, query parameters are available in frappe.form_dict for whitelisted methods
 			student_code = frappe.form_dict.get("student_code")
 
+		debug_info = f"Final student_code: {student_code}"
+		frappe.logger().info(debug_info)
+
 		if not student_code:
-			return error_response("Student code is required")
+			return error_response(f"Student code is required. Debug: {frappe.form_dict}")
 
 		# First, check the database flag for reliable status
 		bus_student = frappe.db.get_value("SIS Bus Student",
