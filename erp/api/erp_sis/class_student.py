@@ -11,6 +11,32 @@ from erp.utils.api_response import (
 )
 
 
+def _clear_class_log_student_link(class_student_id):
+    """
+    Clear class_student_id link in SIS Class Log Student records.
+    This prevents "cannot delete because linked" error when unassigning students.
+    
+    Args:
+        class_student_id: The SIS Class Student ID to clear links for
+    
+    Returns:
+        int: Number of records updated
+    """
+    try:
+        result = frappe.db.sql("""
+            UPDATE `tabSIS Class Log Student`
+            SET class_student_id = NULL
+            WHERE class_student_id = %s
+        """, (class_student_id,))
+        count = result if result else 0
+        if count > 0:
+            frappe.logger().info(f"Cleared {count} Class Log Student links for {class_student_id}")
+        return count
+    except Exception as e:
+        frappe.logger().warning(f"Failed to clear class_student_id in Class Log Student: {str(e)}")
+        return 0
+
+
 def sync_student_subjects_for_class_change(student_id, new_class_id, school_year_id, campus_id, old_class_id=None):
     """
     Sync SIS Student Subject records when a student changes class.
@@ -806,6 +832,9 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                     code="FORCE_UNASSIGN_CLEANUP_ERROR"
                 )
 
+        # 🆕 Clear Class Log Student link before delete
+        _clear_class_log_student_link(name)
+        
         # Delete the assignment
         frappe.delete_doc("SIS Class Student", name)
         frappe.db.commit()
@@ -898,6 +927,9 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                             pass
                     frappe.db.commit()
 
+                    # 🆕 Clear Class Log Student link before retry delete
+                    _clear_class_log_student_link(name)
+
                     # Retry delete
                     frappe.delete_doc("SIS Class Student", name)
                     frappe.db.commit()
@@ -917,6 +949,10 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                     except Exception:
                         pass
                 frappe.db.commit()
+                
+                # 🆕 Clear Class Log Student link before force delete
+                _clear_class_log_student_link(name)
+                
                 frappe.delete_doc("SIS Class Student", name)
                 frappe.db.commit()
                 return success_response(message="Student unassigned (force removed linked records)")
@@ -958,6 +994,10 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                     except Exception:
                         pass
                 frappe.db.commit()
+                
+                # 🆕 Clear Class Log Student link before delete
+                _clear_class_log_student_link(name)
+                
                 frappe.delete_doc("SIS Class Student", name)
                 frappe.db.commit()
                 return success_response(message="Student unassigned (auto-migrated links)")
@@ -975,6 +1015,10 @@ def unassign_student(name=None, class_id=None, student_id=None, school_year_id=N
                 except Exception:
                     pass
             frappe.db.commit()
+            
+            # 🆕 Clear Class Log Student link before delete
+            _clear_class_log_student_link(name)
+            
             frappe.delete_doc("SIS Class Student", name)
             frappe.db.commit()
             return success_response(message="Student unassigned (auto-removed linked records)")
