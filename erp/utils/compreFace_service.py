@@ -70,8 +70,6 @@ class CompreFaceService:
                 img.save(output_buffer, format='JPEG', quality=85)
                 processed_image_data = output_buffer.getvalue()
 
-                frappe.logger().info(f"Image processed successfully: {img.size}, {len(processed_image_data)} bytes")
-
             except Exception as img_error:
                 frappe.logger().warning(f"Image processing failed, using original: {str(img_error)}")
 
@@ -119,7 +117,6 @@ class CompreFaceService:
                     "message": f"Subject {subject_id} already exists"
                 }
             else:
-                frappe.logger().error(f"HTTP Error creating CompreFace subject {subject_id}: Status {e.response.status_code}, Response: {e.response.text if hasattr(e.response, 'text') else 'No response text'}")
                 frappe.log_error(f"HTTP Error creating CompreFace subject: {str(e)}", "CompreFace Service")
                 return {
                     "success": False,
@@ -167,16 +164,11 @@ class CompreFaceService:
                 'subject': subject_id
             }
 
-            frappe.logger().info(f"CompreFace add_face request: POST {url} (multipart, subject: {subject_id}, {len(image_data)} bytes)")
             response = requests.post(url, files=files, data=data, headers={'x-api-key': self.api_key}, timeout=60)
-
-            frappe.logger().info(f"CompreFace response status: {response.status_code}")
-            frappe.logger().info(f"CompreFace response headers: {dict(response.headers)}")
 
             response.raise_for_status()
 
             result = response.json()
-            frappe.logger().info(f"Face added to CompreFace subject: {subject_id}, result: {result}")
 
             return {
                 "success": True,
@@ -268,15 +260,11 @@ class CompreFaceService:
         """
         try:
             # Test basic connectivity first
-            frappe.logger().info(f"Testing CompreFace connectivity to: {self.base_url}")
             response = requests.get(self.base_url, timeout=10)
-            frappe.logger().info(f"Base URL response: {response.status_code}")
 
             # Test recognition API subjects endpoint (the one that works)
             url = f"{self.recognition_api}/subjects"
-            frappe.logger().info(f"Testing subjects API: {url}")
             response = requests.get(url, headers=self._get_headers(), timeout=10)
-            frappe.logger().info(f"Subjects API response: {response.status_code}")
             subjects = response.json()
 
             # Test different add face endpoints

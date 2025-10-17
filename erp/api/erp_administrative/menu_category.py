@@ -336,6 +336,12 @@ def update_menu_category():
 @frappe.whitelist(allow_guest=False)
 def upload_menu_category_image():
     """Upload image for menu category - similar to sis_photo pattern"""
+    # Ensure we always return JSON responses
+    frappe.local.response.http_status_code = 200
+    frappe.local.response.update({
+        'content-type': 'application/json; charset=utf-8'
+    })
+
     try:
         # IMPORTANT: Check for files first to avoid encoding issues when parsing request data
         files = frappe.request.files
@@ -490,15 +496,32 @@ def upload_menu_category_image():
 @frappe.whitelist(allow_guest=False)
 def create_menu_category_with_image():
     """Create a new menu category with image upload - for AddMenuCategory form"""
+    # Ensure we always return JSON responses
+    frappe.local.response.http_status_code = 200
+    frappe.local.response.update({
+        'content-type': 'application/json; charset=utf-8'
+    })
+
     try:
         # IMPORTANT: Access form_dict AFTER processing files to avoid UTF-8 encoding issues
         # The issue occurs when Frappe tries to parse multipart data containing binary files
 
+        # DEBUG: Log request info
+        frappe.logger().info("=== create_menu_category_with_image DEBUG START ===")
+        frappe.logger().info(f"Request method: {frappe.request.method}")
+        frappe.logger().info(f"Content-Type: {frappe.request.content_type}")
+        frappe.logger().info(f"Content-Length: {frappe.request.content_length}")
+        frappe.logger().info(f"form_dict keys: {list(frappe.local.form_dict.keys())}")
+        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"files keys: {list(frappe.request.files.keys()) if frappe.request.files else 'None'}")
+        
         # Get text fields from form_dict with error handling for encoding issues
         try:
             title_vn = frappe.local.form_dict.get("title_vn")
             title_en = frappe.local.form_dict.get("title_en")
             code = frappe.local.form_dict.get("code")
+            
+            frappe.logger().info(f"Parsed values - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
         except UnicodeDecodeError as e:
             frappe.logger().error(f"UTF-8 decode error when accessing form_dict: {str(e)}")
             # Try to parse multipart data manually as fallback
