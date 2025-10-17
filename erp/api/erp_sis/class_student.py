@@ -1266,7 +1266,7 @@ def check_student_subject_sync_status(class_ids=None):
         )
 
 
-@frappe.whitelist(allow_guest=False, methods=["POST"])
+@frappe.whitelist(allow_guest=False)
 def create_student_subjects_from_timetable(class_id=None, student_id=None):
     """
     Manually create Student Subject records from class timetable.
