@@ -516,25 +516,50 @@ def create_menu_category_with_image():
         frappe.logger().info(f"files keys: {list(frappe.request.files.keys()) if frappe.request.files else 'None'}")
         
         # Get text fields from form_dict with error handling for encoding issues
+        title_vn = None
+        title_en = None
+        code = None
+        
+        # Method 1: Try form_dict first (standard way)
         try:
             title_vn = frappe.local.form_dict.get("title_vn")
             title_en = frappe.local.form_dict.get("title_en")
             code = frappe.local.form_dict.get("code")
-            
-            frappe.logger().info(f"Parsed values - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
-        except UnicodeDecodeError as e:
-            frappe.logger().error(f"UTF-8 decode error when accessing form_dict: {str(e)}")
-            # Try to parse multipart data manually as fallback
+            frappe.logger().info(f"Method 1 (form_dict) - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
+        except Exception as e:
+            frappe.logger().error(f"Method 1 failed: {str(e)}")
+        
+        # Method 2: If form_dict is empty or failed, try werkzeug parser
+        if not title_vn or not title_en or not code:
             try:
+                frappe.logger().info("Trying werkzeug formparser...")
                 from werkzeug.formparser import parse_form_data
-                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
-                title_vn = form.get("title_vn")
-                title_en = form.get("title_en")
-                code = form.get("code")
-                frappe.logger().info("Successfully parsed form data using werkzeug fallback")
-            except Exception as fallback_error:
-                frappe.logger().error(f"Fallback parsing also failed: {str(fallback_error)}")
-                return error_response("Error processing form data with file upload")
+                stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=False)
+                
+                title_vn = title_vn or form.get("title_vn")
+                title_en = title_en or form.get("title_en")
+                code = code or form.get("code")
+                
+                frappe.logger().info(f"Method 2 (werkzeug) - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
+                frappe.logger().info(f"werkzeug form keys: {list(form.keys())}")
+                frappe.logger().info(f"werkzeug files keys: {list(files_parsed.keys())}")
+            except Exception as e2:
+                frappe.logger().error(f"Method 2 failed: {str(e2)}")
+        
+        # Method 3: Try request.form directly
+        if not title_vn or not title_en or not code:
+            try:
+                frappe.logger().info("Trying request.form...")
+                if hasattr(frappe.request, 'form'):
+                    title_vn = title_vn or frappe.request.form.get("title_vn")
+                    title_en = title_en or frappe.request.form.get("title_en")
+                    code = code or frappe.request.form.get("code")
+                    frappe.logger().info(f"Method 3 (request.form) - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
+            except Exception as e3:
+                frappe.logger().error(f"Method 3 failed: {str(e3)}")
+        
+        frappe.logger().info(f"Final values - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
+        frappe.logger().info("=== create_menu_category_with_image DEBUG END ===")
 
         # Input validation
         if not title_vn or not title_en or not code:
