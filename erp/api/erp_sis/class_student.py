@@ -1445,9 +1445,7 @@ def create_student_subjects_from_timetable(class_id=None, student_id=None):
 def fix_student_subject_sync(class_ids=None, auto_fix=False):
     """
     Fix Student Subject records that are out of sync with Class Student.
-    
-    This will update all Student Subject records to match the current class assignment
-    in Class Student table.
+
     
     Args:
         class_ids: List of class IDs to fix (optional, if not provided will fix all)
