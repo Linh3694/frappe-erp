@@ -449,6 +449,9 @@ class CompreFaceService:
     def get_subject_info(self, subject_id: str) -> Dict:
         """
         Get information about a subject
+        
+        Note: CompreFace doesn't support GET /subjects/{id}
+        We need to list all subjects and find the matching one
 
         Args:
             subject_id: Subject identifier
@@ -457,32 +460,39 @@ class CompreFaceService:
             Dict with subject information
         """
         try:
-            url = f"{self.recognition_api}/subjects/{subject_id}"
+            # CompreFace API: GET /subjects returns list of all subjects
+            url = f"{self.recognition_api}/subjects"
 
             response = requests.get(url, headers=self._get_headers(), timeout=30)
             response.raise_for_status()
 
             result = response.json()
-            return {
-                "success": True,
-                "data": result,
-                "message": f"Subject {subject_id} information retrieved"
-            }
-
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
+            subjects = result.get("subjects", [])
+            
+            # Check if our subject_id is in the list
+            if subject_id in subjects:
+                frappe.logger().info(f"[CompreFace] Subject {subject_id} found in subjects list")
+                return {
+                    "success": True,
+                    "data": {"subject": subject_id},
+                    "message": f"Subject {subject_id} exists"
+                }
+            else:
+                frappe.logger().info(f"[CompreFace] Subject {subject_id} NOT found in subjects list")
                 return {
                     "success": False,
                     "error": "Subject not found",
                     "message": f"Subject {subject_id} does not exist"
                 }
-            else:
-                frappe.log_error(f"HTTP Error getting subject info: {str(e)}", "CompreFace Service")
-                return {
-                    "success": False,
-                    "error": f"HTTP Error: {e.response.status_code}",
-                    "message": f"Failed to get subject {subject_id} info"
-                }
+
+        except requests.exceptions.HTTPError as e:
+            error_detail = e.response.text if e.response.text else str(e)
+            frappe.log_error(f"HTTP Error getting subjects list: {error_detail}", "CompreFace Service")
+            return {
+                "success": False,
+                "error": f"HTTP Error: {e.response.status_code}",
+                "message": f"Failed to get subjects list"
+            }
 
         except Exception as e:
             frappe.log_error(f"Error getting CompreFace subject info: {str(e)}", "CompreFace Service")
