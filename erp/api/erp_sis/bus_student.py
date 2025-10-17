@@ -206,65 +206,93 @@ def create_bus_student_from_sis():
 
 		# Sync to CompreFace in background if status is Active
 		if status == "Active":
-			# Check if student already exists in CompreFace
-			subject_check = compreFace_service.get_subject_info(student_data.student_code)
+			# Check complete status in CompreFace
+			status_check = compreFace_service.check_subject_complete(student_data.student_code)
+			
+			subject_exists = False
+			has_photos = False
+			should_sync = True
+			
+			if status_check["success"]:
+				status_data = status_check.get("data", {})
+				subject_exists = status_data.get("subject_exists", False)
+				has_photos = status_data.get("has_photos", False)
+				
+				# Only skip sync if subject exists AND has photos
+				if subject_exists and has_photos:
+					should_sync = False
+					frappe.logger().info(
+						f"Student {student_data.student_code} already complete in CompreFace "
+						f"(subject exists and has {status_data.get('photos_count', 0)} photo(s)), marking as registered"
+					)
+					# Mark as registered
+					frappe.db.set_value("SIS Bus Student", doc.name, "compreface_registered", 1)
+					frappe.db.commit()
 
-			if subject_check["success"]:
-				# Student already exists in CompreFace, skip sync
-				frappe.logger().info(f"Student {student_data.student_code} already exists in CompreFace, skipping sync")
-			else:
-				# Student doesn't exist, proceed with sync
-				frappe.logger().info(f"Starting CompreFace sync for student {student_data.student_code}")
+			if should_sync:
+				# Student doesn't exist OR exists but has no photos - proceed with sync
+				frappe.logger().info(
+					f"Starting CompreFace sync for student {student_data.student_code} "
+					f"(subject_exists={subject_exists}, has_photos={has_photos})"
+				)
 
 				# Get student's photo URL first
 				photo_url = get_student_photo_url(student_data.student_code, student_data.campus_id, student_data.school_year_id)
 
-				compreface_result = sync_student_to_compreface(
-					student_data.student_code,
-					student_data.full_name,
-					student_data.campus_id,
-					student_data.school_year_id
-				)
-
-				# Verify sync result by checking subject existence
-				# Only mark as registered if we have a photo AND sync succeeded
-				if compreface_result["success"] and photo_url:
-					# Add small delay and verify
-					import time
-					time.sleep(2)  # Wait 2 seconds for CompreFace to process
-
-					# Try verification multiple times with increasing delays
-					verification_success = False
-					for attempt in range(3):
-						verify_check = compreFace_service.get_subject_info(student_data.student_code)
-						if verify_check["success"]:
-							verification_success = True
-							break
-						elif attempt < 2:  # Don't sleep after last attempt
-							time.sleep(2)  # Wait another 2 seconds
-
-					# Update the bus student record to mark as registered
-					frappe.db.set_value("SIS Bus Student", student_data.name, "compreface_registered", 1)
-					frappe.db.commit()  # Ensure the change is committed
-				else:
-					if not photo_url:
-						frappe.logger().warning(f"No photo found for student {student_data.student_code}")
-					if not compreface_result["success"]:
-						frappe.logger().warning(f"CompreFace sync failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
-
-				# If CompreFace sync fails, still create the bus student but log the error
-				if not compreface_result["success"]:
-					frappe.logger().warning(f"CompreFace sync ultimately failed for student {student_data.student_code}: {compreface_result.get('message', '')}")
-
-					# Create a notification for failed sync
+				if not photo_url:
+					frappe.logger().warning(f"No photo found for student {student_data.student_code}, cannot sync to CompreFace")
+					# Create a notification for missing photo
 					frappe.get_doc({
 						"doctype": "ERP Notification",
-						"title": f"CompreFace Sync Failed - {student_data.student_code}",
-						"message": f"Failed to sync student {student_data.student_code} to CompreFace: {compreface_result.get('message', '')}",
+						"title": f"No Photo for Student - {student_data.student_code}",
+						"message": f"Cannot sync student {student_data.student_code} to CompreFace: No photo found. Please upload a photo.",
 						"notification_type": "alert",
 						"user": frappe.session.user or "Administrator"
 					}).insert(ignore_permissions=True)
 					frappe.db.commit()
+				else:
+					# Proceed with sync
+					compreface_result = sync_student_to_compreface(
+						student_data.student_code,
+						student_data.full_name,
+						student_data.campus_id,
+						student_data.school_year_id
+					)
+
+					# Verify sync result and update registration status
+					if compreface_result["success"]:
+						# Add small delay and verify with complete check
+						import time
+						time.sleep(2)  # Wait 2 seconds for CompreFace to process
+
+						# Verify with complete check
+						for attempt in range(3):
+							verify_check = compreFace_service.check_subject_complete(student_data.student_code)
+							if verify_check["success"]:
+								verify_data = verify_check.get("data", {})
+								if verify_data.get("subject_exists") and verify_data.get("has_photos"):
+									# Successfully verified - mark as registered
+									frappe.db.set_value("SIS Bus Student", doc.name, "compreface_registered", 1)
+									frappe.db.commit()
+									frappe.logger().info(f"Successfully synced and verified student {student_data.student_code} in CompreFace")
+									break
+							if attempt < 2:  # Don't sleep after last attempt
+								time.sleep(2)  # Wait another 2 seconds
+					else:
+						frappe.logger().warning(
+							f"CompreFace sync failed for student {student_data.student_code}: "
+							f"{compreface_result.get('message', '')}"
+						)
+
+						# Create a notification for failed sync
+						frappe.get_doc({
+							"doctype": "ERP Notification",
+							"title": f"CompreFace Sync Failed - {student_data.student_code}",
+							"message": f"Failed to sync student {student_data.student_code} to CompreFace: {compreface_result.get('message', '')}",
+							"notification_type": "alert",
+							"user": frappe.session.user or "Administrator"
+						}).insert(ignore_permissions=True)
+						frappe.db.commit()
 
 		return success_response(
 			data={
@@ -392,16 +420,17 @@ def get_available_routes():
 
 @frappe.whitelist()
 def check_compreface_subject(student_code=None):
-	"""Check if a student subject exists in CompreFace"""
+	"""
+	Check if a student subject exists in CompreFace and has photos
+	
+	Returns comprehensive status with 3 possible states:
+	- no_subject: Subject does not exist in CompreFace
+	- subject_only: Subject exists but has no photos
+	- complete: Subject exists and has photos
+	"""
 	try:
 		# Read student_code from request parameters if not provided
 		if not student_code:
-			# Debug: Log what we have in form_dict and request
-			debug_info = f"check_compreface_subject called. frappe.form_dict: {frappe.form_dict}"
-			if hasattr(frappe, 'request'):
-				debug_info += f", request.args: {getattr(frappe.request, 'args', 'No args')}"
-			frappe.logger().info(debug_info)
-
 			# Try frappe.form_dict first (for POST data)
 			student_code = frappe.form_dict.get("student_code")
 
@@ -409,55 +438,81 @@ def check_compreface_subject(student_code=None):
 			if not student_code and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
 				student_code = frappe.request.args.get("student_code")
 
-		debug_info = f"Final student_code: {student_code}"
-		frappe.logger().info(debug_info)
-
 		if not student_code:
-			return error_response(f"Student code is required. Debug: {frappe.form_dict}")
+			return error_response("Student code is required")
 
-		# First, check the database flag for reliable status
+		# Get bus student record
 		bus_student = frappe.db.get_value("SIS Bus Student",
 			{"student_code": student_code},
 			["name", "compreface_registered"],
 			as_dict=True
 		)
 
-		if bus_student and bus_student.get("compreface_registered"):
-			return success_response(
-				data={
-					"exists": True,
-					"subject_info": None,
-					"verification_method": "database_flag",
-					"bus_student_id": bus_student.name
-				},
-				message=f"Subject {student_code} is registered in CompreFace (confirmed by database)"
-			)
-
-		# Fallback to API check if database flag is not set
+		# Check complete status from CompreFace API
 		import time
-		subject_exists = False
-		subject_info = None
-
+		complete_status = None
+		
 		for attempt in range(3):
-			subject_check = compreFace_service.get_subject_info(student_code)
-			if subject_check["success"]:
-				subject_exists = True
-				subject_info = subject_check.get("data", None)
-				# Update database flag if API check succeeds
+			check_result = compreFace_service.check_subject_complete(student_code)
+			if check_result["success"]:
+				complete_status = check_result.get("data", {})
+				
+				# Update database flag based on complete status
 				if bus_student:
-					frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
+					should_be_registered = (
+						complete_status.get("subject_exists") and 
+						complete_status.get("has_photos")
+					)
+					current_registered = bus_student.get("compreface_registered")
+					
+					# Only update if status has changed
+					if should_be_registered != current_registered:
+						frappe.db.set_value(
+							"SIS Bus Student", 
+							bus_student.name, 
+							"compreface_registered", 
+							1 if should_be_registered else 0
+						)
+						frappe.db.commit()
+				
 				break
 			elif attempt < 2:  # Don't sleep after last attempt
 				time.sleep(2)  # Wait 2 seconds between attempts
 
+		# If we couldn't get status, fallback to database flag
+		if not complete_status:
+			if bus_student and bus_student.get("compreface_registered"):
+				complete_status = {
+					"subject_exists": True,
+					"has_photos": True,
+					"photos_count": 1,  # Unknown, assume at least 1
+					"status": "complete"
+				}
+			else:
+				complete_status = {
+					"subject_exists": False,
+					"has_photos": False,
+					"photos_count": 0,
+					"status": "no_subject"
+				}
+
+		# Prepare response with legacy 'exists' field for backward compatibility
 		return success_response(
 			data={
-				"exists": subject_exists,
-				"subject_info": subject_info,
-				"verification_method": "api_check" if subject_info else "database_check",
-				"bus_student_id": bus_student.name if bus_student else None
+				# Legacy field (for backward compatibility)
+				"exists": complete_status.get("subject_exists") and complete_status.get("has_photos"),
+				
+				# New detailed fields
+				"subject_exists": complete_status.get("subject_exists", False),
+				"has_photos": complete_status.get("has_photos", False),
+				"photos_count": complete_status.get("photos_count", 0),
+				"status": complete_status.get("status", "no_subject"),
+				
+				# Additional info
+				"bus_student_id": bus_student.name if bus_student else None,
+				"database_registered": bus_student.get("compreface_registered") if bus_student else False
 			},
-			message=f"Subject {student_code} {'exists' if subject_exists else 'does not exist'} in CompreFace"
+			message=f"Subject {student_code}: {complete_status.get('status', 'unknown')}"
 		)
 
 	except Exception as e:
@@ -531,62 +586,89 @@ def sync_bus_student_to_compreface():
 		if not bus_student:
 			return error_response("Bus student not found")
 
-		# Check if already exists in CompreFace
-		subject_check = compreFace_service.get_subject_info(bus_student.student_code)
+		# Check complete status in CompreFace
+		status_check = compreFace_service.check_subject_complete(bus_student.student_code)
+		
+		subject_exists = False
+		has_photos = False
+		
+		if status_check["success"]:
+			status_data = status_check.get("data", {})
+			subject_exists = status_data.get("subject_exists", False)
+			has_photos = status_data.get("has_photos", False)
+			
+			# If already complete, no need to sync
+			if subject_exists and has_photos:
+				# Update database flag
+				frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
+				frappe.db.commit()
+				
+				return success_response(
+					data={
+						"status": "already_complete",
+						"photos_count": status_data.get("photos_count", 0)
+					},
+					message=f"Student {bus_student.student_code} already complete in CompreFace with {status_data.get('photos_count', 0)} photo(s)"
+				)
 
-		if subject_check["success"]:
-			return success_response(
-				message=f"Student {bus_student.student_code} already exists in CompreFace"
+		# Check if photo exists before trying to sync
+		photo_url = get_student_photo_url(bus_student.student_code, bus_student.campus_id, bus_student.school_year_id)
+		
+		if not photo_url:
+			return error_response(
+				f"Cannot sync student {bus_student.student_code}: No photo found. Please upload a photo first."
 			)
 
-		# Get student_id from CRM Student using student_code
-		student_record = frappe.get_all("CRM Student",
-			filters={"student_code": bus_student.student_code},
-			fields=["name"],
-			limit=1
-		)
-
-		if not student_record:
-			return error_response(f"CRM Student record not found for code {bus_student.student_code}")
-
-		crm_student_id = student_record[0].name
-
 		# Proceed with sync
+		frappe.logger().info(
+			f"Syncing student {bus_student.student_code} "
+			f"(subject_exists={subject_exists}, has_photos={has_photos})"
+		)
+		
 		compreface_result = sync_student_to_compreface(
-			crm_student_id,  # Use CRM Student ID
+			bus_student.student_code,
 			bus_student.full_name,
 			bus_student.campus_id,
 			bus_student.school_year_id
 		)
 
-		# Verify sync result - only mark as registered if we actually have a photo
-		photo_exists = bool(get_student_photo_url(bus_student.student_code, bus_student.campus_id, bus_student.school_year_id))
-
-		if compreface_result["success"] and photo_exists:
+		# Verify sync result
+		if compreface_result["success"]:
 			import time
 			time.sleep(2)  # Wait for processing
 
-			# Try verification multiple times
+			# Verify with complete check (multiple attempts)
 			for attempt in range(3):
-				verify_check = compreFace_service.get_subject_info(bus_student.student_code)
+				verify_check = compreFace_service.check_subject_complete(bus_student.student_code)
 				if verify_check["success"]:
-					break
-				elif attempt < 2:  # Don't sleep after last attempt
+					verify_data = verify_check.get("data", {})
+					if verify_data.get("subject_exists") and verify_data.get("has_photos"):
+						# Successfully verified - mark as registered
+						frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
+						frappe.db.commit()
+						frappe.logger().info(f"Successfully synced and verified student {bus_student.student_code}")
+						
+						return success_response(
+							data={
+								"status": "synced",
+								"photos_count": verify_data.get("photos_count", 1)
+							},
+							message=f"Successfully synced student {bus_student.student_code} to CompreFace"
+						)
+				if attempt < 2:  # Don't sleep after last attempt
 					time.sleep(2)  # Wait another 2 seconds
-
-			# Update the bus student record to mark as registered
-			frappe.db.set_value("SIS Bus Student", bus_student.name, "compreface_registered", 1)
-			frappe.db.commit()  # Ensure the change is committed
+			
+			# Sync succeeded but verification failed - still return success but with a note
 			return success_response(
-				message=f"Successfully synced student {bus_student.student_code} to CompreFace"
+				data={
+					"status": "synced_unverified"
+				},
+				message=f"Synced student {bus_student.student_code} but verification is pending"
 			)
 		else:
-			if not photo_exists:
-				return error_response(f"Cannot register student {bus_student.student_code}: No photo found")
-			else:
-				return error_response(f"Failed to sync student {bus_student.student_code} to CompreFace: {compreface_result.get('message', '')}")
-
-		return error_response(f"Failed to sync student {bus_student.student_code} to CompreFace: {compreface_result.get('message', '')}")
+			error_msg = compreface_result.get("message", "Unknown error")
+			frappe.logger().error(f"Failed to sync student {bus_student.student_code}: {error_msg}")
+			return error_response(f"Failed to sync student {bus_student.student_code} to CompreFace: {error_msg}")
 
 	except Exception as e:
 		frappe.log_error(f"Error syncing bus student to CompreFace: {str(e)}")
@@ -771,55 +853,85 @@ def sync_student_to_compreface(student_code: str, student_name: str, campus_id: 
 	try:
 		frappe.logger().info(f"Starting CompreFace sync for student {student_code}")
 
-		# Test CompreFace service connectivity
-		try:
-			test_result = compreFace_service.test_api_endpoints()
-			frappe.logger().info(f"CompreFace service test: {test_result}")
-		except Exception as test_e:
-			frappe.logger().error(f"CompreFace service test failed: {str(test_e)}")
-
-		# Get student's photo
+		# Get student's photo first
 		photo_url = get_student_photo_url(student_code, campus_id, school_year_id)
 
 		if not photo_url:
+			frappe.logger().warning(f"No photo found for student {student_code}")
 			return {
 				"success": False,
 				"error": "No photo found",
-				"message": f"No photo found for student {student_code}"
+				"message": f"No photo found for student {student_code}. Please upload a photo first."
 			}
 
-		# Check if subject already exists first
-		existing_check = compreFace_service.get_subject_info(student_code)
+		# Check complete status of subject in CompreFace
+		status_check = compreFace_service.check_subject_complete(student_code)
+		
+		subject_exists = False
+		has_photos = False
+		should_create_subject = True
+		
+		if status_check["success"]:
+			status_data = status_check.get("data", {})
+			subject_exists = status_data.get("subject_exists", False)
+			has_photos = status_data.get("has_photos", False)
+			should_create_subject = not subject_exists
+			
+			frappe.logger().info(
+				f"CompreFace status for {student_code}: "
+				f"subject_exists={subject_exists}, has_photos={has_photos}"
+			)
 
-		if existing_check["success"]:
-			create_result = {"success": True, "data": {"subject": student_code}, "message": f"Subject {student_code} already exists"}
-		else:
-			# Create subject in CompreFace
+		# Create subject if needed
+		if should_create_subject:
+			frappe.logger().info(f"Creating subject {student_code} in CompreFace")
 			create_result = compreFace_service.create_subject(student_code, student_name)
-
-		if not create_result["success"]:
-			return create_result
+			
+			if not create_result["success"]:
+				frappe.logger().error(f"Failed to create subject {student_code}: {create_result.get('message', '')}")
+				return {
+					"success": False,
+					"error": create_result.get("error", "Unknown error"),
+					"message": f"Failed to create subject in CompreFace: {create_result.get('message', '')}"
+				}
+		else:
+			frappe.logger().info(f"Subject {student_code} already exists in CompreFace")
 
 		# Add face to subject
+		frappe.logger().info(f"Adding face to subject {student_code}")
 		add_face_result = compreFace_service.add_face_to_subject(student_code, photo_url)
 
 		if add_face_result["success"]:
 			frappe.logger().info(f"Successfully synced student {student_code} to CompreFace")
 			return {
 				"success": True,
-				"message": f"Student {student_code} synced to CompreFace successfully"
+				"message": f"Student {student_code} synced to CompreFace successfully",
+				"data": {
+					"subject_created": should_create_subject,
+					"face_added": True
+				}
 			}
 		else:
-			# If adding face failed, try to clean up the created subject
-			compreFace_service.delete_subject(student_code)
-			return add_face_result
+			error_msg = add_face_result.get("message", "Unknown error")
+			frappe.logger().error(f"Failed to add face for {student_code}: {error_msg}")
+			
+			# Only delete subject if we just created it AND face addition failed
+			if should_create_subject:
+				frappe.logger().info(f"Cleaning up newly created subject {student_code}")
+				compreFace_service.delete_subject(student_code)
+			
+			return {
+				"success": False,
+				"error": add_face_result.get("error", "Unknown error"),
+				"message": f"Failed to add face to CompreFace: {error_msg}"
+			}
 
 	except Exception as e:
 		frappe.log_error(f"Error syncing student {student_code} to CompreFace: {str(e)}", "Bus Student API")
 		return {
 			"success": False,
 			"error": str(e),
-			"message": f"Failed to sync student {student_code} to CompreFace"
+			"message": f"Failed to sync student {student_code} to CompreFace: {str(e)}"
 		}
 
 

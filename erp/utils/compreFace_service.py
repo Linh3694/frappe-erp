@@ -434,6 +434,127 @@ class CompreFaceService:
                 "message": f"Failed to get subject {subject_id} info"
             }
 
+    def get_subject_photos_count(self, subject_id: str) -> Dict:
+        """
+        Get the number of photos for a subject
+        
+        Args:
+            subject_id: Subject identifier
+            
+        Returns:
+            Dict with photos count information
+        """
+        try:
+            # Get all faces for the subject
+            url = f"{self.recognition_api}/faces"
+            params = {'subject': subject_id}
+            
+            response = requests.get(url, params=params, headers=self._get_headers(), timeout=30)
+            response.raise_for_status()
+            
+            result = response.json()
+            faces = result.get('faces', [])
+            photos_count = len(faces)
+            
+            return {
+                "success": True,
+                "data": {
+                    "subject_id": subject_id,
+                    "photos_count": photos_count,
+                    "faces": faces
+                },
+                "message": f"Subject {subject_id} has {photos_count} photo(s)"
+            }
+            
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                return {
+                    "success": False,
+                    "error": "Subject not found",
+                    "message": f"Subject {subject_id} does not exist"
+                }
+            else:
+                frappe.log_error(f"HTTP Error getting subject photos: {str(e)}", "CompreFace Service")
+                return {
+                    "success": False,
+                    "error": f"HTTP Error: {e.response.status_code}",
+                    "message": f"Failed to get photos for subject {subject_id}"
+                }
+                
+        except Exception as e:
+            frappe.log_error(f"Error getting subject photos count: {str(e)}", "CompreFace Service")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to get photos for subject {subject_id}"
+            }
+    
+    def check_subject_complete(self, subject_id: str) -> Dict:
+        """
+        Check if a subject exists and has photos
+        
+        Args:
+            subject_id: Subject identifier
+            
+        Returns:
+            Dict with complete status information
+        """
+        try:
+            # First check if subject exists
+            subject_info = self.get_subject_info(subject_id)
+            
+            if not subject_info["success"]:
+                return {
+                    "success": True,
+                    "data": {
+                        "subject_exists": False,
+                        "has_photos": False,
+                        "photos_count": 0,
+                        "status": "no_subject"
+                    },
+                    "message": f"Subject {subject_id} does not exist"
+                }
+            
+            # Subject exists, now check photos
+            photos_info = self.get_subject_photos_count(subject_id)
+            
+            if photos_info["success"]:
+                photos_count = photos_info["data"]["photos_count"]
+                has_photos = photos_count > 0
+                
+                status = "complete" if has_photos else "subject_only"
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "subject_exists": True,
+                        "has_photos": has_photos,
+                        "photos_count": photos_count,
+                        "status": status
+                    },
+                    "message": f"Subject {subject_id} exists with {photos_count} photo(s)"
+                }
+            else:
+                # Couldn't get photos info, assume no photos
+                return {
+                    "success": True,
+                    "data": {
+                        "subject_exists": True,
+                        "has_photos": False,
+                        "photos_count": 0,
+                        "status": "subject_only"
+                    },
+                    "message": f"Subject {subject_id} exists but couldn't verify photos"
+                }
+                
+        except Exception as e:
+            frappe.log_error(f"Error checking subject complete status: {str(e)}", "CompreFace Service")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to check complete status for subject {subject_id}"
+            }
+
 
 # Singleton instance
 compreFace_service = CompreFaceService()
