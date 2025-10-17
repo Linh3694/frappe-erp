@@ -392,12 +392,18 @@ def check_compreface_subject(student_code=None):
 	try:
 		# Read student_code from request parameters if not provided
 		if not student_code:
-			# Debug: Log what we have in form_dict
+			# Debug: Log what we have in form_dict and request
 			debug_info = f"check_compreface_subject called. frappe.form_dict: {frappe.form_dict}"
+			if hasattr(frappe, 'request'):
+				debug_info += f", request.args: {getattr(frappe.request, 'args', 'No args')}"
 			frappe.logger().info(debug_info)
 
-			# In Frappe, query parameters are available in frappe.form_dict for whitelisted methods
+			# Try frappe.form_dict first (for POST data)
 			student_code = frappe.form_dict.get("student_code")
+
+			# If not found, try request.args (for query parameters)
+			if not student_code and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+				student_code = frappe.request.args.get("student_code")
 
 		debug_info = f"Final student_code: {student_code}"
 		frappe.logger().info(debug_info)
