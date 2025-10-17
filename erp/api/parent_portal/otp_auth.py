@@ -507,384 +507,289 @@ def get_current_guardian_comprehensive_data():
         }
 
 
+
+
 def get_guardian_comprehensive_data(guardian_name):
     """
-    Get comprehensive data for a guardian including family and student information
+    Get comprehensive data for a guardian including ALL family and student information
+    Now supports multiple families - returns ALL families where guardian is a member
 
     Args:
         guardian_name: Guardian document name
 
     Returns:
-        dict: Comprehensive data including family, students, and campus info
+        dict: Comprehensive data including families array, students, and campus info
     """
     logs = []
 
     try:
-        # Get guardian details with family_code
+        # Get guardian details
         guardian = frappe.get_doc("CRM Guardian", guardian_name)
         logs.append(f"✅ Retrieved guardian: {guardian.guardian_name}")
 
         comprehensive_data = {
-            "family": {},
-            "students": [],
-            "campus": {}
+            "families": [],  # Array of families - supports multiple families
+            "students": [],  # Flat list of all students across all families
+            "campus": {}     # Primary campus (from first student)
         }
 
-        # Get family information if family_code exists
-        logs.append(f"🔍 Guardian family_code: {guardian.family_code}")
+        # NEW APPROACH: Find ALL families where this guardian appears in relationships
+        logs.append(f"🔍 Finding all families where guardian {guardian_name} is a member...")
 
-        if guardian.family_code:
-            family_found = False
+        # Get all relationships where this guardian is involved
+        all_guardian_relationships = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"guardian": guardian_name},
+            fields=["parent", "name", "student", "guardian", "relationship_type", "key_person", "access"],
+            ignore_permissions=True
+        )
+
+        if not all_guardian_relationships:
+            logs.append("⚠️ No relationships found for this guardian")
+            # Return empty structure
+            return {
+                "success": True,
+                "data": comprehensive_data,
+                "logs": logs
+            }
+
+        logs.append(f"✅ Found {len(all_guardian_relationships)} relationships for this guardian")
+
+        # Group relationships by family (parent field is the family name)
+        families_dict = {}
+        for rel in all_guardian_relationships:
+            family_name = rel["parent"]
+            if family_name not in families_dict:
+                families_dict[family_name] = []
+            families_dict[family_name].append(rel)
+
+        logs.append(f"✅ Guardian belongs to {len(families_dict)} families")
+
+        # Track processed students to avoid duplicates in the flat students list
+        processed_students = set()
+
+        # Process each family
+        for family_name, family_rels in families_dict.items():
             try:
-                family_list = frappe.db.get_list(
-                    "CRM Family",
-                    filters={"family_code": guardian.family_code},
-                    fields=["name", "family_code"],
-                    ignore_permissions=True
-                )
+                # Get family document
+                family_doc = frappe.get_doc("CRM Family", family_name)
+                logs.append(f"✅ Processing family: {family_doc.family_code}")
 
-                if family_list:
-                    family = family_list[0]
-                    logs.append(f"✅ Found family: {family['family_code']}")
-
-                    # Get family relationships - get all docs to ensure we get all field values
-                    relationship_docs = frappe.get_all(
-                        "CRM Family Relationship",
-                        filters={"parent": family["name"]},
-                        fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
-                        ignore_permissions=True
-                    )
-                    comprehensive_data["family"] = {
-                        "name": family["name"],
-                        "family_code": family["family_code"],
-                        "relationships": []
-                    }
-
-                    # Process each relationship
-                    for rel in relationship_docs:
-                        rel_data = {
-                            "name": rel["name"],
-                            "student_name": rel["student"],
-                            "guardian_name": rel["guardian"],
-                            "relationship_type": rel["relationship_type"],
-                            "key_person": rel["key_person"],
-                            "access": rel["access"],
-                            "student_details": {},
-                            "guardian_details": {}
-                        }
-
-                        # Get student details
-                        if rel["student"]:
-                            try:
-                                student = frappe.get_doc("CRM Student", rel["student"])
-                                rel_data["student_details"] = {
-                                    "name": student.name,
-                                    "student_name": student.student_name,
-                                    "student_code": student.student_code,
-                                    "dob": student.dob.strftime("%Y-%m-%d") if student.dob else None,
-                                    "gender": student.gender,
-                                    "campus_id": student.campus_id,
-                                    "family_code": student.family_code
-                                }
-
-                                # Get SIS Photo for this student
-                                sis_photos = frappe.get_all("SIS Photo",
-                                    filters={
-                                        "student_id": student.name,
-                                        "type": "student",
-                                        "status": "Active"
-                                    },
-                                    fields=["photo", "title", "upload_date"],
-                                    order_by="upload_date desc",
-                                    limit_page_length=1
-                                )
-
-                                if sis_photos:
-                                    rel_data["student_details"]["sis_photo"] = sis_photos[0]["photo"]
-                                    rel_data["student_details"]["photo_title"] = sis_photos[0]["title"]
-                                else:
-                                    rel_data["student_details"]["sis_photo"] = "chưa có"
-
-                                # Get SIS Class Student for current/latest class (only regular type)
-                                class_students = frappe.get_all("SIS Class Student",
-                                    filters={"student_id": student.name},
-                                    fields=["class_id", "school_year_id"],
-                                    order_by="modified desc"
-                                )
-
-                                # Find the latest regular class
-                                current_class = None
-                                for cs in class_students:
-                                    if cs["class_id"]:
-                                        try:
-                                            class_doc = frappe.get_doc("SIS Class", cs["class_id"])
-                                            if getattr(class_doc, 'class_type', '') == 'regular':
-                                                current_class = {
-                                                    'class_id': cs["class_id"],
-                                                    'school_year_id': cs["school_year_id"],
-                                                    'class_doc': class_doc
-                                                }
-                                                break  # Take the most recent regular class
-                                        except:
-                                            continue
-
-                                if current_class:
-                                    rel_data["student_details"]["current_class_id"] = current_class["class_id"]
-                                    rel_data["student_details"]["school_year_id"] = current_class["school_year_id"]
-                                    rel_data["student_details"]["class_name"] = getattr(current_class["class_doc"], 'title', '')
-                                    rel_data["student_details"]["grade"] = getattr(current_class["class_doc"], 'education_grade', None)
-
-                                    # Get homeroom teachers information
-                                    class_doc = current_class["class_doc"]
-                                    teachers_info = {}
-
-                                    # Get homeroom teacher
-                                    if getattr(class_doc, 'homeroom_teacher', None):
-                                        try:
-                                            homeroom_teacher = frappe.get_doc("SIS Teacher", class_doc.homeroom_teacher)
-
-                                            # Get user information from User doctype
-                                            user_info = None
-                                            if getattr(homeroom_teacher, 'user_id', None):
-                                                try:
-                                                    user = frappe.get_doc("User", homeroom_teacher.user_id)
-                                                    user_info = {
-                                                        "full_name": getattr(user, 'full_name', ''),
-                                                        "email": getattr(user, 'email', ''),
-                                                        "user_image": getattr(user, 'user_image', None),
-                                                        "mobile_no": getattr(user, 'mobile_no', ''),
-                                                        "phone": getattr(user, 'phone', '')
-                                                    }
-                                                except Exception as e:
-                                                    logs.append(f"⚠️ Could not get user info for homeroom teacher: {str(e)}")
-
-                                            teachers_info["homeroom_teacher"] = {
-                                                "name": homeroom_teacher.name,
-                                                "teacher_name": getattr(homeroom_teacher, 'teacher_name', ''),
-                                                "teacher_code": getattr(homeroom_teacher, 'teacher_code', ''),
-                                                "email": user_info.get('email') if user_info else getattr(homeroom_teacher, 'email', ''),
-                                                "phone": user_info.get('mobile_no') or user_info.get('phone') if user_info else getattr(homeroom_teacher, 'phone', ''),
-                                                "avatar": user_info.get('user_image') if user_info and user_info.get('user_image') else None,
-                                                "full_name": user_info.get('full_name') if user_info else getattr(homeroom_teacher, 'teacher_name', '')
-                                            }
-                                        except Exception as e:
-                                            logs.append(f"⚠️ Could not get homeroom teacher details: {str(e)}")
-
-                                    # Get vice homeroom teacher
-                                    if getattr(class_doc, 'vice_homeroom_teacher', None):
-                                        try:
-                                            vice_homeroom_teacher = frappe.get_doc("SIS Teacher", class_doc.vice_homeroom_teacher)
-
-                                            # Get user information from User doctype
-                                            user_info = None
-                                            if getattr(vice_homeroom_teacher, 'user_id', None):
-                                                try:
-                                                    user = frappe.get_doc("User", vice_homeroom_teacher.user_id)
-                                                    user_info = {
-                                                        "full_name": getattr(user, 'full_name', ''),
-                                                        "email": getattr(user, 'email', ''),
-                                                        "user_image": getattr(user, 'user_image', None),
-                                                        "mobile_no": getattr(user, 'mobile_no', ''),
-                                                        "phone": getattr(user, 'phone', '')
-                                                    }
-                                                except Exception as e:
-                                                    logs.append(f"⚠️ Could not get user info for vice homeroom teacher: {str(e)}")
-
-                                            teachers_info["vice_homeroom_teacher"] = {
-                                                "name": vice_homeroom_teacher.name,
-                                                "teacher_name": getattr(vice_homeroom_teacher, 'teacher_name', ''),
-                                                "teacher_code": getattr(vice_homeroom_teacher, 'teacher_code', ''),
-                                                "email": user_info.get('email') if user_info else getattr(vice_homeroom_teacher, 'email', ''),
-                                                "phone": user_info.get('mobile_no') or user_info.get('phone') if user_info else getattr(vice_homeroom_teacher, 'phone', ''),
-                                                "avatar": user_info.get('user_image') if user_info and user_info.get('user_image') else None,
-                                                "full_name": user_info.get('full_name') if user_info else getattr(vice_homeroom_teacher, 'teacher_name', '')
-                                            }
-                                        except Exception as e:
-                                            logs.append(f"⚠️ Could not get vice homeroom teacher details: {str(e)}")
-
-                                    if teachers_info:
-                                        rel_data["student_details"]["teachers"] = teachers_info
-
-                                # Get campus details
-                                if student.campus_id:
-                                    try:
-                                        campus = frappe.get_doc("SIS Campus", student.campus_id)
-                                        comprehensive_data["campus"] = {
-                                            "name": campus.name,
-                                            "title_vn": campus.title_vn,
-                                            "title_en": campus.title_en,
-                                            "short_title": campus.short_title
-                                        }
-                                        logs.append(f"✅ Retrieved campus: {campus.title_vn}")
-                                    except Exception as e:
-                                        logs.append(f"⚠️ Could not get campus details: {str(e)}")
-
-                                logs.append(f"✅ Retrieved student: {student.student_name}")
-                            except Exception as e:
-                                logs.append(f"⚠️ Could not get student details: {str(e)}")
-
-                        # Get guardian details (if different from current guardian)
-                        if rel["guardian"] and rel["guardian"] != guardian_name:
-                            try:
-                                other_guardian = frappe.get_doc("CRM Guardian", rel["guardian"])
-                                rel_data["guardian_details"] = {
-                                    "name": other_guardian.name,
-                                    "guardian_id": other_guardian.guardian_id,
-                                    "guardian_name": other_guardian.guardian_name,
-                                    "phone_number": other_guardian.phone_number,
-                                    "email": other_guardian.email
-                                }
-                                logs.append(f"✅ Retrieved related guardian: {other_guardian.guardian_name}")
-                            except Exception as e:
-                                logs.append(f"⚠️ Could not get related guardian details: {str(e)}")
-
-                        comprehensive_data["family"]["relationships"].append(rel_data)
-
-                        # Add student to students list if not already present
-                        student_details = rel_data.get("student_details")
-                        if student_details and student_details.get("name"):
-                            student_already_in_list = any(
-                                s.get("name") == student_details["name"]
-                                for s in comprehensive_data["students"]
-                            )
-                            if not student_already_in_list:
-                                comprehensive_data["students"].append(student_details)
-
-            except Exception as e:
-                logs.append(f"⚠️ Could not get family details: {str(e)}")
-        else:
-            logs.append("⚠️ No family_code found for guardian")
-            logs.append("🔍 Attempting to find direct relationships from guardian...")
-
-            # Try to find relationships directly from this guardian
-            try:
-                direct_relationships = frappe.get_all(
+                # Get ALL relationships for this family (includes all members, not just this guardian)
+                all_family_relationships = frappe.get_all(
                     "CRM Family Relationship",
-                    filters={"guardian": guardian_name},
+                    filters={"parent": family_name},
                     fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
                     ignore_permissions=True
                 )
 
-                if direct_relationships:
-                    logs.append(f"✅ Found {len(direct_relationships)} direct relationships")
+                family_data = {
+                    "name": family_doc.name,
+                    "family_code": family_doc.family_code,
+                    "relationships": []
+                }
 
-                    # Group by students to create family-like structure
-                    student_groups = {}
-                    for rel in direct_relationships:
-                        student_id = rel["student"]
-                        if student_id not in student_groups:
-                            student_groups[student_id] = []
-
-                        # Get student details
-                        if rel["student"]:
-                            try:
-                                student = frappe.get_doc("CRM Student", rel["student"])
-                                rel_data = {
-                                    "name": rel["name"],
-                                    "student_name": rel["student"],
-                                    "guardian_name": rel["guardian"],
-                                    "relationship_type": rel["relationship_type"],
-                                    "key_person": rel["key_person"],
-                                    "access": rel["access"],
-                                    "student_details": {
-                                        "name": student.name,
-                                        "student_name": student.student_name,
-                                        "student_code": student.student_code,
-                                        "dob": student.dob.strftime("%Y-%m-%d") if student.dob else None,
-                                        "gender": student.gender,
-                                        "campus_id": student.campus_id,
-                                        "family_code": student.family_code
-                                    },
-                                    "guardian_details": {}
-                                }
-
-                                # Get SIS Photo for this student (direct relationships)
-                                sis_photos_direct = frappe.get_all("SIS Photo",
-                                    filters={
-                                        "student_id": student.name,
-                                        "type": "student",
-                                        "status": "Active"
-                                    },
-                                    fields=["photo", "title", "upload_date"],
-                                    order_by="upload_date desc",
-                                    limit_page_length=1
-                                )
-
-                                if sis_photos_direct:
-                                    rel_data["student_details"]["sis_photo"] = sis_photos_direct[0]["photo"]
-                                    rel_data["student_details"]["photo_title"] = sis_photos_direct[0]["title"]
-
-                                # Get SIS Class Student for current/latest class (direct relationships, only regular type)
-                                class_students_direct = frappe.get_all("SIS Class Student",
-                                    filters={"student_id": student.name},
-                                    fields=["class_id", "school_year_id"],
-                                    order_by="modified desc"
-                                )
-
-                                # Find the latest regular class
-                                current_class_direct = None
-                                for cs in class_students_direct:
-                                    if cs["class_id"]:
-                                        try:
-                                            class_doc = frappe.get_doc("SIS Class", cs["class_id"])
-                                            if getattr(class_doc, 'class_type', '') == 'regular':
-                                                current_class_direct = {
-                                                    'class_id': cs["class_id"],
-                                                    'school_year_id': cs["school_year_id"],
-                                                    'class_doc': class_doc
-                                                }
-                                                break  # Take the most recent regular class
-                                        except:
-                                            continue
-
-                                if current_class_direct:
-                                    rel_data["student_details"]["current_class_id"] = current_class_direct["class_id"]
-                                    rel_data["student_details"]["school_year_id"] = current_class_direct["school_year_id"]
-                                    rel_data["student_details"]["class_name"] = getattr(current_class_direct["class_doc"], 'title', '')
-                                    rel_data["student_details"]["grade"] = getattr(current_class_direct["class_doc"], 'education_grade', None)
-
-                                # Get campus details if available
-                                if student.campus_id:
-                                    try:
-                                        campus = frappe.get_doc("SIS Campus", student.campus_id)
-                                        comprehensive_data["campus"] = {
-                                            "name": campus.name,
-                                            "title_vn": campus.title_vn,
-                                            "title_en": campus.title_en,
-                                            "short_title": campus.short_title
-                                        }
-                                    except Exception as e:
-                                        logs.append(f"⚠️ Could not get campus details: {str(e)}")
-
-                                student_groups[student_id].append(rel_data)
-
-                                # Add to students list - avoid duplicates by student name
-                                student_already_exists = any(s.get("name") == student.name for s in comprehensive_data["students"])
-                                if not student_already_exists:
-                                    comprehensive_data["students"].append(rel_data["student_details"])
-
-                            except Exception as e:
-                                logs.append(f"⚠️ Could not get student details: {str(e)}")
-
-                    # Create a temporary family structure
-                    if student_groups:
-                        comprehensive_data["family"] = {
-                            "name": f"temp_family_{guardian_name}",
-                            "family_code": "NO_FAMILY_CODE",
-                            "relationships": [rel for rels in student_groups.values() for rel in rels],
-                            "note": "Guardian không có family_code, hiển thị relationships trực tiếp"
-                        }
-                        logs.append(f"✅ Created temporary family structure with {len(comprehensive_data['students'])} students")
-                else:
-                    logs.append("⚠️ No direct relationships found for this guardian")
-                    comprehensive_data["family"] = {
-                        "note": "Guardian chưa có family hoặc relationships nào"
+                # Process each relationship in this family
+                for rel in all_family_relationships:
+                    rel_data = {
+                        "name": rel["name"],
+                        "student_name": rel["student"],
+                        "guardian_name": rel["guardian"],
+                        "relationship_type": rel["relationship_type"],
+                        "key_person": rel["key_person"],
+                        "access": rel["access"],
+                        "student_details": {},
+                        "guardian_details": {}
                     }
 
-            except Exception as e:
-                logs.append(f"⚠️ Error finding direct relationships: {str(e)}")
+                    # Get student details
+                    if rel["student"]:
+                        try:
+                            student = frappe.get_doc("CRM Student", rel["student"])
+                            
+                            student_details = {
+                                "name": student.name,
+                                "student_name": student.student_name,
+                                "student_code": student.student_code,
+                                "dob": student.dob.strftime("%Y-%m-%d") if student.dob else None,
+                                "gender": student.gender,
+                                "campus_id": student.campus_id,
+                                "family_code": student.family_code
+                            }
 
-        logs.append(f"📊 Comprehensive data retrieved: {len(comprehensive_data['students'])} students")
+                            # Get SIS Photo
+                            sis_photos = frappe.get_all("SIS Photo",
+                                filters={
+                                    "student_id": student.name,
+                                    "type": "student",
+                                    "status": "Active"
+                                },
+                                fields=["photo", "title", "upload_date"],
+                                order_by="upload_date desc",
+                                limit_page_length=1
+                            )
+
+                            if sis_photos:
+                                student_details["sis_photo"] = sis_photos[0]["photo"]
+                                student_details["photo_title"] = sis_photos[0]["title"]
+                            else:
+                                student_details["sis_photo"] = None
+
+                            # Get current class (only regular type)
+                            class_students = frappe.get_all("SIS Class Student",
+                                filters={"student_id": student.name},
+                                fields=["class_id", "school_year_id"],
+                                order_by="modified desc"
+                            )
+
+                            # Find the latest regular class
+                            current_class = None
+                            for cs in class_students:
+                                if cs["class_id"]:
+                                    try:
+                                        class_doc = frappe.get_doc("SIS Class", cs["class_id"])
+                                        if getattr(class_doc, 'class_type', '') == 'regular':
+                                            current_class = {
+                                                'class_id': cs["class_id"],
+                                                'school_year_id': cs["school_year_id"],
+                                                'class_doc': class_doc
+                                            }
+                                            break  # Take the most recent regular class
+                                    except:
+                                        continue
+
+                            if current_class:
+                                student_details["current_class_id"] = current_class["class_id"]
+                                student_details["school_year_id"] = current_class["school_year_id"]
+                                student_details["class_name"] = getattr(current_class["class_doc"], 'title', '')
+                                student_details["grade"] = getattr(current_class["class_doc"], 'education_grade', None)
+
+                                # Get homeroom teachers information
+                                class_doc = current_class["class_doc"]
+                                teachers_info = {}
+
+                                # Get homeroom teacher
+                                if getattr(class_doc, 'homeroom_teacher', None):
+                                    try:
+                                        homeroom_teacher = frappe.get_doc("SIS Teacher", class_doc.homeroom_teacher)
+                                        user_info = None
+                                        if getattr(homeroom_teacher, 'user_id', None):
+                                            try:
+                                                user = frappe.get_doc("User", homeroom_teacher.user_id)
+                                                user_info = {
+                                                    "full_name": getattr(user, 'full_name', ''),
+                                                    "email": getattr(user, 'email', ''),
+                                                    "user_image": getattr(user, 'user_image', None),
+                                                    "mobile_no": getattr(user, 'mobile_no', ''),
+                                                    "phone": getattr(user, 'phone', '')
+                                                }
+                                            except Exception as e:
+                                                logs.append(f"⚠️ Could not get user info for homeroom teacher: {str(e)}")
+
+                                        teachers_info["homeroom_teacher"] = {
+                                            "name": homeroom_teacher.name,
+                                            "teacher_name": getattr(homeroom_teacher, 'teacher_name', ''),
+                                            "teacher_code": getattr(homeroom_teacher, 'teacher_code', ''),
+                                            "email": user_info.get('email') if user_info else getattr(homeroom_teacher, 'email', ''),
+                                            "phone": user_info.get('mobile_no') or user_info.get('phone') if user_info else getattr(homeroom_teacher, 'phone', ''),
+                                            "avatar": user_info.get('user_image') if user_info and user_info.get('user_image') else None,
+                                            "full_name": user_info.get('full_name') if user_info else getattr(homeroom_teacher, 'teacher_name', '')
+                                        }
+                                    except Exception as e:
+                                        logs.append(f"⚠️ Could not get homeroom teacher: {str(e)}")
+
+                                # Get vice homeroom teacher
+                                if getattr(class_doc, 'vice_homeroom_teacher', None):
+                                    try:
+                                        vice_homeroom_teacher = frappe.get_doc("SIS Teacher", class_doc.vice_homeroom_teacher)
+                                        user_info = None
+                                        if getattr(vice_homeroom_teacher, 'user_id', None):
+                                            try:
+                                                user = frappe.get_doc("User", vice_homeroom_teacher.user_id)
+                                                user_info = {
+                                                    "full_name": getattr(user, 'full_name', ''),
+                                                    "email": getattr(user, 'email', ''),
+                                                    "user_image": getattr(user, 'user_image', None),
+                                                    "mobile_no": getattr(user, 'mobile_no', ''),
+                                                    "phone": getattr(user, 'phone', '')
+                                                }
+                                            except Exception as e:
+                                                logs.append(f"⚠️ Could not get user info for vice homeroom teacher: {str(e)}")
+
+                                        teachers_info["vice_homeroom_teacher"] = {
+                                            "name": vice_homeroom_teacher.name,
+                                            "teacher_name": getattr(vice_homeroom_teacher, 'teacher_name', ''),
+                                            "teacher_code": getattr(vice_homeroom_teacher, 'teacher_code', ''),
+                                            "email": user_info.get('email') if user_info else getattr(vice_homeroom_teacher, 'email', ''),
+                                            "phone": user_info.get('mobile_no') or user_info.get('phone') if user_info else getattr(vice_homeroom_teacher, 'phone', ''),
+                                            "avatar": user_info.get('user_image') if user_info and user_info.get('user_image') else None,
+                                            "full_name": user_info.get('full_name') if user_info else getattr(vice_homeroom_teacher, 'teacher_name', '')
+                                        }
+                                    except Exception as e:
+                                        logs.append(f"⚠️ Could not get vice homeroom teacher: {str(e)}")
+
+                                if teachers_info:
+                                    student_details["teachers"] = teachers_info
+
+                            # Get campus details (set once from first student)
+                            if student.campus_id and not comprehensive_data["campus"]:
+                                try:
+                                    campus = frappe.get_doc("SIS Campus", student.campus_id)
+                                    comprehensive_data["campus"] = {
+                                        "name": campus.name,
+                                        "title_vn": campus.title_vn,
+                                        "title_en": campus.title_en,
+                                        "short_title": campus.short_title
+                                    }
+                                    logs.append(f"✅ Retrieved campus: {campus.title_vn}")
+                                except Exception as e:
+                                    logs.append(f"⚠️ Could not get campus details: {str(e)}")
+
+                            rel_data["student_details"] = student_details
+
+                            # Add to flat students list (avoid duplicates)
+                            if student.name not in processed_students:
+                                comprehensive_data["students"].append(student_details)
+                                processed_students.add(student.name)
+
+                            logs.append(f"✅ Retrieved student: {student.student_name}")
+
+                        except Exception as e:
+                            logs.append(f"⚠️ Could not get student details for {rel['student']}: {str(e)}")
+
+                    # Get guardian details (if different from current guardian)
+                    if rel["guardian"] and rel["guardian"] != guardian_name:
+                        try:
+                            other_guardian = frappe.get_doc("CRM Guardian", rel["guardian"])
+                            rel_data["guardian_details"] = {
+                                "name": other_guardian.name,
+                                "guardian_id": other_guardian.guardian_id,
+                                "guardian_name": other_guardian.guardian_name,
+                                "phone_number": other_guardian.phone_number,
+                                "email": other_guardian.email
+                            }
+                            logs.append(f"✅ Retrieved related guardian: {other_guardian.guardian_name}")
+                        except Exception as e:
+                            logs.append(f"⚠️ Could not get guardian details: {str(e)}")
+
+                    # Add relationship to this family
+                    family_data["relationships"].append(rel_data)
+
+                # Add this family to families array
+                comprehensive_data["families"].append(family_data)
+                logs.append(f"✅ Added family {family_doc.family_code} with {len(family_data['relationships'])} relationships")
+
+            except Exception as e:
+                logs.append(f"⚠️ Could not process family {family_name}: {str(e)}")
+
+        logs.append(f"📊 Comprehensive data retrieved: {len(comprehensive_data['families'])} families, {len(comprehensive_data['students'])} students")
+
+        # For backward compatibility, add a "family" field with the first family
+        # This ensures existing frontend code doesn't break
+        if comprehensive_data["families"]:
+            comprehensive_data["family"] = comprehensive_data["families"][0]
+        else:
+            comprehensive_data["family"] = {}
 
         return {
             "success": True,
@@ -898,7 +803,7 @@ def get_guardian_comprehensive_data(guardian_name):
 
         return {
             "success": False,
-            "data": {"family": {}, "students": [], "campus": {}},
+            "data": {"families": [], "family": {}, "students": [], "campus": {}},
             "logs": logs,
             "error": str(e)
         }
