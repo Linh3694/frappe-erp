@@ -116,18 +116,14 @@ def create_menu_category():
                 json_data = json.loads(frappe.request.data)
                 if json_data:
                     data = json_data
-                    frappe.logger().info(f"Received JSON data for create_menu_category: {data}")
                 else:
                     data = frappe.local.form_dict
-                    frappe.logger().info(f"Received form data for create_menu_category: {data}")
             except (json.JSONDecodeError, TypeError):
                 # If JSON parsing fails, use form_dict
                 data = frappe.local.form_dict
-                frappe.logger().info(f"JSON parsing failed, using form data for create_menu_category: {data}")
         else:
             # Fallback to form_dict
             data = frappe.local.form_dict
-            frappe.logger().info(f"No request data, using form_dict for create_menu_category: {data}")
 
         # Extract values from data
         title_vn = data.get("title_vn")
@@ -355,26 +351,22 @@ def upload_menu_category_image():
             try:
                 # Method 1: Try form_dict first (most common case)
                 menu_category_id = frappe.local.form_dict.get('menu_category_id')
-                frappe.logger().info(f"Method 1 - form_dict menu_category_id: {menu_category_id}")
-                
+
                 # Method 2: If form_dict fails, try werkzeug parser
                 if not menu_category_id:
                     from werkzeug.formparser import parse_form_data
                     stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=True)
                     menu_category_id = form.get('menu_category_id')
-                    frappe.logger().info(f"Method 2 - werkzeug menu_category_id: {menu_category_id}")
-                
+
                 # Method 3: Try to get from request.form if available
                 if not menu_category_id and hasattr(frappe.request, 'form'):
                     menu_category_id = frappe.request.form.get('menu_category_id')
-                    frappe.logger().info(f"Method 3 - request.form menu_category_id: {menu_category_id}")
                     
             except Exception as e:
                 frappe.logger().error(f"Error parsing multipart data: {str(e)}")
                 # Try fallback method
                 try:
                     menu_category_id = frappe.local.form_dict.get('menu_category_id')
-                    frappe.logger().info(f"Fallback method - form_dict menu_category_id: {menu_category_id}")
                 except:
                     return error_response("Error processing form data with file upload")
         else:
@@ -416,7 +408,6 @@ def upload_menu_category_image():
         # Read file content as bytes
         try:
             file_content = uploaded_file.read()
-            frappe.logger().info(f"Successfully read file content, size: {len(file_content)} bytes")
         except Exception as read_error:
             frappe.logger().error(f"Error reading file content: {str(read_error)}")
             return validation_error_response("Failed to read file", {"file": ["Error reading uploaded file"]})
@@ -449,8 +440,6 @@ def upload_menu_category_image():
 
         # Create new filename using menu category code
         new_file_name = f"{menu_category_doc.code}{original_extension}"
-        
-        frappe.logger().info(f"Original filename: {file_name}, New filename: {new_file_name}")
 
         # Create Menu Categories directory if it doesn't exist
         upload_dir = frappe.get_site_path("public", "files", "Menu_Categories")
@@ -462,15 +451,12 @@ def upload_menu_category_image():
         try:
             with open(file_path, 'wb') as f:
                 f.write(file_content)
-            frappe.logger().info(f"Successfully saved file to: {file_path}")
         except Exception as write_error:
             frappe.logger().error(f"Error writing file to disk: {str(write_error)}")
             return validation_error_response("Failed to save file", {"file": ["Error saving file to disk"]})
 
         # Create file URL
         file_url = f"/files/Menu_Categories/{new_file_name}"
-        
-        frappe.logger().info(f"File saved to: {file_path}, URL: {file_url}")
 
         # Update menu category with image URL (directly use file_url, no Frappe File document needed)
         menu_category_doc.image_url = file_url
@@ -506,60 +492,40 @@ def create_menu_category_with_image():
         # IMPORTANT: Access form_dict AFTER processing files to avoid UTF-8 encoding issues
         # The issue occurs when Frappe tries to parse multipart data containing binary files
 
-        # DEBUG: Log request info
-        frappe.logger().info("=== create_menu_category_with_image DEBUG START ===")
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Content-Type: {frappe.request.content_type}")
-        frappe.logger().info(f"Content-Length: {frappe.request.content_length}")
-        frappe.logger().info(f"form_dict keys: {list(frappe.local.form_dict.keys())}")
-        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
-        frappe.logger().info(f"files keys: {list(frappe.request.files.keys()) if frappe.request.files else 'None'}")
-        
         # Get text fields from form_dict with error handling for encoding issues
         title_vn = None
         title_en = None
         code = None
-        
+
         # Method 1: Try form_dict first (standard way)
         try:
             title_vn = frappe.local.form_dict.get("title_vn")
             title_en = frappe.local.form_dict.get("title_en")
             code = frappe.local.form_dict.get("code")
-            frappe.logger().info(f"Method 1 (form_dict) - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
         except Exception as e:
             frappe.logger().error(f"Method 1 failed: {str(e)}")
-        
+
         # Method 2: If form_dict is empty or failed, try werkzeug parser
         if not title_vn or not title_en or not code:
             try:
-                frappe.logger().info("Trying werkzeug formparser...")
                 from werkzeug.formparser import parse_form_data
                 stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=False)
-                
+
                 title_vn = title_vn or form.get("title_vn")
                 title_en = title_en or form.get("title_en")
                 code = code or form.get("code")
-                
-                frappe.logger().info(f"Method 2 (werkzeug) - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
-                frappe.logger().info(f"werkzeug form keys: {list(form.keys())}")
-                frappe.logger().info(f"werkzeug files keys: {list(files_parsed.keys())}")
             except Exception as e2:
                 frappe.logger().error(f"Method 2 failed: {str(e2)}")
-        
+
         # Method 3: Try request.form directly
         if not title_vn or not title_en or not code:
             try:
-                frappe.logger().info("Trying request.form...")
                 if hasattr(frappe.request, 'form'):
                     title_vn = title_vn or frappe.request.form.get("title_vn")
                     title_en = title_en or frappe.request.form.get("title_en")
                     code = code or frappe.request.form.get("code")
-                    frappe.logger().info(f"Method 3 (request.form) - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
             except Exception as e3:
                 frappe.logger().error(f"Method 3 failed: {str(e3)}")
-        
-        frappe.logger().info(f"Final values - title_vn: {title_vn}, title_en: {title_en}, code: {code}")
-        frappe.logger().info("=== create_menu_category_with_image DEBUG END ===")
 
         # Input validation
         if not title_vn or not title_en or not code:
@@ -616,8 +582,6 @@ def create_menu_category_with_image():
         menu_category_doc.insert()
         frappe.db.commit()
 
-        frappe.logger().info(f"Created menu category: {menu_category_doc.name} with code: {code}")
-
         # Handle image upload if file is provided
         image_url = ""
         files = frappe.request.files
@@ -637,7 +601,6 @@ def create_menu_category_with_image():
                 # Read file content as bytes
                 try:
                     file_content = uploaded_file.read()
-                    frappe.logger().info(f"Successfully read file content, size: {len(file_content)} bytes")
                 except Exception as read_error:
                     frappe.logger().error(f"Error reading file content: {str(read_error)}")
                     # Delete the created menu category if file read fails
@@ -676,8 +639,6 @@ def create_menu_category_with_image():
 
                 # Create new filename using menu category code
                 new_file_name = f"{menu_category_doc.code}{original_extension}"
-                
-                frappe.logger().info(f"Uploading image with filename: {new_file_name}")
 
                 # Create Menu Categories directory if it doesn't exist
                 upload_dir = frappe.get_site_path("public", "files", "Menu_Categories")
@@ -689,7 +650,6 @@ def create_menu_category_with_image():
                 try:
                     with open(file_path, 'wb') as f:
                         f.write(file_content)
-                    frappe.logger().info(f"Successfully saved file to: {file_path}")
                 except Exception as write_error:
                     frappe.logger().error(f"Error writing file to disk: {str(write_error)}")
                     # Delete the created menu category if file save fails
@@ -699,15 +659,11 @@ def create_menu_category_with_image():
 
                 # Create file URL
                 file_url = f"/files/Menu_Categories/{new_file_name}"
-                
-                frappe.logger().info(f"File saved to: {file_path}, URL: {file_url}")
 
                 menu_category_doc.image_url = file_url
                 menu_category_doc.save()
                 frappe.db.commit()
                 image_url = file_url
-
-                frappe.logger().info(f"Image uploaded successfully: {image_url}")
 
             except Exception as image_error:
                 # If image upload fails, still return success for menu category creation
