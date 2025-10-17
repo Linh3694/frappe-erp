@@ -16,6 +16,11 @@ def sync_student_subjects_for_class_change(student_id, new_class_id, school_year
     Sync SIS Student Subject records when a student changes class.
     This ensures Student Subject table is always in sync with Class Student table.
     
+    This function:
+    1. Updates existing Student Subject records to new class_id
+    2. Creates NEW Student Subject records for subjects in new class timetable
+    3. This ensures report cards have all subjects from the new class
+    
     Args:
         student_id: Student ID
         new_class_id: New class ID the student is moving to
@@ -43,7 +48,7 @@ def sync_student_subjects_for_class_change(student_id, new_class_id, school_year
                 AND class_id = %s
             """, (new_class_id, student_id, school_year_id, campus_id, old_class_id))
             updated_count = result
-            logs.append(f"✓ Updated {updated_count} Student Subject records from class {old_class_id} to {new_class_id}")
+            logs.append(f"✓ Updated {updated_count} existing Student Subject records to class {new_class_id}")
         else:
             # Don't know old class, update all mismatched records for this student
             result = frappe.db.sql("""
@@ -55,9 +60,89 @@ def sync_student_subjects_for_class_change(student_id, new_class_id, school_year
                 AND class_id != %s
             """, (new_class_id, student_id, school_year_id, campus_id, new_class_id))
             updated_count = result
-            logs.append(f"✓ Synced {updated_count} Student Subject records to class {new_class_id}")
+            logs.append(f"✓ Synced {updated_count} existing Student Subject records to class {new_class_id}")
         
-        # Step 2: Verify sync was successful
+        # 🆕 Step 2: Create NEW Student Subject records for subjects in new class timetable
+        # This ensures the student has Subject records for ALL subjects in the new class
+        try:
+            # Get subjects from timetable of new class
+            timetable_instances = frappe.get_all(
+                "SIS Timetable Instance",
+                fields=["name"],
+                filters={
+                    "campus_id": campus_id,
+                    "class_id": new_class_id
+                }
+            )
+            
+            if timetable_instances:
+                instance_ids = [t["name"] for t in timetable_instances]
+                
+                # Get distinct subjects from timetable rows
+                timetable_subjects = frappe.db.sql("""
+                    SELECT DISTINCT subject_id
+                    FROM `tabSIS Timetable Instance Row`
+                    WHERE parent IN %s
+                    AND subject_id IS NOT NULL
+                    AND subject_id != ''
+                """, [instance_ids], as_dict=True)
+                
+                subject_ids = [s["subject_id"] for s in timetable_subjects if s.get("subject_id")]
+                logs.append(f"Found {len(subject_ids)} subjects in timetable for class {new_class_id}")
+                
+                # For each subject, ensure Student Subject record exists
+                for subject_id in subject_ids:
+                    try:
+                        # Get actual_subject_id from SIS Subject
+                        actual_subject_id = frappe.db.get_value("SIS Subject", subject_id, "actual_subject_id")
+                        
+                        if not actual_subject_id:
+                            logs.append(f"⚠️ Subject {subject_id} has no actual_subject_id, skipping")
+                            continue
+                        
+                        # Check if Student Subject record already exists
+                        existing = frappe.db.exists(
+                            "SIS Student Subject",
+                            {
+                                "campus_id": campus_id,
+                                "student_id": student_id,
+                                "class_id": new_class_id,
+                                "subject_id": subject_id,
+                                "school_year_id": school_year_id
+                            }
+                        )
+                        
+                        if not existing:
+                            # Create new Student Subject record
+                            doc = frappe.get_doc({
+                                "doctype": "SIS Student Subject",
+                                "campus_id": campus_id,
+                                "student_id": student_id,
+                                "class_id": new_class_id,
+                                "subject_id": subject_id,
+                                "actual_subject_id": actual_subject_id,
+                                "school_year_id": school_year_id
+                            })
+                            doc.insert(ignore_permissions=True)
+                            created_count += 1
+                        
+                    except Exception as subj_err:
+                        logs.append(f"⚠️ Error processing subject {subject_id}: {str(subj_err)}")
+                        continue
+                
+                if created_count > 0:
+                    logs.append(f"✓ Created {created_count} NEW Student Subject records for class {new_class_id} subjects")
+                else:
+                    logs.append(f"✓ All subjects already exist in Student Subject")
+                    
+            else:
+                logs.append(f"⚠️ No timetable found for class {new_class_id}")
+                
+        except Exception as timetable_err:
+            logs.append(f"⚠️ Error creating new Student Subject records: {str(timetable_err)}")
+            frappe.log_error(f"Error creating Student Subject from timetable: {str(timetable_err)}")
+        
+        # Step 3: Verify sync was successful
         mismatched = frappe.db.sql("""
             SELECT COUNT(*) as count
             FROM `tabSIS Student Subject`
@@ -70,9 +155,12 @@ def sync_student_subjects_for_class_change(student_id, new_class_id, school_year
         if mismatched and mismatched[0]["count"] > 0:
             logs.append(f"⚠️ Warning: {mismatched[0]['count']} Student Subject records still have mismatched class_id")
         else:
-            logs.append("✓ All Student Subject records are now in sync with Class Student")
+            logs.append("✓ All Student Subject records are in sync with Class Student")
         
-        frappe.logger().info(f"Synced Student Subject for student {student_id} to class {new_class_id}: updated={updated_count}")
+        frappe.logger().info(
+            f"Synced Student Subject for student {student_id} to class {new_class_id}: "
+            f"updated={updated_count}, created={created_count}"
+        )
         
         return {
             "updated_count": updated_count,
@@ -344,7 +432,8 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                     if sync_result.get("success"):
                         frappe.logger().info(
                             f"Student {student_id} moved from {old_class_id} to {class_id}. "
-                            f"Synced {sync_result.get('updated_count', 0)} Student Subject records."
+                            f"Updated {sync_result.get('updated_count', 0)} records, "
+                            f"Created {sync_result.get('created_count', 0)} new subject records."
                         )
                     else:
                         frappe.logger().warning(
@@ -360,6 +449,15 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                             pass
                     frappe.db.commit()
                     updated = frappe.get_doc("SIS Class Student", target_name)
+                    
+                    # Build informative message
+                    sync_msg_parts = []
+                    if sync_result.get('updated_count', 0) > 0:
+                        sync_msg_parts.append(f"updated {sync_result.get('updated_count', 0)} existing")
+                    if sync_result.get('created_count', 0) > 0:
+                        sync_msg_parts.append(f"created {sync_result.get('created_count', 0)} new")
+                    sync_msg = ", ".join(sync_msg_parts) if sync_msg_parts else "no changes needed"
+                    
                     return single_item_response(
                         data={
                             "name": updated.name,
@@ -370,7 +468,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                             "campus_id": updated.campus_id,
                             "sync_info": sync_result  # Include sync info in response
                         },
-                        message=f"Student moved to new regular class. Synced {sync_result.get('updated_count', 0)} subject records."
+                        message=f"Student moved to new class. Subject records: {sync_msg}."
                     )
                 except Exception as move_err:
                     frappe.logger().error(f"Failed to move regular class assignment: {str(move_err)}")
@@ -401,13 +499,22 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
         )
         
         # Log sync results
-        if sync_result.get("updated_count", 0) > 0:
+        if sync_result.get("updated_count", 0) > 0 or sync_result.get("created_count", 0) > 0:
             frappe.logger().info(
                 f"Student {student_id} assigned to {class_id}. "
-                f"Synced {sync_result.get('updated_count', 0)} existing Student Subject records."
+                f"Updated {sync_result.get('updated_count', 0)} records, "
+                f"Created {sync_result.get('created_count', 0)} new subject records."
             )
         
         frappe.db.commit()
+
+        # Build informative message
+        sync_msg_parts = []
+        if sync_result.get('updated_count', 0) > 0:
+            sync_msg_parts.append(f"updated {sync_result.get('updated_count', 0)} existing")
+        if sync_result.get('created_count', 0) > 0:
+            sync_msg_parts.append(f"created {sync_result.get('created_count', 0)} new")
+        sync_msg = ", ".join(sync_msg_parts) if sync_msg_parts else "no changes needed"
 
         return single_item_response(
             data={
@@ -419,7 +526,7 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                 "campus_id": class_student.campus_id,
                 "sync_info": sync_result  # Include sync info in response
             },
-            message=f"Student assigned to class successfully. Synced {sync_result.get('updated_count', 0)} subject records."
+            message=f"Student assigned to class. Subject records: {sync_msg}."
         )
         
     except Exception as e:
