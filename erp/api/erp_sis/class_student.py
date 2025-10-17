@@ -1312,7 +1312,7 @@ def create_student_subjects_from_timetable(class_id=None, student_id=None):
         # Get timetable for this class
         timetable_instances = frappe.get_all(
             "SIS Timetable Instance",
-            fields=["name", "school_year_id"],
+            fields=["name"],
             filters={
                 "campus_id": campus_id,
                 "class_id": class_id
@@ -1327,7 +1327,14 @@ def create_student_subjects_from_timetable(class_id=None, student_id=None):
             )
         
         instance_ids = [t["name"] for t in timetable_instances]
-        school_year_id = timetable_instances[0]["school_year_id"]
+        
+        # Get school_year_id from SIS Class
+        school_year_id = frappe.db.get_value("SIS Class", class_id, "school_year_id")
+        if not school_year_id:
+            return error_response(
+                f"Cannot determine school year for class {class_id}",
+                code="NO_SCHOOL_YEAR"
+            )
         
         logs.append(f"Found {len(timetable_instances)} timetable instance(s) for class {class_id}")
         
