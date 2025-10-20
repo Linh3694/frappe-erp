@@ -20,6 +20,10 @@ def get_news_articles():
     """Get published news articles for parent portal with filtering"""
     try:
         data = frappe.local.form_dict
+        
+        # Debug: Log ALL incoming params
+        frappe.logger().info(f"📰 [News API] Received form_dict: {data}")
+        frappe.logger().info(f"📰 [News API] student_id from form_dict: {data.get('student_id')}")
 
         campus_id = data.get("campus_id")
             
