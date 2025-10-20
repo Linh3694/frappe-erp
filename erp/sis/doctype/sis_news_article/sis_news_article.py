@@ -110,20 +110,25 @@ class SISNewsArticle(Document):
         """Send push notification after publishing"""
         # Check if we need to send notification
         if getattr(self, '_send_publish_notification', False):
-            frappe.logger().info(f"📰 [News Article] Enqueueing notification for: {self.name}")
+            frappe.logger().info(f"📰 [News Article] Sending notification for: {self.name}")
             frappe.logger().info(f"📰 [News Article] Title: {self.title_vn}, Stages: {self.education_stage_ids}")
             
-            frappe.enqueue(
-                method='erp.sis.doctype.sis_news_article.sis_news_article.send_news_publish_notification',
-                queue='default',
-                timeout=300,
-                article_id=self.name,
-                title_vn=self.title_vn,
-                title_en=self.title_en,
-                education_stage_ids=self.education_stage_ids,
-                campus_id=self.campus_id
-            )
-            frappe.logger().info(f"✅ [News Article] Notification enqueued successfully for: {self.name}")
+            try:
+                # Gọi trực tiếp function thay vì enqueue (để test ngay)
+                # TODO: Sau khi test xong, có thể đổi lại thành enqueue
+                send_news_publish_notification(
+                    article_id=self.name,
+                    title_vn=self.title_vn,
+                    title_en=self.title_en,
+                    education_stage_ids=self.education_stage_ids,
+                    campus_id=self.campus_id
+                )
+                frappe.logger().info(f"✅ [News Article] Notification sent for: {self.name}")
+            except Exception as e:
+                frappe.logger().error(f"❌ [News Article] Error sending notification: {str(e)}")
+                import traceback
+                frappe.logger().error(traceback.format_exc())
+            
             # Clear flag
             self._send_publish_notification = False
 
