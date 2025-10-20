@@ -151,9 +151,36 @@ def _get_class_timetable_for_date(class_id, target_date):
         all_columns = []
 
         try:
-            # Get all timetable columns used in this instance for this specific day
-            # This query gets both study periods (with subject) and break periods (without subject)
-            all_columns_sql = """
+            # First, get class info and find education_stage through education_grade
+            class_doc = frappe.get_doc("SIS Class", class_id)
+            education_grade_id = class_doc.education_grade
+            campus_id = class_doc.campus_id
+            
+            # Get education_stage from education_grade
+            education_grade_doc = frappe.get_doc("SIS Education Grade", education_grade_id)
+            education_stage_id = education_grade_doc.education_stage_id
+            
+            logs.append(f"📋 Class: {class_id}, Grade: {education_grade_id}, Stage: {education_stage_id}, Campus: {campus_id}")
+            
+            # Get columns actually used in this instance for this day (study periods)
+            study_columns_sql = """
+                SELECT DISTINCT
+                    tir.timetable_column_id
+                FROM `tabSIS Timetable Instance Row` tir
+                WHERE tir.parent IN %(instance_ids)s
+                AND tir.day_of_week = %(day_of_week)s
+            """
+            
+            study_columns = frappe.db.sql(study_columns_sql, {
+                "instance_ids": tuple(instance_ids),
+                "day_of_week": day_of_week
+            }, as_dict=True)
+            
+            study_column_ids = {row['timetable_column_id'] for row in study_columns}
+            logs.append(f"✅ Found {len(study_column_ids)} study columns for {day_of_week}")
+            
+            # Get ALL non-study columns for this education stage (apply to all days)
+            non_study_columns_sql = """
                 SELECT DISTINCT
                     tc.name as timetable_column_id,
                     tc.period_name,
@@ -161,19 +188,47 @@ def _get_class_timetable_for_date(class_id, target_date):
                     tc.end_time,
                     tc.period_type,
                     tc.period_priority
-                FROM `tabSIS Timetable Instance Row` tir
-                INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
-                WHERE tir.parent IN %(instance_ids)s
-                AND tir.day_of_week = %(day_of_week)s
+                FROM `tabSIS Timetable Column` tc
+                WHERE tc.education_stage_id = %(education_stage_id)s
+                AND tc.campus_id = %(campus_id)s
+                AND tc.period_type = 'non-study'
                 ORDER BY tc.period_priority ASC, tc.start_time ASC
             """
             
-            all_day_columns = frappe.db.sql(all_columns_sql, {
-                "instance_ids": tuple(instance_ids),
-                "day_of_week": day_of_week
+            non_study_columns = frappe.db.sql(non_study_columns_sql, {
+                "education_stage_id": education_stage_id,
+                "campus_id": campus_id
             }, as_dict=True)
             
-            logs.append(f"✅ Found {len(all_day_columns)} total timetable columns for {day_of_week}")
+            logs.append(f"✅ Found {len(non_study_columns)} non-study columns (apply all days)")
+            
+            # Get study column details
+            study_columns_detail_sql = """
+                SELECT DISTINCT
+                    tc.name as timetable_column_id,
+                    tc.period_name,
+                    tc.start_time,
+                    tc.end_time,
+                    tc.period_type,
+                    tc.period_priority
+                FROM `tabSIS Timetable Column` tc
+                WHERE tc.name IN %(column_ids)s
+                ORDER BY tc.period_priority ASC, tc.start_time ASC
+            """
+            
+            if study_column_ids:
+                study_columns_detail = frappe.db.sql(study_columns_detail_sql, {
+                    "column_ids": tuple(study_column_ids)
+                }, as_dict=True)
+            else:
+                study_columns_detail = []
+            
+            # Combine study and non-study columns
+            all_day_columns = study_columns_detail + non_study_columns
+            # Sort by priority and time
+            all_day_columns.sort(key=lambda x: (x.get('period_priority', 999), x.get('start_time', '')))
+            
+            logs.append(f"✅ Total {len(all_day_columns)} columns for {day_of_week} (study + non-study)")
             
             # Get existing rows with subject data for this specific day
             existing_rows_sql = """
