@@ -26,12 +26,25 @@ class SISNewsArticle(Document):
         self.updated_at = frappe.utils.now()
         self.updated_by = teacher
 
-        # Track if status is changing from draft to published
-        if self.status == "published" and not self.published_at:
+        # Get old document to check if status changed
+        old_status = None
+        if not self.is_new():
+            old_doc = self.get_doc_before_save()
+            if old_doc:
+                old_status = old_doc.status
+
+        # Track if status is changing to published
+        is_newly_published = (
+            self.status == "published" and 
+            (old_status != "published" or not self.published_at)
+        )
+
+        if is_newly_published:
             self.published_at = frappe.utils.now()
             self.published_by = teacher
             # Set flag to send notification after save
             self._send_publish_notification = True
+            frappe.logger().info(f"📰 [News Article] Will send notification for: {self.name}")
         elif self.status == "draft":
             # Reset publish info when changing back to draft
             self.published_at = None
@@ -93,6 +106,9 @@ class SISNewsArticle(Document):
         """Send push notification after publishing"""
         # Check if we need to send notification
         if getattr(self, '_send_publish_notification', False):
+            frappe.logger().info(f"📰 [News Article] Enqueueing notification for: {self.name}")
+            frappe.logger().info(f"📰 [News Article] Title: {self.title_vn}, Stages: {self.education_stage_ids}")
+            
             frappe.enqueue(
                 method='erp.sis.doctype.sis_news_article.sis_news_article.send_news_publish_notification',
                 queue='default',
@@ -103,6 +119,7 @@ class SISNewsArticle(Document):
                 education_stage_ids=self.education_stage_ids,
                 campus_id=self.campus_id
             )
+            frappe.logger().info(f"✅ [News Article] Notification enqueued successfully for: {self.name}")
             # Clear flag
             self._send_publish_notification = False
 
