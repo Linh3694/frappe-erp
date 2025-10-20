@@ -225,13 +225,29 @@ def _get_class_timetable_for_date(class_id, target_date):
                         try:
                             tt_subject = frappe.get_doc("SIS Timetable Subject", subject.timetable_subject_id)
                             row["timetable_subject_title"] = tt_subject.title_vn or tt_subject.title_en
-                            # Get curriculum ID directly from timetable subject
-                            row["curriculum_id"] = tt_subject.curriculum_id or ""
                         except:
                             row["timetable_subject_title"] = ""
-                            row["curriculum_id"] = ""
                     else:
                         row["timetable_subject_title"] = ""
+
+                    # Get curriculum ID from SIS Subject Assignment (more accurate)
+                    # Use actual_subject_id to find the correct curriculum for this class
+                    try:
+                        assignments = frappe.get_all(
+                            "SIS Subject Assignment",
+                            filters={
+                                "actual_subject_id": subject.actual_subject_id,
+                                "class_id": class_id
+                            },
+                            fields=["curriculum_id"]
+                        )
+
+                        if assignments and assignments[0].get("curriculum_id"):
+                            row["curriculum_id"] = assignments[0].curriculum_id
+                        else:
+                            row["curriculum_id"] = ""
+                    except Exception as curriculum_error:
+                        logs.append(f"⚠️ Could not get curriculum from subject assignment: {str(curriculum_error)}")
                         row["curriculum_id"] = ""
                 except:
                     row["subject_title"] = ""
@@ -357,14 +373,23 @@ def _get_class_timetable_for_date(class_id, target_date):
                             subject = frappe.get_doc("SIS Subject", override["subject_id"])
                             row["subject_title"] = subject.title
 
-                            # Update curriculum ID from timetable subject
-                            if subject.get("timetable_subject_id"):
-                                try:
-                                    tt_subject = frappe.get_doc("SIS Timetable Subject", subject.timetable_subject_id)
-                                    row["curriculum_id"] = tt_subject.curriculum_id or ""
-                                except:
+                            # Update curriculum ID from SIS Subject Assignment (more accurate)
+                            try:
+                                assignments = frappe.get_all(
+                                    "SIS Subject Assignment",
+                                    filters={
+                                        "actual_subject_id": subject.actual_subject_id,
+                                        "class_id": class_id
+                                    },
+                                    fields=["curriculum_id"]
+                                )
+
+                                if assignments and assignments[0].get("curriculum_id"):
+                                    row["curriculum_id"] = assignments[0].curriculum_id
+                                else:
                                     row["curriculum_id"] = ""
-                            else:
+                            except Exception as curriculum_error:
+                                logs.append(f"⚠️ Could not get curriculum from override subject assignment: {str(curriculum_error)}")
                                 row["curriculum_id"] = ""
                         except:
                             row["curriculum_id"] = ""
