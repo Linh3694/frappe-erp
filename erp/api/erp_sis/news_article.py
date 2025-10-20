@@ -777,7 +777,11 @@ def delete_news_article():
 
     except frappe.DoesNotExistError:
         logs.append("Article not found")
-        return not_found_response("News article not found", logs=logs)
+        return error_response(
+            message="News article not found",
+            code="NOT_FOUND",
+            logs=logs
+        )
     except Exception as e:
         frappe.logger().error(f"Error deleting news article: {str(e)}")
         logs.append(f"Error occurred: {str(e)}")
