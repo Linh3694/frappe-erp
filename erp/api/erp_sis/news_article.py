@@ -733,6 +733,7 @@ def delete_news_article():
     try:
         logs.append(f"DELETE API CALLED - User: {frappe.session.user}")
         logs.append(f"Request method: {frappe.request.method}")
+        logs.append(f"Available frappe attributes: {dir(frappe)[:10]}")
 
         data = frappe.local.form_dict
         logs.append(f"form_dict keys: {list(data.keys())}")
@@ -785,7 +786,6 @@ def delete_news_article():
         # Delete using frappe.delete_doc
         try:
             # Check transaction status before delete
-            import frappe.db
             logs.append(f"Transaction status before delete: {frappe.db.get_open_transactions()}")
 
             logs.append("Calling frappe.delete_doc...")
@@ -856,21 +856,13 @@ def delete_news_article():
                 logs=logs
             )
 
-    except frappe.DoesNotExistError:
-        logs.append("Article not found during initial fetch")
-        return error_response(
-            message="News article not found",
-            code="NOT_FOUND",
-            logs=logs
-        )
-    except Exception as e:
-        logs.append(f"Unexpected error: {str(e)}")
-        frappe.logger().error(f"Error deleting news article: {str(e)}")
+    except Exception as initial_error:
+        logs.append(f"Initial setup error: {str(initial_error)}")
         import traceback
-        logs.append(f"Full traceback: {traceback.format_exc()}")
+        logs.append(f"Initial traceback: {traceback.format_exc()}")
         return error_response(
-            message=f"Failed to delete news article: {str(e)}",
-            code="DELETE_ERROR",
+            message=f"Failed to initialize delete operation: {str(initial_error)}",
+            code="INIT_ERROR",
             logs=logs
         )
 
