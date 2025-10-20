@@ -204,38 +204,34 @@ def get_parent_emails_by_education_stages(education_stage_ids_json, campus_id):
     try:
         # Parse education stage IDs
         if not education_stage_ids_json:
-            frappe.logger().info("📰 [Get Parent Emails] No education stages specified, will notify all parents")
-            # If no stages specified, get all students in campus
-            education_stage_ids = []
+            frappe.logger().info("📰 [Get Parent Emails] No education stages specified, will notify all parents in campus")
+            education_stage_ids = None
         else:
             try:
                 education_stage_ids = json.loads(education_stage_ids_json)
+                if not education_stage_ids or len(education_stage_ids) == 0:
+                    education_stage_ids = None
             except:
-                education_stage_ids = []
+                education_stage_ids = None
+        
+        frappe.logger().info(f"📰 [Get Parent Emails] Campus: {campus_id}, Stages: {education_stage_ids}")
         
         parent_emails = []
         
-        # SQL query to get all students in the given education stages
-        if education_stage_ids and len(education_stage_ids) > 0:
-            # Filter by education stages
-            # Path: Education Stage -> Education Grade -> Class -> Class Student -> Student -> Family Relationship -> Guardian
+        # Step 1: Get all students in campus (optionally filtered by education stage)
+        if education_stage_ids:
+            # Get students by education stage through class
             sql_query = """
-                SELECT DISTINCT 
-                    fr.guardian,
-                    g.guardian_id
+                SELECT DISTINCT cs.student_id
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
                 INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
-                INNER JOIN `tabCRM Family Relationship` fr ON cs.student_id = fr.student
-                INNER JOIN `tabCRM Guardian` g ON fr.guardian = g.name
                 WHERE 
                     cs.campus_id = %(campus_id)s
                     AND eg.education_stage_id IN %(education_stage_ids)s
-                    AND g.guardian_id IS NOT NULL
-                    AND g.guardian_id != ''
             """
             
-            results = frappe.db.sql(
+            student_results = frappe.db.sql(
                 sql_query,
                 {
                     "campus_id": campus_id,
@@ -244,33 +240,41 @@ def get_parent_emails_by_education_stages(education_stage_ids_json, campus_id):
                 as_dict=True
             )
         else:
-            # No stages specified, get all students in campus
-            sql_query = """
-                SELECT DISTINCT 
-                    fr.guardian,
-                    g.guardian_id
-                FROM `tabSIS Class Student` cs
-                INNER JOIN `tabCRM Family Relationship` fr ON cs.student_id = fr.student
-                INNER JOIN `tabCRM Guardian` g ON fr.guardian = g.name
-                WHERE 
-                    cs.campus_id = %(campus_id)s
-                    AND g.guardian_id IS NOT NULL
-                    AND g.guardian_id != ''
-            """
-            
-            results = frappe.db.sql(
-                sql_query,
-                {"campus_id": campus_id},
-                as_dict=True
+            # Get all students in campus
+            student_results = frappe.get_all(
+                "SIS Class Student",
+                filters={"campus_id": campus_id},
+                fields=["student_id"],
+                distinct=True
             )
         
-        # Convert guardian IDs to parent portal emails
-        for row in results:
+        student_ids = [s.student_id for s in student_results if s.student_id]
+        frappe.logger().info(f"📰 [Get Parent Emails] Found {len(student_ids)} students")
+        
+        if not student_ids:
+            frappe.logger().info("📰 [Get Parent Emails] No students found")
+            return []
+        
+        # Step 2: Get guardians for these students
+        guardian_results = frappe.db.sql("""
+            SELECT DISTINCT g.guardian_id
+            FROM `tabCRM Family Relationship` fr
+            INNER JOIN `tabCRM Guardian` g ON fr.guardian = g.name
+            WHERE 
+                fr.student IN %(student_ids)s
+                AND g.guardian_id IS NOT NULL
+                AND g.guardian_id != ''
+        """, {"student_ids": student_ids}, as_dict=True)
+        
+        frappe.logger().info(f"📰 [Get Parent Emails] Found {len(guardian_results)} guardians")
+        
+        # Step 3: Convert to parent portal emails
+        for row in guardian_results:
             if row.guardian_id:
                 email = f"{row.guardian_id}@parent.wellspring.edu.vn"
                 parent_emails.append(email)
         
-        frappe.logger().info(f"📰 [Get Parent Emails] Found {len(parent_emails)} parent emails for stages: {education_stage_ids}")
+        frappe.logger().info(f"📰 [Get Parent Emails] Generated {len(parent_emails)} parent emails")
         
         return parent_emails
         
