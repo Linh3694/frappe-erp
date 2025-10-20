@@ -69,11 +69,25 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         data = response.json()
         print(f"✅ [Notification Center] Response status: {response.status_code}")
         print(f"   Response keys: {list(data.keys())}")
-        print(f"   Notifications count in response: {len(data.get('notifications', []))}")
-        print(f"   Pagination: {data.get('pagination', {})}")
         
-        # Parse notifications từ response
-        raw_notifications = data.get('notifications', [])
+        # Parse notifications từ response - check multiple possible locations
+        raw_notifications = []
+        
+        # Try different response structures
+        if 'notifications' in data:
+            raw_notifications = data.get('notifications', [])
+            print(f"   Found notifications in root: {len(raw_notifications)}")
+        elif 'data' in data and isinstance(data['data'], list):
+            raw_notifications = data['data']
+            print(f"   Found notifications in data: {len(raw_notifications)}")
+        elif 'data' in data and isinstance(data['data'], dict) and 'notifications' in data['data']:
+            raw_notifications = data['data']['notifications']
+            print(f"   Found notifications in data.notifications: {len(raw_notifications)}")
+        else:
+            print(f"   ⚠️ Could not find notifications in response")
+            print(f"   Full response structure: {json.dumps(data, indent=2, default=str)[:500]}")
+        
+        print(f"   Pagination: {data.get('pagination', {})}")
         
         print(f"📊 [Notification Center] Raw notifications count: {len(raw_notifications)}")
         
@@ -84,7 +98,14 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         
         debug_logs.append(f"API URL: {api_url}")
         debug_logs.append(f"Request params: page={page}, limit={limit}")
+        debug_logs.append(f"Response keys: {list(data.keys())}")
         debug_logs.append(f"Response pagination: {data.get('pagination', {})}")
+        
+        # Add sample of first notification if available
+        if raw_notifications and len(raw_notifications) > 0:
+            sample = raw_notifications[0]
+            debug_logs.append(f"Sample notification keys: {list(sample.keys())}")
+        
         debug_logs.append(f"Raw notifications count: {len(raw_notifications)}")
         
         for idx, notif in enumerate(raw_notifications):
