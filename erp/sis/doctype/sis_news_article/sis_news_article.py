@@ -3,6 +3,8 @@
 
 import frappe
 from frappe.model.document import Document
+import json
+import requests
 
 
 class SISNewsArticle(Document):
@@ -24,14 +26,17 @@ class SISNewsArticle(Document):
         self.updated_at = frappe.utils.now()
         self.updated_by = teacher
 
-        # Handle publish status change
+        # Track if status is changing from draft to published
         if self.status == "published" and not self.published_at:
             self.published_at = frappe.utils.now()
             self.published_by = teacher
+            # Set flag to send notification after save
+            self._send_publish_notification = True
         elif self.status == "draft":
             # Reset publish info when changing back to draft
             self.published_at = None
             self.published_by = None
+            self._send_publish_notification = False
 
     def validate(self):
         """Validate article data"""
@@ -83,3 +88,173 @@ class SISNewsArticle(Document):
                         tag.tag_color = tag_doc.color
                     except:
                         pass  # Tag might be deleted
+
+    def after_save(self):
+        """Send push notification after publishing"""
+        # Check if we need to send notification
+        if getattr(self, '_send_publish_notification', False):
+            frappe.enqueue(
+                method='erp.sis.doctype.sis_news_article.sis_news_article.send_news_publish_notification',
+                queue='default',
+                timeout=300,
+                article_id=self.name,
+                title_vn=self.title_vn,
+                title_en=self.title_en,
+                education_stage_ids=self.education_stage_ids,
+                campus_id=self.campus_id
+            )
+            # Clear flag
+            self._send_publish_notification = False
+
+
+def send_news_publish_notification(article_id, title_vn, title_en, education_stage_ids, campus_id):
+    """
+    Send push notification to parents when news article is published
+    This runs in background queue
+    """
+    try:
+        frappe.logger().info(f"📰 [News Notification] Starting notification for article: {article_id}")
+        
+        # Get parent emails based on education stages
+        parent_emails = get_parent_emails_by_education_stages(education_stage_ids, campus_id)
+        
+        if not parent_emails:
+            frappe.logger().info(f"📰 [News Notification] No parent emails found for article: {article_id}")
+            return
+        
+        # Deduplicate parent emails
+        parent_emails = list(set(parent_emails))
+        frappe.logger().info(f"📰 [News Notification] Sending to {len(parent_emails)} parents")
+        
+        # Prepare notification
+        title = "Tin tức"
+        body = title_vn if title_vn else title_en
+        
+        # Call notification-service API
+        notification_service_url = frappe.conf.get("notification_service_url", "http://172.16.20.115:5001")
+        
+        payload = {
+            "title": title,
+            "body": body,
+            "recipients": parent_emails,
+            "type": "system",
+            "priority": "normal",
+            "channel": "push",
+            "data": {
+                "type": "news",
+                "article_id": article_id,
+                "title_vn": title_vn,
+                "title_en": title_en
+            }
+        }
+        
+        frappe.logger().info(f"📰 [News Notification] Calling notification service: {notification_service_url}/api/notifications/send")
+        
+        response = requests.post(
+            f"{notification_service_url}/api/notifications/send",
+            json=payload,
+            timeout=10
+        )
+        
+        frappe.logger().info(f"📰 [News Notification] Response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            frappe.logger().info(f"✅ [News Notification] Successfully sent notification for article: {article_id}")
+        else:
+            frappe.logger().warning(f"⚠️ [News Notification] Failed to send notification: {response.status_code} - {response.text[:200]}")
+            
+    except Exception as e:
+        frappe.logger().error(f"❌ [News Notification] Error sending notification: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+
+
+def get_parent_emails_by_education_stages(education_stage_ids_json, campus_id):
+    """
+    Get all parent emails for students in the given education stages
+    
+    Args:
+        education_stage_ids_json: JSON string array of education stage IDs
+        campus_id: Campus ID to filter students
+        
+    Returns:
+        list: List of parent email addresses
+    """
+    try:
+        # Parse education stage IDs
+        if not education_stage_ids_json:
+            frappe.logger().info("📰 [Get Parent Emails] No education stages specified, will notify all parents")
+            # If no stages specified, get all students in campus
+            education_stage_ids = []
+        else:
+            try:
+                education_stage_ids = json.loads(education_stage_ids_json)
+            except:
+                education_stage_ids = []
+        
+        parent_emails = []
+        
+        # SQL query to get all students in the given education stages
+        if education_stage_ids and len(education_stage_ids) > 0:
+            # Filter by education stages
+            # Path: Education Stage -> Education Grade -> Class -> Class Student -> Student -> Family Relationship -> Guardian
+            sql_query = """
+                SELECT DISTINCT 
+                    fr.guardian,
+                    g.guardian_id
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                INNER JOIN `tabCRM Family Relationship` fr ON cs.student_id = fr.student
+                INNER JOIN `tabCRM Guardian` g ON fr.guardian = g.name
+                WHERE 
+                    cs.campus_id = %(campus_id)s
+                    AND eg.education_stage_id IN %(education_stage_ids)s
+                    AND g.guardian_id IS NOT NULL
+                    AND g.guardian_id != ''
+            """
+            
+            results = frappe.db.sql(
+                sql_query,
+                {
+                    "campus_id": campus_id,
+                    "education_stage_ids": education_stage_ids
+                },
+                as_dict=True
+            )
+        else:
+            # No stages specified, get all students in campus
+            sql_query = """
+                SELECT DISTINCT 
+                    fr.guardian,
+                    g.guardian_id
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabCRM Family Relationship` fr ON cs.student_id = fr.student
+                INNER JOIN `tabCRM Guardian` g ON fr.guardian = g.name
+                WHERE 
+                    cs.campus_id = %(campus_id)s
+                    AND g.guardian_id IS NOT NULL
+                    AND g.guardian_id != ''
+            """
+            
+            results = frappe.db.sql(
+                sql_query,
+                {"campus_id": campus_id},
+                as_dict=True
+            )
+        
+        # Convert guardian IDs to parent portal emails
+        for row in results:
+            if row.guardian_id:
+                email = f"{row.guardian_id}@parent.wellspring.edu.vn"
+                parent_emails.append(email)
+        
+        frappe.logger().info(f"📰 [Get Parent Emails] Found {len(parent_emails)} parent emails for stages: {education_stage_ids}")
+        
+        return parent_emails
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Get Parent Emails] Error: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+        return []
