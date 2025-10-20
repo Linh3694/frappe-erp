@@ -24,7 +24,7 @@ def _get_request_arg(name: str, fallback: Optional[Any] = None) -> Optional[str]
 
 
 @frappe.whitelist()
-def get_calendar_events(school_year_id=None, start_date=None, end_date=None):
+def get_calendar_events(school_year_id=None, start_date=None, end_date=None, student_id=None):
     """
     Get calendar events for parent portal
 
@@ -32,6 +32,7 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None):
         school_year_id: Optional school year filter
         start_date: Optional start date filter
         end_date: Optional end date filter
+        student_id: Optional student ID to get education stage (if not provided, uses first student)
 
     Returns:
         dict: Calendar events with success status
@@ -65,23 +66,26 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None):
                 "logs": logs
             }
 
-        # Get first student's class to determine school year if not provided
-        relationships = frappe.get_all(
-            "CRM Family Relationship",
-            filters={"guardian": guardian_list[0].name},
-            fields=["student"],
-            ignore_permissions=True,
-            limit=1
-        )
+        # If student_id is provided, use it; otherwise get first student
+        if not student_id:
+            relationships = frappe.get_all(
+                "CRM Family Relationship",
+                filters={"guardian": guardian_list[0].name},
+                fields=["student"],
+                ignore_permissions=True,
+                limit=1
+            )
 
-        if not relationships:
-            return {
-                "success": False,
-                "message": "Không tìm thấy học sinh",
-                "logs": logs
-            }
+            if not relationships:
+                return {
+                    "success": False,
+                    "message": "Không tìm thấy học sinh",
+                    "logs": logs
+                }
 
-        student_id = relationships[0].student
+            student_id = relationships[0].student
+        
+        logs.append(f"Using student_id: {student_id}")
 
         # Get student's current class, school year, and education stage
         education_stage_id = None
