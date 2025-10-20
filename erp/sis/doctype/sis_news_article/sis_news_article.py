@@ -159,7 +159,7 @@ def send_news_publish_notification(article_id, title_vn, title_en, education_sta
             "body": body,
             "recipients": parent_emails,
             "type": "system",
-            "priority": "normal",
+            "priority": "medium",
             "channel": "push",
             "data": {
                 "type": "news",
