@@ -76,12 +76,19 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         # Transform notifications sang format frontend cần
         notifications = []
         error_count = 0
+        debug_logs = []
+        
+        debug_logs.append(f"Raw notifications count: {len(raw_notifications)}")
         
         for idx, notif in enumerate(raw_notifications):
             try:
-                print(f"🔄 [Notification Center] Processing notification {idx + 1}/{len(raw_notifications)}")
-                print(f"   Raw notif keys: {list(notif.keys())}")
-                print(f"   Type: {notif.get('type')}, Title: {notif.get('title')}")
+                # Chỉ log chi tiết cho 5 notifications đầu
+                if idx < 5:
+                    debug_logs.append(f"Processing {idx + 1}/{len(raw_notifications)}")
+                    debug_logs.append(f"  Keys: {list(notif.keys())}")
+                    debug_logs.append(f"  Type: {notif.get('type')}, Title: {notif.get('title')}")
+                elif idx == 5:
+                    debug_logs.append(f"... (logging first 5 only, still processing all {len(raw_notifications)})")
                 
                 # Xác định type dựa vào notif.type và notif.data
                 notif_type = map_notification_type(notif.get('type'), notif.get('data', {}))
@@ -105,7 +112,8 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                     "data": notif.get('data', {})
                 }
                 
-                print(f"   ✅ Built notification: {notification['id']}, type: {notification['type']}")
+                if idx < 5:
+                    debug_logs.append(f"  ✅ Built: {notification['id']}, type: {notification['type']}")
                 
                 # KHÔNG FILTER GÌ CẢ - lấy hết để debug
                 # Filter sẽ được làm ở client side
@@ -113,12 +121,13 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                 
             except Exception as e:
                 error_count += 1
-                print(f"❌ [Notification Center] Error processing notification {idx + 1}: {str(e)}")
+                error_msg = f"❌ Error at {idx + 1}: {str(e)}"
+                debug_logs.append(error_msg)
                 import traceback
-                print(traceback.format_exc())
+                debug_logs.append(traceback.format_exc())
                 continue
         
-        print(f"📊 [Notification Center] Processed: {len(notifications)} success, {error_count} errors")
+        debug_logs.append(f"Final: {len(notifications)} success, {error_count} errors")
         
         # Calculate unread count từ raw data
         unread_count = sum(1 for n in raw_notifications if not n.get('read', False))
@@ -131,7 +140,8 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                 "notifications": notifications,
                 "unread_count": unread_count,
                 "total": data.get('pagination', {}).get('total', len(notifications))
-            }
+            },
+            "debug_logs": debug_logs  # Thêm logs để debug
         }
         
     except requests.exceptions.RequestException as e:
