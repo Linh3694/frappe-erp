@@ -85,6 +85,7 @@ def get_news_articles():
         frappe.logger().info(f"Parent portal - Using filters: {filters}")
 
         # Get published articles with pagination
+        # Sort: Featured first, then by published date (newest first)
         articles = frappe.get_all(
             "SIS News Article",
             fields=[
@@ -100,7 +101,7 @@ def get_news_articles():
                 "published_by"
             ],
             filters=filters,
-            order_by="published_at desc",
+            order_by="featured desc, published_at desc",  # Featured articles first, then by date
             limit_page_length=limit,
             limit_start=offset
         )
