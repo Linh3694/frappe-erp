@@ -796,7 +796,7 @@ def publish_news_article():
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def unpublish_news_article():
     """Unpublish an article (change back to draft)"""
     try:
