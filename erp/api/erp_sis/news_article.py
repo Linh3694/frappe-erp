@@ -728,69 +728,46 @@ def update_news_article():
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def delete_news_article():
     """Delete a news article"""
-    logs = []  # Collect logs to return in response
-
     try:
-        logs.append(f"delete_news_article called by user: {frappe.session.user}")
-        logs.append(f"Request method: {frappe.request.method}")
-        logs.append(f"Request content type: {frappe.request.content_type}")
-
         data = frappe.local.form_dict
-        logs.append(f"form_dict keys: {list(data.keys())}")
 
         article_id = data.get("article_id")
-        logs.append(f"article_id from form_dict: '{article_id}'")
 
         # Try from request.args (for GET query params)
         if not article_id:
             article_id = frappe.request.args.get("article_id")
-            logs.append(f"article_id from query args: '{article_id}'")
 
         if not article_id:
-            logs.append("Article ID is required - validation failed")
             return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
-
-        logs.append(f"Attempting to get article: {article_id}")
 
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
-        logs.append(f"Article found: {article.name}, campus_id: {article.campus_id}")
 
         # Check if user has access to this campus
         campus_id = get_current_campus_from_context()
-        logs.append(f"Current user's campus_id: '{campus_id}'")
-
         if campus_id and article.campus_id != campus_id:
-            logs.append(f"Access denied: user campus '{campus_id}' != article campus '{article.campus_id}'")
-            return forbidden_response("You don't have access to this article")
-
-        logs.append("Access granted, proceeding with deletion")
+            return error_response(
+                message="You don't have access to this article",
+                code="FORBIDDEN"
+            )
 
         # Delete the article
         article.delete()
-        logs.append("Article deleted successfully")
 
         return success_response(
-            message="News article deleted successfully",
-            logs=logs
+            message="News article deleted successfully"
         )
 
     except frappe.DoesNotExistError:
-        logs.append("Article not found")
         return error_response(
             message="News article not found",
-            code="NOT_FOUND",
-            logs=logs
+            code="NOT_FOUND"
         )
     except Exception as e:
         frappe.logger().error(f"Error deleting news article: {str(e)}")
-        logs.append(f"Error occurred: {str(e)}")
-        import traceback
-        logs.append(f"Traceback: {traceback.format_exc()}")
         return error_response(
             message=f"Failed to delete news article: {str(e)}",
-            code="DELETE_ERROR",
-            logs=logs
+            code="DELETE_ERROR"
         )
 
 
