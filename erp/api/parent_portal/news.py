@@ -50,12 +50,32 @@ def get_news_articles():
         student_id = data.get("student_id")
         student_education_stage_id = None
         if student_id:
-            # Get student's education stage
-            student = frappe.get_doc("SIS Student", student_id)
-            if student.enrollment_status == "enrolled" and student.class_id:
-                class_doc = frappe.get_doc("SIS Class", student.class_id)
-                if class_doc.education_stage_id:
-                    student_education_stage_id = class_doc.education_stage_id
+            try:
+                # Get student's education stage through class -> grade -> stage
+                # Path: Student -> Class -> Education Grade -> Education Stage
+                student = frappe.get_doc("CRM Student", student_id)
+                
+                # Find active class enrollment
+                class_students = frappe.get_all(
+                    "SIS Class Student",
+                    filters={"student_id": student_id},
+                    fields=["class_id"],
+                    order_by="creation desc",
+                    limit=1
+                )
+                
+                if class_students and class_students[0].class_id:
+                    class_id = class_students[0].class_id
+                    class_doc = frappe.get_doc("SIS Class", class_id)
+                    
+                    # Get education stage from education grade
+                    if class_doc.education_grade:
+                        grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade)
+                        if grade_doc.education_stage_id:
+                            student_education_stage_id = grade_doc.education_stage_id
+                            frappe.logger().info(f"Parent portal - Student {student_id} education stage: {student_education_stage_id}")
+            except Exception as e:
+                frappe.logger().error(f"Parent portal - Error getting student education stage: {str(e)}")
 
         # Tag filter
         tag_ids = data.get("tag_ids")
@@ -77,15 +97,14 @@ def get_news_articles():
                     # No articles found with these tags
                     return list_response(data=[], message="No articles found with specified tags")
 
-        # Pagination
+        # Pagination params
         page = int(data.get("page", 1))
         limit = int(data.get("limit", 10))
-        offset = (page - 1) * limit
 
         frappe.logger().info(f"Parent portal - Using filters: {filters}")
 
-        # Get published articles with pagination
-        # Sort: Featured first, then by published date (newest first)
+        # Get ALL published articles first (no pagination yet)
+        # We need to filter by education stage before paginating
         articles = frappe.get_all(
             "SIS News Article",
             fields=[
@@ -101,13 +120,8 @@ def get_news_articles():
                 "published_by"
             ],
             filters=filters,
-            order_by="featured desc, published_at desc",  # Featured articles first, then by date
-            limit_page_length=limit,
-            limit_start=offset
+            order_by="featured desc, published_at desc"  # Featured articles first, then by date
         )
-
-        # Get total count for pagination
-        total_count = frappe.db.count("SIS News Article", filters=filters)
 
         # Enrich articles with tag information and filter by education stage
         filtered_articles = []
@@ -124,7 +138,12 @@ def get_news_articles():
             if student_education_stage_id:
                 try:
                     education_stage_ids = json.loads(article.education_stage_ids or "[]")
-                    should_include = student_education_stage_id in education_stage_ids
+                    # If article has no education_stage_ids (empty array), show to all students
+                    # If article has education_stage_ids, only show if student's stage matches
+                    if education_stage_ids and len(education_stage_ids) > 0:
+                        should_include = student_education_stage_id in education_stage_ids
+                    else:
+                        should_include = True  # Empty education_stage_ids means show to all
                 except:
                     should_include = False  # If parsing fails, exclude the article
 
@@ -149,7 +168,8 @@ def get_news_articles():
 
                 filtered_articles.append(article)
 
-        # Apply pagination to filtered results
+        # Now apply pagination to filtered results
+        total_count = len(filtered_articles)
         start_index = (page - 1) * limit
         end_index = start_index + limit
         paginated_articles = filtered_articles[start_index:end_index]
