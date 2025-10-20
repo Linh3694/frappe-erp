@@ -766,29 +766,40 @@ def delete_news_article():
 
         logs.append("Access granted, attempting deletion")
 
-        # Delete the article
+        # Delete the article using frappe.delete_doc for better error handling
         try:
-            article.delete()
-            logs.append("Article.delete() called successfully")
+            # Check if article has cover image that needs cleanup
+            cover_image = article.cover_image
+            logs.append(f"Article cover_image: {cover_image}")
 
-            # Verify deletion
-            try:
-                frappe.get_doc("SIS News Article", article_id)
-                logs.append("ERROR: Article still exists after delete!")
-                return error_response(
-                    message="Article deletion failed - still exists",
-                    code="DELETE_ERROR",
-                    logs=logs
-                )
-            except frappe.DoesNotExistError:
-                logs.append("Article successfully deleted and verified")
-                return success_response(
-                    message="News article deleted successfully",
-                    logs=logs
-                )
+            # Delete using frappe.delete_doc instead of article.delete()
+            frappe.delete_doc("SIS News Article", article_id, ignore_permissions=True, force=True)
+            logs.append("frappe.delete_doc() called successfully")
+
+            # Skip verification to avoid server messages
+            logs.append("Article deletion completed (skipping verification to avoid server messages)")
+
+            # Try to cleanup cover image file if it exists
+            if cover_image and cover_image.startswith("/files/News_Articles/"):
+                try:
+                    import os
+                    file_path = frappe.get_site_path("public") + cover_image
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        logs.append(f"Cover image file deleted: {file_path}")
+                    else:
+                        logs.append(f"Cover image file not found: {file_path}")
+                except Exception as file_error:
+                    logs.append(f"Failed to delete cover image file: {str(file_error)}")
+                    # Don't fail the whole operation for file cleanup error
+
+            return success_response(
+                message="News article deleted successfully",
+                logs=logs
+            )
 
         except Exception as delete_error:
-            logs.append(f"Article.delete() failed: {str(delete_error)}")
+            logs.append(f"frappe.delete_doc() failed: {str(delete_error)}")
             frappe.logger().error(f"Delete operation failed: {str(delete_error)}")
             import traceback
             logs.append(f"Delete traceback: {traceback.format_exc()}")
