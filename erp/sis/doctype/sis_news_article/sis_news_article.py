@@ -32,19 +32,23 @@ class SISNewsArticle(Document):
             old_doc = self.get_doc_before_save()
             if old_doc:
                 old_status = old_doc.status
-
+        
         # Track if status is changing to published
+        # Case 1: New document created with status="published"
+        # Case 2: Existing document changing from draft to published
+        # Case 3: Existing published document that didn't have published_at set
         is_newly_published = (
             self.status == "published" and 
             (old_status != "published" or not self.published_at)
         )
 
         if is_newly_published:
-            self.published_at = frappe.utils.now()
-            self.published_by = teacher
+            if not self.published_at:
+                self.published_at = frappe.utils.now()
+                self.published_by = teacher
             # Set flag to send notification after save
             self._send_publish_notification = True
-            frappe.logger().info(f"📰 [News Article] Will send notification for: {self.name}")
+            frappe.logger().info(f"📰 [News Article] Will send notification - New: {self.is_new()}, Old status: {old_status}, Current: {self.status}")
         elif self.status == "draft":
             # Reset publish info when changing back to draft
             self.published_at = None
