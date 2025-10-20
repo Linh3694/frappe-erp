@@ -60,13 +60,17 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
             "limit": limit
         }
         
-        print(f"📡 [Notification Center] Calling: {api_url} with params: {params}")
+        print(f"📡 [Notification Center] Calling: {api_url}")
+        print(f"   Params: {params}")
         
         response = requests.get(api_url, params=params, timeout=10)
         response.raise_for_status()
         
         data = response.json()
-        print(f"✅ [Notification Center] Got response from notification-service")
+        print(f"✅ [Notification Center] Response status: {response.status_code}")
+        print(f"   Response keys: {list(data.keys())}")
+        print(f"   Notifications count in response: {len(data.get('notifications', []))}")
+        print(f"   Pagination: {data.get('pagination', {})}")
         
         # Parse notifications từ response
         raw_notifications = data.get('notifications', [])
@@ -78,6 +82,9 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         error_count = 0
         debug_logs = []
         
+        debug_logs.append(f"API URL: {api_url}")
+        debug_logs.append(f"Request params: page={page}, limit={limit}")
+        debug_logs.append(f"Response pagination: {data.get('pagination', {})}")
         debug_logs.append(f"Raw notifications count: {len(raw_notifications)}")
         
         for idx, notif in enumerate(raw_notifications):
