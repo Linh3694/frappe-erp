@@ -725,7 +725,7 @@ def update_news_article():
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def delete_news_article():
     """Delete a news article"""
     try:
@@ -760,7 +760,7 @@ def delete_news_article():
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def publish_news_article():
     """Publish a draft article"""
     try:

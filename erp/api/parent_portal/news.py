@@ -15,24 +15,15 @@ from erp.utils.api_response import (
 )
 
 
-@frappe.whitelist(allow_guest=False)  # Changed to False - user must be authenticated
+@frappe.whitelist(allow_guest=False)
 def get_news_articles():
     """Get published news articles for parent portal with filtering"""
     try:
-        # Try multiple ways to get params
         data = frappe.local.form_dict
         request_args = frappe.request.args
         request_values = frappe.request.values
         
-        # Debug: Log ALL incoming params from different sources
-        frappe.logger().info(f"📰 [News API] form_dict: {data}")
-        frappe.logger().info(f"📰 [News API] request.args: {dict(request_args)}")
-        frappe.logger().info(f"📰 [News API] request.values: {dict(request_values)}")
-        frappe.logger().info(f"📰 [News API] student_id from form_dict: {data.get('student_id')}")
-        frappe.logger().info(f"📰 [News API] student_id from request.args: {request_args.get('student_id')}")
-        frappe.logger().info(f"📰 [News API] student_id from request.values: {request_values.get('student_id')}")
-        
-        # Try to get student_id from multiple sources
+        # Try to get student_id from multiple sources (GET params)
         student_id_param = data.get('student_id') or request_args.get('student_id') or request_values.get('student_id')
 
         campus_id = data.get("campus_id")
@@ -61,9 +52,7 @@ def get_news_articles():
         frappe.logger().info(f"Parent portal - {backend_log}")
 
         # Student ID for education stage filtering
-        # Use the student_id we found from multiple sources
         student_id = student_id_param if student_id_param else data.get("student_id")
-        frappe.logger().info(f"📰 [News API] Final student_id being used: {student_id}")
         
         student_education_stage_id = None
         if student_id:
@@ -90,7 +79,6 @@ def get_news_articles():
                         grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade)
                         if grade_doc.education_stage_id:
                             student_education_stage_id = grade_doc.education_stage_id
-                            frappe.logger().info(f"Parent portal - Student {student_id} education stage: {student_education_stage_id}")
             except Exception as e:
                 frappe.logger().error(f"Parent portal - Error getting student education stage: {str(e)}")
 
