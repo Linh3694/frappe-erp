@@ -460,7 +460,7 @@ def generate_action_url(notif_type, data):
     
     # Build base URL với student parameter
     if notif_type == 'attendance':
-        base_url = "/dashboard"  # Attendance thường hiển thị trong dashboard
+        base_url = "/attendance"
         return f"{base_url}?student={student_id}" if student_id else base_url
     
     elif notif_type == 'contact_log':
