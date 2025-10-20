@@ -785,15 +785,9 @@ def delete_news_article():
 
         # Delete using frappe.delete_doc
         try:
-            # Check transaction status before delete
-            logs.append(f"Transaction status before delete: {frappe.db.get_open_transactions()}")
-
             logs.append("Calling frappe.delete_doc...")
             frappe.delete_doc("SIS News Article", article_id, ignore_permissions=True, force=True)
             logs.append("frappe.delete_doc completed successfully")
-
-            # Check transaction status after delete
-            logs.append(f"Transaction status after delete: {frappe.db.get_open_transactions()}")
 
             # IMMEDIATE VERIFICATION - check if still exists using different methods
             try:
