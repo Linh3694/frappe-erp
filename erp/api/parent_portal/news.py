@@ -142,10 +142,15 @@ def get_news_articles():
                     # If article has education_stage_ids, only show if student's stage matches
                     if education_stage_ids and len(education_stage_ids) > 0:
                         should_include = student_education_stage_id in education_stage_ids
+                        frappe.logger().info(f"Parent portal - Article {article.name}: stages={education_stage_ids}, student_stage={student_education_stage_id}, include={should_include}")
                     else:
                         should_include = True  # Empty education_stage_ids means show to all
-                except:
+                        frappe.logger().info(f"Parent portal - Article {article.name}: No stages specified, showing to all")
+                except Exception as e:
                     should_include = False  # If parsing fails, exclude the article
+                    frappe.logger().error(f"Parent portal - Error parsing stages for {article.name}: {str(e)}")
+            else:
+                frappe.logger().info(f"Parent portal - No student_education_stage_id provided, showing all articles")
 
             if should_include:
                 # Get education stage names for display
