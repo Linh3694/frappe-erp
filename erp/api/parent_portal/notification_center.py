@@ -453,27 +453,47 @@ def get_student_name_from_notification(notif):
 def generate_action_url(notif_type, data):
     """
     Generate action URL để navigate khi click vào notification
+    Bao gồm student parameter để tự động chọn học sinh
     """
-    student_id = data.get('student_id') or data.get('studentId')
+    # Extract student_id từ nhiều field có thể
+    student_id = data.get('student_id') or data.get('studentId') or data.get('studentCode')
     
+    # Build base URL với student parameter
     if notif_type == 'attendance':
-        return f"/attendance?student={student_id}" if student_id else "/attendance"
+        base_url = "/dashboard"  # Attendance thường hiển thị trong dashboard
+        return f"{base_url}?student={student_id}" if student_id else base_url
     
     elif notif_type == 'contact_log':
-        return f"/communication?student={student_id}" if student_id else "/communication"
+        base_url = "/communication"
+        return f"{base_url}?student={student_id}" if student_id else base_url
     
     elif notif_type == 'report_card':
+        base_url = "/report-card"
         report_id = data.get('report_card_id') or data.get('reportId')
-        if report_id and student_id:
-            return f"/report-card?student={student_id}&report={report_id}"
-        return f"/report-card?student={student_id}" if student_id else "/report-card"
+        if student_id:
+            if report_id:
+                return f"{base_url}?student={student_id}&report={report_id}"
+            return f"{base_url}?student={student_id}"
+        return base_url
+    
+    elif notif_type == 'announcement':
+        base_url = "/announcements"
+        announcement_id = data.get('announcement_id') or data.get('announcementId')
+        if announcement_id:
+            return f"{base_url}/{announcement_id}"
+        return base_url
     
     elif notif_type == 'news':
-        news_id = data.get('news_id') or data.get('newsId')
-        return f"/news/{news_id}" if news_id else "/news"
+        base_url = "/news"
+        news_id = data.get('news_id') or data.get('newsId') or data.get('postId')
+        if news_id:
+            return f"{base_url}/{news_id}"
+        return base_url
     
     elif notif_type == 'leave':
-        return f"/leave?student={student_id}" if student_id else "/leave"
+        base_url = "/leaves"
+        return f"{base_url}?student={student_id}" if student_id else base_url
     
-    return None
+    # Default
+    return "/dashboard"
 
