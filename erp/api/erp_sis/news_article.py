@@ -199,8 +199,7 @@ def get_news_articles():
             order_by="published_at desc, modified desc" if status == "published" else "modified desc",
             limit_page_length=limit,
             limit_start=offset,
-            ignore_permissions=True,  # Ensure we bypass permission caching
-            update_modified=False     # Don't update modified timestamp
+            ignore_permissions=True   # Ensure we bypass permission caching
         )
 
         # Get total count for pagination
