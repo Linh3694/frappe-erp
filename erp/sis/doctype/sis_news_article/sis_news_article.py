@@ -106,8 +106,36 @@ class SISNewsArticle(Document):
 
     def on_update(self):
         """Handle post-update operations"""
+        print("=" * 80)
+        print(f"📰 [on_update] CALLED for article: {self.name}")
+        print(f"📰 [on_update] Status: {self.status}")
+        print(f"📰 [on_update] Published at: {self.published_at}")
+        print("=" * 80)
+        
         # Update tag display fields
         self._update_tag_display_fields()
+        
+        # Check if we need to send notification
+        # Since flag doesn't persist, check directly if this is a new published article
+        should_send = False
+        
+        if self.status == "published" and self.published_at:
+            # Check if published_at is very recent (within last 10 seconds)
+            # This indicates it was just published
+            from datetime import datetime, timedelta
+            published_time = datetime.fromisoformat(str(self.published_at))
+            now = datetime.now()
+            time_diff = (now - published_time).total_seconds()
+            
+            print(f"📰 [on_update] Time since published: {time_diff} seconds")
+            
+            # If published within last 10 seconds, send notification
+            if time_diff < 10:
+                should_send = True
+                print(f"✅ [on_update] Recently published - will send notification")
+        
+        if should_send:
+            self._handle_notification_direct()
 
     def _update_tag_display_fields(self):
         """Update display fields for tags"""
@@ -129,34 +157,43 @@ class SISNewsArticle(Document):
         print(f"📰 [after_save] Flag value: {getattr(self, '_send_publish_notification', 'NOT SET')}")
         print("=" * 80)
         
+        self._handle_notification()
+    
+    def _handle_notification(self):
+        """Handle sending notification - extracted to separate method"""
         # Check if we need to send notification
         if getattr(self, '_send_publish_notification', False):
-            print(f"✅ [after_save] FLAG IS TRUE! Sending notification...")
-            frappe.logger().info(f"📰 [News Article] Sending notification for: {self.name}")
-            frappe.logger().info(f"📰 [News Article] Title: {self.title_vn}, Stages: {self.education_stage_ids}")
-            
-            try:
-                # Gọi trực tiếp function thay vì enqueue (để test ngay)
-                # TODO: Sau khi test xong, có thể đổi lại thành enqueue
-                send_news_publish_notification(
-                    article_id=self.name,
-                    title_vn=self.title_vn,
-                    title_en=self.title_en,
-                    education_stage_ids=self.education_stage_ids,
-                    campus_id=self.campus_id
-                )
-                print(f"✅ [after_save] Notification sent successfully!")
-                frappe.logger().info(f"✅ [News Article] Notification sent for: {self.name}")
-            except Exception as e:
-                print(f"❌ [after_save] Error: {str(e)}")
-                frappe.logger().error(f"❌ [News Article] Error sending notification: {str(e)}")
-                import traceback
-                frappe.logger().error(traceback.format_exc())
-            
+            print(f"✅ [_handle_notification] FLAG IS TRUE! Sending notification...")
+            self._handle_notification_direct()
             # Clear flag
             self._send_publish_notification = False
         else:
-            print(f"⚠️ [after_save] FLAG IS FALSE - No notification will be sent")
+            print(f"⚠️ [_handle_notification] FLAG IS FALSE - No notification will be sent")
+    
+    def _handle_notification_direct(self):
+        """Actually send the notification"""
+        print(f"✅ [_handle_notification_direct] Sending notification...")
+        frappe.logger().info(f"📰 [News Article] Sending notification for: {self.name}")
+        frappe.logger().info(f"📰 [News Article] Title: {self.title_vn}, Stages: {self.education_stage_ids}")
+        
+        try:
+            # Gọi trực tiếp function thay vì enqueue (để test ngay)
+            # TODO: Sau khi test xong, có thể đổi lại thành enqueue
+            send_news_publish_notification(
+                article_id=self.name,
+                title_vn=self.title_vn,
+                title_en=self.title_en,
+                education_stage_ids=self.education_stage_ids,
+                campus_id=self.campus_id
+            )
+            print(f"✅ [_handle_notification_direct] Notification sent successfully!")
+            frappe.logger().info(f"✅ [News Article] Notification sent for: {self.name}")
+        except Exception as e:
+            print(f"❌ [_handle_notification_direct] Error: {str(e)}")
+            frappe.logger().error(f"❌ [News Article] Error sending notification: {str(e)}")
+            import traceback
+            frappe.logger().error(traceback.format_exc())
+            print(traceback.format_exc())
 
 
 def send_news_publish_notification(article_id, title_vn, title_en, education_stage_ids, campus_id):
