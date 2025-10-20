@@ -784,27 +784,46 @@ def delete_news_article():
 
         # Delete using frappe.delete_doc
         try:
+            # Check transaction status before delete
+            import frappe.db
+            logs.append(f"Transaction status before delete: {frappe.db.get_open_transactions()}")
+
             logs.append("Calling frappe.delete_doc...")
             frappe.delete_doc("SIS News Article", article_id, ignore_permissions=True, force=True)
             logs.append("frappe.delete_doc completed successfully")
 
-            # IMMEDIATE VERIFICATION - check if still exists
-            try:
-                still_exists = frappe.db.exists("SIS News Article", article_id)
-                logs.append(f"Immediate verification - exists in DB: {still_exists}")
+            # Check transaction status after delete
+            logs.append(f"Transaction status after delete: {frappe.db.get_open_transactions()}")
 
-                if still_exists:
+            # IMMEDIATE VERIFICATION - check if still exists using different methods
+            try:
+                # Method 1: frappe.db.exists
+                still_exists_db = frappe.db.exists("SIS News Article", article_id)
+                logs.append(f"Verification 1 - frappe.db.exists: {still_exists_db}")
+
+                # Method 2: Direct SQL query
+                direct_sql_result = frappe.db.sql("SELECT name FROM `tabSIS News Article` WHERE name = %s", article_id, as_dict=True)
+                logs.append(f"Verification 2 - Direct SQL result: {direct_sql_result}")
+
+                # Method 3: frappe.get_all
+                get_all_result = frappe.get_all("SIS News Article", filters={"name": article_id}, fields=["name"])
+                logs.append(f"Verification 3 - frappe.get_all result: {get_all_result}")
+
+                if still_exists_db or direct_sql_result or get_all_result:
                     logs.append("ERROR: Article still exists in database after delete!")
+                    logs.append(f"Details - db.exists: {still_exists_db}, sql: {direct_sql_result}, get_all: {get_all_result}")
                     return error_response(
                         message="Article deletion failed - still exists in database",
                         code="DELETE_ERROR",
                         logs=logs
                     )
                 else:
-                    logs.append("SUCCESS: Article confirmed deleted from database")
+                    logs.append("SUCCESS: Article confirmed deleted from all verification methods")
 
             except Exception as verify_error:
                 logs.append(f"Verification check error: {str(verify_error)}")
+                import traceback
+                logs.append(f"Verification traceback: {traceback.format_exc()}")
 
             # Try to cleanup cover image file if it exists
             if cover_image and cover_image.startswith("/files/News_Articles/"):
