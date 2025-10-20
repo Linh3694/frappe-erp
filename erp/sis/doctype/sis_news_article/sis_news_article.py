@@ -10,6 +10,11 @@ import requests
 class SISNewsArticle(Document):
     def before_save(self):
         """Set audit fields and handle publish logic"""
+        print("=" * 80)
+        print(f"📰 [before_save] CALLED for article: {self.name if self.name else 'NEW'}")
+        print(f"📰 [before_save] Status: {self.status}")
+        print("=" * 80)
+        
         current_user = frappe.session.user
 
         # Get SIS Teacher record for current user, fallback to email if not found
@@ -33,6 +38,11 @@ class SISNewsArticle(Document):
             if old_doc:
                 old_status = old_doc.status
         
+        print(f"📰 [before_save] Is new: {self.is_new()}")
+        print(f"📰 [before_save] Old status: {old_status}")
+        print(f"📰 [before_save] Current status: {self.status}")
+        print(f"📰 [before_save] Published at: {self.published_at}")
+        
         # Track if status is changing to published
         # Case 1: New document created with status="published"
         # Case 2: Existing document changing from draft to published
@@ -42,18 +52,24 @@ class SISNewsArticle(Document):
             (old_status != "published" or not self.published_at)
         )
 
+        print(f"📰 [before_save] Is newly published: {is_newly_published}")
+
         if is_newly_published:
             if not self.published_at:
                 self.published_at = frappe.utils.now()
                 self.published_by = teacher
             # Set flag to send notification after save
             self._send_publish_notification = True
+            print(f"✅ [before_save] FLAG SET! Will send notification")
             frappe.logger().info(f"📰 [News Article] Will send notification - New: {self.is_new()}, Old status: {old_status}, Current: {self.status}")
         elif self.status == "draft":
             # Reset publish info when changing back to draft
             self.published_at = None
             self.published_by = None
             self._send_publish_notification = False
+            print(f"⚠️ [before_save] Draft - no notification")
+        else:
+            print(f"⚠️ [before_save] Status not newly published - no notification")
 
     def validate(self):
         """Validate article data"""
@@ -108,8 +124,14 @@ class SISNewsArticle(Document):
 
     def after_save(self):
         """Send push notification after publishing"""
+        print("=" * 80)
+        print(f"📰 [after_save] CALLED for article: {self.name}")
+        print(f"📰 [after_save] Flag value: {getattr(self, '_send_publish_notification', 'NOT SET')}")
+        print("=" * 80)
+        
         # Check if we need to send notification
         if getattr(self, '_send_publish_notification', False):
+            print(f"✅ [after_save] FLAG IS TRUE! Sending notification...")
             frappe.logger().info(f"📰 [News Article] Sending notification for: {self.name}")
             frappe.logger().info(f"📰 [News Article] Title: {self.title_vn}, Stages: {self.education_stage_ids}")
             
@@ -123,14 +145,18 @@ class SISNewsArticle(Document):
                     education_stage_ids=self.education_stage_ids,
                     campus_id=self.campus_id
                 )
+                print(f"✅ [after_save] Notification sent successfully!")
                 frappe.logger().info(f"✅ [News Article] Notification sent for: {self.name}")
             except Exception as e:
+                print(f"❌ [after_save] Error: {str(e)}")
                 frappe.logger().error(f"❌ [News Article] Error sending notification: {str(e)}")
                 import traceback
                 frappe.logger().error(traceback.format_exc())
             
             # Clear flag
             self._send_publish_notification = False
+        else:
+            print(f"⚠️ [after_save] FLAG IS FALSE - No notification will be sent")
 
 
 def send_news_publish_notification(article_id, title_vn, title_en, education_stage_ids, campus_id):
