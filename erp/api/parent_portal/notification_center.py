@@ -96,16 +96,7 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         error_count = 0
         debug_logs = []
         
-        debug_logs.append(f"API URL: {api_url}")
-        debug_logs.append(f"Request params: page={page}, limit={limit}")
-        debug_logs.append(f"Response keys: {list(data.keys())}")
-        debug_logs.append(f"Response pagination: {data.get('pagination', {})}")
-        
-        # Add sample of first notification if available
-        if raw_notifications and len(raw_notifications) > 0:
-            sample = raw_notifications[0]
-            debug_logs.append(f"Sample notification keys: {list(sample.keys())}")
-        
+        debug_logs.append(f"Filter: student_id={student_id}, type={type}, status={status}, include_read={include_read}")
         debug_logs.append(f"Raw notifications count: {len(raw_notifications)}")
         
         for idx, notif in enumerate(raw_notifications):
@@ -125,17 +116,24 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                 is_read = notif.get('read', False)
                 
                 # Build notification object TRƯỚC KHI filter
+                # Clean up title, message, student_name (remove extra whitespace and newlines)
+                title = (notif.get('title', 'No title') or 'No title').strip()
+                message = (notif.get('message', 'No message') or 'No message').strip()
+                student_name = get_student_name_from_notification(notif)
+                if student_name:
+                    student_name = student_name.strip()
+                
                 notification = {
                     "id": str(notif.get('_id', '')),
                     "type": notif_type,
-                    "title": notif.get('title', 'No title'),
-                    "message": notif.get('message', 'No message'),
+                    "title": title,
+                    "message": message,
                     "status": "read" if is_read else "unread",
                     "priority": notif.get('priority', 'normal'),
                     "created_at": notif.get('createdAt', notif.get('timestamp', datetime.now().isoformat())),
                     "read_at": notif.get('readAt') if is_read else None,
                     "student_id": get_student_id_from_notification(notif),
-                    "student_name": get_student_name_from_notification(notif),
+                    "student_name": student_name,
                     "action_url": generate_action_url(notif_type, notif.get('data', {})),
                     "data": notif.get('data', {})
                 }
@@ -143,8 +141,27 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                 if idx < 5:
                     debug_logs.append(f"  ✅ Built: {notification['id']}, type: {notification['type']}")
                 
-                # KHÔNG FILTER GÌ CẢ - lấy hết để debug
-                # Filter sẽ được làm ở client side
+                # Filter theo student_id nếu có
+                if student_id:
+                    notif_student_id = notification.get('student_id')
+                    # Chỉ lấy notifications của student này HOẶC notifications không có student_id (general)
+                    if notif_student_id and notif_student_id != student_id:
+                        continue
+                
+                # Filter theo type nếu có
+                if type and type != 'all' and notification['type'] != type:
+                    continue
+                
+                # Filter theo status nếu có
+                if status == 'unread' and notification['status'] != 'unread':
+                    continue
+                elif status == 'read' and notification['status'] != 'read':
+                    continue
+                
+                # Filter theo include_read
+                if not include_read and notification['status'] == 'read':
+                    continue
+                
                 notifications.append(notification)
                 
             except Exception as e:
