@@ -728,103 +728,61 @@ def update_news_article():
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def delete_news_article():
     """Delete a news article"""
-    logs = []
-
     try:
-        logs.append(f"Starting delete operation for user: {frappe.session.user}")
         data = frappe.local.form_dict
 
         article_id = data.get("article_id")
-        logs.append(f"article_id from form_dict: {article_id}")
 
         # Try from request.args (for GET query params)
         if not article_id:
             article_id = frappe.request.args.get("article_id")
-            logs.append(f"article_id from query args: {article_id}")
 
         if not article_id:
-            logs.append("Article ID validation failed")
             return validation_error_response("Article ID is required", {"article_id": ["Article ID is required"]})
-
-        logs.append(f"Fetching article: {article_id}")
 
         # Get the article
         article = frappe.get_doc("SIS News Article", article_id)
-        logs.append(f"Article loaded: {article.name}, status: {article.status}")
 
         # Check if user has access to this campus
         campus_id = get_current_campus_from_context()
-        logs.append(f"User campus: {campus_id}, Article campus: {article.campus_id}")
-
         if campus_id and article.campus_id != campus_id:
-            logs.append("Campus access denied")
             return error_response(
                 message="You don't have access to this article",
-                code="FORBIDDEN",
-                logs=logs
+                code="FORBIDDEN"
             )
-
-        logs.append("Access granted, attempting deletion")
 
         # Delete the article using frappe.delete_doc for better error handling
-        try:
-            # Check if article has cover image that needs cleanup
-            cover_image = article.cover_image
-            logs.append(f"Article cover_image: {cover_image}")
+        # Check if article has cover image that needs cleanup
+        cover_image = article.cover_image
 
-            # Delete using frappe.delete_doc instead of article.delete()
-            frappe.delete_doc("SIS News Article", article_id, ignore_permissions=True, force=True)
-            logs.append("frappe.delete_doc() called successfully")
+        # Delete using frappe.delete_doc instead of article.delete()
+        frappe.delete_doc("SIS News Article", article_id, ignore_permissions=True, force=True)
 
-            # Skip verification to avoid server messages
-            logs.append("Article deletion completed (skipping verification to avoid server messages)")
+        # Try to cleanup cover image file if it exists
+        if cover_image and cover_image.startswith("/files/News_Articles/"):
+            try:
+                import os
+                file_path = frappe.get_site_path("public") + cover_image
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as file_error:
+                # Don't fail the whole operation for file cleanup error
+                frappe.logger().warning(f"Failed to delete cover image file: {str(file_error)}")
 
-            # Try to cleanup cover image file if it exists
-            if cover_image and cover_image.startswith("/files/News_Articles/"):
-                try:
-                    import os
-                    file_path = frappe.get_site_path("public") + cover_image
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                        logs.append(f"Cover image file deleted: {file_path}")
-                    else:
-                        logs.append(f"Cover image file not found: {file_path}")
-                except Exception as file_error:
-                    logs.append(f"Failed to delete cover image file: {str(file_error)}")
-                    # Don't fail the whole operation for file cleanup error
-
-            return success_response(
-                message="News article deleted successfully",
-                logs=logs
-            )
-
-        except Exception as delete_error:
-            logs.append(f"frappe.delete_doc() failed: {str(delete_error)}")
-            frappe.logger().error(f"Delete operation failed: {str(delete_error)}")
-            import traceback
-            logs.append(f"Delete traceback: {traceback.format_exc()}")
-            return error_response(
-                message=f"Failed to delete article: {str(delete_error)}",
-                code="DELETE_ERROR",
-                logs=logs
-            )
+        return success_response(
+            message="News article deleted successfully"
+        )
 
     except frappe.DoesNotExistError:
-        logs.append("Article not found during initial fetch")
         return error_response(
             message="News article not found",
-            code="NOT_FOUND",
-            logs=logs
+            code="NOT_FOUND"
         )
     except Exception as e:
-        logs.append(f"Unexpected error: {str(e)}")
         frappe.logger().error(f"Error deleting news article: {str(e)}")
-        import traceback
-        logs.append(f"Full traceback: {traceback.format_exc()}")
         return error_response(
             message=f"Failed to delete news article: {str(e)}",
-            code="DELETE_ERROR",
-            logs=logs
+            code="DELETE_ERROR"
         )
 
 
