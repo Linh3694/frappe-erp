@@ -137,7 +137,35 @@ def get_news_articles():
             should_include = True
             if student_education_stage_id:
                 try:
-                    education_stage_ids = json.loads(article.education_stage_ids or "[]")
+                    # Handle escaped JSON strings - some articles have double/triple escaped JSON
+                    raw_stages = article.education_stage_ids or "[]"
+                    
+                    # Try to parse, if it's a string that looks like escaped JSON, unescape it
+                    education_stage_ids = []
+                    try:
+                        # First attempt: direct parse
+                        education_stage_ids = json.loads(raw_stages)
+                    except:
+                        # Second attempt: it might be double-escaped, try unescaping once
+                        try:
+                            unescaped = json.loads(raw_stages)
+                            if isinstance(unescaped, str):
+                                education_stage_ids = json.loads(unescaped)
+                            else:
+                                education_stage_ids = unescaped
+                        except:
+                            # Third attempt: triple-escaped?
+                            try:
+                                unescaped1 = json.loads(raw_stages)
+                                if isinstance(unescaped1, str):
+                                    unescaped2 = json.loads(unescaped1)
+                                    if isinstance(unescaped2, str):
+                                        education_stage_ids = json.loads(unescaped2)
+                                    else:
+                                        education_stage_ids = unescaped2
+                            except:
+                                education_stage_ids = []
+                    
                     # If article has no education_stage_ids (empty array), show to all students
                     # If article has education_stage_ids, only show if student's stage matches
                     if education_stage_ids and len(education_stage_ids) > 0:
@@ -147,15 +175,26 @@ def get_news_articles():
                         should_include = True  # Empty education_stage_ids means show to all
                         frappe.logger().info(f"Parent portal - Article {article.name}: No stages specified, showing to all")
                 except Exception as e:
-                    should_include = False  # If parsing fails, exclude the article
-                    frappe.logger().error(f"Parent portal - Error parsing stages for {article.name}: {str(e)}")
+                    should_include = True  # If parsing fails completely, show the article (failsafe)
+                    frappe.logger().error(f"Parent portal - Error parsing stages for {article.name}: {str(e)}, raw: {article.education_stage_ids}")
             else:
                 frappe.logger().info(f"Parent portal - No student_education_stage_id provided, showing all articles")
 
             if should_include:
                 # Get education stage names for display
                 try:
-                    education_stage_ids = json.loads(article.education_stage_ids or "[]")
+                    # Reuse the already-parsed education_stage_ids from above
+                    # But if we're showing all articles (no student filter), need to parse here
+                    if not student_education_stage_id:
+                        raw_stages = article.education_stage_ids or "[]"
+                        try:
+                            education_stage_ids = json.loads(raw_stages)
+                        except:
+                            try:
+                                unescaped = json.loads(raw_stages)
+                                education_stage_ids = json.loads(unescaped) if isinstance(unescaped, str) else unescaped
+                            except:
+                                education_stage_ids = []
                     if education_stage_ids:
                         stages_info = []
                         for stage_id in education_stage_ids[:2]:  # Show max 2 stages
