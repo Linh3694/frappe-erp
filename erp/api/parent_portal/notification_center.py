@@ -75,8 +75,14 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         
         # Transform notifications sang format frontend cần
         notifications = []
-        for notif in raw_notifications:
+        error_count = 0
+        
+        for idx, notif in enumerate(raw_notifications):
             try:
+                print(f"🔄 [Notification Center] Processing notification {idx + 1}/{len(raw_notifications)}")
+                print(f"   Raw notif keys: {list(notif.keys())}")
+                print(f"   Type: {notif.get('type')}, Title: {notif.get('title')}")
+                
                 # Xác định type dựa vào notif.type và notif.data
                 notif_type = map_notification_type(notif.get('type'), notif.get('data', {}))
                 
@@ -85,10 +91,10 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                 
                 # Build notification object TRƯỚC KHI filter
                 notification = {
-                    "id": str(notif.get('_id')),
+                    "id": str(notif.get('_id', '')),
                     "type": notif_type,
-                    "title": notif.get('title', ''),
-                    "message": notif.get('message', ''),
+                    "title": notif.get('title', 'No title'),
+                    "message": notif.get('message', 'No message'),
                     "status": "read" if is_read else "unread",
                     "priority": notif.get('priority', 'normal'),
                     "created_at": notif.get('createdAt', notif.get('timestamp', datetime.now().isoformat())),
@@ -99,13 +105,20 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                     "data": notif.get('data', {})
                 }
                 
+                print(f"   ✅ Built notification: {notification['id']}, type: {notification['type']}")
+                
                 # KHÔNG FILTER GÌ CẢ - lấy hết để debug
                 # Filter sẽ được làm ở client side
                 notifications.append(notification)
                 
             except Exception as e:
-                print(f"⚠️ [Notification Center] Error processing notification: {str(e)}")
+                error_count += 1
+                print(f"❌ [Notification Center] Error processing notification {idx + 1}: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
                 continue
+        
+        print(f"📊 [Notification Center] Processed: {len(notifications)} success, {error_count} errors")
         
         # Calculate unread count từ raw data
         unread_count = sum(1 for n in raw_notifications if not n.get('read', False))
