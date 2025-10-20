@@ -45,10 +45,11 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         limit = int(limit) if limit else 10
         offset = int(offset) if offset else 0
         
-        # Tính page từ offset
+        # Tính page từ offset - TẠM THỜI lấy tất cả (limit = 200)
+        limit = 200  # Lấy nhiều notifications
         page = (offset // limit) + 1 if limit > 0 else 1
         
-        print(f"📥 [Notification Center] Getting notifications for user: {user}, student: {student_id}, type: {type}, status: {status}")
+        print(f"📥 [Notification Center] Getting notifications for user: {user}, limit: {limit}")
         
         # Gọi notification-service API để lấy notifications
         notification_service_url = get_notification_service_url()
@@ -70,55 +71,46 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         # Parse notifications từ response
         raw_notifications = data.get('notifications', [])
         
+        print(f"📊 [Notification Center] Raw notifications count: {len(raw_notifications)}")
+        
         # Transform notifications sang format frontend cần
         notifications = []
         for notif in raw_notifications:
-            # Xác định type dựa vào notif.type và notif.data
-            notif_type = map_notification_type(notif.get('type'), notif.get('data', {}))
-            
-            # Filter theo type nếu có
-            if type and type != 'all' and notif_type != type:
+            try:
+                # Xác định type dựa vào notif.type và notif.data
+                notif_type = map_notification_type(notif.get('type'), notif.get('data', {}))
+                
+                # Check read status
+                is_read = notif.get('read', False)
+                
+                # Build notification object TRƯỚC KHI filter
+                notification = {
+                    "id": str(notif.get('_id')),
+                    "type": notif_type,
+                    "title": notif.get('title', ''),
+                    "message": notif.get('message', ''),
+                    "status": "read" if is_read else "unread",
+                    "priority": notif.get('priority', 'normal'),
+                    "created_at": notif.get('createdAt', notif.get('timestamp', datetime.now().isoformat())),
+                    "read_at": notif.get('readAt') if is_read else None,
+                    "student_id": get_student_id_from_notification(notif),
+                    "student_name": get_student_name_from_notification(notif),
+                    "action_url": generate_action_url(notif_type, notif.get('data', {})),
+                    "data": notif.get('data', {})
+                }
+                
+                # KHÔNG FILTER GÌ CẢ - lấy hết để debug
+                # Filter sẽ được làm ở client side
+                notifications.append(notification)
+                
+            except Exception as e:
+                print(f"⚠️ [Notification Center] Error processing notification: {str(e)}")
                 continue
-            
-            # Filter theo student nếu có
-            if student_id:
-                notif_student_id = get_student_id_from_notification(notif)
-                if notif_student_id and notif_student_id != student_id:
-                    continue
-            
-            # Check read status
-            is_read = notif.get('read', False)
-            
-            # Filter theo status nếu có
-            if status == 'unread' and is_read:
-                continue
-            elif status == 'read' and not is_read:
-                continue
-            
-            # Build notification object
-            notification = {
-                "id": str(notif.get('_id')),
-                "type": notif_type,
-                "title": notif.get('title', ''),
-                "message": notif.get('message', ''),
-                "status": "read" if is_read else "unread",
-                "priority": notif.get('priority', 'normal'),
-                "created_at": notif.get('createdAt', notif.get('timestamp', datetime.now().isoformat())),
-                "read_at": notif.get('readAt') if is_read else None,
-                "student_id": get_student_id_from_notification(notif),
-                "student_name": get_student_name_from_notification(notif),
-                "action_url": generate_action_url(notif_type, notif.get('data', {})),
-                "data": notif.get('data', {})
-            }
-            
-            notifications.append(notification)
         
-        # Calculate unread count
+        # Calculate unread count từ raw data
         unread_count = sum(1 for n in raw_notifications if not n.get('read', False))
         
-        # Filter theo include_read
-        if not include_read:
-            notifications = [n for n in notifications if n['status'] == 'unread']
+        print(f"✅ [Notification Center] Filtered notifications count: {len(notifications)}, unread: {unread_count}")
         
         return {
             "success": True,
@@ -346,11 +338,13 @@ def map_notification_type(notif_type, data):
     # Check data.type hoặc data.notificationType trước
     custom_type = data.get('type') or data.get('notificationType')
     
+    print(f"🔍 [map_notification_type] notif_type={notif_type}, custom_type={custom_type}")
+    
     if custom_type == 'contact_log':
         return 'contact_log'
     elif custom_type == 'report_card':
         return 'report_card'
-    elif custom_type == 'student_attendance':
+    elif custom_type == 'student_attendance' or custom_type == 'attendance':
         return 'attendance'
     elif custom_type == 'announcement':
         return 'announcement'
@@ -365,21 +359,27 @@ def map_notification_type(notif_type, data):
     elif notif_type == 'post':
         return 'news'
     elif notif_type == 'system':
+        # Nếu trong data có type khác, ưu tiên type đó
+        if 'type' in data:
+            return data['type']
         return 'system'
     
+    print(f"⚠️ [map_notification_type] Unknown type, defaulting to system")
     return 'system'
 
 
 def get_student_id_from_notification(notif):
     """Extract student_id từ notification data"""
     data = notif.get('data', {})
-    return data.get('student_id') or data.get('studentId')
+    student_id = data.get('student_id') or data.get('studentId') or data.get('studentCode')
+    print(f"🔍 [get_student_id] Extracted: {student_id} from data: {list(data.keys())}")
+    return student_id
 
 
 def get_student_name_from_notification(notif):
     """Extract student_name từ notification data"""
     data = notif.get('data', {})
-    return data.get('student_name') or data.get('studentName')
+    return data.get('student_name') or data.get('studentName') or data.get('employeeName')
 
 
 def generate_action_url(notif_type, data):
