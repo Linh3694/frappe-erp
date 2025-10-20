@@ -176,7 +176,7 @@ def get_news_articles():
 
         frappe.logger().info(f"Using filters: {filters}")
 
-        # Get articles with pagination
+        # Get articles with pagination - disable cache to ensure fresh data
         articles = frappe.get_all(
             "SIS News Article",
             fields=[
@@ -198,7 +198,9 @@ def get_news_articles():
             filters=filters,
             order_by="published_at desc, modified desc" if status == "published" else "modified desc",
             limit_page_length=limit,
-            limit_start=offset
+            limit_start=offset,
+            ignore_permissions=True,  # Ensure we bypass permission caching
+            update_modified=False     # Don't update modified timestamp
         )
 
         # Get total count for pagination
@@ -832,6 +834,10 @@ def delete_news_article():
                         logs.append("Cover image file not found")
                 except Exception as file_error:
                     logs.append(f"Failed to delete cover image file: {str(file_error)}")
+
+            # Clear frappe cache to ensure fresh data for subsequent queries
+            frappe.clear_cache(doctype="SIS News Article")
+            logs.append("Frappe cache cleared for SIS News Article")
 
             logs.append("DELETION COMPLETED SUCCESSFULLY")
             return success_response(
