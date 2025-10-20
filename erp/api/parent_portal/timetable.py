@@ -151,8 +151,38 @@ def _get_class_timetable_for_date(class_id, target_date):
         all_columns = []
 
         try:
-            # Get all timetable columns from instances that have rows for this day
-            sql = """
+            # First, get class info to find education_stage and campus
+            class_doc = frappe.get_doc("SIS Class", class_id)
+            education_stage_id = class_doc.education_stage_id
+            campus_id = class_doc.campus_id
+            
+            logs.append(f"📋 Class education_stage: {education_stage_id}, campus: {campus_id}")
+            
+            # Get ALL timetable columns for this education stage and campus
+            # This includes both study periods and break periods
+            all_columns_sql = """
+                SELECT 
+                    tc.name as timetable_column_id,
+                    tc.period_name,
+                    tc.start_time,
+                    tc.end_time,
+                    tc.period_type,
+                    tc.period_priority
+                FROM `tabSIS Timetable Column` tc
+                WHERE tc.education_stage_id = %(education_stage_id)s
+                AND tc.campus_id = %(campus_id)s
+                ORDER BY tc.period_priority ASC, tc.start_time ASC
+            """
+            
+            all_day_columns = frappe.db.sql(all_columns_sql, {
+                "education_stage_id": education_stage_id,
+                "campus_id": campus_id
+            }, as_dict=True)
+            
+            logs.append(f"✅ Found {len(all_day_columns)} total timetable columns (including breaks)")
+            
+            # Get existing rows for this specific day
+            existing_rows_sql = """
                 SELECT DISTINCT
                     tir.timetable_column_id,
                     tir.subject_id,
@@ -166,56 +196,55 @@ def _get_class_timetable_for_date(class_id, target_date):
                 ORDER BY tir.timetable_column_id
             """
 
-            existing_rows = frappe.db.sql(sql, {
+            existing_rows = frappe.db.sql(existing_rows_sql, {
                 "instance_ids": tuple(instance_ids),
                 "day_of_week": day_of_week
             }, as_dict=True)
 
             logs.append(f"✅ Found {len(existing_rows)} existing timetable rows for {day_of_week}")
 
-            # Get all timetable columns that should exist for this day
-            # by looking at all columns used in any instance for this day
-            all_column_sql = """
-                SELECT DISTINCT
-                    tir.timetable_column_id,
-                    tc.period_name,
-                    tc.start_time,
-                    tc.end_time,
-                    tc.period_type
-                FROM `tabSIS Timetable Instance Row` tir
-                INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
-                WHERE tir.parent IN %(instance_ids)s
-                AND tir.day_of_week = %(day_of_week)s
-                ORDER BY tir.timetable_column_id
-            """
-
-            all_day_columns = frappe.db.sql(all_column_sql, {
-                "instance_ids": tuple(instance_ids),
-                "day_of_week": day_of_week
-            }, as_dict=True)
-
-            logs.append(f"✅ Found {len(all_day_columns)} total timetable columns for {day_of_week}")
-
             # Create rows for all columns, filling in data where available
             for col in all_day_columns:
-                column_id = col.timetable_column_id
+                column_id = col.get('timetable_column_id')
 
-                # Find if there's an existing row for this column
-                existing_row = next((r for r in existing_rows if r.timetable_column_id == column_id), None)
+                # Find if there's an existing row for this column and day
+                existing_row = next((r for r in existing_rows if r.get('timetable_column_id') == column_id), None)
+
+                # Convert timedelta to HH:MM format for start_time and end_time
+                start_time = None
+                if col.get('start_time'):
+                    total_seconds = int(col['start_time'].total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    start_time = f"{hours:02d}:{minutes:02d}"
+                
+                end_time = None
+                if col.get('end_time'):
+                    total_seconds = int(col['end_time'].total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    end_time = f"{hours:02d}:{minutes:02d}"
 
                 if existing_row:
-                    # Use existing row data
+                    # Use existing row data (study period)
                     row = {
                         "name": f"row_{column_id}",
                         "timetable_column_id": column_id,
-                        "subject_id": existing_row.subject_id,
-                        "teacher_1_id": existing_row.teacher_1_id,
-                        "teacher_2_id": existing_row.teacher_2_id,
-                        "room_id": existing_row.room_id,
-                        "day_of_week": day_of_week
+                        "subject_id": existing_row.get('subject_id'),
+                        "teacher_1_id": existing_row.get('teacher_1_id'),
+                        "teacher_2_id": existing_row.get('teacher_2_id'),
+                        "room_id": existing_row.get('room_id'),
+                        "day_of_week": day_of_week,
+                        "date": target_date_str,
+                        # Add column info directly
+                        "period_name": col.get('period_name', ''),
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "period_type": col.get('period_type', 'study'),
+                        "period_priority": col.get('period_priority', 0)
                     }
                 else:
-                    # Create empty row for non-study periods
+                    # Create row for non-study periods (breaks) or empty slots
                     row = {
                         "name": f"row_{column_id}",
                         "timetable_column_id": column_id,
@@ -223,7 +252,14 @@ def _get_class_timetable_for_date(class_id, target_date):
                         "teacher_1_id": None,
                         "teacher_2_id": None,
                         "room_id": None,
-                        "day_of_week": day_of_week
+                        "day_of_week": day_of_week,
+                        "date": target_date_str,
+                        # Add column info directly
+                        "period_name": col.get('period_name', ''),
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "period_type": col.get('period_type', 'study'),
+                        "period_priority": col.get('period_priority', 0)
                     }
 
                 all_columns.append(row)
@@ -348,40 +384,28 @@ def _get_class_timetable_for_date(class_id, target_date):
                     row["room_title"] = room.title
                 except:
                     row["room_title"] = ""
-
-            # Get timetable column info (period time and type) - ALWAYS enrich this
-            if row.get("timetable_column_id"):
-                try:
-                    column = frappe.get_doc("SIS Timetable Column", row["timetable_column_id"])
-                    row["period_name"] = column.period_name  # Correct field name
-
-                    # Convert timedelta to HH:MM format
-                    if column.start_time:
-                        total_seconds = int(column.start_time.total_seconds())
-                        hours = total_seconds // 3600
-                        minutes = (total_seconds % 3600) // 60
-                        row["start_time"] = f"{hours:02d}:{minutes:02d}"
-                    else:
-                        row["start_time"] = None
-
-                    if column.end_time:
-                        total_seconds = int(column.end_time.total_seconds())
-                        hours = total_seconds // 3600
-                        minutes = (total_seconds % 3600) // 60
-                        row["end_time"] = f"{hours:02d}:{minutes:02d}"
-                    else:
-                        row["end_time"] = None
-
-                    # Get period_type, default to "study" if not set
-                    row["period_type"] = column.period_type if column.period_type else "study"
-                except Exception as e:
-                    row["period_name"] = ""
-                    row["start_time"] = None
-                    row["end_time"] = None
-                    row["period_type"] = "study"  # Default to study if column not found
-                    logs.append(f"⚠️ Could not get column info: {str(e)}")
             else:
-                row["period_type"] = "study"  # Default if no column_id
+                row["room_title"] = ""
+
+            # Column info (period_name, start_time, end_time, period_type) is already set
+            # during row creation above, so no need to fetch again
+            # Ensure defaults if not set
+            if "period_name" not in row:
+                row["period_name"] = ""
+            if "start_time" not in row:
+                row["start_time"] = None
+            if "end_time" not in row:
+                row["end_time"] = None
+            if "period_type" not in row:
+                row["period_type"] = "study"
+            
+            # Ensure empty fields for non-study periods
+            if not row.get("subject_id"):
+                row["subject_title"] = ""
+                row["timetable_subject_title"] = ""
+                row["curriculum_id"] = ""
+                row["teacher_names"] = ""
+                row["teacher_ids"] = []
 
         # Check for date-specific overrides (from custom table)
         overrides = []
@@ -404,11 +428,11 @@ def _get_class_timetable_for_date(class_id, target_date):
                 override_type = override.get("override_type")
                 
                 # Find matching row
-                matching_rows = [r for r in rows if r.get("timetable_column_id") == column_id]
+                matching_rows = [r for r in all_columns if r.get("timetable_column_id") == column_id]
                 
                 if override_type == "cancellation":
                     # Remove the period
-                    rows = [r for r in rows if r.get("timetable_column_id") != column_id]
+                    all_columns = [r for r in all_columns if r.get("timetable_column_id") != column_id]
                 elif override_type == "change" and matching_rows:
                     # Update the period
                     row = matching_rows[0]
