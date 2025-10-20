@@ -151,37 +151,31 @@ def _get_class_timetable_for_date(class_id, target_date):
         all_columns = []
 
         try:
-            # First, get class info to find education_stage and campus
-            class_doc = frappe.get_doc("SIS Class", class_id)
-            education_stage_id = class_doc.education_stage_id
-            campus_id = class_doc.campus_id
-            
-            logs.append(f"📋 Class education_stage: {education_stage_id}, campus: {campus_id}")
-            
-            # Get ALL timetable columns for this education stage and campus
-            # This includes both study periods and break periods
+            # Get all timetable columns used in this instance for this specific day
+            # This query gets both study periods (with subject) and break periods (without subject)
             all_columns_sql = """
-                SELECT 
+                SELECT DISTINCT
                     tc.name as timetable_column_id,
                     tc.period_name,
                     tc.start_time,
                     tc.end_time,
                     tc.period_type,
                     tc.period_priority
-                FROM `tabSIS Timetable Column` tc
-                WHERE tc.education_stage_id = %(education_stage_id)s
-                AND tc.campus_id = %(campus_id)s
+                FROM `tabSIS Timetable Instance Row` tir
+                INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
+                WHERE tir.parent IN %(instance_ids)s
+                AND tir.day_of_week = %(day_of_week)s
                 ORDER BY tc.period_priority ASC, tc.start_time ASC
             """
             
             all_day_columns = frappe.db.sql(all_columns_sql, {
-                "education_stage_id": education_stage_id,
-                "campus_id": campus_id
+                "instance_ids": tuple(instance_ids),
+                "day_of_week": day_of_week
             }, as_dict=True)
             
-            logs.append(f"✅ Found {len(all_day_columns)} total timetable columns (including breaks)")
+            logs.append(f"✅ Found {len(all_day_columns)} total timetable columns for {day_of_week}")
             
-            # Get existing rows for this specific day
+            # Get existing rows with subject data for this specific day
             existing_rows_sql = """
                 SELECT DISTINCT
                     tir.timetable_column_id,
@@ -193,6 +187,7 @@ def _get_class_timetable_for_date(class_id, target_date):
                 FROM `tabSIS Timetable Instance Row` tir
                 WHERE tir.parent IN %(instance_ids)s
                 AND tir.day_of_week = %(day_of_week)s
+                AND tir.subject_id IS NOT NULL
                 ORDER BY tir.timetable_column_id
             """
 
@@ -201,7 +196,7 @@ def _get_class_timetable_for_date(class_id, target_date):
                 "day_of_week": day_of_week
             }, as_dict=True)
 
-            logs.append(f"✅ Found {len(existing_rows)} existing timetable rows for {day_of_week}")
+            logs.append(f"✅ Found {len(existing_rows)} study period rows for {day_of_week}")
 
             # Create rows for all columns, filling in data where available
             for col in all_day_columns:
