@@ -146,46 +146,106 @@ def _get_class_timetable_for_date(class_id, target_date):
         instance_ids = [i.name for i in instances]
         logs.append(f"✅ Found {len(instance_ids)} timetable instance(s): {instance_ids}")
         
-        # Get timetable rows for this day of week - with fallback query
-        rows = []
+        # Get all timetable columns for this day from timetable instances
+        # Include both study periods (with subject) and non-study periods (breaks)
+        all_columns = []
+
         try:
-            # Try standard parent field first
-            row_filters = {
-                "parent": ["in", instance_ids],
-                "parenttype": "SIS Timetable Instance",
-                "parentfield": "weekly_pattern",
+            # Get all timetable columns from instances that have rows for this day
+            sql = """
+                SELECT DISTINCT
+                    tir.timetable_column_id,
+                    tir.subject_id,
+                    tir.teacher_1_id,
+                    tir.teacher_2_id,
+                    tir.room_id,
+                    tir.day_of_week
+                FROM `tabSIS Timetable Instance Row` tir
+                WHERE tir.parent IN %(instance_ids)s
+                AND tir.day_of_week = %(day_of_week)s
+                ORDER BY tir.timetable_column_id
+            """
+
+            existing_rows = frappe.db.sql(sql, {
+                "instance_ids": tuple(instance_ids),
                 "day_of_week": day_of_week
-            }
-            
-            rows = frappe.get_all(
-                "SIS Timetable Instance Row",
-                fields=[
-                    "name",
-                    "parent",
-                    "day_of_week",
-                    "timetable_column_id",
-                    "subject_id",
-                    "teacher_1_id",
-                    "teacher_2_id",
-                    "room_id"
-                ],
-                filters=row_filters,
-                order_by="timetable_column_id asc",
-                ignore_permissions=True
-            )
-            logs.append(f"✅ Queried with 'parent' field - found {len(rows)} rows")
+            }, as_dict=True)
+
+            logs.append(f"✅ Found {len(existing_rows)} existing timetable rows for {day_of_week}")
+
+            # Get all timetable columns that should exist for this day
+            # by looking at all columns used in any instance for this day
+            all_column_sql = """
+                SELECT DISTINCT
+                    tir.timetable_column_id,
+                    tc.period_name,
+                    tc.start_time,
+                    tc.end_time,
+                    tc.period_type
+                FROM `tabSIS Timetable Instance Row` tir
+                INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
+                WHERE tir.parent IN %(instance_ids)s
+                AND tir.day_of_week = %(day_of_week)s
+                ORDER BY tir.timetable_column_id
+            """
+
+            all_day_columns = frappe.db.sql(all_column_sql, {
+                "instance_ids": tuple(instance_ids),
+                "day_of_week": day_of_week
+            }, as_dict=True)
+
+            logs.append(f"✅ Found {len(all_day_columns)} total timetable columns for {day_of_week}")
+
+            # Create rows for all columns, filling in data where available
+            for col in all_day_columns:
+                column_id = col.timetable_column_id
+
+                # Find if there's an existing row for this column
+                existing_row = next((r for r in existing_rows if r.timetable_column_id == column_id), None)
+
+                if existing_row:
+                    # Use existing row data
+                    row = {
+                        "name": f"row_{column_id}",
+                        "timetable_column_id": column_id,
+                        "subject_id": existing_row.subject_id,
+                        "teacher_1_id": existing_row.teacher_1_id,
+                        "teacher_2_id": existing_row.teacher_2_id,
+                        "room_id": existing_row.room_id,
+                        "day_of_week": day_of_week
+                    }
+                else:
+                    # Create empty row for non-study periods
+                    row = {
+                        "name": f"row_{column_id}",
+                        "timetable_column_id": column_id,
+                        "subject_id": None,  # No subject for breaks
+                        "teacher_1_id": None,
+                        "teacher_2_id": None,
+                        "room_id": None,
+                        "day_of_week": day_of_week
+                    }
+
+                all_columns.append(row)
+
+            logs.append(f"✅ Created {len(all_columns)} column entries (including non-study periods)")
+
         except Exception as e:
-            logs.append(f"⚠️ Error with 'parent' field: {str(e)}")
-        
-        # Fallback: try parent_timetable_instance field
-        if not rows:
+            logs.append(f"❌ Error getting timetable columns: {str(e)}")
+            # Fallback to old logic
             try:
-                logs.append(f"🔄 Trying fallback with 'parent_timetable_instance' field")
-                alt_rows = frappe.get_all(
+                row_filters = {
+                    "parent": ["in", instance_ids],
+                    "parenttype": "SIS Timetable Instance",
+                    "parentfield": "weekly_pattern",
+                    "day_of_week": day_of_week
+                }
+
+                all_columns = frappe.get_all(
                     "SIS Timetable Instance Row",
                     fields=[
                         "name",
-                        "parent_timetable_instance",
+                        "parent",
                         "day_of_week",
                         "timetable_column_id",
                         "subject_id",
@@ -193,25 +253,19 @@ def _get_class_timetable_for_date(class_id, target_date):
                         "teacher_2_id",
                         "room_id"
                     ],
-                    filters={
-                        "parent_timetable_instance": ["in", instance_ids],
-                        "day_of_week": day_of_week
-                    },
+                    filters=row_filters,
                     order_by="timetable_column_id asc",
                     ignore_permissions=True
                 )
-                # Normalize to same shape
-                for r in alt_rows:
-                    r["parent"] = r.get("parent_timetable_instance")
-                rows = alt_rows
-                logs.append(f"✅ Fallback query found {len(rows)} rows")
+                logs.append(f"✅ Fallback query found {len(all_columns)} rows")
             except Exception as e2:
                 logs.append(f"❌ Fallback query also failed: {str(e2)}")
+                all_columns = []
         
-        logs.append(f"✅ Found {len(rows)} timetable entries for {day_of_week}")
-        
+        logs.append(f"✅ Found {len(all_columns)} timetable entries for {day_of_week}")
+
         # Enrich with subject titles, teacher names, and room info
-        for row in rows:
+        for row in all_columns:
             row["class_id"] = class_id
 
             # Get subject title
@@ -295,12 +349,12 @@ def _get_class_timetable_for_date(class_id, target_date):
                 except:
                     row["room_title"] = ""
 
-            # Get timetable column info (period time and type)
+            # Get timetable column info (period time and type) - ALWAYS enrich this
             if row.get("timetable_column_id"):
                 try:
                     column = frappe.get_doc("SIS Timetable Column", row["timetable_column_id"])
                     row["period_name"] = column.period_name  # Correct field name
-                    
+
                     # Convert timedelta to HH:MM format
                     if column.start_time:
                         total_seconds = int(column.start_time.total_seconds())
@@ -309,7 +363,7 @@ def _get_class_timetable_for_date(class_id, target_date):
                         row["start_time"] = f"{hours:02d}:{minutes:02d}"
                     else:
                         row["start_time"] = None
-                    
+
                     if column.end_time:
                         total_seconds = int(column.end_time.total_seconds())
                         hours = total_seconds // 3600
@@ -317,7 +371,7 @@ def _get_class_timetable_for_date(class_id, target_date):
                         row["end_time"] = f"{hours:02d}:{minutes:02d}"
                     else:
                         row["end_time"] = None
-                    
+
                     # Get period_type, default to "study" if not set
                     row["period_type"] = column.period_type if column.period_type else "study"
                 except Exception as e:
@@ -456,7 +510,7 @@ def _get_class_timetable_for_date(class_id, target_date):
         
         return {
             "success": True,
-            "entries": rows,
+            "entries": all_columns,
             "logs": logs
         }
         
