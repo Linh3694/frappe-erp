@@ -25,7 +25,7 @@ def _get_current_parent():
 	return guardian
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def download_leave_attachment():
 	"""
 	Download a leave request attachment file - PARENT PORTAL ONLY
