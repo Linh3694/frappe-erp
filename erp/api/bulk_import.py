@@ -1760,9 +1760,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
         return {"success": True}
 
     except Exception as e:
+        # Get error message directly from exception to preserve formatting
+        error_msg = e.message if hasattr(e, 'message') else (e.args[0] if e.args else str(e))
         return {
             "success": False,
-            "error": str(e)
+            "error": error_msg
         }
 
 
