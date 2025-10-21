@@ -176,6 +176,9 @@ def get_news_articles():
 
         frappe.logger().info(f"Using filters: {filters}")
 
+        # Clear cache to ensure fresh data after delete operations
+        frappe.clear_cache(doctype="SIS News Article")
+
         # Get articles with pagination - disable cache to ensure fresh data
         articles = frappe.get_all(
             "SIS News Article",
