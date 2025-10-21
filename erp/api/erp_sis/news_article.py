@@ -787,10 +787,24 @@ def delete_news_article():
         cover_image = article.cover_image
         logs.append(f"Article cover_image: '{cover_image}'")
 
+        # Delete child records first (tags)
+        try:
+            logs.append("Deleting child records (tags)...")
+            child_tags = frappe.get_all("SIS News Article Tag", filters={"parent": article_id}, fields=["name"])
+            logs.append(f"Found {len(child_tags)} child tag records to delete")
+            for tag in child_tags:
+                frappe.delete_doc("SIS News Article Tag", tag.name, ignore_permissions=True, force=True)
+                logs.append(f"Deleted child tag: {tag.name}")
+            logs.append("Child records deletion completed")
+        except Exception as child_error:
+            logs.append(f"Error deleting child records: {str(child_error)}")
+            # Continue with parent deletion even if child deletion fails
+
         # Delete using frappe.delete_doc
         try:
             logs.append("Calling frappe.delete_doc...")
-            frappe.delete_doc("SIS News Article", article_id, ignore_permissions=True, force=True)
+            frappe.delete_doc("SIS News Article", article_id, ignore_permissions=True)
+            frappe.db.commit()  # Ensure the deletion is committed to database
             logs.append("frappe.delete_doc completed successfully")
 
             # IMMEDIATE VERIFICATION - check if still exists using different methods
