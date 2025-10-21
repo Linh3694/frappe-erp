@@ -250,7 +250,10 @@ whitelisted_methods = [
 	"erp.api.erp_sis.curriculum_evaluation_criteria.get_curriculum_evaluation_criteria_by_id",
 	"erp.api.erp_sis.curriculum_evaluation_criteria.create_curriculum_evaluation_criteria",
 	"erp.api.erp_sis.curriculum_evaluation_criteria.update_curriculum_evaluation_criteria",
-	"erp.api.erp_sis.curriculum_evaluation_criteria.delete_curriculum_evaluation_criteria"
+	"erp.api.erp_sis.curriculum_evaluation_criteria.delete_curriculum_evaluation_criteria",
+	# File download endpoints
+	"erp.api.parent_portal.file_download.download_leave_attachment",
+	"erp.api.erp_sis.file_download.download_leave_attachment"
 ]
 
 # Allow guest access for testing
