@@ -1352,13 +1352,13 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             filters=base_filters,
                             fields=["name", "title_vn", "title_en", "campus_id"]
                         )
-                        frappe.logger().info(f"Row {row_num} - [SIS Class] Available Education Grades for campus '{campus_id}': {all_grades}")
+                        print(f"DEBUG: Available Education Grades for campus '{campus_id}': {all_grades}")
                         
                         # Debug: Show byte-level comparison
-                        frappe.logger().info(f"Row {row_num} - [SIS Class] Looking for: '{education_grade_name}' (len={len(education_grade_name)}, bytes={education_grade_name.encode('utf-8').hex()})")
+                        print(f"DEBUG: Looking for: '{education_grade_name}' (len={len(education_grade_name)}, bytes={education_grade_name.encode('utf-8').hex()})")
                         for grade in all_grades:
                             grade_title = grade.get('title_vn', '')
-                            frappe.logger().info(f"Row {row_num} - [SIS Class]   DB value: '{grade_title}' (len={len(grade_title)}, bytes={grade_title.encode('utf-8').hex()}, match={grade_title == education_grade_name})")
+                            print(f"DEBUG:   DB value: '{grade_title}' (len={len(grade_title)}, bytes={grade_title.encode('utf-8').hex()}, match={grade_title == education_grade_name})")
 
                         # Try exact title_vn match first (most likely for Vietnamese data)
                         title_filters = base_filters.copy()
@@ -1372,14 +1372,14 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if title_hit:
                             education_grade_id = title_hit[0].name
-                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn: {education_grade_id} (campus: {title_hit[0].get('campus_id')})")
+                            print(f"DEBUG: Found education grade by exact title_vn: {education_grade_id}")
                         else:
                             # Try case-insensitive match with trimming
-                            frappe.logger().info(f"Row {row_num} - [SIS Class] Trying case-insensitive match for education grade")
+                            print(f"DEBUG: Trying case-insensitive match for education grade")
                             for grade in all_grades:
                                 if grade.get('title_vn', '').strip().lower() == education_grade_name.strip().lower():
                                     education_grade_id = grade.get('name')
-                                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by case-insensitive match: {education_grade_id}")
+                                    print(f"DEBUG: Found education grade by case-insensitive match: {education_grade_id}")
                                     break
                         
                         if not education_grade_id:
@@ -1430,12 +1430,20 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
                 if education_grade_id:
                     doc_data["education_grade"] = education_grade_id
-                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade ID: {education_grade_id}")
+                    print(f"DEBUG: ✓ Successfully resolved education grade: {education_grade_id}")
                 else:
-                    # Build helpful error message with available options
+                    # Build helpful error message with available options and debug info
                     available_grades_list = [f"'{g.get('title_vn', g.get('title_en', g.get('name')))}'" for g in all_grades]
                     available_str = f" (Available: {', '.join(available_grades_list[:5])})" if available_grades_list else ""
-                    resolution_errors.append(f"Education Grade: '{education_grade_name}'{available_str}")
+                    
+                    # Add debug info about what we searched
+                    debug_info = f"[Tìm: '{education_grade_name}' (len={len(education_grade_name)})"
+                    if all_grades:
+                        debug_info += f" | Có trong DB: {', '.join([g.get('title_vn', '') for g in all_grades[:3]])}"
+                    debug_info += "]"
+                    
+                    print(f"DEBUG: ✗ Could not find education grade. Error: Education Grade: '{education_grade_name}'{available_str}")
+                    resolution_errors.append(f"Education Grade: '{education_grade_name}'{available_str} {debug_info}")
 
             # Handle academic program lookup
             academic_program_name = None
@@ -1466,13 +1474,13 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             filters=base_filters,
                             fields=["name", "title_vn", "title_en", "campus_id"]
                         )
-                        frappe.logger().info(f"Row {row_num} - [SIS Class] Available Academic Programs for campus '{campus_id}': {all_programs}")
+                        print(f"DEBUG: Available Academic Programs for campus '{campus_id}': {all_programs}")
                         
                         # Debug: Show byte-level comparison
-                        frappe.logger().info(f"Row {row_num} - [SIS Class] Looking for: '{academic_program_name}' (len={len(academic_program_name)}, bytes={academic_program_name.encode('utf-8').hex()})")
+                        print(f"DEBUG: Looking for: '{academic_program_name}' (len={len(academic_program_name)}, bytes={academic_program_name.encode('utf-8').hex()})")
                         for prog in all_programs:
                             prog_title = prog.get('title_vn', '')
-                            frappe.logger().info(f"Row {row_num} - [SIS Class]   DB value: '{prog_title}' (len={len(prog_title)}, bytes={prog_title.encode('utf-8').hex()}, match={prog_title == academic_program_name})")
+                            print(f"DEBUG:   DB value: '{prog_title}' (len={len(prog_title)}, bytes={prog_title.encode('utf-8').hex()}, match={prog_title == academic_program_name})")
 
                         # Try exact title_vn match
                         title_filters = base_filters.copy()
@@ -1486,14 +1494,14 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if title_hit:
                             academic_program_id = title_hit[0].name
-                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn: {academic_program_id} (campus: {title_hit[0].get('campus_id')})")
+                            print(f"DEBUG: Found academic program by exact title_vn: {academic_program_id}")
                         else:
                             # Try case-insensitive match with trimming
-                            frappe.logger().info(f"Row {row_num} - [SIS Class] Trying case-insensitive match for academic program")
+                            print(f"DEBUG: Trying case-insensitive match for academic program")
                             for prog in all_programs:
                                 if prog.get('title_vn', '').strip().lower() == academic_program_name.strip().lower():
                                     academic_program_id = prog.get('name')
-                                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by case-insensitive match: {academic_program_id}")
+                                    print(f"DEBUG: Found academic program by case-insensitive match: {academic_program_id}")
                                     break
                         
                         if not academic_program_id:
@@ -1544,16 +1552,25 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
                 if academic_program_id:
                     doc_data["academic_program"] = academic_program_id
-                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program ID: {academic_program_id}")
+                    print(f"DEBUG: ✓ Successfully resolved academic program: {academic_program_id}")
                 else:
-                    # Build helpful error message with available options
+                    # Build helpful error message with available options and debug info
                     available_programs_list = [f"'{p.get('title_vn', p.get('title_en', p.get('name')))}'" for p in all_programs]
                     available_str = f" (Available: {', '.join(available_programs_list[:5])})" if available_programs_list else ""
-                    resolution_errors.append(f"Academic Program: '{academic_program_name}'{available_str}")
+                    
+                    # Add debug info about what we searched
+                    debug_info = f"[Tìm: '{academic_program_name}' (len={len(academic_program_name)})"
+                    if all_programs:
+                        debug_info += f" | Có trong DB: {', '.join([p.get('title_vn', '') for p in all_programs[:3]])}"
+                    debug_info += "]"
+                    
+                    print(f"DEBUG: ✗ Could not find academic program. Error: Academic Program: '{academic_program_name}'{available_str}")
+                    resolution_errors.append(f"Academic Program: '{academic_program_name}'{available_str} {debug_info}")
 
             # If there are resolution errors, raise a comprehensive error
             if resolution_errors:
                 error_msg = f"[Campus: {campus_id}] Không thể tìm thấy: {' | '.join(resolution_errors)}"
+                print(f"DEBUG: Raising validation error: {error_msg}")
                 raise frappe.ValidationError(error_msg)
 
         elif doctype == "SIS Calendar":
