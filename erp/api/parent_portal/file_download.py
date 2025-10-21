@@ -75,11 +75,20 @@ def download_leave_attachment():
 		
 		if not parent_id:
 			frappe.logger().error("❌ [File Download] Parent not found")
-			frappe.throw(_("Không tìm thấy thông tin phụ huynh"), frappe.PermissionError)
+			debug_info = {
+				"user_email": frappe.session.user,
+				"expected_format": "guardian_id@parent.wellspring.edu.vn"
+			}
+			frappe.throw(_(f"Không tìm thấy thông tin phụ huynh. Debug: {debug_info}"), frappe.PermissionError)
 
 		if leave_request.parent_id != parent_id:
 			frappe.logger().error(f"❌ [File Download] Permission denied: leave parent={leave_request.parent_id} vs current={parent_id}")
-			frappe.throw(_("Bạn chỉ có thể tải file đính kèm của đơn nghỉ phép của con mình"), frappe.PermissionError)
+			debug_info = {
+				"leave_request_parent_id": leave_request.parent_id,
+				"current_parent_id": parent_id,
+				"user_email": frappe.session.user
+			}
+			frappe.throw(_(f"Bạn chỉ có thể tải file đính kèm của đơn nghỉ phép của con mình. Debug: {debug_info}"), frappe.PermissionError)
 
 		# Get file path
 		file_path = file_doc.get_full_path()
