@@ -361,6 +361,7 @@ def verify_otp_and_login(phone_number, otp):
                     "full_name": guardian["guardian_name"]
                 },
                 "family": comprehensive_data.get("data", {}).get("family", {}),
+                "families": comprehensive_data.get("data", {}).get("families", []),  # ✅ Add families array
                 "students": comprehensive_data.get("data", {}).get("students", []),
                 "campus": comprehensive_data.get("data", {}).get("campus", {}),
                 "token": token,
