@@ -229,7 +229,7 @@ def get_news_articles():
 
                 if stage_ids and len(stage_ids) > 0:
                     # Get the first education stage name (assuming single stage for simplicity)
-                    stage_doc = frappe.get_doc("Educational Stage", stage_ids[0])
+                    stage_doc = frappe.get_doc("SIS Education Stage", stage_ids[0])
                     article["education_stage_name_en"] = stage_doc.title_en
                     article["education_stage_name_vn"] = stage_doc.title_vn
                 else:
