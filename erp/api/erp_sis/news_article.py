@@ -243,17 +243,21 @@ def get_news_articles():
                     stage_ids = stage_ids_str
 
                 if stage_ids and len(stage_ids) > 0:
-                    # Get the first education stage name (assuming single stage for simplicity)
+                    # Get all education stage names
                     try:
-                        stage_data = frappe.db.get_value("SIS Education Stage", stage_ids[0], ["title_en", "title_vn"])
-                        if stage_data:
-                            article["education_stage_name_en"] = stage_data[0]  # title_en
-                            article["education_stage_name_vn"] = stage_data[1]  # title_vn
-                        else:
-                            article["education_stage_name_en"] = None
-                            article["education_stage_name_vn"] = None
+                        stage_names_en = []
+                        stage_names_vn = []
+
+                        for stage_id in stage_ids:
+                            stage_data = frappe.db.get_value("SIS Education Stage", stage_id, ["title_en", "title_vn"])
+                            if stage_data:
+                                stage_names_en.append(stage_data[0])
+                                stage_names_vn.append(stage_data[1] or stage_data[0])
+
+                        article["education_stage_name_en"] = ", ".join(stage_names_en) if stage_names_en else None
+                        article["education_stage_name_vn"] = ", ".join(stage_names_vn) if stage_names_vn else None
                     except Exception as stage_error:
-                        frappe.logger().warning(f"Failed to get education stage {stage_ids[0]}: {str(stage_error)}")
+                        frappe.logger().warning(f"Failed to get education stages {stage_ids}: {str(stage_error)}")
                         article["education_stage_name_en"] = None
                         article["education_stage_name_vn"] = None
                 else:
