@@ -229,9 +229,18 @@ def get_news_articles():
 
                 if stage_ids and len(stage_ids) > 0:
                     # Get the first education stage name (assuming single stage for simplicity)
-                    stage_doc = frappe.get_doc("SIS Education Stage", stage_ids[0])
-                    article["education_stage_name_en"] = stage_doc.title_en
-                    article["education_stage_name_vn"] = stage_doc.title_vn
+                    try:
+                        stage_data = frappe.db.get_value("SIS Education Stage", stage_ids[0], ["title_en", "title_vn"])
+                        if stage_data:
+                            article["education_stage_name_en"] = stage_data[0]  # title_en
+                            article["education_stage_name_vn"] = stage_data[1]  # title_vn
+                        else:
+                            article["education_stage_name_en"] = None
+                            article["education_stage_name_vn"] = None
+                    except Exception as stage_error:
+                        frappe.logger().warning(f"Failed to get education stage {stage_ids[0]}: {str(stage_error)}")
+                        article["education_stage_name_en"] = None
+                        article["education_stage_name_vn"] = None
                 else:
                     article["education_stage_name_en"] = None
                     article["education_stage_name_vn"] = None
