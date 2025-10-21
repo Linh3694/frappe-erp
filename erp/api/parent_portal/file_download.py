@@ -11,21 +11,27 @@ import os
 def _get_current_parent():
 	"""Get current logged in parent/guardian"""
 	user_email = frappe.session.user
+	frappe.logger().info(f"🔍 [Get Parent] frappe.session.user: {user_email}")
+	
 	if user_email == "Guest":
+		frappe.logger().info(f"❌ [Get Parent] User is Guest")
 		return None
 
 	# Extract guardian_id from email (format: guardian_id@parent.wellspring.edu.vn)
 	if "@parent.wellspring.edu.vn" not in user_email:
+		frappe.logger().info(f"❌ [Get Parent] Email format invalid: {user_email}")
 		return None
 
 	guardian_id = user_email.split("@")[0]
+	frappe.logger().info(f"🔍 [Get Parent] guardian_id: {guardian_id}")
 
 	# Get the actual guardian name from guardian_id field
 	guardian = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_id}, "name")
+	frappe.logger().info(f"🔍 [Get Parent] Found guardian: {guardian}")
 	return guardian
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def download_leave_attachment():
 	"""
 	Download a leave request attachment file - PARENT PORTAL ONLY
