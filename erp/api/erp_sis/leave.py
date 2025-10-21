@@ -361,9 +361,17 @@ def batch_get_active_leaves():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_leave_request_attachments(leave_request_id=None):
+def get_leave_request_attachments():
     """Get all attachments for a leave request (admin access)"""
     try:
+        # Try to get leave_request_id from various sources
+        leave_request_id = frappe.form_dict.get('leave_request_id') or frappe.request.args.get('leave_request_id')
+
+        frappe.logger().info(f"🔍 [Backend] get_leave_request_attachments called")
+        frappe.logger().info(f"🔍 [Backend] leave_request_id: {leave_request_id}")
+        frappe.logger().info(f"🔍 [Backend] frappe.form_dict: {frappe.form_dict}")
+        frappe.logger().info(f"🔍 [Backend] frappe.request.args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
+
         if not leave_request_id:
             return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
 

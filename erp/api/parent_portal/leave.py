@@ -431,11 +431,14 @@ def get_student_leave_requests(student_id):
 
 
 @frappe.whitelist()
-def get_leave_request_attachments(leave_request_id=None):
-	"""Get all attachments for a leave request"""
-	try:
-		if not leave_request_id:
-			return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
+def get_leave_request_attachments():
+    """Get all attachments for a leave request"""
+    try:
+        # Try to get leave_request_id from various sources
+        leave_request_id = frappe.form_dict.get('leave_request_id') or frappe.request.args.get('leave_request_id')
+
+        if not leave_request_id:
+            return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
 
 		# Get the leave request to check permissions
 		leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
