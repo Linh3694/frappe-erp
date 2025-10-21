@@ -1359,7 +1359,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             grade_title = grade.get('title_vn', '')
                             frappe.logger().info(f"Row {row_num} - [SIS Class]   DB value: '{grade_title}' (len={len(grade_title)}, bytes={grade_title.encode('utf-8').hex()}, match={grade_title == education_grade_name})")
 
-                        # Try title_vn first (most likely for Vietnamese data)
+                        # Try exact title_vn match first (most likely for Vietnamese data)
                         title_filters = base_filters.copy()
                         title_filters["title_vn"] = education_grade_name
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Education Grade with filters: {title_filters}")
@@ -1373,6 +1373,15 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             education_grade_id = title_hit[0].name
                             frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn: {education_grade_id} (campus: {title_hit[0].get('campus_id')})")
                         else:
+                            # Try case-insensitive match with trimming
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Trying case-insensitive match for education grade")
+                            for grade in all_grades:
+                                if grade.get('title_vn', '').strip().lower() == education_grade_name.strip().lower():
+                                    education_grade_id = grade.get('name')
+                                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by case-insensitive match: {education_grade_id}")
+                                    break
+                        
+                        if not education_grade_id:
                             # Try title_en
                             title_en_filters = base_filters.copy()
                             title_en_filters["title_en"] = education_grade_name
@@ -1463,7 +1472,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             prog_title = prog.get('title_vn', '')
                             frappe.logger().info(f"Row {row_num} - [SIS Class]   DB value: '{prog_title}' (len={len(prog_title)}, bytes={prog_title.encode('utf-8').hex()}, match={prog_title == academic_program_name})")
 
-                        # Try title_vn
+                        # Try exact title_vn match
                         title_filters = base_filters.copy()
                         title_filters["title_vn"] = academic_program_name
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Academic Program by title_vn with filters: {title_filters}")
@@ -1477,6 +1486,15 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             academic_program_id = title_hit[0].name
                             frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn: {academic_program_id} (campus: {title_hit[0].get('campus_id')})")
                         else:
+                            # Try case-insensitive match with trimming
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Trying case-insensitive match for academic program")
+                            for prog in all_programs:
+                                if prog.get('title_vn', '').strip().lower() == academic_program_name.strip().lower():
+                                    academic_program_id = prog.get('name')
+                                    frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by case-insensitive match: {academic_program_id}")
+                                    break
+                        
+                        if not academic_program_id:
                             # Try title_en
                             title_en_filters = base_filters.copy()
                             title_en_filters["title_en"] = academic_program_name
