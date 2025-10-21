@@ -1750,6 +1750,25 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 'o': 'others'
             }
             row_data['gender'] = gender_mapping.get(gender_value, gender_value)
+        
+        # Convert class_type Vietnamese labels to English values
+        if 'class_type' in row_data and row_data['class_type']:
+            class_type_value = str(row_data['class_type']).strip().lower()
+            class_type_mapping = {
+                'regular': 'regular',
+                'lớp chính quy': 'regular',
+                'lớp chính': 'regular',
+                'chính quy': 'regular',
+                'mixed': 'mixed',
+                'lớp chạy': 'mixed',
+                'chạy': 'mixed',
+                'club': 'club',
+                'câu lạc bộ': 'club',
+                'clb': 'club'
+            }
+            mapped_value = class_type_mapping.get(class_type_value, class_type_value)
+            print(f"DEBUG: Mapping class_type: '{row_data['class_type']}' → '{mapped_value}'")
+            row_data['class_type'] = mapped_value
 
         # Map Excel columns to DocType fields (regular fields)
         # Skip field mapping for doctypes that are handled entirely by custom logic
