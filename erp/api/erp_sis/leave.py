@@ -320,23 +320,29 @@ def batch_get_active_leaves():
             'other': 'Lý do khác'
         }
         
-        # Build result map: student_id -> leave info
+        # Build result map: student_id -> array of leave info
         result = {}
         for leave in leaves:
-            # If student has multiple leaves on same day, take the most recent one
             if leave.student_id not in result:
-                result[leave.student_id] = {
-                    "leave_id": leave.name,
-                    "student_name": leave.student_name,
-                    "student_code": leave.student_code,
-                    "reason": leave.reason,
-                    "reason_display": reason_mapping.get(leave.reason, leave.reason),
-                    "other_reason": leave.other_reason,
-                    "start_date": str(leave.start_date),
-                    "end_date": str(leave.end_date),
-                    "total_days": leave.total_days,
-                    "description": leave.description
-                }
+                result[leave.student_id] = []
+
+            result[leave.student_id].append({
+                "leave_id": leave.name,
+                "student_name": leave.student_name,
+                "student_code": leave.student_code,
+                "reason": leave.reason,
+                "reason_display": reason_mapping.get(leave.reason, leave.reason),
+                "other_reason": leave.other_reason,
+                "start_date": str(leave.start_date),
+                "end_date": str(leave.end_date),
+                "total_days": leave.total_days,
+                "description": leave.description,
+                "submitted_at": str(leave.submitted_at) if leave.submitted_at else None
+            })
+
+        # Sort leaves by submission time (newest first) for each student
+        for student_id in result:
+            result[student_id].sort(key=lambda x: x.get('submitted_at') or '', reverse=True)
         
         frappe.logger().info(f"✅ [Backend] Returning leaves for {len(result)} students")
         
