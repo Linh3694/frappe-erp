@@ -1352,6 +1352,12 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             fields=["name", "title_vn", "title_en", "campus_id"]
                         )
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Available Education Grades for campus '{campus_id}': {all_grades}")
+                        
+                        # Debug: Show byte-level comparison
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Looking for: '{education_grade_name}' (len={len(education_grade_name)}, bytes={education_grade_name.encode('utf-8').hex()})")
+                        for grade in all_grades:
+                            grade_title = grade.get('title_vn', '')
+                            frappe.logger().info(f"Row {row_num} - [SIS Class]   DB value: '{grade_title}' (len={len(grade_title)}, bytes={grade_title.encode('utf-8').hex()}, match={grade_title == education_grade_name})")
 
                         # Try title_vn first (most likely for Vietnamese data)
                         title_filters = base_filters.copy()
@@ -1416,7 +1422,10 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["education_grade"] = education_grade_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade ID: {education_grade_id}")
                 else:
-                    resolution_errors.append(f"Education Grade: '{education_grade_name}' for campus '{campus_id}'")
+                    # Build helpful error message with available options
+                    available_grades_list = [f"'{g.get('title_vn', g.get('title_en', g.get('name')))}'" for g in (all_grades if 'all_grades' in locals() else [])]
+                    available_str = f" (Available: {', '.join(available_grades_list[:5])})" if available_grades_list else ""
+                    resolution_errors.append(f"Education Grade: '{education_grade_name}'{available_str}")
 
             # Handle academic program lookup
             academic_program_name = None
@@ -1447,6 +1456,12 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             fields=["name", "title_vn", "title_en", "campus_id"]
                         )
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Available Academic Programs for campus '{campus_id}': {all_programs}")
+                        
+                        # Debug: Show byte-level comparison
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Looking for: '{academic_program_name}' (len={len(academic_program_name)}, bytes={academic_program_name.encode('utf-8').hex()})")
+                        for prog in all_programs:
+                            prog_title = prog.get('title_vn', '')
+                            frappe.logger().info(f"Row {row_num} - [SIS Class]   DB value: '{prog_title}' (len={len(prog_title)}, bytes={prog_title.encode('utf-8').hex()}, match={prog_title == academic_program_name})")
 
                         # Try title_vn
                         title_filters = base_filters.copy()
@@ -1511,11 +1526,14 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     doc_data["academic_program"] = academic_program_id
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program ID: {academic_program_id}")
                 else:
-                    resolution_errors.append(f"Academic Program: '{academic_program_name}' for campus '{campus_id}'")
+                    # Build helpful error message with available options
+                    available_programs_list = [f"'{p.get('title_vn', p.get('title_en', p.get('name')))}'" for p in (all_programs if 'all_programs' in locals() else [])]
+                    available_str = f" (Available: {', '.join(available_programs_list[:5])})" if available_programs_list else ""
+                    resolution_errors.append(f"Academic Program: '{academic_program_name}'{available_str}")
 
             # If there are resolution errors, raise a comprehensive error
             if resolution_errors:
-                error_msg = f"Không thể tìm thấy {', '.join(resolution_errors)}"
+                error_msg = f"[Campus: {campus_id}] Không thể tìm thấy: {' | '.join(resolution_errors)}"
                 raise frappe.ValidationError(error_msg)
 
         elif doctype == "SIS Calendar":
