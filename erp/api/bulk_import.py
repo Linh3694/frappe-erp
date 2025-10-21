@@ -1229,7 +1229,26 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     break
             
             if not school_year_name:
-                print(f"DEBUG: No school_year_id found in Excel. Row data: {row_data}")
+                print(f"DEBUG: No school_year_id found in Excel. Will use active school year as default.")
+                # Try to get active school year as fallback
+                try:
+                    active_year = frappe.get_all(
+                        "SIS School Year",
+                        filters={"is_enable": 1, "campus_id": campus_id},
+                        fields=["name", "title_vn"],
+                        order_by="start_date desc",
+                        limit=1
+                    )
+                    if active_year:
+                        school_year_id = active_year[0].name
+                        doc_data["school_year_id"] = school_year_id
+                        print(f"DEBUG: ✓ Using active school year as default: {school_year_id} ({active_year[0].get('title_vn')})")
+                    else:
+                        print(f"DEBUG: ✗ No active school year found for campus {campus_id}")
+                        resolution_errors.append(f"School Year: No active school year found for campus '{campus_id}' and no school_year specified in Excel")
+                except Exception as e:
+                    print(f"DEBUG: ✗ Error getting active school year: {str(e)}")
+                    resolution_errors.append(f"School Year: Could not determine school year (no column in Excel and no active year found)")
 
             if school_year_name:
                 # Normalize and clean the school year name
