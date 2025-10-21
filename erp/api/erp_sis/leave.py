@@ -363,15 +363,15 @@ def batch_get_active_leaves():
 
 @frappe.whitelist(allow_guest=False)
 def get_leave_request_attachments():
-    """Get all attachments for a leave request (admin access)"""
+    """
+    Get all attachments for a leave request - ADMIN/STAFF ONLY
+
+    This endpoint is dedicated for admin/staff usage in SIS frontend.
+    Parents should use erp.api.parent_portal.leave.get_leave_request_attachments instead.
+    """
     try:
         # Try to get leave_request_id from various sources
         leave_request_id = frappe.form_dict.get('leave_request_id') or frappe.request.args.get('leave_request_id')
-
-        frappe.logger().info(f"🔍 [Backend] get_leave_request_attachments called")
-        frappe.logger().info(f"🔍 [Backend] leave_request_id: {leave_request_id}")
-        frappe.logger().info(f"🔍 [Backend] frappe.form_dict: {frappe.form_dict}")
-        frappe.logger().info(f"🔍 [Backend] frappe.request.args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
 
         if not leave_request_id:
             return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
@@ -379,7 +379,14 @@ def get_leave_request_attachments():
         # Get the leave request to check campus permissions
         leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
 
-        # Check campus permissions for admin
+        # ADMIN/STAFF: Check campus permissions for admin/staff access
+        user_roles = frappe.get_roles(frappe.session.user)
+        admin_roles = ['SIS Admin', 'SIS Manager', 'System Manager']
+
+        if not any(role in user_roles for role in admin_roles):
+            return forbidden_response("Bạn không có quyền xem thông tin này")
+
+        # Check campus permissions
         campus_id = get_current_campus_from_context()
         if leave_request.campus_id != campus_id:
             return forbidden_response("Bạn không có quyền xem file đính kèm của đơn này")

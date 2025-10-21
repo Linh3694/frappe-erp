@@ -1,6 +1,9 @@
 """
 Parent Portal Leave Request API
 Handles leave request submission and management for parent portal
+
+This is a dedicated API module for parent portal only.
+Do not share with admin/erp_sis modules.
 """
 
 import frappe
@@ -62,19 +65,10 @@ def submit_leave_request():
 			data = frappe.form_dict
 			frappe.logger().info("Using frappe.form_dict (fallback)")
 		
-		# DEBUG: Log everything
-		frappe.logger().info(f"===== SUBMIT LEAVE REQUEST DEBUG =====")
-		frappe.logger().info(f"frappe.form_dict: {frappe.form_dict}")
-		frappe.logger().info(f"frappe.request.method: {frappe.request.method}")
-		frappe.logger().info(f"frappe.request.is_json: {frappe.request.is_json}")
-		frappe.logger().info(f"frappe.request.form: {frappe.request.form}")
-		frappe.logger().info(f"frappe.request.files: {frappe.request.files}")
+		
 		if frappe.request.is_json:
 			frappe.logger().info(f"frappe.request.json: {frappe.request.json}")
-		frappe.logger().info(f"Final data source: {data}")
-		frappe.logger().info(f"'reason' in data: {'reason' in data}")
-		frappe.logger().info(f"data.get('reason'): {data.get('reason')}")
-		frappe.logger().info(f"type of data.get('reason'): {type(data.get('reason'))}")
+		
 
 		# Required fields validation (except students, handled separately)
 		required_fields = ['reason', 'start_date', 'end_date']
@@ -432,26 +426,29 @@ def get_student_leave_requests(student_id):
 
 @frappe.whitelist()
 def get_leave_request_attachments():
-    """Get all attachments for a leave request"""
-    try:
-        # Try to get leave_request_id from various sources
-        leave_request_id = frappe.form_dict.get('leave_request_id') or frappe.request.args.get('leave_request_id')
+	"""
+	Get all attachments for a leave request - PARENT PORTAL ONLY
 
-        if not leave_request_id:
-            return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
+	This endpoint is dedicated for parent portal usage.
+	Admins should use erp.api.erp_sis.leave.get_leave_request_attachments instead.
+	"""
+	try:
+		# Try to get leave_request_id from various sources
+		leave_request_id = frappe.form_dict.get('leave_request_id') or frappe.request.args.get('leave_request_id')
+
+		if not leave_request_id:
+			return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
 
 		# Get the leave request to check permissions
 		leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
 
-		# Check permissions: parent can see their own requests, admin can see all
-		user_roles = frappe.get_roles(frappe.session.user)
-		admin_roles = ['SIS Admin', 'SIS Manager', 'System Manager']
+		# PARENT PORTAL: Only allow parents to see their own children's leave request attachments
+		parent_id = _get_current_parent()
+		if not parent_id:
+			return error_response("Không tìm thấy thông tin phụ huynh")
 
-		if not any(role in user_roles for role in admin_roles):
-			# Check if current user is the parent who created this request
-			parent_id = _get_current_parent()
-			if not parent_id or leave_request.parent_id != parent_id:
-				return forbidden_response("Bạn không có quyền xem file đính kèm của đơn này")
+		if leave_request.parent_id != parent_id:
+			return forbidden_response("Bạn chỉ có thể xem file đính kèm của đơn nghỉ phép của con mình")
 
 		# Get all files attached to this leave request
 		attachments = frappe.get_all("File",
