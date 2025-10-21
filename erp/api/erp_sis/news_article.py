@@ -208,14 +208,36 @@ def get_news_articles():
         # Get total count for pagination
         total_count = frappe.db.count("SIS News Article", filters=filters)
 
-        # Enrich articles with tag information
+        # Enrich articles with tag information and education stage names
         for article in articles:
+            # Get tag information
             article_tags = frappe.get_all(
                 "SIS News Article Tag",
                 filters={"parent": article.name},
                 fields=["news_tag_id", "tag_name_en", "tag_name_vn", "tag_color"]
             )
             article["tags"] = article_tags
+
+            # Get education stage names
+            if article.get("education_stage_ids"):
+                stage_ids = article["education_stage_ids"]
+                if isinstance(stage_ids, str):
+                    try:
+                        stage_ids = json.loads(stage_ids)
+                    except:
+                        stage_ids = []
+
+                if stage_ids and len(stage_ids) > 0:
+                    # Get the first education stage name (assuming single stage for simplicity)
+                    stage_doc = frappe.get_doc("Educational Stage", stage_ids[0])
+                    article["education_stage_name_en"] = stage_doc.title_en
+                    article["education_stage_name_vn"] = stage_doc.title_vn
+                else:
+                    article["education_stage_name_en"] = None
+                    article["education_stage_name_vn"] = None
+            else:
+                article["education_stage_name_en"] = None
+                article["education_stage_name_vn"] = None
 
         frappe.logger().info(f"Successfully retrieved {len(articles)} news articles")
 
