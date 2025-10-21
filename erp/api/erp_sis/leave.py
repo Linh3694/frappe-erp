@@ -358,3 +358,43 @@ def batch_get_active_leaves():
             message=f"Failed to get active leaves: {str(e)}",
             code="BATCH_GET_LEAVES_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_leave_request_attachments(leave_request_id=None):
+    """Get all attachments for a leave request (admin access)"""
+    try:
+        if not leave_request_id:
+            return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
+
+        # Get the leave request to check campus permissions
+        leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
+
+        # Check campus permissions for admin
+        campus_id = get_current_campus_from_context()
+        if leave_request.campus_id != campus_id:
+            return forbidden_response("Bạn không có quyền xem file đính kèm của đơn này")
+
+        # Get all files attached to this leave request
+        attachments = frappe.get_all("File",
+            filters={
+                "attached_to_doctype": "SIS Student Leave Request",
+                "attached_to_name": leave_request_id,
+                "is_private": 1
+            },
+            fields=["name", "file_name", "file_url", "file_size", "creation"],
+            order_by="creation desc"
+        )
+
+        # Add full URLs for files
+        for attachment in attachments:
+            if attachment.file_url and not attachment.file_url.startswith('http'):
+                attachment.file_url = frappe.utils.get_url(attachment.file_url)
+
+        return list_response(attachments)
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Không tìm thấy đơn xin nghỉ phép")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "ERP SIS Get Leave Request Attachments Error")
+        return error_response(f"Lỗi khi lấy file đính kèm: {str(e)}")
