@@ -1454,6 +1454,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 # FIX: Don't filter by campus_id for reference data lookup - search across all campuses
                 print(f"DEBUG: Starting academic program lookup for '{academic_program_name}' with campus_id='{campus_id}'")
                 academic_program_id = None
+                all_programs = []  # Initialize before try block
                 try:
                     # First try with user's campus (if available)
                     if campus_id:
@@ -1546,7 +1547,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program ID: {academic_program_id}")
                 else:
                     # Build helpful error message with available options
-                    available_programs_list = [f"'{p.get('title_vn', p.get('title_en', p.get('name')))}'" for p in (all_programs if 'all_programs' in locals() else [])]
+                    available_programs_list = [f"'{p.get('title_vn', p.get('title_en', p.get('name')))}'" for p in all_programs]
                     available_str = f" (Available: {', '.join(available_programs_list[:5])})" if available_programs_list else ""
                     resolution_errors.append(f"Academic Program: '{academic_program_name}'{available_str}")
 
