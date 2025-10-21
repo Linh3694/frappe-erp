@@ -1338,6 +1338,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
                 # Try to find by title_vn first, then grade_name, then title_en
                 # FIX: Don't filter by campus_id for reference data lookup - search across all campuses
+                print(f"DEBUG: Starting education grade lookup for '{education_grade_name}' with campus_id='{campus_id}'")
                 education_grade_id = None
                 try:
                     # First try with user's campus (if available)
@@ -1382,6 +1383,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
                     # If not found in user's campus, try across all campuses
                     if not education_grade_id:
+                        print(f"DEBUG: Not found in user campus, trying all campuses for '{education_grade_name}'")
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Education grade not found in user's campus, trying across all campuses...")
 
                         # Try title_vn without campus filter
@@ -1393,6 +1395,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if fallback_hit:
                             education_grade_id = fallback_hit[0].name
+                            print(f"DEBUG: Found education grade in fallback: {education_grade_id}")
                             frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn (all campuses): {education_grade_id} (campus: {fallback_hit[0].get('campus_id')})")
                         else:
                             # Try title_en without campus filter
@@ -1430,6 +1433,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
                 # Try to find by title_vn first, then title_en
                 # FIX: Don't filter by campus_id for reference data lookup - search across all campuses
+                print(f"DEBUG: Starting academic program lookup for '{academic_program_name}' with campus_id='{campus_id}'")
                 academic_program_id = None
                 try:
                     # First try with user's campus (if available)
@@ -1474,6 +1478,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
                     # If not found in user's campus, try across all campuses
                     if not academic_program_id:
+                        print(f"DEBUG: Not found in user campus, trying all campuses for academic program '{academic_program_name}'")
                         frappe.logger().info(f"Row {row_num} - [SIS Class] Academic program not found in user's campus, trying across all campuses...")
 
                         # Try title_vn without campus filter
@@ -1485,6 +1490,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if fallback_hit:
                             academic_program_id = fallback_hit[0].name
+                            print(f"DEBUG: Found academic program in fallback: {academic_program_id}")
                             frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn (all campuses): {academic_program_id} (campus: {fallback_hit[0].get('campus_id')})")
                         else:
                             # Try title_en without campus filter
