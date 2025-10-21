@@ -1729,7 +1729,12 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
         # Skip field mapping for doctypes that are handled entirely by custom logic
         if doctype not in ["SIS Class Student", "SIS Calendar"]:
             meta = frappe.get_meta(doctype)
-            excluded_fields = ["name", "owner", "creation", "modified", "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id", "education_stage"]
+            # Exclude fields that were already processed with lookup/resolution
+            excluded_fields = [
+                "name", "owner", "creation", "modified",
+                "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id",
+                "education_stage", "education_grade", "academic_program"  # Add SIS Class reference fields
+            ]
             for field in meta.fields:
                 if field.fieldname in row_data and field.fieldname not in excluded_fields:
                     # Regular field mapping (skip already processed reference fields)
