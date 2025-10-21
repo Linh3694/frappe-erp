@@ -1340,6 +1340,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 # FIX: Don't filter by campus_id for reference data lookup - search across all campuses
                 print(f"DEBUG: Starting education grade lookup for '{education_grade_name}' with campus_id='{campus_id}'")
                 education_grade_id = None
+                all_grades = []  # Initialize before try block
                 try:
                     # First try with user's campus (if available)
                     if campus_id:
@@ -1432,7 +1433,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade ID: {education_grade_id}")
                 else:
                     # Build helpful error message with available options
-                    available_grades_list = [f"'{g.get('title_vn', g.get('title_en', g.get('name')))}'" for g in (all_grades if 'all_grades' in locals() else [])]
+                    available_grades_list = [f"'{g.get('title_vn', g.get('title_en', g.get('name')))}'" for g in all_grades]
                     available_str = f" (Available: {', '.join(available_grades_list[:5])})" if available_grades_list else ""
                     resolution_errors.append(f"Education Grade: '{education_grade_name}'{available_str}")
 
