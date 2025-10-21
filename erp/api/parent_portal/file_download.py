@@ -41,27 +41,28 @@ def download_leave_attachment():
 		
 		if not file_name:
 			frappe.logger().error("❌ [File Download] Missing file_name")
-			frappe.response['http_status_code'] = 400
-			return error_response("Thiếu file_name")
+			frappe.throw(_("Thiếu file_name"), frappe.PermissionError)
 
 		# Get file document
-		file_doc = frappe.get_doc("File", file_name)
-		frappe.logger().info(f"🔍 [File Download] File doc: {file_doc.file_name}, attached_to: {file_doc.attached_to_doctype}/{file_doc.attached_to_name}")
-		
-		if not file_doc:
+		try:
+			file_doc = frappe.get_doc("File", file_name)
+			frappe.logger().info(f"🔍 [File Download] File doc: {file_doc.file_name}, attached_to: {file_doc.attached_to_doctype}/{file_doc.attached_to_name}")
+		except frappe.DoesNotExistError:
 			frappe.logger().error(f"❌ [File Download] File not found: {file_name}")
-			frappe.response['http_status_code'] = 404
-			return not_found_response("Không tìm thấy file")
+			frappe.throw(_("Không tìm thấy file"), frappe.DoesNotExistError)
 
 		# Check if file is attached to a leave request
 		if file_doc.attached_to_doctype != "SIS Student Leave Request":
 			frappe.logger().error(f"❌ [File Download] File not attached to leave request: {file_doc.attached_to_doctype}")
-			frappe.response['http_status_code'] = 403
-			return forbidden_response("File không thuộc đơn nghỉ phép")
+			frappe.throw(_("File không thuộc đơn nghỉ phép"), frappe.PermissionError)
 
 		# Get leave request to check permissions
-		leave_request = frappe.get_doc("SIS Student Leave Request", file_doc.attached_to_name)
-		frappe.logger().info(f"🔍 [File Download] Leave request parent_id: {leave_request.parent_id}")
+		try:
+			leave_request = frappe.get_doc("SIS Student Leave Request", file_doc.attached_to_name)
+			frappe.logger().info(f"🔍 [File Download] Leave request parent_id: {leave_request.parent_id}")
+		except frappe.DoesNotExistError:
+			frappe.logger().error(f"❌ [File Download] Leave request not found: {file_doc.attached_to_name}")
+			frappe.throw(_("Không tìm thấy đơn nghỉ phép"), frappe.DoesNotExistError)
 		
 		# Check if current parent owns this leave request
 		parent_id = _get_current_parent()
@@ -69,13 +70,11 @@ def download_leave_attachment():
 		
 		if not parent_id:
 			frappe.logger().error("❌ [File Download] Parent not found")
-			frappe.response['http_status_code'] = 401
-			return error_response("Không tìm thấy thông tin phụ huynh")
+			frappe.throw(_("Không tìm thấy thông tin phụ huynh"), frappe.PermissionError)
 
 		if leave_request.parent_id != parent_id:
 			frappe.logger().error(f"❌ [File Download] Permission denied: leave parent={leave_request.parent_id} vs current={parent_id}")
-			frappe.response['http_status_code'] = 403
-			return forbidden_response("Bạn chỉ có thể tải file đính kèm của đơn nghỉ phép của con mình")
+			frappe.throw(_("Bạn chỉ có thể tải file đính kèm của đơn nghỉ phép của con mình"), frappe.PermissionError)
 
 		# Get file path
 		file_path = file_doc.get_full_path()
@@ -83,22 +82,30 @@ def download_leave_attachment():
 		
 		if not os.path.exists(file_path):
 			frappe.logger().error(f"❌ [File Download] File not found on disk: {file_path}")
-			frappe.response['http_status_code'] = 404
-			return not_found_response("File không tồn tại trên server")
+			frappe.throw(_("File không tồn tại trên server"), frappe.DoesNotExistError)
 
 		# Stream file
 		frappe.logger().info(f"✅ [File Download] Streaming file: {file_doc.file_name}")
-		frappe.local.response.filename = file_doc.file_name
-		frappe.local.response.filecontent = open(file_path, 'rb').read()
-		frappe.local.response.type = "download"
+		
+		with open(file_path, 'rb') as f:
+			frappe.local.response.filename = file_doc.file_name
+			frappe.local.response.filecontent = f.read()
+			frappe.local.response.type = "download"
 
+	except frappe.PermissionError as e:
+		frappe.logger().error(f"❌ [File Download] PermissionError: {str(e)}")
+		frappe.response['http_status_code'] = 403
+		frappe.response['message'] = str(e)
+		raise
 	except frappe.DoesNotExistError as e:
 		frappe.logger().error(f"❌ [File Download] DoesNotExistError: {str(e)}")
 		frappe.response['http_status_code'] = 404
-		return not_found_response("Không tìm thấy file")
+		frappe.response['message'] = str(e)
+		raise
 	except Exception as e:
 		frappe.logger().error(f"❌ [File Download] Exception: {str(e)}")
 		frappe.log_error(frappe.get_traceback(), "Parent Portal Download File Error")
 		frappe.response['http_status_code'] = 500
-		return error_response(f"Lỗi khi tải file: {str(e)}")
+		frappe.response['message'] = f"Lỗi khi tải file: {str(e)}"
+		raise
 
