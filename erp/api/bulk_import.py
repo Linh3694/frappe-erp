@@ -1568,10 +1568,14 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     resolution_errors.append(f"Academic Program: '{academic_program_name}'{available_str} {debug_info}")
 
             # If there are resolution errors, raise a comprehensive error
+            print(f"DEBUG: Checking resolution errors. Count: {len(resolution_errors)}, Errors: {resolution_errors}")
             if resolution_errors:
                 error_msg = f"[Campus: {campus_id}] Không thể tìm thấy: {' | '.join(resolution_errors)}"
                 print(f"DEBUG: Raising validation error: {error_msg}")
                 raise frappe.ValidationError(error_msg)
+            else:
+                print(f"DEBUG: No resolution errors! Proceeding with document creation...")
+                print(f"DEBUG: doc_data so far: {doc_data}")
 
         elif doctype == "SIS Calendar":
             import pandas as pd
