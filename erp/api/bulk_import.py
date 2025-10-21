@@ -1753,8 +1753,11 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             existing_doc.save(ignore_permissions=True)
         else:
             # Create new record
+            print(f"DEBUG: Creating document with data: {doc_data}")
             doc = frappe.get_doc(doc_data)
+            print(f"DEBUG: Document created, now inserting...")
             doc.insert(ignore_permissions=True)
+            print(f"DEBUG: Document inserted successfully: {doc.name}")
 
         frappe.db.commit()
         return {"success": True}
@@ -1762,6 +1765,9 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
     except Exception as e:
         # Get error message directly from exception to preserve formatting
         error_msg = e.message if hasattr(e, 'message') else (e.args[0] if e.args else str(e))
+        print(f"DEBUG: ✗ Exception caught: {error_msg}")
+        print(f"DEBUG: Exception type: {type(e).__name__}")
+        print(f"DEBUG: Exception args: {e.args if hasattr(e, 'args') else 'No args'}")
         return {
             "success": False,
             "error": error_msg
