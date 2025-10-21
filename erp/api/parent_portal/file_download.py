@@ -8,13 +8,38 @@ from frappe import _
 import os
 
 
+def _resolve_user_from_jwt():
+	"""Resolve user email from JWT token in Authorization header"""
+	try:
+		auth_header = frappe.get_request_header("Authorization") or ""
+		token = None
+		if auth_header.lower().startswith("bearer "):
+			token = auth_header.split(" ", 1)[1].strip()
+		if token:
+			from erp.api.erp_common_user.auth import verify_jwt_token
+			payload = verify_jwt_token(token)
+			if payload:
+				user_email = payload.get("email") or payload.get("user") or payload.get("sub")
+				if user_email and frappe.db.exists("User", user_email):
+					return user_email
+	except Exception:
+		pass
+	return None
+
+
 def _get_current_parent():
 	"""Get current logged in parent/guardian"""
-	user_email = frappe.session.user
-	frappe.logger().info(f"🔍 [Get Parent] frappe.session.user: {user_email}")
+	# Try JWT first
+	user_email = _resolve_user_from_jwt()
 	
-	if user_email == "Guest":
-		frappe.logger().info(f"❌ [Get Parent] User is Guest")
+	# Fall back to session user
+	if not user_email:
+		user_email = frappe.session.user
+	
+	frappe.logger().info(f"🔍 [Get Parent] user_email: {user_email}")
+	
+	if user_email == "Guest" or not user_email:
+		frappe.logger().info(f"❌ [Get Parent] User is Guest or empty")
 		return None
 
 	# Extract guardian_id from email (format: guardian_id@parent.wellspring.edu.vn)
@@ -31,7 +56,7 @@ def _get_current_parent():
 	return guardian
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist()
 def download_leave_attachment():
 	"""
 	Download a leave request attachment file - PARENT PORTAL ONLY
