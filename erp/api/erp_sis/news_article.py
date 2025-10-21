@@ -220,12 +220,27 @@ def get_news_articles():
 
             # Get education stage names
             if article.get("education_stage_ids"):
-                stage_ids = article["education_stage_ids"]
-                if isinstance(stage_ids, str):
+                stage_ids_str = article["education_stage_ids"]
+
+                # Handle multiple layers of JSON encoding
+                if isinstance(stage_ids_str, str):
                     try:
-                        stage_ids = json.loads(stage_ids)
-                    except:
-                        stage_ids = []
+                        # Try to decode multiple times if needed
+                        while isinstance(stage_ids_str, str) and stage_ids_str.startswith('"'):
+                            stage_ids_str = json.loads(stage_ids_str)
+                        # If it's still a string after removing quotes, try parsing as JSON array
+                        if isinstance(stage_ids_str, str):
+                            stage_ids = json.loads(stage_ids_str)
+                        else:
+                            stage_ids = stage_ids_str
+                    except (json.JSONDecodeError, TypeError):
+                        # If all parsing fails, try to extract IDs using regex
+                        import re
+                        id_pattern = r'SIS_EDUCATION_STAGE-\d+'
+                        matches = re.findall(id_pattern, str(stage_ids_str))
+                        stage_ids = matches if matches else []
+                else:
+                    stage_ids = stage_ids_str
 
                 if stage_ids and len(stage_ids) > 0:
                     # Get the first education stage name (assuming single stage for simplicity)
