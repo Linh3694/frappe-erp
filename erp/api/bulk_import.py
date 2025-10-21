@@ -1337,53 +1337,53 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up education grade: '{education_grade_name}' for campus: '{campus_id}'")
 
                 # Try to find by title_vn first, then grade_name, then title_en
-                # Filter by campus_id for education grades
+                # FIX: Don't filter by campus_id for reference data lookup - search across all campuses
                 education_grade_id = None
                 try:
-                    base_filters = {"campus_id": campus_id} if campus_id else {}
-                    
-                    # Debug: List all available education grades for this campus
-                    all_grades = frappe.get_all(
-                        "SIS Education Grade",
-                        filters={"campus_id": campus_id} if campus_id else {},
-                        fields=["name", "title_vn", "title_en", "campus_id"]
-                    )
-                    frappe.logger().info(f"Row {row_num} - [SIS Class] Available Education Grades for campus '{campus_id}': {all_grades}")
+                    # First try with user's campus (if available)
+                    if campus_id:
+                        base_filters = {"campus_id": campus_id}
 
-                    # Try title_vn first (most likely for Vietnamese data)
-                    title_filters = base_filters.copy()
-                    title_filters["title_vn"] = education_grade_name
-                    frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Education Grade with filters: {title_filters}")
-                    title_hit = frappe.get_all(
-                        "SIS Education Grade",
-                        filters=title_filters,
-                        fields=["name", "campus_id"],
-                        limit=1
-                    )
-                    if title_hit:
-                        education_grade_id = title_hit[0].name
-                        frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn: {education_grade_id} (campus: {title_hit[0].get('campus_id')})")
-                    else:
-                        # Try title_en
-                        title_en_filters = base_filters.copy()
-                        title_en_filters["title_en"] = education_grade_name
-                        frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Education Grade by title_en with filters: {title_en_filters}")
-                        title_en_hit = frappe.get_all(
+                        # Debug: List all available education grades for this campus
+                        all_grades = frappe.get_all(
                             "SIS Education Grade",
-                            filters=title_en_filters,
+                            filters=base_filters,
+                            fields=["name", "title_vn", "title_en", "campus_id"]
+                        )
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Available Education Grades for campus '{campus_id}': {all_grades}")
+
+                        # Try title_vn first (most likely for Vietnamese data)
+                        title_filters = base_filters.copy()
+                        title_filters["title_vn"] = education_grade_name
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Education Grade with filters: {title_filters}")
+                        title_hit = frappe.get_all(
+                            "SIS Education Grade",
+                            filters=title_filters,
                             fields=["name", "campus_id"],
                             limit=1
                         )
-                        if title_en_hit:
-                            education_grade_id = title_en_hit[0].name
-                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_en: {education_grade_id} (campus: {title_en_hit[0].get('campus_id')})")
-                except Exception as e:
-                    frappe.logger().error(f"Error looking up education grade '{education_grade_name}': {str(e)}")
+                        if title_hit:
+                            education_grade_id = title_hit[0].name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn: {education_grade_id} (campus: {title_hit[0].get('campus_id')})")
+                        else:
+                            # Try title_en
+                            title_en_filters = base_filters.copy()
+                            title_en_filters["title_en"] = education_grade_name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Education Grade by title_en with filters: {title_en_filters}")
+                            title_en_hit = frappe.get_all(
+                                "SIS Education Grade",
+                                filters=title_en_filters,
+                                fields=["name", "campus_id"],
+                                limit=1
+                            )
+                            if title_en_hit:
+                                education_grade_id = title_en_hit[0].name
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_en: {education_grade_id} (campus: {title_en_hit[0].get('campus_id')})")
 
-                # Fallback: try without campus filter if not found
-                if not education_grade_id:
-                    frappe.logger().info(f"Row {row_num} - [SIS Class] Education grade not found with campus filter, trying without campus filter...")
-                    try:
+                    # If not found in user's campus, try across all campuses
+                    if not education_grade_id:
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Education grade not found in user's campus, trying across all campuses...")
+
                         # Try title_vn without campus filter
                         fallback_hit = frappe.get_all(
                             "SIS Education Grade",
@@ -1393,7 +1393,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if fallback_hit:
                             education_grade_id = fallback_hit[0].name
-                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn (no campus filter): {education_grade_id} (campus: {fallback_hit[0].get('campus_id')})")
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_vn (all campuses): {education_grade_id} (campus: {fallback_hit[0].get('campus_id')})")
                         else:
                             # Try title_en without campus filter
                             fallback_en_hit = frappe.get_all(
@@ -1404,9 +1404,10 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             )
                             if fallback_en_hit:
                                 education_grade_id = fallback_en_hit[0].name
-                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_en (no campus filter): {education_grade_id} (campus: {fallback_en_hit[0].get('campus_id')})")
-                    except Exception as e:
-                        frappe.logger().error(f"Error in fallback education grade lookup: {str(e)}")
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found education grade by title_en (all campuses): {education_grade_id} (campus: {fallback_en_hit[0].get('campus_id')})")
+
+                except Exception as e:
+                    frappe.logger().error(f"Error looking up education grade '{education_grade_name}': {str(e)}")
 
                 if education_grade_id:
                     doc_data["education_grade"] = education_grade_id
@@ -1428,53 +1429,53 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 frappe.logger().info(f"Row {row_num} - [SIS Class] Looking up academic program: '{academic_program_name}' for campus: '{campus_id}'")
 
                 # Try to find by title_vn first, then title_en
-                # Filter by campus_id for academic programs
+                # FIX: Don't filter by campus_id for reference data lookup - search across all campuses
                 academic_program_id = None
                 try:
-                    base_filters = {"campus_id": campus_id} if campus_id else {}
-                    
-                    # Debug: List all available academic programs for this campus
-                    all_programs = frappe.get_all(
-                        "SIS Academic Program",
-                        filters={"campus_id": campus_id} if campus_id else {},
-                        fields=["name", "title_vn", "title_en", "campus_id"]
-                    )
-                    frappe.logger().info(f"Row {row_num} - [SIS Class] Available Academic Programs for campus '{campus_id}': {all_programs}")
+                    # First try with user's campus (if available)
+                    if campus_id:
+                        base_filters = {"campus_id": campus_id}
 
-                    # Try title_vn
-                    title_filters = base_filters.copy()
-                    title_filters["title_vn"] = academic_program_name
-                    frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Academic Program by title_vn with filters: {title_filters}")
-                    title_hit = frappe.get_all(
-                        "SIS Academic Program",
-                        filters=title_filters,
-                        fields=["name", "campus_id"],
-                        limit=1
-                    )
-                    if title_hit:
-                        academic_program_id = title_hit[0].name
-                        frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn: {academic_program_id} (campus: {title_hit[0].get('campus_id')})")
-                    else:
-                        # Try title_en
-                        title_en_filters = base_filters.copy()
-                        title_en_filters["title_en"] = academic_program_name
-                        frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Academic Program by title_en with filters: {title_en_filters}")
-                        title_en_hit = frappe.get_all(
+                        # Debug: List all available academic programs for this campus
+                        all_programs = frappe.get_all(
                             "SIS Academic Program",
-                            filters=title_en_filters,
+                            filters=base_filters,
+                            fields=["name", "title_vn", "title_en", "campus_id"]
+                        )
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Available Academic Programs for campus '{campus_id}': {all_programs}")
+
+                        # Try title_vn
+                        title_filters = base_filters.copy()
+                        title_filters["title_vn"] = academic_program_name
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Academic Program by title_vn with filters: {title_filters}")
+                        title_hit = frappe.get_all(
+                            "SIS Academic Program",
+                            filters=title_filters,
                             fields=["name", "campus_id"],
                             limit=1
                         )
-                        if title_en_hit:
-                            academic_program_id = title_en_hit[0].name
-                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_en: {academic_program_id} (campus: {title_en_hit[0].get('campus_id')})")
-                except Exception as e:
-                    frappe.logger().error(f"Error looking up academic program '{academic_program_name}': {str(e)}")
+                        if title_hit:
+                            academic_program_id = title_hit[0].name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn: {academic_program_id} (campus: {title_hit[0].get('campus_id')})")
+                        else:
+                            # Try title_en
+                            title_en_filters = base_filters.copy()
+                            title_en_filters["title_en"] = academic_program_name
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Searching Academic Program by title_en with filters: {title_en_filters}")
+                            title_en_hit = frappe.get_all(
+                                "SIS Academic Program",
+                                filters=title_en_filters,
+                                fields=["name", "campus_id"],
+                                limit=1
+                            )
+                            if title_en_hit:
+                                academic_program_id = title_en_hit[0].name
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_en: {academic_program_id} (campus: {title_en_hit[0].get('campus_id')})")
 
-                # Fallback: try without campus filter if not found
-                if not academic_program_id:
-                    frappe.logger().info(f"Row {row_num} - [SIS Class] Academic program not found with campus filter, trying without campus filter...")
-                    try:
+                    # If not found in user's campus, try across all campuses
+                    if not academic_program_id:
+                        frappe.logger().info(f"Row {row_num} - [SIS Class] Academic program not found in user's campus, trying across all campuses...")
+
                         # Try title_vn without campus filter
                         fallback_hit = frappe.get_all(
                             "SIS Academic Program",
@@ -1484,7 +1485,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         )
                         if fallback_hit:
                             academic_program_id = fallback_hit[0].name
-                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn (no campus filter): {academic_program_id} (campus: {fallback_hit[0].get('campus_id')})")
+                            frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_vn (all campuses): {academic_program_id} (campus: {fallback_hit[0].get('campus_id')})")
                         else:
                             # Try title_en without campus filter
                             fallback_en_hit = frappe.get_all(
@@ -1495,9 +1496,10 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                             )
                             if fallback_en_hit:
                                 academic_program_id = fallback_en_hit[0].name
-                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_en (no campus filter): {academic_program_id} (campus: {fallback_en_hit[0].get('campus_id')})")
-                    except Exception as e:
-                        frappe.logger().error(f"Error in fallback academic program lookup: {str(e)}")
+                                frappe.logger().info(f"Row {row_num} - [SIS Class] Found academic program by title_en (all campuses): {academic_program_id} (campus: {fallback_en_hit[0].get('campus_id')})")
+
+                except Exception as e:
+                    frappe.logger().error(f"Error looking up academic program '{academic_program_name}': {str(e)}")
 
                 if academic_program_id:
                     doc_data["academic_program"] = academic_program_id
