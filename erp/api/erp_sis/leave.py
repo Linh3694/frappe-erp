@@ -383,7 +383,10 @@ def get_leave_request_attachments():
         user_roles = frappe.get_roles(frappe.session.user)
         admin_roles = ['SIS Admin', 'SIS Manager', 'System Manager']
 
+        frappe.logger().info(f"🔍 [Backend] User: {frappe.session.user}, Roles: {user_roles}")
+
         if not any(role in user_roles for role in admin_roles):
+            frappe.logger().info(f"❌ [Backend] User {frappe.session.user} does not have admin roles")
             return forbidden_response("Bạn không có quyền xem thông tin này")
 
         # Check campus permissions
