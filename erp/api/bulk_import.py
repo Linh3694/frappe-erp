@@ -1219,12 +1219,17 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             resolution_errors = []
 
             # Handle school year lookup first (required field)
+            print(f"DEBUG: Starting school year lookup. row_data keys: {list(row_data.keys())}")
             school_year_name = None
             for key in ["school_year_id", "school_year", "year", "năm học"]:
                 if key in row_data and row_data[key] and str(row_data[key]).strip():
                     school_year_name = str(row_data[key]).strip()
+                    print(f"DEBUG: Found school year from key '{key}': {school_year_name}")
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year key '{key}' with value: '{school_year_name}'")
                     break
+            
+            if not school_year_name:
+                print(f"DEBUG: No school_year_id found in Excel. Row data: {row_data}")
 
             if school_year_name:
                 # Normalize and clean the school year name
@@ -1319,8 +1324,10 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
 
                 if school_year_id:
                     doc_data["school_year_id"] = school_year_id
+                    print(f"DEBUG: ✓ Successfully resolved school year: {school_year_id}")
                     frappe.logger().info(f"Row {row_num} - [SIS Class] Found school year ID: {school_year_id}")
                 else:
+                    print(f"DEBUG: ✗ Could not resolve school year: {school_year_name}")
                     resolution_errors.append(f"School Year: '{school_year_name}' for campus '{campus_id}'")
 
             # Handle education grade lookup
@@ -1733,7 +1740,7 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             excluded_fields = [
                 "name", "owner", "creation", "modified",
                 "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id",
-                "education_stage", "education_grade", "academic_program"  # Add SIS Class reference fields
+                "education_stage", "education_grade", "academic_program", "school_year_id"  # Add SIS Class reference fields
             ]
             for field in meta.fields:
                 if field.fieldname in row_data and field.fieldname not in excluded_fields:
