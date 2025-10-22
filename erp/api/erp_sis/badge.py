@@ -104,70 +104,36 @@ def create_badge():
         # Get data from request - handle both FormData and JSON
         data = {}
 
-        # Log request details for debugging
-        frappe.logger().info(f"=== CREATE BADGE REQUEST DEBUG ===")
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Request content-type: {frappe.request.headers.get('Content-Type', 'N/A')}")
-        frappe.logger().info(f"Form dict: {dict(frappe.form_dict) if frappe.form_dict else 'None'}")
-        frappe.logger().info(f"Local form dict: {dict(frappe.local.form_dict) if frappe.local.form_dict else 'None'}")
-        frappe.logger().info(f"Request files: {list(frappe.request.files.keys()) if frappe.request.files else 'None'}")
-        frappe.logger().info(f"Raw request data length: {len(frappe.request.data) if frappe.request.data else 0}")
-
         # Handle FormData (multipart/form-data) vs JSON data differently
+        # Based on daily_menu.py pattern - prioritize form_dict for multipart data
         data = {}
 
-        # Try to get data from form_dict first (should work for both multipart and regular POST)
-        data = dict(frappe.form_dict) if frappe.form_dict else {}
-        frappe.logger().info(f"Form dict data: {data}")
+        # For multipart/form-data, form_dict should contain the text fields
+        content_type = frappe.request.headers.get('Content-Type', '')
+        is_multipart = content_type.startswith('multipart/form-data')
 
-        # If no form data, try local.form_dict
-        if not data:
-            data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
-            frappe.logger().info(f"Local form dict data: {data}")
-
-        # If still no data and it's multipart, try request.form
-        if not data and frappe.request.headers.get('Content-Type', '').startswith('multipart/form-data'):
-            frappe.logger().info("Trying request.form for multipart data")
-            data = dict(frappe.request.form) if hasattr(frappe.request, 'form') and frappe.request.form else {}
-            frappe.logger().info(f"Request.form data: {data}")
-
-        # Last resort: try to parse raw request data for multipart
-        if not data and frappe.request.data:
-            frappe.logger().info("Trying to parse raw multipart data")
-            try:
-                # For multipart data, we need to extract form fields from the raw data
-                raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                frappe.logger().info(f"Raw data preview: {raw_data[:500]}...")
-
-                # Simple parsing for form fields in multipart data
-                import re
-                form_data = {}
-
-                # Extract form fields using regex
-                field_pattern = r'Content-Disposition: form-data; name="([^"]+)"\r?\n\r?\n([^\r\n]+)\r?\n'
-                matches = re.findall(field_pattern, raw_data)
-
-                for field_name, field_value in matches:
-                    form_data[field_name] = field_value
-                    frappe.logger().info(f"Parsed field {field_name}: {field_value}")
-
-                data = form_data
-                frappe.logger().info(f"Parsed multipart data: {data}")
-
-            except Exception as parse_error:
-                frappe.logger().error(f"Failed to parse multipart data: {str(parse_error)}")
-
-        if frappe.request.headers.get('Content-Type', '').startswith('application/json') or not data:
-            # For JSON requests or fallback
-            if frappe.request.data and not data:
+        if is_multipart:
+            frappe.logger().info("Processing multipart/form-data request")
+            # In multipart requests, text fields go to form_dict
+            data = dict(frappe.form_dict) if frappe.form_dict else {}
+            if not data:
+                data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
+        else:
+            frappe.logger().info("Processing JSON/application request")
+            # For JSON requests, try to parse from request.data
+            if frappe.request.data:
                 try:
                     json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                     data = json_data
                     frappe.logger().info(f"Received JSON data for create_badge: {data}")
                 except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
                     frappe.logger().error(f"Failed to parse JSON data: {str(e)}")
+                    # Fallback to form_dict
+                    data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
 
         frappe.logger().info(f"Final data for create_badge: {data}")
+        frappe.logger().info(f"Content-Type: {content_type}")
+        frappe.logger().info(f"Is multipart: {is_multipart}")
         frappe.logger().info(f"===================================")
 
         # Extract values from data
@@ -178,10 +144,22 @@ def create_badge():
 
         # Input validation
         if not title_vn:
+            debug_info = {
+                "debug_request_info": {
+                    "content_type": frappe.request.headers.get('Content-Type', 'N/A'),
+                    "form_dict": dict(frappe.form_dict) if frappe.form_dict else None,
+                    "local_form_dict": dict(frappe.local.form_dict) if frappe.local.form_dict else None,
+                    "request_files": list(frappe.request.files.keys()) if frappe.request.files else None,
+                    "raw_data_length": len(frappe.request.data) if frappe.request.data else 0,
+                    "parsed_title_vn": title_vn,
+                    "parsed_title_en": title_en
+                }
+            }
             return validation_error_response(
                 message="Title VN is required",
                 errors={
-                    "title_vn": ["Required"]
+                    "title_vn": ["Required"],
+                    "debug_info": debug_info
                 }
             )
 
@@ -296,66 +274,36 @@ def update_badge():
         # Get data from request - handle both FormData and JSON
         data = {}
 
-        # Log request details for debugging
-        frappe.logger().info(f"=== UPDATE BADGE REQUEST DEBUG ===")
-        frappe.logger().info(f"Request method: {frappe.request.method}")
-        frappe.logger().info(f"Request content-type: {frappe.request.headers.get('Content-Type', 'N/A')}")
-        frappe.logger().info(f"Form dict: {dict(frappe.form_dict) if frappe.form_dict else 'None'}")
-        frappe.logger().info(f"Local form dict: {dict(frappe.local.form_dict) if frappe.local.form_dict else 'None'}")
-        frappe.logger().info(f"Request files: {list(frappe.request.files.keys()) if frappe.request.files else 'None'}")
+        # Handle FormData (multipart/form-data) vs JSON data differently
+        # Based on daily_menu.py pattern - prioritize form_dict for multipart data
+        data = {}
 
-        # Try to get data from form_dict first (should work for both multipart and regular POST)
-        data = dict(frappe.form_dict) if frappe.form_dict else {}
-        frappe.logger().info(f"Form dict data: {data}")
+        # For multipart/form-data, form_dict should contain the text fields
+        content_type = frappe.request.headers.get('Content-Type', '')
+        is_multipart = content_type.startswith('multipart/form-data')
 
-        # If no form data, try local.form_dict
-        if not data:
-            data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
-            frappe.logger().info(f"Local form dict data: {data}")
-
-        # If still no data and it's multipart, try request.form
-        if not data and frappe.request.headers.get('Content-Type', '').startswith('multipart/form-data'):
-            frappe.logger().info("Trying request.form for multipart data")
-            data = dict(frappe.request.form) if hasattr(frappe.request, 'form') and frappe.request.form else {}
-            frappe.logger().info(f"Request.form data: {data}")
-
-        # Last resort: try to parse raw request data for multipart
-        if not data and frappe.request.data:
-            frappe.logger().info("Trying to parse raw multipart data")
-            try:
-                # For multipart data, we need to extract form fields from the raw data
-                raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                frappe.logger().info(f"Raw data preview: {raw_data[:500]}...")
-
-                # Simple parsing for form fields in multipart data
-                import re
-                form_data = {}
-
-                # Extract form fields using regex
-                field_pattern = r'Content-Disposition: form-data; name="([^"]+)"\r?\n\r?\n([^\r\n]+)\r?\n'
-                matches = re.findall(field_pattern, raw_data)
-
-                for field_name, field_value in matches:
-                    form_data[field_name] = field_value
-                    frappe.logger().info(f"Parsed field {field_name}: {field_value}")
-
-                data = form_data
-                frappe.logger().info(f"Parsed multipart data: {data}")
-
-            except Exception as parse_error:
-                frappe.logger().error(f"Failed to parse multipart data: {str(parse_error)}")
-
-        if frappe.request.headers.get('Content-Type', '').startswith('application/json') or not data:
-            # For JSON requests or fallback
-            if frappe.request.data and not data:
+        if is_multipart:
+            frappe.logger().info("Processing multipart/form-data request for update")
+            # In multipart requests, text fields go to form_dict
+            data = dict(frappe.form_dict) if frappe.form_dict else {}
+            if not data:
+                data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
+        else:
+            frappe.logger().info("Processing JSON/application request for update")
+            # For JSON requests, try to parse from request.data
+            if frappe.request.data:
                 try:
                     json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                     data = json_data
                     frappe.logger().info(f"Received JSON data for update_badge: {data}")
                 except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
                     frappe.logger().error(f"Failed to parse JSON data: {str(e)}")
+                    # Fallback to form_dict
+                    data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
 
         frappe.logger().info(f"Final data for update_badge: {data}")
+        frappe.logger().info(f"Content-Type: {content_type}")
+        frappe.logger().info(f"Is multipart: {is_multipart}")
         frappe.logger().info(f"===================================")
 
         badge_id = data.get('badge_id')
