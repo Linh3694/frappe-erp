@@ -744,10 +744,11 @@ def update_template(template_id: Optional[str] = None):
             "intl_overall_mark_enabled",
             "intl_overall_grade_enabled",
             "intl_comment_enabled",
+            "intl_scoreboard_enabled",
         ]:
             if field in data:
                 value = data.get(field)
-                if field in ["is_published", "scores_enabled", "homeroom_enabled", "subject_eval_enabled", "intl_overall_mark_enabled", "intl_overall_grade_enabled", "intl_comment_enabled"]:
+                if field in ["is_published", "scores_enabled", "homeroom_enabled", "subject_eval_enabled", "intl_overall_mark_enabled", "intl_overall_grade_enabled", "intl_comment_enabled", "intl_scoreboard_enabled"]:
                     value = 1 if value else 0
                 if field in ["homeroom_conduct_enabled", "homeroom_conduct_year_enabled"]:
                     value = 1 if value else 0
@@ -755,7 +756,15 @@ def update_template(template_id: Optional[str] = None):
                     # sanitize value to 'vn' | 'intl'
                     value = "intl" if str(value).lower() == "intl" else "vn"
                 doc.set(field, value)
-        
+
+        # Auto-set intl_scoreboard_enabled based on program_type if program_type is being updated
+        if "program_type" in data:
+            program_type = data.get("program_type", "vn")
+            if program_type == "intl":
+                doc.set("intl_scoreboard_enabled", 1)
+            elif program_type == "vn":
+                doc.set("intl_scoreboard_enabled", 0)
+
         # Handle class_ids (JSON array)
         if "class_ids" in data:
             class_ids = data.get("class_ids")
