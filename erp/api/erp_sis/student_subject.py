@@ -562,10 +562,10 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         
         # 4. Initialize INTL program sections
         if template.program_type == 'intl':
-            # Initialize INTL scoreboard structure
-            intl_scoreboard = {}
+            # Initialize INTL scores structure (renamed from intl_scoreboard for frontend compatibility)
+            intl_scores = {}
 
-            # ONLY include INTL scoreboard for subjects that student actually studies
+            # ONLY include INTL scores for subjects that student actually studies
             if hasattr(template, 'subjects') and template.subjects:
                 for subject_config in template.subjects:
                     actual_subject_id = subject_config.subject_id
@@ -584,12 +584,14 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                                 frappe.logger().error(f"Failed to fetch subcurriculum {subcurriculum_id}: {str(e)}")
                                 subcurriculum_title_en = subcurriculum_id  # Fallback to ID if doc not found
                         
-                        scoreboard_data = {
+                        subject_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
                             "subcurriculum_id": subcurriculum_id,
-                            "subcurriculum_title_en": subcurriculum_title_en,  # ← Added this field
+                            "subcurriculum_title_en": subcurriculum_title_en,
                             "intl_comment": getattr(subject_config, 'intl_comment', None) or '',
-                            "main_scores": {}
+                            "main_scores": {},
+                            "component_scores": {},
+                            "ielts_scores": {}
                         }
                         
                         # Initialize main scores structure from JSON scoreboard
@@ -607,29 +609,47 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                                     for main_score in scoreboard_obj["main_scores"]:
                                         main_title = main_score.get("title", "")
                                         if main_title:
-                                            scoreboard_data["main_scores"][main_title] = {
-                                                "weight": main_score.get("weight", 0),
-                                                "components": {},
-                                                "final_score": None
-                                            }
+                                            subject_data["main_scores"][main_title] = None
                                             
-                                            # Initialize components
-                                            if "components" in main_score:
+                                            # Initialize component_scores structure
+                                            if "components" in main_score and main_score["components"]:
+                                                if main_title not in subject_data["component_scores"]:
+                                                    subject_data["component_scores"][main_title] = {}
+                                                
                                                 for component in main_score["components"]:
                                                     comp_title = component.get("title", "")
                                                     if comp_title:
-                                                        scoreboard_data["main_scores"][main_title]["components"][comp_title] = {
-                                                            "weight": component.get("weight", 0),
-                                                            "score": None
-                                                        }
+                                                        subject_data["component_scores"][main_title][comp_title] = None
                             except (json.JSONDecodeError, AttributeError, KeyError) as e:
                                 frappe.logger().error(f"Error parsing scoreboard for subject {actual_subject_id}: {str(e)}")
                                 # Initialize empty structure on error
                                 pass
                         
-                        intl_scoreboard[actual_subject_id] = scoreboard_data
+                        # Initialize IELTS scores if configured
+                        if hasattr(subject_config, 'ielts_config') and subject_config.ielts_config:
+                            try:
+                                if isinstance(subject_config.ielts_config, str):
+                                    import json
+                                    ielts_config = json.loads(subject_config.ielts_config)
+                                else:
+                                    ielts_config = subject_config.ielts_config
+                                
+                                if isinstance(ielts_config, list):
+                                    for ielts_option in ielts_config:
+                                        option_name = ielts_option.get("option", "")
+                                        if option_name:
+                                            subject_data["ielts_scores"][option_name] = {}
+                                            fields = ielts_option.get("fields", [])
+                                            for field in fields:
+                                                field_key = field.get("key", "")
+                                                if field_key:
+                                                    subject_data["ielts_scores"][option_name][field_key] = None
+                            except (json.JSONDecodeError, AttributeError, KeyError) as e:
+                                frappe.logger().error(f"Error parsing IELTS config for subject {actual_subject_id}: {str(e)}")
+                        
+                        intl_scores[actual_subject_id] = subject_data
             
-            data["intl_scoreboard"] = intl_scoreboard
+            data["intl_scores"] = intl_scores
             
             # Initialize INTL overall marks and comments
             if getattr(template, 'intl_overall_mark_enabled', False):
