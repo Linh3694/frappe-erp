@@ -101,27 +101,32 @@ def get_badge_by_id():
 def create_badge():
     """Create a new badge"""
     try:
-        # Get data from request - follow pattern
+        # Get data from request - handle both FormData and JSON
         data = {}
 
-        # First try to get JSON data from request body
-        if frappe.request.data:
+        # Log request details for debugging
+        frappe.logger().info(f"=== CREATE BADGE REQUEST DEBUG ===")
+        frappe.logger().info(f"Request method: {frappe.request.method}")
+        frappe.logger().info(f"Request content-type: {frappe.request.headers.get('Content-Type', 'N/A')}")
+        frappe.logger().info(f"Form dict: {dict(frappe.local.form_dict) if frappe.local.form_dict else 'None'}")
+        frappe.logger().info(f"Request files: {list(frappe.request.files.keys()) if frappe.request.files else 'None'}")
+        frappe.logger().info(f"Raw request data length: {len(frappe.request.data) if frappe.request.data else 0}")
+
+        # Always get data from form_dict first (works for both FormData and regular POST)
+        data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
+
+        # If no form data, try to get JSON data from request body
+        if not data and frappe.request.data:
             try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-                    frappe.logger().info(f"Received JSON data for create_badge: {data}")
-                else:
-                    data = frappe.local.form_dict
-                    frappe.logger().info(f"Received form data for create_badge: {data}")
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
-                data = frappe.local.form_dict
-                frappe.logger().info(f"JSON parsing failed, using form data for create_badge: {data}")
-        else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
-            frappe.logger().info(f"No request data, using form_dict for create_badge: {data}")
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                data = json_data
+                frappe.logger().info(f"Received JSON data for create_badge: {data}")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+                frappe.logger().error(f"Failed to parse JSON data: {str(e)}")
+                data = {}
+
+        frappe.logger().info(f"Final data for create_badge: {data}")
+        frappe.logger().info(f"===================================")
 
         # Extract values from data
         title_vn = data.get("title_vn")
@@ -142,6 +147,7 @@ def create_badge():
         frappe.logger().info(f"Creating SIS Badge with data: title_vn={title_vn}, title_en={title_en}")
 
         try:
+            frappe.logger().info("Creating badge document...")
             badge_doc = frappe.get_doc({
                 "doctype": "SIS Badge",
                 "title_vn": title_vn,
@@ -150,38 +156,62 @@ def create_badge():
                 "description_en": description_en or "",
                 "is_active": 1
             })
+            frappe.logger().info(f"Badge doc created successfully: {badge_doc.name}")
 
-            frappe.logger().info(f"Badge doc created: {badge_doc}")
-
+            frappe.logger().info("Inserting badge document...")
             badge_doc.insert()
-            frappe.logger().info("Badge doc inserted successfully")
+            frappe.logger().info(f"Badge doc inserted successfully: {badge_doc.name}")
 
             # Handle image upload if provided
             image_url = None
             if frappe.request.files and 'image' in frappe.request.files:
+                frappe.logger().info("Processing image upload...")
                 try:
                     uploaded_file = frappe.request.files['image']
-                    if uploaded_file and uploaded_file.filename:
-                        # Save file attachment to the badge document
-                        file_doc = frappe.get_doc({
-                            "doctype": "File",
-                            "file_name": uploaded_file.filename,
-                            "attached_to_doctype": "SIS Badge",
-                            "attached_to_name": badge_doc.name,
-                            "content": uploaded_file.stream.read(),
-                            "is_private": 0
-                        })
-                        file_doc.insert()
-                        image_url = file_doc.file_url
-                        frappe.logger().info(f"Image uploaded successfully: {image_url}")
+                    frappe.logger().info(f"Uploaded file: {uploaded_file.filename if uploaded_file else 'None'}")
 
-                        # Update badge with image URL
-                        badge_doc.image = image_url
-                        badge_doc.save()
+                    if uploaded_file and uploaded_file.filename:
+                        frappe.logger().info(f"Uploading file: {uploaded_file.filename}")
+
+                        try:
+                            # Read file content
+                            file_content = uploaded_file.stream.read()
+                            frappe.logger().info(f"Read file content, size: {len(file_content)} bytes")
+
+                            # Use frappe's file manager to save the file
+                            from frappe.utils.file_manager import save_file
+
+                            file_doc = save_file(
+                                fname=uploaded_file.filename,
+                                content=file_content,
+                                dt="SIS Badge",
+                                dn=badge_doc.name,
+                                is_private=0
+                            )
+
+                            if file_doc:
+                                image_url = file_doc.file_url
+                                frappe.logger().info(f"Image uploaded successfully: {image_url}")
+
+                                # Update badge with image URL
+                                frappe.logger().info("Updating badge with image URL...")
+                                badge_doc.image = image_url
+                                badge_doc.save()
+                                frappe.logger().info("Badge updated with image URL")
+                            else:
+                                frappe.logger().error("save_file returned None")
+
+                        except Exception as file_error:
+                            frappe.logger().error(f"Error in file upload process: {str(file_error)}")
+                            raise file_error
+                    else:
+                        frappe.logger().info("No valid image file provided")
                 except Exception as img_error:
                     frappe.logger().error(f"Error uploading image: {str(img_error)}")
+                    frappe.logger().error(f"Image error traceback: {frappe.get_traceback()}")
                     # Don't fail the whole operation if image upload fails
 
+            frappe.logger().info("Committing transaction...")
             frappe.db.commit()
             frappe.logger().info("Database committed successfully")
 
@@ -205,9 +235,14 @@ def create_badge():
         )
 
     except Exception as e:
-        frappe.log_error(f"Error creating badge: {str(e)}")
+        frappe.logger().error(f"=== CREATE BADGE ERROR ===")
+        frappe.logger().error(f"Error creating badge: {str(e)}")
+        frappe.logger().error(f"Error type: {type(e).__name__}")
+        frappe.logger().error(f"Full traceback: {frappe.get_traceback()}")
+        frappe.logger().error(f"=========================")
+
         return error_response(
-            message="Error creating badge",
+            message=f"Error creating badge: {str(e)}",
             code="CREATE_BADGE_ERROR"
         )
 
@@ -268,26 +303,47 @@ def update_badge():
 
         # Handle image update if provided
         if frappe.request.files and 'image' in frappe.request.files:
+            frappe.logger().info("Processing image update...")
             try:
                 uploaded_file = frappe.request.files['image']
-                if uploaded_file and uploaded_file.filename:
-                    # Save file attachment to the badge document
-                    file_doc = frappe.get_doc({
-                        "doctype": "File",
-                        "file_name": uploaded_file.filename,
-                        "attached_to_doctype": "SIS Badge",
-                        "attached_to_name": badge_doc.name,
-                        "content": uploaded_file.stream.read(),
-                        "is_private": 0
-                    })
-                    file_doc.insert()
-                    image_url = file_doc.file_url
-                    frappe.logger().info(f"Image uploaded successfully: {image_url}")
+                frappe.logger().info(f"Update uploaded file: {uploaded_file.filename if uploaded_file else 'None'}")
 
-                    # Update badge with new image URL
-                    badge_doc.image = image_url
+                if uploaded_file and uploaded_file.filename:
+                    frappe.logger().info(f"Uploading new image: {uploaded_file.filename}")
+
+                    try:
+                        # Read file content
+                        file_content = uploaded_file.stream.read()
+                        frappe.logger().info(f"Read file content, size: {len(file_content)} bytes")
+
+                        # Use frappe's file manager to save the file
+                        from frappe.utils.file_manager import save_file
+
+                        file_doc = save_file(
+                            fname=uploaded_file.filename,
+                            content=file_content,
+                            dt="SIS Badge",
+                            dn=badge_doc.name,
+                            is_private=0
+                        )
+
+                        if file_doc:
+                            image_url = file_doc.file_url
+                            frappe.logger().info(f"Image updated successfully: {image_url}")
+
+                            # Update badge with new image URL
+                            badge_doc.image = image_url
+                        else:
+                            frappe.logger().error("save_file returned None for update")
+
+                    except Exception as file_error:
+                        frappe.logger().error(f"Error in file update process: {str(file_error)}")
+                        # Don't fail the whole operation if image upload fails
+                else:
+                    frappe.logger().info("No valid image file provided for update")
             except Exception as img_error:
-                frappe.logger().error(f"Error uploading image: {str(img_error)}")
+                frappe.logger().error(f"Error updating image: {str(img_error)}")
+                frappe.logger().error(f"Image update error traceback: {frappe.get_traceback()}")
                 # Don't fail the whole operation if image upload fails
 
         badge_doc.save()
