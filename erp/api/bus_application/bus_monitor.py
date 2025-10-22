@@ -65,9 +65,9 @@ def authenticate_bus_monitor():
 
         # Find bus monitor by phone number
         monitors = frappe.get_all(
-            "Bus Monitor",
-            filters={"phone_number": phone_number, "is_active": 1},
-            fields=["name", "monitor_name", "phone_number", "user_id", "campus_id"]
+            "SIS Bus Monitor",
+            filters={"phone_number": phone_number, "status": "Active"},
+            fields=["name", "monitor_code", "full_name", "phone_number", "user_id", "campus_id", "school_year_id"]
         )
 
         if not monitors:
@@ -75,29 +75,32 @@ def authenticate_bus_monitor():
 
         monitor = monitors[0]
 
-        # Get monitor's user details
+        # Get monitor's user details (if exists)
         user_details = None
-        if monitor.get("user_id"):
+        user_email = f"{monitor['monitor_code']}@busmonitor.wellspring.edu.vn"
+        if frappe.db.exists("User", user_email):
             try:
-                user_doc = frappe.get_doc("User", monitor.user_id)
+                user_doc = frappe.get_doc("User", user_email)
                 user_details = {
                     "email": user_doc.email,
-                    "full_name": user_doc.full_name or monitor.monitor_name,
+                    "full_name": user_doc.full_name or monitor.full_name,
                     "first_name": user_doc.first_name,
                     "last_name": user_doc.last_name,
                     "user_image": user_doc.user_image,
                 }
             except frappe.DoesNotExistError:
                 user_details = {
-                    "email": monitor.user_id,
-                    "full_name": monitor.monitor_name,
+                    "email": user_email,
+                    "full_name": monitor.full_name,
                 }
 
         monitor_data = {
             "monitor_id": monitor.name,
-            "monitor_name": monitor.monitor_name,
+            "monitor_code": monitor.monitor_code,
+            "monitor_name": monitor.full_name,
             "phone_number": monitor.phone_number,
             "campus_id": monitor.campus_id,
+            "school_year_id": monitor.school_year_id,
             "user_details": user_details,
         }
 
@@ -121,10 +124,16 @@ def get_monitor_profile():
             return error_response("Authentication required", code="AUTH_REQUIRED")
 
         # Find bus monitor by user email
+        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        if "@busmonitor.wellspring.edu.vn" not in user_email:
+            return error_response("Invalid user account format", code="INVALID_USER")
+
+        monitor_code = user_email.split("@")[0]
+
         monitors = frappe.get_all(
-            "Bus Monitor",
-            filters={"user_id": user_email, "is_active": 1},
-            fields=["name", "monitor_name", "phone_number", "user_id", "campus_id"]
+            "SIS Bus Monitor",
+            filters={"monitor_code": monitor_code, "status": "Active"},
+            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id"]
         )
 
         if not monitors:
@@ -134,9 +143,11 @@ def get_monitor_profile():
 
         monitor_data = {
             "monitor_id": monitor.name,
-            "monitor_name": monitor.monitor_name,
+            "monitor_code": monitor.monitor_code,
+            "monitor_name": monitor.full_name,
             "phone_number": monitor.phone_number,
             "campus_id": monitor.campus_id,
+            "school_year_id": monitor.school_year_id,
             "user_email": user_email,
         }
 
@@ -178,9 +189,15 @@ def update_monitor_profile():
             data = frappe.local.form_dict
 
         # Find bus monitor by user email
+        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        if "@busmonitor.wellspring.edu.vn" not in user_email:
+            return error_response("Invalid user account format", code="INVALID_USER")
+
+        monitor_code = user_email.split("@")[0]
+
         monitors = frappe.get_all(
-            "Bus Monitor",
-            filters={"user_id": user_email, "is_active": 1},
+            "SIS Bus Monitor",
+            filters={"monitor_code": monitor_code, "status": "Active"},
             fields=["name"]
         )
 
@@ -211,9 +228,11 @@ def update_monitor_profile():
 
         monitor_data = {
             "monitor_id": monitor_doc.name,
-            "monitor_name": monitor_doc.monitor_name,
+            "monitor_code": monitor_doc.monitor_code,
+            "monitor_name": monitor_doc.full_name,
             "phone_number": monitor_doc.phone_number,
             "campus_id": monitor_doc.campus_id,
+            "school_year_id": monitor_doc.school_year_id,
         }
 
         return single_item_response(monitor_data, "Monitor profile updated successfully")

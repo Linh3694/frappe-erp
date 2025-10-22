@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import now_datetime
+from frappe.utils import now_datetime, rate_limit
 import json
 import base64
 from erp.utils.api_response import (
@@ -19,6 +19,7 @@ from erp.utils.compreFace_service import compreFace_service
 
 
 @frappe.whitelist(allow_guest=False)
+@rate_limit(max_calls=100, time_window=600)  # 100 recognitions per 10 minutes
 def recognize_student_face():
     """
     Recognize student face from base64 image
@@ -65,9 +66,15 @@ def recognize_student_face():
             return validation_error_response({"school_year_id": ["School year ID is required"]})
 
         # Verify monitor has access to this campus
+        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        if "@busmonitor.wellspring.edu.vn" not in user_email:
+            return error_response("Invalid user account format", code="INVALID_USER")
+
+        monitor_code = user_email.split("@")[0]
+
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"user_id": user_email, "is_active": 1, "campus_id": campus_id},
+            filters={"monitor_code": monitor_code, "status": "Active", "campus_id": campus_id},
             fields=["name"]
         )
 
@@ -111,11 +118,29 @@ def recognize_student_face():
                     }
 
         if not best_match or best_similarity < 0.7:  # Minimum similarity threshold
-            return single_item_response({
+        # Log failed recognition attempt
+        frappe.get_doc({
+            "doctype": "Activity Log",
+            "subject": f"FACE_RECOGNITION_FAILED: No matching student found",
+            "communication_date": now_datetime(),
+            "full_communication_content": json.dumps({
+                "monitor_id": monitors[0].name,
+                "trip_id": trip_id,
+                "campus_id": campus_id,
+                "school_year_id": school_year_id,
+                "best_similarity": best_similarity if best_match else 0,
+                "threshold": 0.7,
                 "recognized": False,
-                "message": "No matching student found",
-                "similarity": best_similarity if best_match else 0
-            }, "Student not recognized")
+                "faces_detected": len(recognized_faces),
+                "timestamp": now_datetime().isoformat()
+            })
+        }).insert(ignore_permissions=True)
+
+        return single_item_response({
+            "recognized": False,
+            "message": "No matching student found",
+            "similarity": best_similarity if best_match else 0
+        }, "Student not recognized")
 
         # Get student information
         student_code = best_match["student_code"]
@@ -189,6 +214,25 @@ def recognize_student_face():
             "trip_status": trip_student_status
         }
 
+        # Log face recognition attempt
+        frappe.get_doc({
+            "doctype": "Activity Log",
+            "subject": f"FACE_RECOGNITION: Student {bus_student.full_name} recognized in trip {trip_id}",
+            "communication_date": now_datetime(),
+            "full_communication_content": json.dumps({
+                "monitor_id": monitors[0].name,
+                "student_code": bus_student.student_code,
+                "student_id": bus_student.name,
+                "trip_id": trip_id,
+                "similarity": best_match["similarity"],
+                "confidence": "high" if best_match["similarity"] >= 0.95 else "medium",
+                "face_box": best_match["face_box"],
+                "recognized": True,
+                "in_trip": trip_id is not None,
+                "timestamp": now_datetime().isoformat()
+            })
+        }).insert(ignore_permissions=True)
+
         return single_item_response(result, f"Student {bus_student.full_name} recognized")
 
     except Exception as e:
@@ -210,6 +254,24 @@ def check_student_in_trip():
 
         if not user_email or user_email == 'Guest':
             return error_response("Authentication required", code="AUTH_REQUIRED")
+
+        # Get current monitor
+        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        if "@busmonitor.wellspring.edu.vn" not in user_email:
+            return error_response("Invalid user account format", code="INVALID_USER")
+
+        monitor_code = user_email.split("@")[0]
+
+        monitors = frappe.get_all(
+            "SIS Bus Monitor",
+            filters={"monitor_code": monitor_code, "status": "Active"},
+            fields=["name"]
+        )
+
+        if not monitors:
+            return not_found_response("Bus monitor not found")
+
+        monitor_id = monitors[0].name
 
         # Get request data
         data = {}
@@ -240,13 +302,7 @@ def check_student_in_trip():
         # Verify monitor has access to this trip
         trip = frappe.get_doc("SIS Bus Daily Trip", trip_id)
 
-        monitors = frappe.get_all(
-            "SIS Bus Monitor",
-            filters={"user_id": user_email, "is_active": 1},
-            fields=["name"]
-        )
-
-        if not monitors or (trip.monitor1_id != monitors[0].name and trip.monitor2_id != monitors[0].name):
+        if trip.monitor1_id != monitor_id and trip.monitor2_id != monitor_id:
             return forbidden_response("Access denied to this trip")
 
         # Find the trip student record
@@ -288,6 +344,21 @@ def check_student_in_trip():
 
         # Update trip statistics
         _update_trip_statistics(trip_id)
+
+        # Log action
+        frappe.get_doc({
+            "doctype": "Activity Log",
+            "subject": f"{method.upper()}: Student {student_id} checked in trip {trip_id}",
+            "communication_date": now_datetime(),
+            "full_communication_content": json.dumps({
+                "monitor_id": monitor_id,
+                "student_id": student_id,
+                "trip_id": trip_id,
+                "method": method,
+                "status": trip_student.student_status,
+                "timestamp": now_datetime().isoformat()
+            })
+        }).insert(ignore_permissions=True)
 
         return single_item_response({
             "student_id": student_id,
@@ -348,13 +419,7 @@ def mark_student_absent():
         # Verify monitor has access to this trip
         trip = frappe.get_doc("SIS Bus Daily Trip", trip_id)
 
-        monitors = frappe.get_all(
-            "SIS Bus Monitor",
-            filters={"user_id": user_email, "is_active": 1},
-            fields=["name"]
-        )
-
-        if not monitors or (trip.monitor1_id != monitors[0].name and trip.monitor2_id != monitors[0].name):
+        if trip.monitor1_id != monitor_id and trip.monitor2_id != monitor_id:
             return forbidden_response("Access denied to this trip")
 
         # Find the trip student record
@@ -381,6 +446,21 @@ def mark_student_absent():
 
         # Update trip statistics
         _update_trip_statistics(trip_id)
+
+        # Log action
+        frappe.get_doc({
+            "doctype": "Activity Log",
+            "subject": f"ABSENT: Student {student_id} marked absent in trip {trip_id}",
+            "communication_date": now_datetime(),
+            "full_communication_content": json.dumps({
+                "monitor_id": monitor_id,
+                "student_id": student_id,
+                "trip_id": trip_id,
+                "reason": reason,
+                "status": "Absent",
+                "timestamp": now_datetime().isoformat()
+            })
+        }).insert(ignore_permissions=True)
 
         return single_item_response({
             "student_id": student_id,
