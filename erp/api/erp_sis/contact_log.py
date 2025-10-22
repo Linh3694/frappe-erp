@@ -79,9 +79,16 @@ def _get_student_parent_emails(student_id):
 
 def _get_badge_name(badge_id):
     """Get badge display name"""
-    badge = frappe.get_value("SIS Contact Log Badge", badge_id, ["badge_name", "badge_name_en"], as_dict=True)
+    # Try SIS Badge first (new system)
+    badge = frappe.get_value("SIS Badge", badge_id, ["title_vn", "title_en"], as_dict=True)
     if badge:
-        return badge.badge_name or badge.badge_name_en or badge_id
+        return badge.title_vn or badge.title_en or badge_id
+    
+    # Fallback to old system for backward compatibility
+    old_badge = frappe.get_value("SIS Contact Log Badge", badge_id, ["badge_name", "badge_name_en"], as_dict=True)
+    if old_badge:
+        return old_badge.badge_name or old_badge.badge_name_en or badge_id
+    
     return badge_id
 
 
@@ -100,20 +107,30 @@ def _get_student_name(student_id):
 
 @frappe.whitelist(allow_guest=False)
 def get_badges(education_stage=None):
-    """Get available badges"""
+    """Get available badges - now using SIS Badge (new system)"""
     try:
         filters = {"is_active": 1}
-        if education_stage:
-            filters["education_stage"] = education_stage
         
+        # Get all active badges from SIS Badge (no education_stage filter as badges are global)
         badges = frappe.get_all(
-            "SIS Contact Log Badge",
+            "SIS Badge",
             filters=filters,
-            fields=["badge_id", "badge_name", "badge_name_en", "badge_color", "education_stage"],
-            order_by="badge_name asc"
+            fields=["name as badge_id", "title_vn as badge_name", "title_en as badge_name_en", "image"],
+            order_by="title_vn asc"
         )
         
-        return success_response(data=badges, message="Badges fetched")
+        # Transform to match expected format (add default color if needed)
+        result = []
+        for badge in badges:
+            result.append({
+                "badge_id": badge.badge_id,
+                "badge_name": badge.badge_name,
+                "badge_name_en": badge.badge_name_en,
+                "badge_color": "#3F4246",  # Default color
+                "badge_image": badge.image  # Include image URL
+            })
+        
+        return success_response(data=result, message="Badges fetched")
     except Exception as e:
         frappe.log_error(f"get_badges error: {str(e)}")
         return error_response(message="Failed to fetch badges", code="GET_BADGES_ERROR")
