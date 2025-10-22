@@ -126,6 +126,7 @@ def create_badge():
                     try:
                         raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
                         frappe.logger().info(f"Raw multipart data length: {len(raw_data)}")
+                        frappe.logger().info(f"Raw data preview (first 1000 chars): {raw_data[:1000]}")
 
                         # Parse multipart form data - extract text fields
                         import re
@@ -135,11 +136,18 @@ def create_badge():
                         field_pattern = r'name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
                         matches = re.findall(field_pattern, raw_data, re.DOTALL)
 
+                        frappe.logger().info(f"Pattern matches found: {len(matches)}")
+                        for i, match in enumerate(matches):
+                            frappe.logger().info(f"Match {i}: field='{match[0]}', value='{match[1]}'")
+
                         # Alternative pattern if the above doesn't work
                         if not matches:
                             frappe.logger().info("Trying alternative pattern...")
                             alt_pattern = r'Content-Disposition: form-data; name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
                             matches = re.findall(alt_pattern, raw_data, re.DOTALL)
+                            frappe.logger().info(f"Alt pattern matches found: {len(matches)}")
+                            for i, match in enumerate(matches):
+                                frappe.logger().info(f"Alt match {i}: field='{match[0]}', value='{match[1]}'")
 
                         parsed_data = {}
                         for field_name, field_value in matches:
@@ -335,6 +343,7 @@ def update_badge():
                     try:
                         raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
                         frappe.logger().info(f"Raw multipart data length: {len(raw_data)}")
+                        frappe.logger().info(f"Raw data preview (first 1000 chars): {raw_data[:1000]}")
 
                         # Parse multipart form data - extract text fields
                         import re
@@ -344,11 +353,18 @@ def update_badge():
                         field_pattern = r'name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
                         matches = re.findall(field_pattern, raw_data, re.DOTALL)
 
+                        frappe.logger().info(f"Pattern matches found: {len(matches)}")
+                        for i, match in enumerate(matches):
+                            frappe.logger().info(f"Match {i}: field='{match[0]}', value='{match[1]}'")
+
                         # Alternative pattern if the above doesn't work
                         if not matches:
                             frappe.logger().info("Trying alternative pattern...")
                             alt_pattern = r'Content-Disposition: form-data; name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
                             matches = re.findall(alt_pattern, raw_data, re.DOTALL)
+                            frappe.logger().info(f"Alt pattern matches found: {len(matches)}")
+                            for i, match in enumerate(matches):
+                                frappe.logger().info(f"Alt match {i}: field='{match[0]}', value='{match[1]}'")
 
                         parsed_data = {}
                         for field_name, field_value in matches:
