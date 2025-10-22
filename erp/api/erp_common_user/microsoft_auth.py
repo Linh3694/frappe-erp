@@ -705,6 +705,12 @@ def create_frappe_user(ms_user, user_data):
         first_name = user_data.get("givenName") or ""
         last_name = user_data.get("surname") or ""
         display_name = (user_data.get("displayName") or f"{first_name} {last_name}" or email).strip()
+        
+        # Frappe requires first_name to be non-empty, fallback to display_name or email username
+        if not first_name:
+            first_name = display_name or email.split('@')[0]
+        if not last_name:
+            last_name = ""  # last_name can be empty
 
         user_doc = frappe.get_doc({
             "doctype": "User",
@@ -759,10 +765,15 @@ def update_frappe_user(user_doc, ms_user, user_data):
         # Update basic info
         new_first = user_data.get("givenName") or user_doc.first_name
         new_last = user_data.get("surname") or user_doc.last_name
-        user_doc.first_name = new_first
-        user_doc.last_name = new_last
         # Full Name phải khớp Display Name từ Microsoft nếu có
         display_name = (user_data.get("displayName") or user_doc.full_name)
+        
+        # Frappe requires first_name to be non-empty
+        if not new_first:
+            new_first = display_name or user_doc.email.split('@')[0]
+        
+        user_doc.first_name = new_first
+        user_doc.last_name = new_last
         user_doc.full_name = display_name
         user_doc.enabled = user_data.get("accountEnabled", True)
         
