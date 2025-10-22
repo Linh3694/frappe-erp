@@ -128,6 +128,15 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # Parse class_ids from JSON string to array
+    class_ids = None
+    try:
+        class_ids_raw = getattr(doc, "class_ids", None)
+        if class_ids_raw:
+            class_ids = json.loads(class_ids_raw) if isinstance(class_ids_raw, str) else class_ids_raw
+    except Exception:
+        pass
+    
     return {
         "name": doc.name,
         "title": getattr(doc, "title", None),
@@ -138,6 +147,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
         "education_stage": getattr(doc, "education_stage", None),
         "school_year": getattr(doc, "school_year", None),
         "education_grade": getattr(doc, "education_grade", None),
+        "class_ids": class_ids,
         "semester_part": getattr(doc, "semester_part", None),
         "campus_id": getattr(doc, "campus_id", None),
         "scores_enabled": 1 if getattr(doc, "scores_enabled", 0) else 0,
@@ -526,50 +536,87 @@ def create_template():
 
         campus_id = _current_campus_id()
 
-        # Duplicate name check within campus, school_year, semester_part and program_type
-        existing = frappe.db.exists(
-            "SIS Report Card Template",
-            {
-                "title": (data.get("title") or "").strip(),
-                "campus_id": campus_id,
-                "school_year": data.get("school_year"),
-                "semester_part": data.get("semester_part"),
-                "program_type": (data.get("program_type") or "vn"),
-            },
-        )
-        if existing:
-            program_type_label = "Chương trình Việt Nam" if (data.get("program_type") or "vn") == "vn" else "Chương trình Quốc tế"
-            return validation_error_response(
-                message=_("Template already exists for this school year, semester and program type"),
-                errors={"template": [f"Đã tồn tại template cho {program_type_label} - {data.get('semester_part')} - {data.get('school_year')}"]}
+        # Duplicate check logic - different for class-specific vs grade-level templates
+        class_ids = data.get("class_ids")
+        
+        if class_ids and isinstance(class_ids, list) and len(class_ids) > 0:
+            # Template cho lớp cụ thể - check duplicate theo class_ids
+            # Convert class_ids list to JSON string for comparison
+            class_ids_json = json.dumps(sorted(class_ids))  # Sort for consistent comparison
+            
+            # Check if any template exists with same class_ids
+            existing_templates = frappe.get_all(
+                "SIS Report Card Template",
+                filters={
+                    "campus_id": campus_id,
+                    "school_year": data.get("school_year"),
+                    "semester_part": data.get("semester_part"),
+                    "program_type": (data.get("program_type") or "vn"),
+                },
+                fields=["name", "title", "class_ids"]
             )
+            
+            for template in existing_templates:
+                if template.get("class_ids"):
+                    try:
+                        existing_class_ids_json = json.dumps(sorted(json.loads(template.get("class_ids"))))
+                        if existing_class_ids_json == class_ids_json:
+                            program_type_label = "Chương trình Việt Nam" if (data.get("program_type") or "vn") == "vn" else "Chương trình Quốc tế"
+                            return validation_error_response(
+                                message=_("Template already exists for these specific classes"),
+                                errors={"template": [f"Đã tồn tại template cho các lớp này: {program_type_label} - {data.get('semester_part')} - {data.get('school_year')}"]}
+                            )
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+        else:
+            # Template cho toàn khối - check duplicate theo title (as before)
+            existing = frappe.db.exists(
+                "SIS Report Card Template",
+                {
+                    "title": (data.get("title") or "").strip(),
+                    "campus_id": campus_id,
+                    "school_year": data.get("school_year"),
+                    "semester_part": data.get("semester_part"),
+                    "program_type": (data.get("program_type") or "vn"),
+                },
+            )
+            if existing:
+                program_type_label = "Chương trình Việt Nam" if (data.get("program_type") or "vn") == "vn" else "Chương trình Quốc tế"
+                return validation_error_response(
+                    message=_("Template already exists for this school year, semester and program type"),
+                    errors={"template": [f"Đã tồn tại template cho {program_type_label} - {data.get('semester_part')} - {data.get('school_year')}"]}
+                )
 
         # Create doc
-        doc = frappe.get_doc(
-            {
-                "doctype": "SIS Report Card Template",
-                "title": (data.get("title") or "").strip(),
-                "is_published": 1 if data.get("is_published") else 0,
-                "program_type": (data.get("program_type") or "vn"),
-                "form_id": data.get("form_id"),
-                "curriculum": data.get("curriculum"),
-                "education_stage": data.get("education_stage"),
-                "school_year": data.get("school_year"),
-                "education_grade": data.get("education_grade"),
-                "semester_part": data.get("semester_part"),
-                "campus_id": campus_id,
-                "scores_enabled": 1 if data.get("scores_enabled") else 0,
-                "academic_ranking": data.get("academic_ranking"),
-                "academic_ranking_year": data.get("academic_ranking_year"),
-                "student_achievement": data.get("student_achievement"),
-                "homeroom_enabled": 1 if data.get("homeroom_enabled") else 0,
-                "homeroom_conduct_enabled": 1 if data.get("homeroom_conduct_enabled") else 0,
-                "homeroom_conduct_year_enabled": 1 if data.get("homeroom_conduct_year_enabled") else 0,
-                "conduct_ranking": data.get("conduct_ranking"),
-                "conduct_ranking_year": data.get("conduct_ranking_year"),
-                "subject_eval_enabled": 1 if data.get("subject_eval_enabled") else 0,
-            }
-        )
+        doc_data = {
+            "doctype": "SIS Report Card Template",
+            "title": (data.get("title") or "").strip(),
+            "is_published": 1 if data.get("is_published") else 0,
+            "program_type": (data.get("program_type") or "vn"),
+            "form_id": data.get("form_id"),
+            "curriculum": data.get("curriculum"),
+            "education_stage": data.get("education_stage"),
+            "school_year": data.get("school_year"),
+            "education_grade": data.get("education_grade"),
+            "semester_part": data.get("semester_part"),
+            "campus_id": campus_id,
+            "scores_enabled": 1 if data.get("scores_enabled") else 0,
+            "academic_ranking": data.get("academic_ranking"),
+            "academic_ranking_year": data.get("academic_ranking_year"),
+            "student_achievement": data.get("student_achievement"),
+            "homeroom_enabled": 1 if data.get("homeroom_enabled") else 0,
+            "homeroom_conduct_enabled": 1 if data.get("homeroom_conduct_enabled") else 0,
+            "homeroom_conduct_year_enabled": 1 if data.get("homeroom_conduct_year_enabled") else 0,
+            "conduct_ranking": data.get("conduct_ranking"),
+            "conduct_ranking_year": data.get("conduct_ranking_year"),
+            "subject_eval_enabled": 1 if data.get("subject_eval_enabled") else 0,
+        }
+        
+        # Add class_ids if present (as JSON string for storage)
+        if class_ids and isinstance(class_ids, list) and len(class_ids) > 0:
+            doc_data["class_ids"] = json.dumps(class_ids)
+        
+        doc = frappe.get_doc(doc_data)
 
         # Apply child tables
         _apply_scores(doc, data.get("scores") or [])

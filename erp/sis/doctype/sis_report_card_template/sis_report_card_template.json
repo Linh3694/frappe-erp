@@ -14,6 +14,7 @@
   "education_stage",
   "school_year",
   "education_grade",
+  "class_ids",
   "semester_part",
   "campus_id",
   "scores_enabled",
@@ -39,6 +40,7 @@
   {"fieldname": "education_stage", "fieldtype": "Link", "label": "Cấp học", "options": "SIS Education Stage"},
   {"fieldname": "school_year", "fieldtype": "Link", "label": "Năm học", "options": "SIS School Year", "reqd": 1},
   {"fieldname": "education_grade", "fieldtype": "Link", "label": "Khối", "options": "SIS Education Grade"},
+  {"fieldname": "class_ids", "fieldtype": "Small Text", "label": "Lớp cụ thể (JSON array)"},
   {"fieldname": "semester_part", "fieldtype": "Select", "label": "Kì học", "options": "Mid Term 1\nEnd Term 1\nMid Term 2\nEnd Term 2", "reqd": 1},
   {"fieldname": "campus_id", "fieldtype": "Link", "label": "Trường học", "options": "SIS Campus", "reqd": 1},
 
