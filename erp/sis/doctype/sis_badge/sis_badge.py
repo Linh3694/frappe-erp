@@ -9,15 +9,6 @@ from frappe.utils import nowdate
 class SISBadge(Document):
 	def validate(self):
 		"""Validate the badge document"""
-		# Validate that badge_id is unique
-		if self.badge_id:
-			existing = frappe.db.exists(
-				"SIS Badge",
-				{"badge_id": self.badge_id, "name": ["!=", self.name]}
-			)
-			if existing:
-				frappe.throw(f"Badge ID '{self.badge_id}' already exists")
-
 		# Validate required fields
 		if not self.title_vn:
 			frappe.throw("Title (Vietnamese) is required")

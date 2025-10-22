@@ -7,7 +7,6 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "badge_id",
   "title_vn",
   "title_en",
   "column_break_1",
@@ -18,14 +17,6 @@
   "is_active"
  ],
  "fields": [
-  {
-   "fieldname": "badge_id",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Badge ID",
-   "reqd": 1,
-   "unique": 1
-  },
   {
    "fieldname": "title_vn",
    "fieldtype": "Data",
