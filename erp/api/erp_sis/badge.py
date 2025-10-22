@@ -157,11 +157,30 @@ def create_badge():
             frappe.logger().info("Badge doc inserted successfully")
 
             # Handle image upload if provided
-            image_file = data.get("image")
-            if image_file:
-                # Image handling will be done through the standard Frappe attachment system
-                # The image field in the DocType will handle this automatically
-                pass
+            image_url = None
+            if frappe.request.files and 'image' in frappe.request.files:
+                try:
+                    uploaded_file = frappe.request.files['image']
+                    if uploaded_file and uploaded_file.filename:
+                        # Save file attachment to the badge document
+                        file_doc = frappe.get_doc({
+                            "doctype": "File",
+                            "file_name": uploaded_file.filename,
+                            "attached_to_doctype": "SIS Badge",
+                            "attached_to_name": badge_doc.name,
+                            "content": uploaded_file.stream.read(),
+                            "is_private": 0
+                        })
+                        file_doc.insert()
+                        image_url = file_doc.file_url
+                        frappe.logger().info(f"Image uploaded successfully: {image_url}")
+
+                        # Update badge with image URL
+                        badge_doc.image = image_url
+                        badge_doc.save()
+                except Exception as img_error:
+                    frappe.logger().error(f"Error uploading image: {str(img_error)}")
+                    # Don't fail the whole operation if image upload fails
 
             frappe.db.commit()
             frappe.logger().info("Database committed successfully")
@@ -248,10 +267,28 @@ def update_badge():
             badge_doc.description_en = description_en
 
         # Handle image update if provided
-        image_file = data.get("image")
-        if image_file:
-            # Image handling will be done through the standard Frappe attachment system
-            pass
+        if frappe.request.files and 'image' in frappe.request.files:
+            try:
+                uploaded_file = frappe.request.files['image']
+                if uploaded_file and uploaded_file.filename:
+                    # Save file attachment to the badge document
+                    file_doc = frappe.get_doc({
+                        "doctype": "File",
+                        "file_name": uploaded_file.filename,
+                        "attached_to_doctype": "SIS Badge",
+                        "attached_to_name": badge_doc.name,
+                        "content": uploaded_file.stream.read(),
+                        "is_private": 0
+                    })
+                    file_doc.insert()
+                    image_url = file_doc.file_url
+                    frappe.logger().info(f"Image uploaded successfully: {image_url}")
+
+                    # Update badge with new image URL
+                    badge_doc.image = image_url
+            except Exception as img_error:
+                frappe.logger().error(f"Error uploading image: {str(img_error)}")
+                # Don't fail the whole operation if image upload fails
 
         badge_doc.save()
         frappe.db.commit()
@@ -259,7 +296,6 @@ def update_badge():
         return single_item_response(
             data={
                 "name": badge_doc.name,
-                "badge_id": badge_doc.badge_id,
                 "title_vn": badge_doc.title_vn,
                 "title_en": badge_doc.title_en,
                 "description_vn": badge_doc.description_vn,
