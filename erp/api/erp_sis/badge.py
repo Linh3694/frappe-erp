@@ -49,10 +49,10 @@ def get_all_badges():
 def get_badge_by_id():
     """Get a specific badge by ID"""
     try:
-        # Get badge_id from multiple sources (form data or JSON payload)
+        # Get badge_id from multiple sources
         badge_id = None
 
-        # Try from form_dict first (for FormData/URLSearchParams)
+        # Try from form_dict first
         badge_id = frappe.form_dict.get('badge_id')
 
         # If not found, try from JSON payload
@@ -60,7 +60,7 @@ def get_badge_by_id():
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 badge_id = json_data.get('badge_id')
-            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
                 pass
 
         if not badge_id:
@@ -90,7 +90,7 @@ def get_badge_by_id():
             code="BADGE_NOT_FOUND"
         )
     except Exception as e:
-        frappe.log_error(f"Error fetching badge {badge_id}: {str(e)}")
+        frappe.log_error(f"Error fetching badge: {str(e)}")
         return error_response(
             message="Error fetching badge",
             code="FETCH_BADGE_ERROR"
@@ -100,219 +100,189 @@ def get_badge_by_id():
 @frappe.whitelist(allow_guest=False)
 def create_badge():
     """Create a new badge"""
+    logs = []  # Collect logs to return in response
+    
     try:
-        # Get data from request - handle both FormData and JSON
+        # IMPORTANT: Check for files first to detect multipart form data
+        files = frappe.request.files
+        has_files = files and 'image' in files
+        
+        logs.append(f"Request method: {frappe.request.method}")
+        logs.append(f"Request content type: {frappe.request.content_type}")
+        logs.append(f"Has files: {has_files}")
+        logs.append(f"Request files keys: {list(files.keys()) if files else 'None'}")
+
+        # Get data from request - handle multipart form data properly
         data = {}
-
-        # Handle FormData (multipart/form-data) vs JSON data differently
-        # Based on daily_menu.py pattern - prioritize form_dict for multipart data
-        data = {}
-
-        # For multipart/form-data, form_dict should contain the text fields
-        content_type = frappe.request.headers.get('Content-Type', '')
-        is_multipart = content_type.startswith('multipart/form-data')
-
+        
+        # Check if request is multipart (either has files OR content-type is multipart)
+        is_multipart = (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type)
+        
+        logs.append(f"Is multipart: {is_multipart}")
+        
+        # Try multiple methods to get form data when request is multipart
         if is_multipart:
-            frappe.logger().info("Processing multipart/form-data request")
-            # In multipart requests, text fields go to form_dict
-            data = dict(frappe.form_dict) if frappe.form_dict else {}
+            # Method 1: Try frappe.request.form (Werkzeug's ImmutableMultiDict) - MOST IMPORTANT
+            if hasattr(frappe.request, 'form') and frappe.request.form:
+                frappe.logger().info(f"Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
+                logs.append(f"Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
+                for key in frappe.request.form.keys():
+                    data[key] = frappe.request.form.get(key)
+                    frappe.logger().info(f"request.form[{key}] = {data[key]}")
+                    logs.append(f"request.form[{key}] = {data[key]}")
+            
+            # Method 2: If request.form is empty, try form_dict
             if not data:
-                data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
-
-            # If still no text data, try parsing multipart data properly
-            if not data or not any(key in data for key in ['title_vn', 'title_en']):
-                frappe.logger().info("No text fields in form_dict, trying cgi.FieldStorage parser")
+                frappe.logger().info("request.form is empty, trying form_dict")
+                logs.append("request.form is empty, trying form_dict")
+                data = dict(frappe.local.form_dict)
+                frappe.logger().info(f"form_dict keys: {list(data.keys())}")
+                logs.append(f"form_dict keys: {list(data.keys())}")
+            
+            # Method 3: Last resort - try werkzeug parser
+            if not data or not data.get('title_vn'):
+                frappe.logger().info("form_dict is empty, trying werkzeug parser")
+                logs.append("form_dict is empty, trying werkzeug parser")
                 try:
-                    import cgi
-                    import io
-
-                    # Create a file-like object from request data
-                    fp = io.BytesIO(frappe.request.data)
-
-                    # Create environment dict for cgi.FieldStorage
-                    env = {
-                        'REQUEST_METHOD': 'POST',
-                        'CONTENT_TYPE': content_type,
-                        'CONTENT_LENGTH': str(len(frappe.request.data))
-                    }
-
-                    # Parse using cgi.FieldStorage - this is the classic way
-                    form = cgi.FieldStorage(fp=fp, environ=env, keep_blank_values=True)
-
-                    cgi_data = {}
-                    for field_name in form:
-                        field_item = form[field_name]
-                        if hasattr(field_item, 'value') and field_item.value is not None:
-                            cgi_data[field_name] = field_item.value.decode('utf-8') if isinstance(field_item.value, bytes) else field_item.value
-
-                    frappe.logger().info(f"CGI parsed data: {cgi_data}")
-
-                    # Merge with existing data
-                    data.update(cgi_data)
-                    frappe.logger().info(f"Final merged data with CGI: {data}")
-
-                except Exception as cgi_error:
-                    frappe.logger().error(f"CGI parsing failed: {str(cgi_error)}")
-                    # Fallback to manual parsing if CGI fails
-                    frappe.logger().info("Trying manual regex parsing as final fallback")
-                    try:
-                        raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                        frappe.logger().info(f"Raw data preview (first 1500 chars): {raw_data[:1500]}")
-
-                        # Simple manual parsing for common fields
-                        import re
-
-                        # Extract title_vn - more flexible pattern
-                        title_vn_match = re.search(r'name="title_vn"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if title_vn_match:
-                            data['title_vn'] = title_vn_match.group(1).strip()
-                            frappe.logger().info(f"Manual parsed title_vn: '{data['title_vn']}'")
-
-                        # Extract title_en
-                        title_en_match = re.search(r'name="title_en"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if title_en_match:
-                            data['title_en'] = title_en_match.group(1).strip()
-                            frappe.logger().info(f"Manual parsed title_en: '{data['title_en']}'")
-
-                        # Extract description_vn
-                        desc_vn_match = re.search(r'name="description_vn"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if desc_vn_match:
-                            data['description_vn'] = desc_vn_match.group(1).strip()
-
-                        # Extract description_en
-                        desc_en_match = re.search(r'name="description_en"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if desc_en_match:
-                            data['description_en'] = desc_en_match.group(1).strip()
-
-                        frappe.logger().info(f"Final manual parsed data: {data}")
-
-                    except Exception as manual_error:
-                        frappe.logger().error(f"Manual parsing also failed: {str(manual_error)}")
-                        frappe.logger().error(f"Raw data sample: {frappe.request.data[:200] if frappe.request.data else 'None'}")
+                    from werkzeug.formparser import parse_form_data
+                    stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=False)
+                    
+                    # Convert form data to dict
+                    for key in form.keys():
+                        data[key] = form.get(key)
+                        frappe.logger().info(f"werkzeug form[{key}] = {data[key]}")
+                        logs.append(f"werkzeug form[{key}] = {data[key]}")
+                        
+                    frappe.logger().info(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
+                    logs.append(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
+                    
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse multipart form data: {str(e)}")
+                    logs.append(f"Failed to parse multipart form data: {str(e)}")
+                    import traceback
+                    frappe.logger().error(traceback.format_exc())
         else:
-            frappe.logger().info("Processing JSON/application request")
-            # For JSON requests, try to parse from request.data
-            if frappe.request.data:
+            # No files, use standard parsing
+            data = dict(frappe.local.form_dict)
+            frappe.logger().info(f"Using standard form_dict: {list(data.keys())}")
+            logs.append(f"Using standard form_dict: {list(data.keys())}")
+            
+            # If form_dict is empty, try JSON body
+            if not data or not data.get('title_vn'):
                 try:
-                    json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                    data = json_data
-                    frappe.logger().info(f"Received JSON data for create_badge: {data}")
-                except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                    frappe.logger().error(f"Failed to parse JSON data: {str(e)}")
-                    # Fallback to form_dict
-                    data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
-
-        frappe.logger().info(f"Final data for create_badge: {data}")
-        frappe.logger().info(f"Content-Type: {content_type}")
-        frappe.logger().info(f"Is multipart: {is_multipart}")
-        frappe.logger().info(f"===================================")
+                    if frappe.request.data:
+                        data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                        frappe.logger().info(f"Parsed JSON data: {list(data.keys())}")
+                        logs.append(f"Parsed JSON data: {list(data.keys())}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+                    logs.append(f"Failed to parse JSON from request: {str(e)}")
+        
+        # Log final parsed data for debugging
+        frappe.logger().info(f"Final parsed data keys: {list(data.keys())}")
+        logs.append(f"Final parsed data keys: {list(data.keys())}")
+        for key, value in data.items():
+            if key != 'cmd':  # Skip cmd to reduce noise
+                log_value = value[:100] if isinstance(value, str) and len(value) > 100 else value
+                frappe.logger().info(f"Form data {key}: {log_value} (type: {type(value).__name__})")
+                logs.append(f"Form data {key}: {log_value} (type: {type(value).__name__})")
 
         # Extract values from data
-        title_vn = data.get("title_vn")
-        title_en = data.get("title_en")
-        description_vn = data.get("description_vn")
-        description_en = data.get("description_en")
+        title_vn = str(data.get("title_vn", "")).strip()
+        title_en = str(data.get("title_en", "")).strip()
+        description_vn = str(data.get("description_vn", "")).strip()
+        description_en = str(data.get("description_en", "")).strip()
+
+        frappe.logger().info(f"Final data before validation: title_vn='{title_vn}', title_en='{title_en}'")
+        logs.append(f"Final data before validation: title_vn='{title_vn}', title_en='{title_en}'")
 
         # Input validation
         if not title_vn:
-            debug_info = {
-                "debug_request_info": {
-                    "content_type": frappe.request.headers.get('Content-Type', 'N/A'),
-                    "form_dict": dict(frappe.form_dict) if frappe.form_dict else None,
-                    "local_form_dict": dict(frappe.local.form_dict) if frappe.local.form_dict else None,
-                    "request_files": list(frappe.request.files.keys()) if frappe.request.files else None,
-                    "raw_data_length": len(frappe.request.data) if frappe.request.data else 0,
-                    "final_parsed_data": data,
-                    "parsed_title_vn": title_vn,
-                    "parsed_title_en": title_en
-                }
-            }
             return validation_error_response(
                 message="Title VN is required",
                 errors={
                     "title_vn": ["Required"],
-                    "debug_info": debug_info
+                    "logs": logs
                 }
             )
 
         # Create new badge
         frappe.logger().info(f"Creating SIS Badge with data: title_vn={title_vn}, title_en={title_en}")
+        logs.append(f"Creating SIS Badge with data: title_vn={title_vn}, title_en={title_en}")
 
-        try:
-            frappe.logger().info("Creating badge document...")
-            badge_doc = frappe.get_doc({
-                "doctype": "SIS Badge",
-                "title_vn": title_vn,
-                "title_en": title_en or "",
-                "description_vn": description_vn or "",
-                "description_en": description_en or "",
-                "is_active": 1
-            })
-            frappe.logger().info(f"Badge doc created successfully: {badge_doc.name}")
+        badge_doc = frappe.get_doc({
+            "doctype": "SIS Badge",
+            "title_vn": title_vn,
+            "title_en": title_en,
+            "description_vn": description_vn,
+            "description_en": description_en,
+            "is_active": 1
+        })
+        
+        frappe.logger().info(f"Badge doc created, inserting...")
+        logs.append(f"Badge doc created, inserting...")
+        
+        badge_doc.insert()
+        
+        frappe.logger().info(f"Badge doc inserted successfully: {badge_doc.name}")
+        logs.append(f"Badge doc inserted successfully: {badge_doc.name}")
 
-            frappe.logger().info("Inserting badge document...")
-            badge_doc.insert()
-            frappe.logger().info(f"Badge doc inserted successfully: {badge_doc.name}")
+        # Handle image upload if provided
+        image_url = None
+        if has_files:
+            frappe.logger().info("Processing image upload...")
+            logs.append("Processing image upload...")
+            try:
+                uploaded_file = frappe.request.files['image']
+                frappe.logger().info(f"Uploaded file: {uploaded_file.filename if uploaded_file else 'None'}")
+                logs.append(f"Uploaded file: {uploaded_file.filename if uploaded_file else 'None'}")
 
-            # Handle image upload if provided
-            image_url = None
-            if frappe.request.files and 'image' in frappe.request.files:
-                frappe.logger().info("Processing image upload...")
-                try:
-                    uploaded_file = frappe.request.files['image']
-                    frappe.logger().info(f"Uploaded file: {uploaded_file.filename if uploaded_file else 'None'}")
+                if uploaded_file and uploaded_file.filename:
+                    frappe.logger().info(f"Uploading file: {uploaded_file.filename}")
+                    logs.append(f"Uploading file: {uploaded_file.filename}")
 
-                    if uploaded_file and uploaded_file.filename:
-                        frappe.logger().info(f"Uploading file: {uploaded_file.filename}")
+                    # Read file content
+                    file_content = uploaded_file.stream.read()
+                    frappe.logger().info(f"Read file content, size: {len(file_content)} bytes")
+                    logs.append(f"Read file content, size: {len(file_content)} bytes")
 
-                        try:
-                            # Read file content
-                            file_content = uploaded_file.stream.read()
-                            frappe.logger().info(f"Read file content, size: {len(file_content)} bytes")
+                    # Use frappe's file manager to save the file
+                    from frappe.utils.file_manager import save_file
 
-                            # Use frappe's file manager to save the file
-                            from frappe.utils.file_manager import save_file
+                    file_doc = save_file(
+                        fname=uploaded_file.filename,
+                        content=file_content,
+                        dt="SIS Badge",
+                        dn=badge_doc.name,
+                        is_private=0
+                    )
 
-                            file_doc = save_file(
-                                fname=uploaded_file.filename,
-                                content=file_content,
-                                dt="SIS Badge",
-                                dn=badge_doc.name,
-                                is_private=0
-                            )
+                    if file_doc:
+                        image_url = file_doc.file_url
+                        frappe.logger().info(f"Image uploaded successfully: {image_url}")
+                        logs.append(f"Image uploaded successfully: {image_url}")
 
-                            if file_doc:
-                                image_url = file_doc.file_url
-                                frappe.logger().info(f"Image uploaded successfully: {image_url}")
-
-                                # Update badge with image URL
-                                frappe.logger().info("Updating badge with image URL...")
-                                badge_doc.image = image_url
-                                badge_doc.save()
-                                frappe.logger().info("Badge updated with image URL")
-                            else:
-                                frappe.logger().error("save_file returned None")
-
-                        except Exception as file_error:
-                            frappe.logger().error(f"Error in file upload process: {str(file_error)}")
-                            raise file_error
+                        # Update badge with image URL
+                        badge_doc.image = image_url
+                        badge_doc.save()
+                        frappe.logger().info("Badge updated with image URL")
+                        logs.append("Badge updated with image URL")
                     else:
-                        frappe.logger().info("No valid image file provided")
-                except Exception as img_error:
-                    frappe.logger().error(f"Error uploading image: {str(img_error)}")
-                    frappe.logger().error(f"Image error traceback: {frappe.get_traceback()}")
-                    # Don't fail the whole operation if image upload fails
+                        frappe.logger().error("save_file returned None")
+                        logs.append("save_file returned None")
+                else:
+                    frappe.logger().info("No valid image file provided")
+                    logs.append("No valid image file provided")
+            except Exception as img_error:
+                frappe.logger().error(f"Error uploading image: {str(img_error)}")
+                logs.append(f"Error uploading image: {str(img_error)}")
+                # Don't fail the whole operation if image upload fails
 
-            frappe.logger().info("Committing transaction...")
-            frappe.db.commit()
-            frappe.logger().info("Database committed successfully")
-
-        except Exception as doc_error:
-            frappe.logger().error(f"Error creating/inserting badge doc: {str(doc_error)}")
-            raise doc_error
+        frappe.db.commit()
+        frappe.logger().info("Database committed successfully")
+        logs.append("Database committed successfully")
 
         # Return the created data
-        frappe.msgprint(_("Badge created successfully"))
         return single_item_response(
             data={
                 "name": badge_doc.name,
@@ -321,7 +291,8 @@ def create_badge():
                 "description_vn": badge_doc.description_vn,
                 "description_en": badge_doc.description_en,
                 "image": badge_doc.image,
-                "is_active": badge_doc.is_active
+                "is_active": badge_doc.is_active,
+                "logs": logs
             },
             message="Badge created successfully"
         )
@@ -332,139 +303,126 @@ def create_badge():
         frappe.logger().error(f"Error type: {type(e).__name__}")
         frappe.logger().error(f"Full traceback: {frappe.get_traceback()}")
         frappe.logger().error(f"=========================")
+        
+        logs.append(f"=== CREATE BADGE ERROR ===")
+        logs.append(f"Error: {str(e)}")
+        logs.append(f"Error type: {type(e).__name__}")
 
         return error_response(
             message=f"Error creating badge: {str(e)}",
-            code="CREATE_BADGE_ERROR"
+            code="CREATE_BADGE_ERROR",
+            logs=logs
         )
 
 
 @frappe.whitelist(allow_guest=False)
 def update_badge():
     """Update an existing badge"""
+    logs = []  # Collect logs to return in response
+    
     try:
-        data = {}
-        data = {}
+        # IMPORTANT: Check for files first to detect multipart form data
+        files = frappe.request.files
+        has_files = files and 'image' in files
+        
+        logs.append(f"Request method: {frappe.request.method}")
+        logs.append(f"Request content type: {frappe.request.content_type}")
+        logs.append(f"Has files: {has_files}")
+        logs.append(f"Request files keys: {list(files.keys()) if files else 'None'}")
 
-        # For multipart/form-data, form_dict should contain the text fields
-        content_type = frappe.request.headers.get('Content-Type', '')
-        is_multipart = content_type.startswith('multipart/form-data')
-
+        # Get data from request - handle multipart form data properly
+        data = {}
+        
+        # Check if request is multipart (either has files OR content-type is multipart)
+        is_multipart = (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type)
+        
+        logs.append(f"Is multipart: {is_multipart}")
+        
+        # Try multiple methods to get form data when request is multipart
         if is_multipart:
-            frappe.logger().info("Processing multipart/form-data request for update")
-            # In multipart requests, text fields go to form_dict
-            data = dict(frappe.form_dict) if frappe.form_dict else {}
+            # Method 1: Try frappe.request.form (Werkzeug's ImmutableMultiDict) - MOST IMPORTANT
+            if hasattr(frappe.request, 'form') and frappe.request.form:
+                frappe.logger().info(f"Using frappe.request.form for update, keys: {list(frappe.request.form.keys())}")
+                logs.append(f"Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
+                for key in frappe.request.form.keys():
+                    data[key] = frappe.request.form.get(key)
+                    frappe.logger().info(f"request.form[{key}] = {data[key]}")
+                    logs.append(f"request.form[{key}] = {data[key]}")
+            
+            # Method 2: If request.form is empty, try form_dict
             if not data:
-                data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
-
-            # If still no text data, try parsing multipart data properly
-            if not data or not any(key in data for key in ['badge_id', 'title_vn']):
-                frappe.logger().info("No text fields in form_dict, trying cgi.FieldStorage parser for update")
+                frappe.logger().info("request.form is empty, trying form_dict")
+                logs.append("request.form is empty, trying form_dict")
+                data = dict(frappe.local.form_dict)
+                frappe.logger().info(f"form_dict keys: {list(data.keys())}")
+                logs.append(f"form_dict keys: {list(data.keys())}")
+            
+            # Method 3: Last resort - try werkzeug parser
+            if not data or not data.get('badge_id'):
+                frappe.logger().info("form_dict is empty, trying werkzeug parser")
+                logs.append("form_dict is empty, trying werkzeug parser")
                 try:
-                    import cgi
-                    import io
-
-                    # Create a file-like object from request data
-                    fp = io.BytesIO(frappe.request.data)
-
-                    # Create environment dict for cgi.FieldStorage
-                    env = {
-                        'REQUEST_METHOD': 'POST',
-                        'CONTENT_TYPE': content_type,
-                        'CONTENT_LENGTH': str(len(frappe.request.data))
-                    }
-
-                    # Parse using cgi.FieldStorage - this is the classic way
-                    form = cgi.FieldStorage(fp=fp, environ=env, keep_blank_values=True)
-
-                    cgi_data = {}
-                    for field_name in form:
-                        field_item = form[field_name]
-                        if hasattr(field_item, 'value') and field_item.value is not None:
-                            cgi_data[field_name] = field_item.value.decode('utf-8') if isinstance(field_item.value, bytes) else field_item.value
-
-                    frappe.logger().info(f"CGI parsed data for update: {cgi_data}")
-
-                    # Merge with existing data
-                    data.update(cgi_data)
-                    frappe.logger().info(f"Final merged data with CGI for update: {data}")
-
-                except Exception as cgi_error:
-                    frappe.logger().error(f"CGI parsing failed for update: {str(cgi_error)}")
-                    # Fallback to manual parsing if CGI fails
-                    frappe.logger().info("Trying manual regex parsing as final fallback for update")
-                    try:
-                        raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                        frappe.logger().info(f"Raw data preview (first 1500 chars): {raw_data[:1500]}")
-
-                        # Simple manual parsing for common fields
-                        import re
-
-                        # Extract badge_id - more flexible pattern
-                        badge_id_match = re.search(r'name="badge_id"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if badge_id_match:
-                            data['badge_id'] = badge_id_match.group(1).strip()
-                            frappe.logger().info(f"Manual parsed badge_id: '{data['badge_id']}'")
-
-                        # Extract title_vn
-                        title_vn_match = re.search(r'name="title_vn"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if title_vn_match:
-                            data['title_vn'] = title_vn_match.group(1).strip()
-                            frappe.logger().info(f"Manual parsed title_vn: '{data['title_vn']}'")
-
-                        # Extract title_en
-                        title_en_match = re.search(r'name="title_en"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if title_en_match:
-                            data['title_en'] = title_en_match.group(1).strip()
-                            frappe.logger().info(f"Manual parsed title_en: '{data['title_en']}'")
-
-                        # Extract descriptions
-                        desc_vn_match = re.search(r'name="description_vn"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if desc_vn_match:
-                            data['description_vn'] = desc_vn_match.group(1).strip()
-
-                        desc_en_match = re.search(r'name="description_en"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
-                        if desc_en_match:
-                            data['description_en'] = desc_en_match.group(1).strip()
-
-                        frappe.logger().info(f"Final manual parsed data for update: {data}")
-
-                    except Exception as manual_error:
-                        frappe.logger().error(f"Manual parsing also failed for update: {str(manual_error)}")
-                        frappe.logger().error(f"Raw data sample: {frappe.request.data[:200] if frappe.request.data else 'None'}")
+                    from werkzeug.formparser import parse_form_data
+                    stream, form, files_parsed = parse_form_data(frappe.request.environ, silent=False)
+                    
+                    # Convert form data to dict
+                    for key in form.keys():
+                        data[key] = form.get(key)
+                        frappe.logger().info(f"werkzeug form[{key}] = {data[key]}")
+                        logs.append(f"werkzeug form[{key}] = {data[key]}")
+                        
+                    frappe.logger().info(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
+                    logs.append(f"Parsed multipart form data using werkzeug: {list(data.keys())}")
+                    
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse multipart form data: {str(e)}")
+                    logs.append(f"Failed to parse multipart form data: {str(e)}")
+                    import traceback
+                    frappe.logger().error(traceback.format_exc())
         else:
-            frappe.logger().info("Processing JSON/application request for update")
-            # For JSON requests, try to parse from request.data
-            if frappe.request.data:
+            # No files, use standard parsing
+            data = dict(frappe.local.form_dict)
+            frappe.logger().info(f"Using standard form_dict: {list(data.keys())}")
+            logs.append(f"Using standard form_dict: {list(data.keys())}")
+            
+            # If form_dict is empty, try JSON body
+            if not data or not data.get('badge_id'):
                 try:
-                    json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
-                    data = json_data
-                    frappe.logger().info(f"Received JSON data for update_badge: {data}")
-                except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
-                    frappe.logger().error(f"Failed to parse JSON data: {str(e)}")
-                    # Fallback to form_dict
-                    data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
-
-        frappe.logger().info(f"Final data for update_badge: {data}")
-        frappe.logger().info(f"Content-Type: {content_type}")
-        frappe.logger().info(f"Is multipart: {is_multipart}")
-        frappe.logger().info(f"===================================")
+                    if frappe.request.data:
+                        data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                        frappe.logger().info(f"Parsed JSON data: {list(data.keys())}")
+                        logs.append(f"Parsed JSON data: {list(data.keys())}")
+                except Exception as e:
+                    frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+                    logs.append(f"Failed to parse JSON from request: {str(e)}")
+        
+        # Log final parsed data for debugging
+        frappe.logger().info(f"Final parsed data keys: {list(data.keys())}")
+        logs.append(f"Final parsed data keys: {list(data.keys())}")
+        for key, value in data.items():
+            if key != 'cmd':  # Skip cmd to reduce noise
+                log_value = value[:100] if isinstance(value, str) and len(value) > 100 else value
+                frappe.logger().info(f"Form data {key}: {log_value} (type: {type(value).__name__})")
+                logs.append(f"Form data {key}: {log_value} (type: {type(value).__name__})")
 
         badge_id = data.get('badge_id')
 
         if not badge_id:
             return error_response(
                 message="Badge ID is required",
-                code="MISSING_BADGE_ID"
+                code="MISSING_BADGE_ID",
+                logs=logs
             )
 
         # Get existing document
         try:
             badge_doc = frappe.get_doc("SIS Badge", badge_id)
+            logs.append(f"Found badge: {badge_id}")
         except frappe.DoesNotExistError:
-            return not_found_response(
+            return error_response(
                 message="Badge not found",
-                code="BADGE_NOT_FOUND"
+                code="BADGE_NOT_FOUND",
+                logs=logs
             )
 
         # Update fields if provided
@@ -475,63 +433,71 @@ def update_badge():
 
         if title_vn and title_vn != badge_doc.title_vn:
             badge_doc.title_vn = title_vn
+            logs.append(f"Updated title_vn to: {title_vn}")
 
         if title_en is not None and title_en != badge_doc.title_en:
             badge_doc.title_en = title_en
+            logs.append(f"Updated title_en to: {title_en}")
 
         if description_vn is not None and description_vn != badge_doc.description_vn:
             badge_doc.description_vn = description_vn
+            logs.append(f"Updated description_vn")
 
         if description_en is not None and description_en != badge_doc.description_en:
             badge_doc.description_en = description_en
+            logs.append(f"Updated description_en")
 
         # Handle image update if provided
-        if frappe.request.files and 'image' in frappe.request.files:
+        if has_files:
             frappe.logger().info("Processing image update...")
+            logs.append("Processing image update...")
             try:
                 uploaded_file = frappe.request.files['image']
                 frappe.logger().info(f"Update uploaded file: {uploaded_file.filename if uploaded_file else 'None'}")
+                logs.append(f"Update uploaded file: {uploaded_file.filename if uploaded_file else 'None'}")
 
                 if uploaded_file and uploaded_file.filename:
                     frappe.logger().info(f"Uploading new image: {uploaded_file.filename}")
+                    logs.append(f"Uploading new image: {uploaded_file.filename}")
 
-                    try:
-                        # Read file content
-                        file_content = uploaded_file.stream.read()
-                        frappe.logger().info(f"Read file content, size: {len(file_content)} bytes")
+                    # Read file content
+                    file_content = uploaded_file.stream.read()
+                    frappe.logger().info(f"Read file content, size: {len(file_content)} bytes")
+                    logs.append(f"Read file content, size: {len(file_content)} bytes")
 
-                        # Use frappe's file manager to save the file
-                        from frappe.utils.file_manager import save_file
+                    # Use frappe's file manager to save the file
+                    from frappe.utils.file_manager import save_file
 
-                        file_doc = save_file(
-                            fname=uploaded_file.filename,
-                            content=file_content,
-                            dt="SIS Badge",
-                            dn=badge_doc.name,
-                            is_private=0
-                        )
+                    file_doc = save_file(
+                        fname=uploaded_file.filename,
+                        content=file_content,
+                        dt="SIS Badge",
+                        dn=badge_doc.name,
+                        is_private=0
+                    )
 
-                        if file_doc:
-                            image_url = file_doc.file_url
-                            frappe.logger().info(f"Image updated successfully: {image_url}")
+                    if file_doc:
+                        image_url = file_doc.file_url
+                        frappe.logger().info(f"Image updated successfully: {image_url}")
+                        logs.append(f"Image updated successfully: {image_url}")
 
-                            # Update badge with new image URL
-                            badge_doc.image = image_url
-                        else:
-                            frappe.logger().error("save_file returned None for update")
-
-                    except Exception as file_error:
-                        frappe.logger().error(f"Error in file update process: {str(file_error)}")
-                        # Don't fail the whole operation if image upload fails
+                        # Update badge with new image URL
+                        badge_doc.image = image_url
+                    else:
+                        frappe.logger().error("save_file returned None for update")
+                        logs.append("save_file returned None for update")
                 else:
                     frappe.logger().info("No valid image file provided for update")
+                    logs.append("No valid image file provided for update")
             except Exception as img_error:
                 frappe.logger().error(f"Error updating image: {str(img_error)}")
-                frappe.logger().error(f"Image update error traceback: {frappe.get_traceback()}")
+                logs.append(f"Error updating image: {str(img_error)}")
                 # Don't fail the whole operation if image upload fails
 
         badge_doc.save()
         frappe.db.commit()
+        
+        logs.append("Badge updated and committed successfully")
 
         return single_item_response(
             data={
@@ -541,16 +507,19 @@ def update_badge():
                 "description_vn": badge_doc.description_vn,
                 "description_en": badge_doc.description_en,
                 "image": badge_doc.image,
-                "is_active": badge_doc.is_active
+                "is_active": badge_doc.is_active,
+                "logs": logs
             },
             message="Badge updated successfully"
         )
 
     except Exception as e:
-        frappe.log_error(f"Error updating badge {badge_id}: {str(e)}")
+        frappe.log_error(f"Error updating badge: {str(e)}")
+        logs.append(f"Error updating badge: {str(e)}")
         return error_response(
             message="Error updating badge",
-            code="UPDATE_BADGE_ERROR"
+            code="UPDATE_BADGE_ERROR",
+            logs=logs
         )
 
 
@@ -558,10 +527,10 @@ def update_badge():
 def delete_badge():
     """Delete a badge"""
     try:
-        # Get badge_id from multiple sources (form data or JSON payload)
+        # Get badge_id from multiple sources
         badge_id = None
 
-        # Try from form_dict first (for FormData/URLSearchParams)
+        # Try from form_dict first
         badge_id = frappe.form_dict.get('badge_id')
 
         # If not found, try from JSON payload
@@ -569,7 +538,7 @@ def delete_badge():
             try:
                 json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
                 badge_id = json_data.get('badge_id')
-            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError) as e:
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
                 pass
 
         if not badge_id:
@@ -588,7 +557,6 @@ def delete_badge():
             )
 
         # Check for linked documents before deletion
-        # Add business logic checks here if needed
         linked_docs = []
         # Example: Check if badge is referenced in other doctypes
         # This can be extended based on actual business requirements
@@ -613,7 +581,7 @@ def delete_badge():
             code="BADGE_LINKED"
         )
     except Exception as e:
-        frappe.log_error(f"Error deleting badge {badge_id}: {str(e)}")
+        frappe.log_error(f"Error deleting badge: {str(e)}")
         return error_response(
             message="Lỗi không mong muốn khi xóa huy hiệu",
             code="DELETE_BADGE_ERROR"
