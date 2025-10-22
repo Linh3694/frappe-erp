@@ -755,6 +755,15 @@ def update_template(template_id: Optional[str] = None):
                     # sanitize value to 'vn' | 'intl'
                     value = "intl" if str(value).lower() == "intl" else "vn"
                 doc.set(field, value)
+        
+        # Handle class_ids (JSON array)
+        if "class_ids" in data:
+            class_ids = data.get("class_ids")
+            if class_ids and isinstance(class_ids, list) and len(class_ids) > 0:
+                doc.set("class_ids", json.dumps(class_ids))
+            else:
+                # Clear class_ids if empty/null (template for whole grade)
+                doc.set("class_ids", None)
 
         # Replace child tables if payload provided
         if "scores" in data:
