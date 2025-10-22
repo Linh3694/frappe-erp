@@ -20,7 +20,6 @@ def get_all_badges():
             "SIS Badge",
             fields=[
                 "name",
-                "badge_id",
                 "title_vn",
                 "title_en",
                 "description_vn",
@@ -72,16 +71,9 @@ def get_badge_by_id():
 
         badge = frappe.get_doc("SIS Badge", badge_id)
 
-        if not badge:
-            return not_found_response(
-                message="Badge not found",
-                code="BADGE_NOT_FOUND"
-            )
-
         return single_item_response(
             data={
                 "name": badge.name,
-                "badge_id": badge.badge_id,
                 "title_vn": badge.title_vn,
                 "title_en": badge.title_en,
                 "description_vn": badge.description_vn,
@@ -136,7 +128,6 @@ def create_badge():
         title_en = data.get("title_en")
         description_vn = data.get("description_vn")
         description_en = data.get("description_en")
-        badge_id = data.get("badge_id")  # Optional, will be auto-generated if not provided
 
         # Input validation
         if not title_vn:
@@ -147,25 +138,12 @@ def create_badge():
                 }
             )
 
-        # Check if badge_id already exists (if provided)
-        if badge_id:
-            existing = frappe.db.exists(
-                "SIS Badge",
-                {"badge_id": badge_id}
-            )
-            if existing:
-                return error_response(
-                    message=f"Badge with ID '{badge_id}' already exists",
-                    code="BADGE_ID_EXISTS"
-                )
-
         # Create new badge
-        frappe.logger().info(f"Creating SIS Badge with data: title_vn={title_vn}, title_en={title_en}, badge_id={badge_id}")
+        frappe.logger().info(f"Creating SIS Badge with data: title_vn={title_vn}, title_en={title_en}")
 
         try:
             badge_doc = frappe.get_doc({
                 "doctype": "SIS Badge",
-                "badge_id": badge_id,  # Will use autoname if not provided
                 "title_vn": title_vn,
                 "title_en": title_en or "",
                 "description_vn": description_vn or "",
@@ -197,7 +175,6 @@ def create_badge():
         return single_item_response(
             data={
                 "name": badge_doc.name,
-                "badge_id": badge_doc.badge_id,
                 "title_vn": badge_doc.title_vn,
                 "title_en": badge_doc.title_en,
                 "description_vn": badge_doc.description_vn,

@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "field:badge_id",
+ "autoname": "naming_series:BADGE-.YYYY.-.#####",
  "creation": "2025-01-22 12:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
