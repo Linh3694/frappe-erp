@@ -931,6 +931,13 @@ def get_report_data(report_id: Optional[str] = None):
         except Exception as e:
             frappe.logger().error(f"[SCOREBOARD_CONFIG] Error enriching intl_scores: {str(e)}")
         
+        # === CLEANUP: Remove deprecated intl_scoreboard ===
+        # FormRenderer prioritizes intl_scoreboard over intl_scores, causing old null data to be used
+        # We must remove intl_scoreboard to force FormRenderer to use the correct intl_scores
+        if "intl_scoreboard" in transformed_data:
+            del transformed_data["intl_scoreboard"]
+            frappe.logger().info("[get_report_data] Removed deprecated intl_scoreboard from response")
+        
         response_data = {
             "form_code": form.code or "PRIM_VN", 
             "student": standardized_data.get("student", {}),
