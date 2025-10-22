@@ -1,0 +1,109 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:badge_id",
+ "creation": "2025-01-22 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "badge_id",
+  "title_vn",
+  "title_en",
+  "column_break_1",
+  "description_vn",
+  "description_en",
+  "column_break_2",
+  "image",
+  "is_active"
+ ],
+ "fields": [
+  {
+   "fieldname": "badge_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Badge ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "title_vn",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title (Vietnamese)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title (English)"
+  },
+  {
+   "fieldname": "description_vn",
+   "fieldtype": "Text",
+   "label": "Description (Vietnamese)"
+  },
+  {
+   "fieldname": "description_en",
+   "fieldtype": "Text",
+   "label": "Description (English)"
+  },
+  {
+   "fieldname": "image",
+   "fieldtype": "Attach Image",
+   "label": "Image"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "default": 1,
+   "label": "Active"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-01-22 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Badge",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
