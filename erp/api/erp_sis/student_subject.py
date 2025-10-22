@@ -430,9 +430,22 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         # Get actual subject details - these are subjects the student ACTUALLY studies
         actual_subject_ids = [s["actual_subject_id"] for s in student_subjects if s.get("actual_subject_id")]
 
-        # CRITICAL: Only use subjects that student actually studies
-        # Do NOT add subjects from template that student doesn't study
-        # This ensures report card only shows subjects the student is enrolled in
+        # 🆕 FALLBACK: For INTL programs, if SIS Student Subject is empty, use ALL subjects from template
+        # This handles cases where timetable data hasn't been synced to SIS Student Subject yet
+        # For VN programs, we keep strict filtering to match historical behavior
+        program_type = getattr(template, 'program_type', 'vn') or 'vn'
+        use_template_subjects_as_fallback = False
+        
+        if program_type == 'intl' and len(actual_subject_ids) == 0:
+            frappe.logger().warning(
+                f"[INTL Report Card] SIS Student Subject empty for student {student_id} in class {class_id}. "
+                f"Using ALL subjects from template as fallback."
+            )
+            use_template_subjects_as_fallback = True
+            
+            # Extract all subject IDs from template configuration
+            if hasattr(template, 'subjects') and template.subjects:
+                actual_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
         
         # Get actual subject names/titles for reference
         subjects_info = {}
