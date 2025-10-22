@@ -1079,7 +1079,8 @@ def microsoft_webhook():
     # Lưu dấu vết lần nhận gần nhất để kiểm tra nhanh (không phụ thuộc Error Log)
     try:
         cache = frappe.cache()
-        cache.set_value("ms_webhook_last_received_at", datetime.utcnow().isoformat())
+        from datetime import timezone
+        cache.set_value("ms_webhook_last_received_at", datetime.now(timezone.utc).isoformat())
         cache.set_value("ms_webhook_last_notifications_count", len(notifications))
         # Lưu preview an toàn để debug (tối đa 2KB)
         try:
@@ -1370,7 +1371,8 @@ def create_users_subscription():
         token = get_microsoft_app_token()
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-        expiration = (datetime.utcnow() + timedelta(minutes=55)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        from datetime import timezone
+        expiration = (datetime.now(timezone.utc) + timedelta(minutes=55)).strftime("%Y-%m-%dT%H:%M:%SZ")
         body = {
             "changeType": "created,updated,deleted",
             "notificationUrl": notification_url,
@@ -1433,7 +1435,9 @@ def ensure_users_subscription():
                 exp_dt = None
             if not exp_dt:
                 continue
-            now_utc = dt.utcnow()
+            # Đảm bảo cả 2 datetime đều timezone-aware
+            from datetime import timezone
+            now_utc = dt.now(timezone.utc)
             # nếu còn dưới 20 phút thì renew lên ~55 phút
             minutes_left = (exp_dt - now_utc).total_seconds() / 60.0
             if minutes_left < 20:
