@@ -709,12 +709,27 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
             subject_title = subject_data.get("subject_title", subject_id)
             resolved_teacher = _resolve_teacher_name(subject_id, class_id)
             
-            subjects.append({
+            # Flatten structure: move intl_scores fields to top level for binding compatibility
+            subject_obj = {
                 "subject_id": subject_id,
                 "title_vn": subject_title,
                 "teacher_name": resolved_teacher or "",
-                **subject_data  # Include all intl_scores data (main_scores, component_scores, etc.)
-            })
+                # Flatten intl_scores to top level
+                "main_scores": subject_data.get("main_scores", {}),
+                "component_scores": subject_data.get("component_scores", {}),
+                "ielts_scores": subject_data.get("ielts_scores", {}),
+                "overall_mark": subject_data.get("overall_mark"),
+                "overall_grade": subject_data.get("overall_grade"),
+                "comment": subject_data.get("comment"),
+                "intl_comment": subject_data.get("intl_comment"),
+                "subcurriculum_id": subject_data.get("subcurriculum_id"),
+                "subcurriculum_title_en": subject_data.get("subcurriculum_title_en"),
+                "subject_title": subject_data.get("subject_title"),
+                "scoreboard_config": subject_data.get("scoreboard_config"),
+                # Keep nested intl_scores for backward compatibility
+                "intl_scores": subject_data
+            }
+            subjects.append(subject_obj)
         
         if subjects:
             transformed["subjects"] = subjects
