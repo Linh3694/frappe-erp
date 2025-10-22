@@ -680,14 +680,47 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
 def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Transform report data to match frontend layout binding expectations.
-    Converts subject_eval structure to subjects array for binding paths like subjects.0.*
+    Converts subject_eval structure OR intl_scores to subjects array for binding paths like subjects.0.*
     """
     if not isinstance(data, dict):
         return data
     
     transformed = data.copy()
+    subjects = []
     
-    # Transform subject_eval to subjects array
+    # === INTL PROGRAMS: Transform intl_scores to subjects array ===
+    if "intl_scores" in data and isinstance(data["intl_scores"], dict):
+        intl_scores = data["intl_scores"]
+        class_id = data.get("_metadata", {}).get("class_id")
+        
+        for subject_id, subject_data in intl_scores.items():
+            if not isinstance(subject_data, dict):
+                continue
+            
+            # Skip metadata keys
+            if subject_id.startswith("_"):
+                continue
+            
+            # Skip non-subject keys
+            if not subject_id.startswith("SIS_ACTUAL_SUBJECT-") and not subject_id.startswith("SIS-ACTUAL-SUBJECT-"):
+                continue
+            
+            # Extract subject title and teacher
+            subject_title = subject_data.get("subject_title", subject_id)
+            resolved_teacher = _resolve_teacher_name(subject_id, class_id)
+            
+            subjects.append({
+                "subject_id": subject_id,
+                "title_vn": subject_title,
+                "teacher_name": resolved_teacher or "",
+                **subject_data  # Include all intl_scores data (main_scores, component_scores, etc.)
+            })
+        
+        if subjects:
+            transformed["subjects"] = subjects
+            return transformed  # Early return for INTL programs
+    
+    # === VN PROGRAMS: Transform subject_eval to subjects array ===
     if "subject_eval" in data and isinstance(data["subject_eval"], dict):
         subject_eval = data["subject_eval"]
         
