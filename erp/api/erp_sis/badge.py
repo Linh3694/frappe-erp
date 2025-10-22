@@ -118,6 +118,44 @@ def create_badge():
             data = dict(frappe.form_dict) if frappe.form_dict else {}
             if not data:
                 data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
+
+            # If still no text data, parse from raw multipart data
+            if not data or not any(key in data for key in ['title_vn', 'title_en']):
+                frappe.logger().info("No text fields in form_dict, parsing raw multipart data")
+                if frappe.request.data:
+                    try:
+                        raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                        frappe.logger().info(f"Raw multipart data length: {len(raw_data)}")
+
+                        # Parse multipart form data - extract text fields
+                        import re
+
+                        # Parse multipart form data - find all name/value pairs
+                        # Pattern: name="fieldname" followed by empty line then value until next boundary
+                        field_pattern = r'name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
+                        matches = re.findall(field_pattern, raw_data, re.DOTALL)
+
+                        # Alternative pattern if the above doesn't work
+                        if not matches:
+                            frappe.logger().info("Trying alternative pattern...")
+                            alt_pattern = r'Content-Disposition: form-data; name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
+                            matches = re.findall(alt_pattern, raw_data, re.DOTALL)
+
+                        parsed_data = {}
+                        for field_name, field_value in matches:
+                            # Clean up the field value (remove trailing whitespace)
+                            clean_value = field_value.strip()
+                            if clean_value:  # Only add non-empty values
+                                parsed_data[field_name] = clean_value
+                                frappe.logger().info(f"Parsed field: {field_name} = '{clean_value}'")
+
+                        # Merge parsed data with existing form_dict data
+                        data.update(parsed_data)
+                        frappe.logger().info(f"Final merged data: {data}")
+
+                    except Exception as parse_error:
+                        frappe.logger().error(f"Failed to parse raw multipart data: {str(parse_error)}")
+                        frappe.logger().error(f"Raw data preview: {frappe.request.data[:500] if frappe.request.data else 'None'}")
         else:
             frappe.logger().info("Processing JSON/application request")
             # For JSON requests, try to parse from request.data
@@ -151,6 +189,7 @@ def create_badge():
                     "local_form_dict": dict(frappe.local.form_dict) if frappe.local.form_dict else None,
                     "request_files": list(frappe.request.files.keys()) if frappe.request.files else None,
                     "raw_data_length": len(frappe.request.data) if frappe.request.data else 0,
+                    "final_parsed_data": data,
                     "parsed_title_vn": title_vn,
                     "parsed_title_en": title_en
                 }
@@ -288,6 +327,44 @@ def update_badge():
             data = dict(frappe.form_dict) if frappe.form_dict else {}
             if not data:
                 data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
+
+            # If still no text data, parse from raw multipart data
+            if not data or not any(key in data for key in ['badge_id', 'title_vn']):
+                frappe.logger().info("No text fields in form_dict, parsing raw multipart data for update")
+                if frappe.request.data:
+                    try:
+                        raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                        frappe.logger().info(f"Raw multipart data length: {len(raw_data)}")
+
+                        # Parse multipart form data - extract text fields
+                        import re
+
+                        # Parse multipart form data - find all name/value pairs
+                        # Pattern: name="fieldname" followed by empty line then value until next boundary
+                        field_pattern = r'name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
+                        matches = re.findall(field_pattern, raw_data, re.DOTALL)
+
+                        # Alternative pattern if the above doesn't work
+                        if not matches:
+                            frappe.logger().info("Trying alternative pattern...")
+                            alt_pattern = r'Content-Disposition: form-data; name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
+                            matches = re.findall(alt_pattern, raw_data, re.DOTALL)
+
+                        parsed_data = {}
+                        for field_name, field_value in matches:
+                            # Clean up the field value (remove trailing whitespace)
+                            clean_value = field_value.strip()
+                            if clean_value:  # Only add non-empty values
+                                parsed_data[field_name] = clean_value
+                                frappe.logger().info(f"Parsed field for update: {field_name} = '{clean_value}'")
+
+                        # Merge parsed data with existing form_dict data
+                        data.update(parsed_data)
+                        frappe.logger().info(f"Final merged data for update: {data}")
+
+                    except Exception as parse_error:
+                        frappe.logger().error(f"Failed to parse raw multipart data for update: {str(parse_error)}")
+                        frappe.logger().error(f"Raw data preview: {frappe.request.data[:500] if frappe.request.data else 'None'}")
         else:
             frappe.logger().info("Processing JSON/application request for update")
             # For JSON requests, try to parse from request.data
