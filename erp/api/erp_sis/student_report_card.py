@@ -431,15 +431,31 @@ def _normalize_intl_scores(payload: Dict[str, Any]) -> Dict[str, Any]:
             sanitized_value = _sanitize_float(field_value)
             normalized_main_scores[field_name] = sanitized_value
 
-    # Normalize component scores (Formative, Summative, Practical, etc.)
-    normalized_component_scores: Dict[str, Optional[float]] = {}
+    # Normalize component scores (nested structure: main_score -> components -> values)
+    # Structure: {"Participation": {"Điểm thái độ": 22, "Điểm bài tập": 18}}
+    normalized_component_scores: Dict[str, Dict[str, Optional[float]]] = {}
     raw_component_scores = payload.get("component_scores")
     if isinstance(raw_component_scores, dict):
-        for field_name, field_value in raw_component_scores.items():
-            if not field_name:
+        for main_score_title, components in raw_component_scores.items():
+            if not main_score_title:
                 continue
-            sanitized_value = _sanitize_float(field_value)
-            normalized_component_scores[field_name] = sanitized_value
+            
+            # Handle nested structure (correct format)
+            if isinstance(components, dict):
+                normalized_components: Dict[str, Optional[float]] = {}
+                for component_title, component_value in components.items():
+                    if not component_title:
+                        continue
+                    sanitized_value = _sanitize_float(component_value)
+                    normalized_components[component_title] = sanitized_value
+                
+                if normalized_components:  # Only add if has components
+                    normalized_component_scores[main_score_title] = normalized_components
+            else:
+                # Fallback: flat structure (legacy format) - treat as single component
+                sanitized_value = _sanitize_float(components)
+                if sanitized_value is not None:
+                    normalized_component_scores[main_score_title] = {"value": sanitized_value}
 
     # Normalize IELTS scores (nested structure per option)
     normalized_ielts_scores: Dict[str, Dict[str, Any]] = {}
@@ -1041,27 +1057,34 @@ def update_report_section():
             # INTL Scores section handling with validation and MERGING
             # CRITICAL: Merge per subject to avoid data loss
             
+            # Debug: Log incoming payload structure
+            frappe.logger().info(f"[INTL_SCORES_MERGE] Incoming payload type: {type(payload)}")
+            frappe.logger().info(f"[INTL_SCORES_MERGE] Incoming payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'not_dict'}")
+            
             # Get subject_id from payload BEFORE normalizing (as normalize may exclude it)
             subject_id = None
             if isinstance(payload, dict):
                 # Try to find subject_id in various places
                 subject_id = payload.get("subject_id")
+                frappe.logger().info(f"[INTL_SCORES_MERGE] subject_id from payload.get(): {subject_id}")
+            
             if not subject_id:
-                    # Check if it's nested in payload
-                    for key, value in payload.items():
-                        if key.startswith("SIS_ACTUAL_SUBJECT-"):
-                            subject_id = key
-                            payload = value  # Use nested payload
-                            break
+                # Check if it's nested in payload
+                for key, value in payload.items():
+                    if key.startswith("SIS_ACTUAL_SUBJECT-"):
+                        subject_id = key
+                        payload = value  # Use nested payload
+                        frappe.logger().info(f"[INTL_SCORES_MERGE] subject_id extracted from nested key: {subject_id}")
+                        break
             
             if subject_id:
                 frappe.logger().info(f"[INTL_SCORES_MERGE] subject_id identified: {subject_id}")
                 
                 # Get or init existing intl_scores dict
                 existing_intl_scores = json_data.get("intl_scores")
-            if not isinstance(existing_intl_scores, dict):
-                existing_intl_scores = {}
-            
+                if not isinstance(existing_intl_scores, dict):
+                    existing_intl_scores = {}
+                
                 # Get existing data for this subject (if any)
                 existing_subject_data = existing_intl_scores.get(subject_id, {})
                 if not isinstance(existing_subject_data, dict):
