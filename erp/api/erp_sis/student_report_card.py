@@ -1087,7 +1087,7 @@ def update_report_section():
                                     for ielts_field, ielts_value in field_value.items():
                                         existing_subject_data[section_key][field_name][ielts_field] = ielts_value
                                         frappe.logger().info(f"[INTL_SCORES_MERGE] Updated {section_key}.{field_name}.{ielts_field} = {ielts_value}")
-                    else:
+                                else:
                                     # For main_scores / component_scores (flat dict), merge directly
                                     existing_subject_data[section_key][field_name] = field_value
                                     frappe.logger().info(f"[INTL_SCORES_MERGE] Updated {section_key}.{field_name} = {field_value}")
@@ -1104,9 +1104,12 @@ def update_report_section():
                 
                 frappe.logger().info(f"[INTL_SCORES_MERGE] Successfully merged subject '{subject_id}'. Total subjects in intl_scores: {len(existing_intl_scores)}")
             else:
-                # Fallback: If no subject_id, use old behavior (may overwrite)
-                frappe.logger().warning("[INTL_SCORES_MERGE] No subject_id found in payload. Using fallback behavior (may overwrite existing data).")
-                json_data["intl_scores"] = _normalize_intl_scores(payload)
+                # ERROR: subject_id is REQUIRED for intl_scores updates to prevent data corruption
+                frappe.logger().error("[INTL_SCORES_MERGE] CRITICAL: No subject_id found in payload. Refusing to update to prevent data loss.")
+                return validation_error_response(
+                    message="subject_id is required for intl_scores updates",
+                    errors={"subject_id": ["Required field missing in payload. This prevents data corruption."]}
+                )
         elif section == "scores":
             # DEEP MERGE for scores section - merge per subject_id to avoid data loss
             # This ensures that updating one subject doesn't wipe out others
