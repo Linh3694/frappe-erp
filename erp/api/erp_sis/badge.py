@@ -119,51 +119,74 @@ def create_badge():
             if not data:
                 data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
 
-            # If still no text data, parse from raw multipart data
+            # If still no text data, try parsing multipart data properly
             if not data or not any(key in data for key in ['title_vn', 'title_en']):
-                frappe.logger().info("No text fields in form_dict, parsing raw multipart data")
-                if frappe.request.data:
+                frappe.logger().info("No text fields in form_dict, trying werkzeug parser")
+                try:
+                    from werkzeug.datastructures import MultiDict
+                    from werkzeug.formparser import parse_form_data
+                    import io
+
+                    # Create a file-like object from request data
+                    data_stream = io.BytesIO(frappe.request.data)
+
+                    # Parse using werkzeug - this is the proper way to parse multipart
+                    parsed_form, parsed_files = parse_form_data(
+                        environ={
+                            'REQUEST_METHOD': 'POST',
+                            'CONTENT_TYPE': content_type,
+                            'CONTENT_LENGTH': str(len(frappe.request.data))
+                        },
+                        stream=data_stream,
+                        content_type=content_type,
+                        cache_stream=False
+                    )
+
+                    # Convert to dict and merge
+                    werkzeug_data = dict(parsed_form)
+                    frappe.logger().info(f"Werkzeug parsed data: {werkzeug_data}")
+
+                    # Merge with existing data
+                    data.update(werkzeug_data)
+                    frappe.logger().info(f"Final merged data with werkzeug: {data}")
+
+                except Exception as werkzeug_error:
+                    frappe.logger().error(f"Werkzeug parsing failed: {str(werkzeug_error)}")
+                    # Fallback to manual parsing if werkzeug fails
+                    frappe.logger().info("Trying manual regex parsing as fallback")
                     try:
                         raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                        frappe.logger().info(f"Raw multipart data length: {len(raw_data)}")
                         frappe.logger().info(f"Raw data preview (first 1000 chars): {raw_data[:1000]}")
 
-                        # Parse multipart form data - extract text fields
+                        # Simple manual parsing for common fields
                         import re
 
-                        # Parse multipart form data - find all name/value pairs
-                        # Pattern: name="fieldname" followed by empty line then value until next boundary
-                        field_pattern = r'name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
-                        matches = re.findall(field_pattern, raw_data, re.DOTALL)
+                        # Extract title_vn
+                        title_vn_match = re.search(r'name="title_vn"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if title_vn_match:
+                            data['title_vn'] = title_vn_match.group(1).strip()
+                            frappe.logger().info(f"Manual parsed title_vn: '{data['title_vn']}'")
 
-                        frappe.logger().info(f"Pattern matches found: {len(matches)}")
-                        for i, match in enumerate(matches):
-                            frappe.logger().info(f"Match {i}: field='{match[0]}', value='{match[1]}'")
+                        # Extract title_en
+                        title_en_match = re.search(r'name="title_en"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if title_en_match:
+                            data['title_en'] = title_en_match.group(1).strip()
+                            frappe.logger().info(f"Manual parsed title_en: '{data['title_en']}'")
 
-                        # Alternative pattern if the above doesn't work
-                        if not matches:
-                            frappe.logger().info("Trying alternative pattern...")
-                            alt_pattern = r'Content-Disposition: form-data; name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
-                            matches = re.findall(alt_pattern, raw_data, re.DOTALL)
-                            frappe.logger().info(f"Alt pattern matches found: {len(matches)}")
-                            for i, match in enumerate(matches):
-                                frappe.logger().info(f"Alt match {i}: field='{match[0]}', value='{match[1]}'")
+                        # Extract description_vn
+                        desc_vn_match = re.search(r'name="description_vn"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if desc_vn_match:
+                            data['description_vn'] = desc_vn_match.group(1).strip()
 
-                        parsed_data = {}
-                        for field_name, field_value in matches:
-                            # Clean up the field value (remove trailing whitespace)
-                            clean_value = field_value.strip()
-                            if clean_value:  # Only add non-empty values
-                                parsed_data[field_name] = clean_value
-                                frappe.logger().info(f"Parsed field: {field_name} = '{clean_value}'")
+                        # Extract description_en
+                        desc_en_match = re.search(r'name="description_en"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if desc_en_match:
+                            data['description_en'] = desc_en_match.group(1).strip()
 
-                        # Merge parsed data with existing form_dict data
-                        data.update(parsed_data)
-                        frappe.logger().info(f"Final merged data: {data}")
+                        frappe.logger().info(f"Final manual parsed data: {data}")
 
-                    except Exception as parse_error:
-                        frappe.logger().error(f"Failed to parse raw multipart data: {str(parse_error)}")
-                        frappe.logger().error(f"Raw data preview: {frappe.request.data[:500] if frappe.request.data else 'None'}")
+                    except Exception as manual_error:
+                        frappe.logger().error(f"Manual parsing also failed: {str(manual_error)}")
         else:
             frappe.logger().info("Processing JSON/application request")
             # For JSON requests, try to parse from request.data
@@ -336,51 +359,79 @@ def update_badge():
             if not data:
                 data = dict(frappe.local.form_dict) if frappe.local.form_dict else {}
 
-            # If still no text data, parse from raw multipart data
+            # If still no text data, try parsing multipart data properly
             if not data or not any(key in data for key in ['badge_id', 'title_vn']):
-                frappe.logger().info("No text fields in form_dict, parsing raw multipart data for update")
-                if frappe.request.data:
+                frappe.logger().info("No text fields in form_dict, trying werkzeug parser for update")
+                try:
+                    from werkzeug.datastructures import MultiDict
+                    from werkzeug.formparser import parse_form_data
+                    import io
+
+                    # Create a file-like object from request data
+                    data_stream = io.BytesIO(frappe.request.data)
+
+                    # Parse using werkzeug - this is the proper way to parse multipart
+                    parsed_form, parsed_files = parse_form_data(
+                        environ={
+                            'REQUEST_METHOD': 'POST',
+                            'CONTENT_TYPE': content_type,
+                            'CONTENT_LENGTH': str(len(frappe.request.data))
+                        },
+                        stream=data_stream,
+                        content_type=content_type,
+                        cache_stream=False
+                    )
+
+                    # Convert to dict and merge
+                    werkzeug_data = dict(parsed_form)
+                    frappe.logger().info(f"Werkzeug parsed data for update: {werkzeug_data}")
+
+                    # Merge with existing data
+                    data.update(werkzeug_data)
+                    frappe.logger().info(f"Final merged data with werkzeug for update: {data}")
+
+                except Exception as werkzeug_error:
+                    frappe.logger().error(f"Werkzeug parsing failed for update: {str(werkzeug_error)}")
+                    # Fallback to manual parsing if werkzeug fails
+                    frappe.logger().info("Trying manual regex parsing as fallback for update")
                     try:
                         raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                        frappe.logger().info(f"Raw multipart data length: {len(raw_data)}")
                         frappe.logger().info(f"Raw data preview (first 1000 chars): {raw_data[:1000]}")
 
-                        # Parse multipart form data - extract text fields
+                        # Simple manual parsing for common fields
                         import re
 
-                        # Parse multipart form data - find all name/value pairs
-                        # Pattern: name="fieldname" followed by empty line then value until next boundary
-                        field_pattern = r'name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
-                        matches = re.findall(field_pattern, raw_data, re.DOTALL)
+                        # Extract badge_id
+                        badge_id_match = re.search(r'name="badge_id"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if badge_id_match:
+                            data['badge_id'] = badge_id_match.group(1).strip()
+                            frappe.logger().info(f"Manual parsed badge_id: '{data['badge_id']}'")
 
-                        frappe.logger().info(f"Pattern matches found: {len(matches)}")
-                        for i, match in enumerate(matches):
-                            frappe.logger().info(f"Match {i}: field='{match[0]}', value='{match[1]}'")
+                        # Extract title_vn
+                        title_vn_match = re.search(r'name="title_vn"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if title_vn_match:
+                            data['title_vn'] = title_vn_match.group(1).strip()
+                            frappe.logger().info(f"Manual parsed title_vn: '{data['title_vn']}'")
 
-                        # Alternative pattern if the above doesn't work
-                        if not matches:
-                            frappe.logger().info("Trying alternative pattern...")
-                            alt_pattern = r'Content-Disposition: form-data; name="([^"]+)"\s*\r?\n\s*\r?\n(.*?)\r?\n--'
-                            matches = re.findall(alt_pattern, raw_data, re.DOTALL)
-                            frappe.logger().info(f"Alt pattern matches found: {len(matches)}")
-                            for i, match in enumerate(matches):
-                                frappe.logger().info(f"Alt match {i}: field='{match[0]}', value='{match[1]}'")
+                        # Extract title_en
+                        title_en_match = re.search(r'name="title_en"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if title_en_match:
+                            data['title_en'] = title_en_match.group(1).strip()
+                            frappe.logger().info(f"Manual parsed title_en: '{data['title_en']}'")
 
-                        parsed_data = {}
-                        for field_name, field_value in matches:
-                            # Clean up the field value (remove trailing whitespace)
-                            clean_value = field_value.strip()
-                            if clean_value:  # Only add non-empty values
-                                parsed_data[field_name] = clean_value
-                                frappe.logger().info(f"Parsed field for update: {field_name} = '{clean_value}'")
+                        # Extract descriptions
+                        desc_vn_match = re.search(r'name="description_vn"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if desc_vn_match:
+                            data['description_vn'] = desc_vn_match.group(1).strip()
 
-                        # Merge parsed data with existing form_dict data
-                        data.update(parsed_data)
-                        frappe.logger().info(f"Final merged data for update: {data}")
+                        desc_en_match = re.search(r'name="description_en"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        if desc_en_match:
+                            data['description_en'] = desc_en_match.group(1).strip()
 
-                    except Exception as parse_error:
-                        frappe.logger().error(f"Failed to parse raw multipart data for update: {str(parse_error)}")
-                        frappe.logger().error(f"Raw data preview: {frappe.request.data[:500] if frappe.request.data else 'None'}")
+                        frappe.logger().info(f"Final manual parsed data for update: {data}")
+
+                    except Exception as manual_error:
+                        frappe.logger().error(f"Manual parsing also failed for update: {str(manual_error)}")
         else:
             frappe.logger().info("Processing JSON/application request for update")
             # For JSON requests, try to parse from request.data
