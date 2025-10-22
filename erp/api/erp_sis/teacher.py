@@ -521,12 +521,20 @@ def create_teacher():
                 code="TEACHER_EXISTS"
             )
         
-        # Verify user exists
+        # Verify user exists and is enabled
         user_exists = frappe.db.exists("User", user_id)
         if not user_exists:
             return error_response(
                 message="Selected user does not exist",
                 code="USER_NOT_FOUND"
+            )
+        
+        # Check if user is enabled
+        user_enabled = frappe.db.get_value("User", user_id, "enabled")
+        if not user_enabled:
+            return error_response(
+                message="Selected user is disabled. Please enable the user first or ensure they are in the allowed Microsoft groups.",
+                code="USER_DISABLED"
             )
         
         # Verify education stage exists and belongs to same campus (if provided)
@@ -787,6 +795,14 @@ def update_teacher():
                     "data": {},
                     "message": "Selected user does not exist"
                 }
+            
+            # Check if user is enabled
+            user_enabled = frappe.db.get_value("User", user_id, "enabled")
+            if not user_enabled:
+                return error_response(
+                    message="Selected user is disabled. Please enable the user first or ensure they are in the allowed Microsoft groups.",
+                    code="USER_DISABLED"
+                )
             
             teacher_doc.user_id = user_id
         

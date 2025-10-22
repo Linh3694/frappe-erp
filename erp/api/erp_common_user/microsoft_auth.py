@@ -1177,17 +1177,25 @@ def microsoft_webhook():
                     pass
                 continue
             user_data = resp.json()
-            # Lọc theo group: bỏ qua nếu user không thuộc các group được phép
+            # Kiểm tra group membership để quyết định enabled status
+            is_in_allowed_groups = True
             try:
-                if not _is_user_in_allowed_groups(user_id, headers):
-                    if debug_enabled:
-                        debug_info.append({
-                            "note": "skip_not_in_allowed_groups",
-                            "user_id": user_id
-                        })
-                    continue
+                is_in_allowed_groups = _is_user_in_allowed_groups(user_id, headers)
             except Exception:
-                continue
+                is_in_allowed_groups = False
+            
+            # Ghi đè accountEnabled dựa trên group membership
+            # User sẽ được tạo nhưng disabled nếu không thuộc group được phép
+            user_data['accountEnabled'] = user_data.get('accountEnabled', True) and is_in_allowed_groups
+            
+            if debug_enabled and not is_in_allowed_groups:
+                debug_info.append({
+                    "note": "user_not_in_allowed_groups_will_be_disabled",
+                    "user_id": user_id,
+                    "email": user_data.get('mail') or user_data.get('userPrincipalName')
+                })
+            
+            # Tiếp tục xử lý (không skip)
             if debug_enabled:
                 debug_info.append({
                     "user_id": user_id,
