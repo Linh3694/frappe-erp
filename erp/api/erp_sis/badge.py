@@ -121,65 +121,66 @@ def create_badge():
 
             # If still no text data, try parsing multipart data properly
             if not data or not any(key in data for key in ['title_vn', 'title_en']):
-                frappe.logger().info("No text fields in form_dict, trying werkzeug parser")
+                frappe.logger().info("No text fields in form_dict, trying cgi.FieldStorage parser")
                 try:
-                    from werkzeug.datastructures import MultiDict
-                    from werkzeug.formparser import parse_form_data
+                    import cgi
                     import io
 
                     # Create a file-like object from request data
-                    data_stream = io.BytesIO(frappe.request.data)
+                    fp = io.BytesIO(frappe.request.data)
 
-                    # Parse using werkzeug - this is the proper way to parse multipart
-                    parsed_form, parsed_files = parse_form_data(
-                        environ={
-                            'REQUEST_METHOD': 'POST',
-                            'CONTENT_TYPE': content_type,
-                            'CONTENT_LENGTH': str(len(frappe.request.data))
-                        },
-                        stream=data_stream,
-                        content_type=content_type,
-                        cache_stream=False
-                    )
+                    # Create environment dict for cgi.FieldStorage
+                    env = {
+                        'REQUEST_METHOD': 'POST',
+                        'CONTENT_TYPE': content_type,
+                        'CONTENT_LENGTH': str(len(frappe.request.data))
+                    }
 
-                    # Convert to dict and merge
-                    werkzeug_data = dict(parsed_form)
-                    frappe.logger().info(f"Werkzeug parsed data: {werkzeug_data}")
+                    # Parse using cgi.FieldStorage - this is the classic way
+                    form = cgi.FieldStorage(fp=fp, environ=env, keep_blank_values=True)
+
+                    cgi_data = {}
+                    for field_name in form:
+                        field_item = form[field_name]
+                        if hasattr(field_item, 'value') and field_item.value is not None:
+                            cgi_data[field_name] = field_item.value.decode('utf-8') if isinstance(field_item.value, bytes) else field_item.value
+
+                    frappe.logger().info(f"CGI parsed data: {cgi_data}")
 
                     # Merge with existing data
-                    data.update(werkzeug_data)
-                    frappe.logger().info(f"Final merged data with werkzeug: {data}")
+                    data.update(cgi_data)
+                    frappe.logger().info(f"Final merged data with CGI: {data}")
 
-                except Exception as werkzeug_error:
-                    frappe.logger().error(f"Werkzeug parsing failed: {str(werkzeug_error)}")
-                    # Fallback to manual parsing if werkzeug fails
-                    frappe.logger().info("Trying manual regex parsing as fallback")
+                except Exception as cgi_error:
+                    frappe.logger().error(f"CGI parsing failed: {str(cgi_error)}")
+                    # Fallback to manual parsing if CGI fails
+                    frappe.logger().info("Trying manual regex parsing as final fallback")
                     try:
                         raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                        frappe.logger().info(f"Raw data preview (first 1000 chars): {raw_data[:1000]}")
+                        frappe.logger().info(f"Raw data preview (first 1500 chars): {raw_data[:1500]}")
 
                         # Simple manual parsing for common fields
                         import re
 
-                        # Extract title_vn
-                        title_vn_match = re.search(r'name="title_vn"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        # Extract title_vn - more flexible pattern
+                        title_vn_match = re.search(r'name="title_vn"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if title_vn_match:
                             data['title_vn'] = title_vn_match.group(1).strip()
                             frappe.logger().info(f"Manual parsed title_vn: '{data['title_vn']}'")
 
                         # Extract title_en
-                        title_en_match = re.search(r'name="title_en"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        title_en_match = re.search(r'name="title_en"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if title_en_match:
                             data['title_en'] = title_en_match.group(1).strip()
                             frappe.logger().info(f"Manual parsed title_en: '{data['title_en']}'")
 
                         # Extract description_vn
-                        desc_vn_match = re.search(r'name="description_vn"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        desc_vn_match = re.search(r'name="description_vn"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if desc_vn_match:
                             data['description_vn'] = desc_vn_match.group(1).strip()
 
                         # Extract description_en
-                        desc_en_match = re.search(r'name="description_en"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        desc_en_match = re.search(r'name="description_en"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if desc_en_match:
                             data['description_en'] = desc_en_match.group(1).strip()
 
@@ -187,6 +188,7 @@ def create_badge():
 
                     except Exception as manual_error:
                         frappe.logger().error(f"Manual parsing also failed: {str(manual_error)}")
+                        frappe.logger().error(f"Raw data sample: {frappe.request.data[:200] if frappe.request.data else 'None'}")
         else:
             frappe.logger().info("Processing JSON/application request")
             # For JSON requests, try to parse from request.data
@@ -341,11 +343,7 @@ def create_badge():
 def update_badge():
     """Update an existing badge"""
     try:
-        # Get data from request - handle both FormData and JSON
         data = {}
-
-        # Handle FormData (multipart/form-data) vs JSON data differently
-        # Based on daily_menu.py pattern - prioritize form_dict for multipart data
         data = {}
 
         # For multipart/form-data, form_dict should contain the text fields
@@ -361,70 +359,71 @@ def update_badge():
 
             # If still no text data, try parsing multipart data properly
             if not data or not any(key in data for key in ['badge_id', 'title_vn']):
-                frappe.logger().info("No text fields in form_dict, trying werkzeug parser for update")
+                frappe.logger().info("No text fields in form_dict, trying cgi.FieldStorage parser for update")
                 try:
-                    from werkzeug.datastructures import MultiDict
-                    from werkzeug.formparser import parse_form_data
+                    import cgi
                     import io
 
                     # Create a file-like object from request data
-                    data_stream = io.BytesIO(frappe.request.data)
+                    fp = io.BytesIO(frappe.request.data)
 
-                    # Parse using werkzeug - this is the proper way to parse multipart
-                    parsed_form, parsed_files = parse_form_data(
-                        environ={
-                            'REQUEST_METHOD': 'POST',
-                            'CONTENT_TYPE': content_type,
-                            'CONTENT_LENGTH': str(len(frappe.request.data))
-                        },
-                        stream=data_stream,
-                        content_type=content_type,
-                        cache_stream=False
-                    )
+                    # Create environment dict for cgi.FieldStorage
+                    env = {
+                        'REQUEST_METHOD': 'POST',
+                        'CONTENT_TYPE': content_type,
+                        'CONTENT_LENGTH': str(len(frappe.request.data))
+                    }
 
-                    # Convert to dict and merge
-                    werkzeug_data = dict(parsed_form)
-                    frappe.logger().info(f"Werkzeug parsed data for update: {werkzeug_data}")
+                    # Parse using cgi.FieldStorage - this is the classic way
+                    form = cgi.FieldStorage(fp=fp, environ=env, keep_blank_values=True)
+
+                    cgi_data = {}
+                    for field_name in form:
+                        field_item = form[field_name]
+                        if hasattr(field_item, 'value') and field_item.value is not None:
+                            cgi_data[field_name] = field_item.value.decode('utf-8') if isinstance(field_item.value, bytes) else field_item.value
+
+                    frappe.logger().info(f"CGI parsed data for update: {cgi_data}")
 
                     # Merge with existing data
-                    data.update(werkzeug_data)
-                    frappe.logger().info(f"Final merged data with werkzeug for update: {data}")
+                    data.update(cgi_data)
+                    frappe.logger().info(f"Final merged data with CGI for update: {data}")
 
-                except Exception as werkzeug_error:
-                    frappe.logger().error(f"Werkzeug parsing failed for update: {str(werkzeug_error)}")
-                    # Fallback to manual parsing if werkzeug fails
-                    frappe.logger().info("Trying manual regex parsing as fallback for update")
+                except Exception as cgi_error:
+                    frappe.logger().error(f"CGI parsing failed for update: {str(cgi_error)}")
+                    # Fallback to manual parsing if CGI fails
+                    frappe.logger().info("Trying manual regex parsing as final fallback for update")
                     try:
                         raw_data = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                        frappe.logger().info(f"Raw data preview (first 1000 chars): {raw_data[:1000]}")
+                        frappe.logger().info(f"Raw data preview (first 1500 chars): {raw_data[:1500]}")
 
                         # Simple manual parsing for common fields
                         import re
 
-                        # Extract badge_id
-                        badge_id_match = re.search(r'name="badge_id"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        # Extract badge_id - more flexible pattern
+                        badge_id_match = re.search(r'name="badge_id"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if badge_id_match:
                             data['badge_id'] = badge_id_match.group(1).strip()
                             frappe.logger().info(f"Manual parsed badge_id: '{data['badge_id']}'")
 
                         # Extract title_vn
-                        title_vn_match = re.search(r'name="title_vn"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        title_vn_match = re.search(r'name="title_vn"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if title_vn_match:
                             data['title_vn'] = title_vn_match.group(1).strip()
                             frappe.logger().info(f"Manual parsed title_vn: '{data['title_vn']}'")
 
                         # Extract title_en
-                        title_en_match = re.search(r'name="title_en"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        title_en_match = re.search(r'name="title_en"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if title_en_match:
                             data['title_en'] = title_en_match.group(1).strip()
                             frappe.logger().info(f"Manual parsed title_en: '{data['title_en']}'")
 
                         # Extract descriptions
-                        desc_vn_match = re.search(r'name="description_vn"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        desc_vn_match = re.search(r'name="description_vn"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if desc_vn_match:
                             data['description_vn'] = desc_vn_match.group(1).strip()
 
-                        desc_en_match = re.search(r'name="description_en"\s*\r?\n\s*\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
+                        desc_en_match = re.search(r'name="description_en"[\s\S]*?\r?\n\r?\n(.*?)\r?\n--', raw_data, re.DOTALL)
                         if desc_en_match:
                             data['description_en'] = desc_en_match.group(1).strip()
 
@@ -432,6 +431,7 @@ def update_badge():
 
                     except Exception as manual_error:
                         frappe.logger().error(f"Manual parsing also failed for update: {str(manual_error)}")
+                        frappe.logger().error(f"Raw data sample: {frappe.request.data[:200] if frappe.request.data else 'None'}")
         else:
             frappe.logger().info("Processing JSON/application request for update")
             # For JSON requests, try to parse from request.data
