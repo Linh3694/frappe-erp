@@ -572,38 +572,10 @@ def _process_excel_file(job):
             # Already processed single data row case, df is ready
             pass
         else:
-            # Normal case: skip header and check for sample data
+            # Normal case: skip header only, dòng 2 trở đi là actual data
             df = df.iloc[1:]  # Skip header row, start from row 2
             skipped_rows = 1
-
-            if len(df) > 0:
-                first_row = df.iloc[0]
-
-                # Check if this is clearly sample/instruction data
-                # Only skip if ALL non-empty cells contain sample indicators
-                non_empty_count = 0
-                sample_indicators_count = 0
-
-                for val in first_row.values:
-                    if pd.notna(val) and str(val).strip():
-                        non_empty_count += 1
-                        val_str = str(val).strip().lower()
-                        if ('←' in val_str or
-                            'fill your data' in val_str or
-                            'sample' in val_str or
-                            'ví dụ' in val_str or
-                            val_str in ['nam', 'nữ', 'khác'] or
-                            val_str.startswith('student_') or
-                            '@example.com' in val_str):
-                            sample_indicators_count += 1
-
-                # Only consider it sample row if ALL non-empty cells are sample indicators
-                is_sample_row = non_empty_count > 0 and sample_indicators_count == non_empty_count
-
-                if is_sample_row and len(df) > 1:
-                    # Skip this row and start from next row
-                    df = df.iloc[1:]
-                    skipped_rows = 2
+            # Bỏ logic kiểm tra và skip sample data - coi dòng 2 là actual data luôn
 
         # Remove completely empty rows
         df = df.dropna(how='all')
