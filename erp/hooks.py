@@ -363,3 +363,11 @@ before_request = ["erp.utils.auth_middleware.jwt_auth_middleware"]
 #     "erp.utils.hooks.on_logout"
 # ]
 
+scheduler_events = {
+    "cron": {
+        # Renew subscription mỗi 30 phút
+        "*/30 * * * *": [
+            "erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
+        ]
+    }
+}
