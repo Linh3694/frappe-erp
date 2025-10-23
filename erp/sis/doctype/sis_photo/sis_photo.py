@@ -406,16 +406,25 @@ def upload_single_photo():
 
         # Handle user avatar - update User.user_image directly
         if photo_type == "user":
-            # Find user by email
+            # Find user by email or employee_code
             user = frappe.get_all("User",
-                filters={"email": user_email, "enabled": 1},
-                fields=["name", "email", "full_name"]
+                filters=[["User", "enabled", "=", 1], ["User", "email", "=", user_email]],
+                fields=["name", "email", "full_name", "employee_code"]
             )
+
+            # If not found by email, try employee_code
             if not user:
-                frappe.throw(f"User with email '{user_email}' not found or disabled")
+                user = frappe.get_all("User",
+                    filters=[["User", "enabled", "=", 1], ["User", "employee_code", "=", user_email]],
+                    fields=["name", "email", "full_name", "employee_code"]
+                )
+
+            if not user:
+                frappe.throw(f"User with email/employee_code '{user_email}' not found or disabled")
 
             user_id = user[0].name
-            photo_title = f"Avatar of {user[0].full_name} ({user_email})"
+            actual_email = user[0].email
+            photo_title = f"Avatar of {user[0].full_name} ({actual_email})"
 
             # Update User.user_image directly (same as avatar_management.py)
             try:
@@ -428,7 +437,7 @@ def upload_single_photo():
                 try:
                     from erp.common.redis_events import publish_user_event, is_user_events_enabled
                     if is_user_events_enabled():
-                        publish_user_event('user_updated', user_email)
+                        publish_user_event('user_updated', actual_email)
                 except Exception:
                     pass
 
