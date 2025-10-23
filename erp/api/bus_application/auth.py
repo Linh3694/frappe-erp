@@ -137,7 +137,7 @@ def send_sms_via_vivas(phone_number, message):
 
 
 @frappe.whitelist(allow_guest=True)
-@rate_limit(max_calls=5, time_window=3600)  # 5 attempts per hour
+@rate_limit(limit=5, seconds=3600)  # 5 attempts per hour
 def request_otp(phone_number):
     """
     Request OTP for bus monitor phone number authentication

@@ -20,7 +20,7 @@ from erp.utils.compreFace_service import compreFace_service
 
 
 @frappe.whitelist(allow_guest=False)
-@rate_limit(max_calls=100, time_window=600)  # 100 recognitions per 10 minutes
+@rate_limit(limit=100, seconds=600)  # 100 recognitions per 10 minutes
 def recognize_student_face():
     """
     Recognize student face from base64 image
