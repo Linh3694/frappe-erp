@@ -317,7 +317,7 @@ def mark_viewed():
         current_count = log.contact_log_viewed_count or 0
         new_count = current_count + 1
         log.contact_log_viewed_count = new_count
-        log.save(ignore_permissions=True)  # Parent doesn't have write permission, but should be able to mark as viewed
+        log.save(ignore_permissions=True, ignore_version=True)  # Parent doesn't have write permission, but should be able to mark as viewed
         
         frappe.db.commit()
         
@@ -329,7 +329,12 @@ def mark_viewed():
         )
     
     except Exception as e:
-        frappe.log_error(f"mark_viewed error: {str(e)}")
+        # Truncate error message to avoid CharacterLengthExceededError (max 140 chars)
+        error_msg = str(e)
+        if len(error_msg) > 130:
+            error_msg = error_msg[:127] + "..."
+
+        frappe.log_error(f"mark_viewed error: {error_msg}")
         return error_response(
             message="Failed to mark as viewed",
             code="MARK_VIEWED_ERROR"
