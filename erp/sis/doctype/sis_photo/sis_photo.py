@@ -20,11 +20,13 @@ class SISPhoto(Document):
         self.uploaded_by = get_fullname(frappe.session.user)
 
     def validate(self):
-        # Validate that either student_id or class_id is provided based on type
+        # Validate that either student_id, class_id, or user_id is provided based on type
         if self.type == "student" and not self.student_id:
             frappe.throw("Student ID is required for student photos")
         if self.type == "class" and not self.class_id:
             frappe.throw("Class ID is required for class photos")
+        if self.type == "user" and not self.user_id:
+            frappe.throw("User ID is required for user photos")
 
 
 @frappe.whitelist()
@@ -112,6 +114,7 @@ def upload_single_photo():
         school_year_id = _norm(parsed_params.get("school_year_id") or frappe.form_dict.get("school_year_id"))
         student_code = _norm(parsed_params.get("student_code") or frappe.form_dict.get("student_code"))
         class_name = _norm(parsed_params.get("class_name") or frappe.form_dict.get("class_name"))
+        user_email = _norm(parsed_params.get("user_email") or frappe.form_dict.get("user_email"))
 
         if not photo_type or not campus_id or not school_year_id:
             frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
@@ -127,7 +130,7 @@ def upload_single_photo():
 
             # Default allowed if metadata missing or parsing failed
             if not allowed_options:
-                allowed_options = ["student", "class"]
+                allowed_options = ["student", "class", "user"]
 
 
             # Find canonical option value by case-insensitive match
@@ -147,14 +150,17 @@ def upload_single_photo():
         except Exception as e:
             frappe.logger().error(f"Error normalizing photo type: {str(e)}")
             # Fallback strict check
-            if photo_type not in ["student", "class"]:
-                frappe.throw("Invalid photo type. Must be 'student' or 'class'")
+            if photo_type not in ["student", "class", "user"]:
+                frappe.throw("Invalid photo type. Must be 'student', 'class', or 'user'")
 
         if photo_type == "student" and not student_code:
             frappe.throw("Student code is required for student photos")
 
         if photo_type == "class" and not class_name:
             frappe.throw("Class name is required for class photos")
+
+        if photo_type == "user" and not user_email:
+            frappe.throw("User email is required for user photos")
 
         # Auto-detect type based on filename if possible
         detected_type = None
@@ -397,6 +403,44 @@ def upload_single_photo():
 
             except Exception as img_err:
                 frappe.throw(f"Invalid image file: {str(img_err)}")
+
+        # Handle user avatar - update User.user_image directly
+        if photo_type == "user":
+            # Find user by email
+            user = frappe.get_all("User",
+                filters={"email": user_email, "enabled": 1},
+                fields=["name", "email", "full_name"]
+            )
+            if not user:
+                frappe.throw(f"User with email '{user_email}' not found or disabled")
+
+            user_id = user[0].name
+            photo_title = f"Avatar of {user[0].full_name} ({user_email})"
+
+            # Update User.user_image directly (same as avatar_management.py)
+            try:
+                user_doc = frappe.get_doc("User", user_id)
+                user_doc.user_image = photo_url
+                user_doc.flags.ignore_permissions = True
+                user_doc.save()
+
+                # Publish redis event for realtime microservices
+                try:
+                    from erp.common.redis_events import publish_user_event, is_user_events_enabled
+                    if is_user_events_enabled():
+                        publish_user_event('user_updated', user_email)
+                except Exception:
+                    pass
+
+                return {
+                    "success": True,
+                    "message": "User avatar updated successfully",
+                    "photo_id": f"user_{user_id}",
+                    "file_url": photo_url
+                }
+            except Exception as e:
+                frappe.log_error(f"Error updating user avatar for {user_email}: {str(e)}")
+                raise frappe.ValidationError(f"Failed to update user avatar: {str(e)}")
 
         # Find the appropriate student or class record
         if photo_type == "student":

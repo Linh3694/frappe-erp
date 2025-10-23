@@ -23,6 +23,7 @@
   "school_year_id",
   "student_id",
   "class_id",
+  "user_id",
   "photo",
   "upload_information",
   "upload_date",
@@ -55,7 +56,7 @@
    "fieldname": "type",
    "fieldtype": "Select",
    "label": "Type",
-   "options": "student\nclass",
+   "options": "student\nclass\nuser",
    "reqd": 1
   },
   {
@@ -76,6 +77,12 @@
    "fieldtype": "Link",
    "label": "Class",
    "options": "SIS Class"
+  },
+  {
+   "fieldname": "user_id",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User"
   },
   {
    "fieldname": "photo",
