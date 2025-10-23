@@ -448,6 +448,9 @@ def upload_single_photo():
             actual_email = user[0].email
             photo_title = f"Avatar of {user[0].full_name} ({actual_email})"
 
+            # Get photo URL from uploaded file
+            photo_url = file_doc.file_url or f"/files/{file_doc.file_name}"
+
             # Update User.user_image directly (same as avatar_management.py)
             try:
                 user_doc = frappe.get_doc("User", user_id)
