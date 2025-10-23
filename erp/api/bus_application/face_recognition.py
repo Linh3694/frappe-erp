@@ -3,7 +3,8 @@
 
 import frappe
 from frappe import _
-from frappe.utils import now_datetime, rate_limit
+from frappe.utils import now_datetime
+from frappe.rate_limiter import rate_limit
 import json
 import base64
 from erp.utils.api_response import (

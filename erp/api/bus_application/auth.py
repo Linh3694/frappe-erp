@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import rate_limit
+from frappe.rate_limiter import rate_limit
 import secrets
 import requests
 import json
