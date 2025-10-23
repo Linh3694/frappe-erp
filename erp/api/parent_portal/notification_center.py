@@ -219,10 +219,10 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
 def get_unread_count(student_id=None):
     """
     Lấy số lượng thông báo chưa đọc
-    
+
     Args:
         student_id: ID của học sinh (optional)
-        
+
     Returns:
         {
             "success": True,
@@ -233,17 +233,48 @@ def get_unread_count(student_id=None):
     """
     try:
         user = frappe.session.user
-        
-        # Gọi notification-service
+
+        # Gọi notification-service để lấy tất cả notifications của user
         notification_service_url = get_notification_service_url()
-        api_url = f"{notification_service_url}/api/notifications/user/{user}/unread-count"
-        
-        response = requests.get(api_url, timeout=10)
+        api_url = f"{notification_service_url}/api/notifications/user/{user}"
+
+        params = {
+            "page": 1,
+            "limit": 1000  # Lấy đủ để đếm unread
+        }
+
+        response = requests.get(api_url, params=params, timeout=10)
         response.raise_for_status()
-        
+
         data = response.json()
-        unread_count = data.get('unreadCount', 0)
-        
+
+        # Parse notifications từ response - giống như get_notifications
+        raw_notifications = []
+        if 'notifications' in data:
+            raw_notifications = data.get('notifications', [])
+        elif 'data' in data and isinstance(data['data'], list):
+            raw_notifications = data['data']
+        elif 'data' in data and isinstance(data['data'], dict) and 'notifications' in data['data']:
+            raw_notifications = data['data']['notifications']
+
+        # Filter theo student_id nếu có và đếm unread
+        unread_count = 0
+        for notif in raw_notifications:
+            is_read = notif.get('read', False)
+
+            if not is_read:  # Chỉ đếm unread
+                # Filter theo student_id nếu có
+                if student_id:
+                    notif_data = notif.get('data', {})
+                    notif_student_id = notif_data.get('student_id')
+                    # Chỉ đếm notifications của student này HOẶC notifications không có student_id (general)
+                    if notif_student_id and notif_student_id != student_id:
+                        continue
+
+                unread_count += 1
+
+        print(f"✅ [Notification Center] Filtered unread count for student {student_id}: {unread_count}")
+
         return {
             "success": True,
             "data": {
