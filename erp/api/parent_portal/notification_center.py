@@ -266,10 +266,10 @@ def get_unread_count(student_id=None):
 def mark_as_read(notification_id=None):
     """
     Đánh dấu một thông báo là đã đọc
-    
+
     Args:
         notification_id: ID của notification
-        
+
     Returns:
         {
             "success": True,
@@ -278,8 +278,19 @@ def mark_as_read(notification_id=None):
     """
     try:
         user = frappe.session.user
-        
+
+        # Parse notification_id from JSON body if not provided as parameter
+        if not notification_id and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                notification_id = json_data.get('notification_id')
+                print(f"📥 [Notification Center] Parsed notification_id from JSON body: {notification_id}")
+            except Exception as e:
+                print(f"❌ [Notification Center] Failed to parse JSON body: {str(e)}")
+
         if not notification_id:
+            print(f"❌ [Notification Center] notification_id is still required after parsing")
             return {
                 "success": False,
                 "message": "notification_id is required"
@@ -350,10 +361,10 @@ def mark_all_as_read(student_id=None):
 def delete_notification(notification_id=None):
     """
     Xóa một thông báo (soft delete)
-    
+
     Args:
         notification_id: ID của notification
-        
+
     Returns:
         {
             "success": True,
@@ -362,8 +373,19 @@ def delete_notification(notification_id=None):
     """
     try:
         user = frappe.session.user
-        
+
+        # Parse notification_id from JSON body if not provided as parameter
+        if not notification_id and frappe.request.data:
+            try:
+                import json
+                json_data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                notification_id = json_data.get('notification_id')
+                print(f"📥 [Notification Center] Parsed notification_id from JSON body: {notification_id}")
+            except Exception as e:
+                print(f"❌ [Notification Center] Failed to parse JSON body: {str(e)}")
+
         if not notification_id:
+            print(f"❌ [Notification Center] notification_id is still required after parsing")
             return {
                 "success": False,
                 "message": "notification_id is required"
