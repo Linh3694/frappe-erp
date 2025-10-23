@@ -88,27 +88,30 @@ def _resolve_homeroom_teacher_name(teacher_id: str) -> str:
     except Exception as e:
         return teacher_id  # Fallback to teacher_id
 
-def _resolve_teacher_name(actual_subject_id: str, class_id: str) -> str:
-    """Resolve teacher name from SIS Subject Assignment"""
+def _resolve_teacher_names(actual_subject_id: str, class_id: str) -> list:
+    """Resolve ALL teacher names from SIS Subject Assignment"""
     try:
         if not class_id:
-            return None
-        
-        # Find assignment by actual_subject_id and class_id
-        assignment = frappe.db.sql("""
+            return []
+
+        # Find ALL assignments by actual_subject_id and class_id (remove LIMIT 1)
+        assignments = frappe.db.sql("""
             SELECT COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name
             FROM `tabSIS Subject Assignment` sa
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE sa.actual_subject_id = %s AND sa.class_id = %s
-            LIMIT 1
+            ORDER BY sa.creation
         """, (actual_subject_id, class_id), as_dict=True)
-        
-        if assignment:
-            return assignment[0].get("teacher_name", "")
+
+        return [a.get("teacher_name", "") for a in assignments if a.get("teacher_name")]
     except Exception:
-        pass
-    return None
+        return []
+
+def _resolve_teacher_name(actual_subject_id: str, class_id: str) -> str:
+    """Resolve teacher name from SIS Subject Assignment (backward compatibility)"""
+    teacher_names = _resolve_teacher_names(actual_subject_id, class_id)
+    return teacher_names[0] if teacher_names else ""
 
 
 def _load_evaluation_criteria_options(criteria_id: str) -> List[Dict[str, str]]:
@@ -707,13 +710,14 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
             
             # Extract subject title and teacher
             subject_title = subject_data.get("subject_title", subject_id)
-            resolved_teacher = _resolve_teacher_name(subject_id, class_id)
-            
+            resolved_teacher_names = _resolve_teacher_names(subject_id, class_id)
+
             # Flatten structure: move intl_scores fields to top level for binding compatibility
             subject_obj = {
                 "subject_id": subject_id,
                 "title_vn": subject_title,
-                "teacher_name": resolved_teacher or "",
+                "teacher_names": resolved_teacher_names,  # Multiple teachers support
+                "teacher_name": resolved_teacher_names[0] if resolved_teacher_names else "",  # Backward compatibility
                 # Flatten intl_scores to top level
                 "main_scores": subject_data.get("main_scores", {}),
                 "component_scores": subject_data.get("component_scores", {}),
@@ -749,12 +753,13 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(subject_data, dict):
                 # Resolve actual subject title and teacher name
                 resolved_title = _resolve_actual_subject_title(subject_id)
-                resolved_teacher = _resolve_teacher_name(subject_id, data.get("_metadata", {}).get("class_id"))
-                
+                resolved_teacher_names = _resolve_teacher_names(subject_id, data.get("_metadata", {}).get("class_id"))
+
                 subjects.append({
                     "subject_id": subject_id,
                     "title_vn": resolved_title or subject_data.get("title_vn", subject_id),
-                    "teacher_name": resolved_teacher or subject_data.get("teacher_name", ""),
+                    "teacher_names": resolved_teacher_names,  # Multiple teachers support
+                    "teacher_name": resolved_teacher_names[0] if resolved_teacher_names else subject_data.get("teacher_name", ""),  # Backward compatibility
                     "rubric": subject_data.get("rubric", {}),
                     "comments": subject_data.get("comments", []),
                     **subject_data
@@ -764,12 +769,13 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
         elif subject_eval.get("title_vn") or subject_eval.get("rubric") or subject_eval.get("comments"):
             # Resolve actual subject title and teacher name
             resolved_title = _resolve_actual_subject_title(subject_id) if subject_id else None
-            resolved_teacher = _resolve_teacher_name(subject_id, data.get("_metadata", {}).get("class_id")) if subject_id else None
-            
+            resolved_teacher_names = _resolve_teacher_names(subject_id, data.get("_metadata", {}).get("class_id")) if subject_id else []
+
             subjects.append({
                 "subject_id": subject_id or "unknown",
                 "title_vn": resolved_title or subject_eval.get("title_vn", subject_id or ""),
-                "teacher_name": resolved_teacher or subject_eval.get("teacher_name", ""),
+                "teacher_names": resolved_teacher_names,  # Multiple teachers support
+                "teacher_name": resolved_teacher_names[0] if resolved_teacher_names else subject_eval.get("teacher_name", ""),  # Backward compatibility
                 "rubric": subject_eval.get("rubric", {}),
                 "comments": subject_eval.get("comments", []),
                 **subject_eval
@@ -786,12 +792,13 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
                     if has_title or has_rubric or has_comments:
                         # Resolve actual subject title and teacher name
                         resolved_title = _resolve_actual_subject_title(key)
-                        resolved_teacher = _resolve_teacher_name(key, data.get("_metadata", {}).get("class_id"))
-                        
+                        resolved_teacher_names = _resolve_teacher_names(key, data.get("_metadata", {}).get("class_id"))
+
                         subject_obj = {
                             "subject_id": key,
                             "title_vn": resolved_title or value.get("title_vn", key),
-                            "teacher_name": resolved_teacher or value.get("teacher_name", ""),
+                            "teacher_names": resolved_teacher_names,  # Multiple teachers support
+                            "teacher_name": resolved_teacher_names[0] if resolved_teacher_names else value.get("teacher_name", ""),  # Backward compatibility
                             "rubric": value.get("rubric", {}),
                             "comments": value.get("comments", []),
                             **value

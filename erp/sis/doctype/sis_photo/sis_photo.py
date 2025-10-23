@@ -138,9 +138,19 @@ def upload_single_photo():
         frappe.logger().info(f"📝 All form_dict keys: {list(frappe.form_dict.keys())}")
         frappe.logger().info(f"📝 All parsed_params keys: {list(parsed_params.keys())}")
 
-        if not photo_type or not campus_id or not school_year_id:
-            debug_info = f"photo_type={photo_type}, campus_id={campus_id}, school_year_id={school_year_id}, args_keys={list(frappe.request.args.keys()) if hasattr(frappe.request, 'args') and frappe.request.args else 'None'}, form_dict_keys={list(frappe.form_dict.keys())}, parsed_params_keys={list(parsed_params.keys())}"
-            frappe.throw(f"Missing required parameters: photo_type, campus_id, school_year_id. Debug: {debug_info}")
+        # Campus and school_year are required for students/classes but optional for users (users are global)
+        if not photo_type:
+            frappe.throw("Photo type is required")
+
+        if photo_type != "user" and (not campus_id or not school_year_id):
+            frappe.throw(f"Missing required parameters: campus_id, school_year_id are required for {photo_type} photos")
+
+        # For user photos, set default values if missing
+        if photo_type == "user":
+            if not campus_id:
+                campus_id = "GLOBAL"
+            if not school_year_id:
+                school_year_id = "GLOBAL"
 
         # Resolve 'type' against DocType options (case-insensitive, exact option value)
         try:
