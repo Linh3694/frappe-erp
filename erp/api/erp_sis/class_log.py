@@ -343,9 +343,9 @@ def batch_get_class_logs():
         if subject_ids:
             student_logs = frappe.get_all(
                 "SIS Class Log Student",
-                filters={"class_log_subject_id": ["in", subject_ids]},
+                filters={"subject_id": ["in", subject_ids]},
                 fields=[
-                    "class_log_subject_id",
+                    "subject_id",
                     "student_id",
                     "class_student_id",
                     "homework",
@@ -359,7 +359,7 @@ def batch_get_class_logs():
         # Build map: subject_id -> list of students
         students_by_subject = {}
         for student_log in student_logs:
-            subject_id = student_log['class_log_subject_id']
+            subject_id = student_log['subject_id']
             if subject_id not in students_by_subject:
                 students_by_subject[subject_id] = []
             students_by_subject[subject_id].append(student_log)
