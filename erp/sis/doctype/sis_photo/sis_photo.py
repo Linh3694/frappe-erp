@@ -109,12 +109,14 @@ def upload_single_photo():
         def _norm(v):
             return (v or "").strip()
 
-        photo_type = _norm(parsed_params.get("photo_type") or frappe.form_dict.get("photo_type")).lower()
-        campus_id = _norm(parsed_params.get("campus_id") or frappe.form_dict.get("campus_id"))
-        school_year_id = _norm(parsed_params.get("school_year_id") or frappe.form_dict.get("school_year_id"))
-        student_code = _norm(parsed_params.get("student_code") or frappe.form_dict.get("student_code"))
-        class_name = _norm(parsed_params.get("class_name") or frappe.form_dict.get("class_name"))
+        photo_type = _norm(frappe.request.args.get("photo_type") or parsed_params.get("photo_type") or frappe.form_dict.get("photo_type")).lower()
+        campus_id = _norm(frappe.request.args.get("campus_id") or parsed_params.get("campus_id") or frappe.form_dict.get("campus_id"))
+        school_year_id = _norm(frappe.request.args.get("school_year_id") or parsed_params.get("school_year_id") or frappe.form_dict.get("school_year_id"))
+        student_code = _norm(frappe.request.args.get("student_code") or parsed_params.get("student_code") or frappe.form_dict.get("student_code"))
+        class_name = _norm(frappe.request.args.get("class_name") or parsed_params.get("class_name") or frappe.form_dict.get("class_name"))
         user_identifier = _norm(
+            frappe.request.args.get("user_email") or
+            frappe.request.args.get("user_identifier") or
             parsed_params.get("user_email") or
             parsed_params.get("user_identifier") or
             frappe.form_dict.get("user_email") or
@@ -122,16 +124,21 @@ def upload_single_photo():
         )
 
         # Debug logging
+        frappe.logger().info(f"📝 photo_type: {photo_type}, campus_id: {campus_id}, school_year_id: {school_year_id}")
+        frappe.logger().info(f"📝 user_identifier from request.args (user_email): {frappe.request.args.get('user_email')}")
+        frappe.logger().info(f"📝 user_identifier from request.args (user_identifier): {frappe.request.args.get('user_identifier')}")
         frappe.logger().info(f"📝 user_identifier from parsed_params (user_email): {parsed_params.get('user_email')}")
         frappe.logger().info(f"📝 user_identifier from parsed_params (user_identifier): {parsed_params.get('user_identifier')}")
         frappe.logger().info(f"📝 user_identifier from form_dict (user_email): {frappe.form_dict.get('user_email')}")
         frappe.logger().info(f"📝 user_identifier from form_dict (user_identifier): {frappe.form_dict.get('user_identifier')}")
         frappe.logger().info(f"📝 Final user_identifier: {user_identifier}")
+        frappe.logger().info(f"📝 All request.args keys: {list(frappe.request.args.keys()) if hasattr(frappe.request, 'args') and frappe.request.args else 'None'}")
         frappe.logger().info(f"📝 All form_dict keys: {list(frappe.form_dict.keys())}")
         frappe.logger().info(f"📝 All parsed_params keys: {list(parsed_params.keys())}")
 
         if not photo_type or not campus_id or not school_year_id:
-            frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
+            debug_info = f"photo_type={photo_type}, campus_id={campus_id}, school_year_id={school_year_id}, args_keys={list(frappe.request.args.keys()) if hasattr(frappe.request, 'args') and frappe.request.args else 'None'}, form_dict_keys={list(frappe.form_dict.keys())}, parsed_params_keys={list(parsed_params.keys())}"
+            frappe.throw(f"Missing required parameters: photo_type, campus_id, school_year_id. Debug: {debug_info}")
 
         # Resolve 'type' against DocType options (case-insensitive, exact option value)
         try:
@@ -174,7 +181,9 @@ def upload_single_photo():
             frappe.throw("Class name is required for class photos")
 
         if photo_type == "user" and not user_identifier:
-            frappe.throw("User identifier (email or employee code) is required for user photos")
+            # Debug info for troubleshooting
+            debug_info = f"photo_type={photo_type}, user_identifier={user_identifier}, args_keys={list(frappe.request.args.keys()) if hasattr(frappe.request, 'args') and frappe.request.args else 'None'}, form_dict_keys={list(frappe.form_dict.keys())}, parsed_params_keys={list(parsed_params.keys())}"
+            frappe.throw(f"User identifier (email or employee code) is required for user photos. Debug: {debug_info}")
 
         # Auto-detect type based on filename if possible
         detected_type = None
