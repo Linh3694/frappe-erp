@@ -29,7 +29,7 @@ class SISPhoto(Document):
             frappe.throw("User ID is required for user photos")
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def upload_single_photo():
     """Upload single photo for student or class"""
     try:
@@ -876,7 +876,7 @@ def upload_single_photo():
         }
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=None, school_year_id=None, page=1, limit=20):
     """Get list of photos with optional filters"""
     try:
@@ -1129,7 +1129,7 @@ def ensure_unique_student_photo(student_id, school_year_id=None, campus_id=None)
         frappe.logger().error(f"❌ Error in ensure_unique_student_photo: {str(e)}")
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def delete_photo(photo_id):
     """Delete a photo record"""
     try:
