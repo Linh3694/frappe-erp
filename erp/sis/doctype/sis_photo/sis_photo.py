@@ -11,6 +11,8 @@ import io
 from PIL import Image, ImageOps, ImageFile
 import mimetypes
 import glob
+import uuid
+from erp.api.erp_common_user.avatar_management import process_image
 
 # Allow loading truncated images to avoid conversion failures on slightly corrupted input files
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -448,13 +450,31 @@ def upload_single_photo():
             actual_email = user[0].email
             photo_title = f"Avatar of {user[0].full_name} ({actual_email})"
 
-            # Get photo URL from uploaded file
-            photo_url = file_doc.file_url or f"/files/{file_doc.file_name}"
-
-            # Update User.user_image directly (same as avatar_management.py)
+            # Use same avatar saving logic as avatar_management.py
             try:
+                # Create filename like avatar_management.py: user_{email}_{uuid}.{ext}
+                file_extension = file_doc.file_name.rsplit('.', 1)[1].lower() if '.' in file_doc.file_name else 'jpg'
+                file_id = str(uuid.uuid4())
+                avatar_filename = f"user_{actual_email}_{file_id}.{file_extension}"
+
+                # Create Avatar directory if it doesn't exist
+                avatar_dir = frappe.get_site_path("public", "files", "Avatar")
+                if not os.path.exists(avatar_dir):
+                    os.makedirs(avatar_dir)
+
+                processed_content = process_image(final_content, file_extension)
+
+                # Save to Avatar directory
+                avatar_path = os.path.join(avatar_dir, avatar_filename)
+                with open(avatar_path, 'wb') as f:
+                    f.write(processed_content)
+
+                # Create avatar URL 
+                avatar_url = f"/files/Avatar/{avatar_filename}"
+
+                # Update User.user_image directly
                 user_doc = frappe.get_doc("User", user_id)
-                user_doc.user_image = photo_url
+                user_doc.user_image = avatar_url
                 user_doc.flags.ignore_permissions = True
                 user_doc.save()
 
@@ -470,7 +490,7 @@ def upload_single_photo():
                     "success": True,
                     "message": "User avatar updated successfully",
                     "photo_id": f"user_{user_id}",
-                    "file_url": photo_url
+                    "file_url": avatar_url
                 }
             except Exception as e:
                 frappe.log_error(f"Error updating user avatar for {user_identifier}: {str(e)}")
