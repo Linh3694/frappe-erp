@@ -114,7 +114,7 @@ def upload_single_photo():
         school_year_id = _norm(parsed_params.get("school_year_id") or frappe.form_dict.get("school_year_id"))
         student_code = _norm(parsed_params.get("student_code") or frappe.form_dict.get("student_code"))
         class_name = _norm(parsed_params.get("class_name") or frappe.form_dict.get("class_name"))
-        user_email = _norm(parsed_params.get("user_email") or frappe.form_dict.get("user_email"))
+        user_identifier = _norm(parsed_params.get("user_email") or frappe.form_dict.get("user_email"))
 
         if not photo_type or not campus_id or not school_year_id:
             frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
@@ -159,8 +159,8 @@ def upload_single_photo():
         if photo_type == "class" and not class_name:
             frappe.throw("Class name is required for class photos")
 
-        if photo_type == "user" and not user_email:
-            frappe.throw("User email is required for user photos")
+        if photo_type == "user" and not user_identifier:
+            frappe.throw("User identifier (email or employee code) is required for user photos")
 
         # Auto-detect type based on filename if possible
         detected_type = None
@@ -408,19 +408,18 @@ def upload_single_photo():
         if photo_type == "user":
             # Find user by email or employee_code
             user = frappe.get_all("User",
-                filters=[["User", "enabled", "=", 1], ["User", "email", "=", user_email]],
+                filters=[["User", "enabled", "=", 1], ["User", "email", "=", user_identifier]],
                 fields=["name", "email", "full_name", "employee_code"]
             )
 
-            # If not found by email, try employee_code
             if not user:
                 user = frappe.get_all("User",
-                    filters=[["User", "enabled", "=", 1], ["User", "employee_code", "=", user_email]],
+                    filters=[["User", "enabled", "=", 1], ["User", "employee_code", "=", user_identifier]],
                     fields=["name", "email", "full_name", "employee_code"]
                 )
 
             if not user:
-                frappe.throw(f"User with email/employee_code '{user_email}' not found or disabled")
+                frappe.throw(f"User with email/employee_code '{user_identifier}' not found or disabled")
 
             user_id = user[0].name
             actual_email = user[0].email
@@ -448,7 +447,7 @@ def upload_single_photo():
                     "file_url": photo_url
                 }
             except Exception as e:
-                frappe.log_error(f"Error updating user avatar for {user_email}: {str(e)}")
+                frappe.log_error(f"Error updating user avatar for {user_identifier}: {str(e)}")
                 raise frappe.ValidationError(f"Failed to update user avatar: {str(e)}")
 
         # Find the appropriate student or class record
