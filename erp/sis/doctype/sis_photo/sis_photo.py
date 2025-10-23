@@ -114,7 +114,21 @@ def upload_single_photo():
         school_year_id = _norm(parsed_params.get("school_year_id") or frappe.form_dict.get("school_year_id"))
         student_code = _norm(parsed_params.get("student_code") or frappe.form_dict.get("student_code"))
         class_name = _norm(parsed_params.get("class_name") or frappe.form_dict.get("class_name"))
-        user_identifier = _norm(parsed_params.get("user_email") or frappe.form_dict.get("user_email"))
+        user_identifier = _norm(
+            parsed_params.get("user_email") or
+            parsed_params.get("user_identifier") or
+            frappe.form_dict.get("user_email") or
+            frappe.form_dict.get("user_identifier")
+        )
+
+        # Debug logging
+        frappe.logger().info(f"📝 user_identifier from parsed_params (user_email): {parsed_params.get('user_email')}")
+        frappe.logger().info(f"📝 user_identifier from parsed_params (user_identifier): {parsed_params.get('user_identifier')}")
+        frappe.logger().info(f"📝 user_identifier from form_dict (user_email): {frappe.form_dict.get('user_email')}")
+        frappe.logger().info(f"📝 user_identifier from form_dict (user_identifier): {frappe.form_dict.get('user_identifier')}")
+        frappe.logger().info(f"📝 Final user_identifier: {user_identifier}")
+        frappe.logger().info(f"📝 All form_dict keys: {list(frappe.form_dict.keys())}")
+        frappe.logger().info(f"📝 All parsed_params keys: {list(parsed_params.keys())}")
 
         if not photo_type or not campus_id or not school_year_id:
             frappe.throw("Missing required parameters: photo_type, campus_id, school_year_id")
