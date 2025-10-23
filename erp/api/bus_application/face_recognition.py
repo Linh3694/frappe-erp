@@ -119,29 +119,29 @@ def recognize_student_face():
                     }
 
         if not best_match or best_similarity < 0.7:  # Minimum similarity threshold
-        # Log failed recognition attempt
-        frappe.get_doc({
-            "doctype": "Activity Log",
-            "subject": f"FACE_RECOGNITION_FAILED: No matching student found",
-            "communication_date": now_datetime(),
-            "full_communication_content": json.dumps({
-                "monitor_id": monitors[0].name,
-                "trip_id": trip_id,
-                "campus_id": campus_id,
-                "school_year_id": school_year_id,
-                "best_similarity": best_similarity if best_match else 0,
-                "threshold": 0.7,
-                "recognized": False,
-                "faces_detected": len(recognized_faces),
-                "timestamp": now_datetime().isoformat()
-            })
-        }).insert(ignore_permissions=True)
+            # Log failed recognition attempt
+            frappe.get_doc({
+                "doctype": "Activity Log",
+                "subject": f"FACE_RECOGNITION_FAILED: No matching student found",
+                "communication_date": now_datetime(),
+                "full_communication_content": json.dumps({
+                    "monitor_id": monitors[0].name,
+                    "trip_id": trip_id,
+                    "campus_id": campus_id,
+                    "school_year_id": school_year_id,
+                    "best_similarity": best_similarity if best_match else 0,
+                    "threshold": 0.7,
+                    "recognized": False,
+                    "faces_detected": len(recognized_faces),
+                    "timestamp": now_datetime().isoformat()
+                })
+            }).insert(ignore_permissions=True)
 
-        return single_item_response({
-            "recognized": False,
-            "message": "No matching student found",
-            "similarity": best_similarity if best_match else 0
-        }, "Student not recognized")
+            return single_item_response({
+                "recognized": False,
+                "message": "No matching student found",
+                "similarity": best_similarity if best_match else 0
+            }, "Student not recognized")
 
         # Get student information
         student_code = best_match["student_code"]
