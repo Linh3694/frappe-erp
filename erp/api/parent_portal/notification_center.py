@@ -112,8 +112,17 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                 # Xác định type dựa vào notif.type và notif.data
                 notif_type = map_notification_type(notif.get('type'), notif.get('data', {}))
                 
-                # Check read status
-                is_read = notif.get('read', False)
+                # Check read status - try multiple possible field names
+                is_read = notif.get('read', False) or notif.get('isRead', False)
+                # Also check if there's a status field
+                if notif.get('status') == 'read':
+                    is_read = True
+                elif notif.get('status') == 'unread':
+                    is_read = False
+
+                # Debug log for read status
+                if idx < 3:  # Log first 3 notifications
+                    debug_logs.append(f"  Read status check: read={notif.get('read')}, isRead={notif.get('isRead')}, status={notif.get('status')}, final_is_read={is_read}")
                 
                 # Build notification object TRƯỚC KHI filter
                 # Clean up title, message, student_name (remove extra whitespace and newlines)
