@@ -960,7 +960,6 @@ def get_microsoft_sync_stats():
 from urllib.parse import unquote_plus
 from werkzeug.wrappers import Response
 from typing import Any
-from erp.api.erp_common_user.avatar_management import save_user_avatar_bytes
 
 def _get_webhook_logger():
     """Always get a fresh site-aware logger. Avoid module-level init before site context exists."""
@@ -1235,34 +1234,6 @@ def microsoft_webhook():
                         _logger.info(msg)
                 except Exception:
                     pass
-                # Đồng bộ avatar từ Microsoft nếu có
-                try:
-                    if email:
-                        photo_resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{user_id}/photo/$value", headers={"Authorization": headers["Authorization"]}, stream=True)
-                        if photo_resp.status_code == 200:
-                            content_type = photo_resp.headers.get('Content-Type')
-                            content_bytes = photo_resp.content
-                            save_user_avatar_bytes(email, content_bytes, content_type)
-                            if debug_enabled:
-                                debug_info.append({
-                                    "note": "avatar_synced",
-                                    "user_id": user_id,
-                                    "content_type": content_type
-                                })
-                        else:
-                            if debug_enabled:
-                                debug_info.append({
-                                    "note": "avatar_not_available",
-                                    "user_id": user_id,
-                                    "status": photo_resp.status_code
-                                })
-                except Exception as _e:
-                    if debug_enabled:
-                        debug_info.append({
-                            "note": "avatar_sync_error",
-                            "user_id": user_id,
-                            "error": str(_e)[:500]
-                        })
                 try:
                     from erp.common.redis_events import publish_user_event, is_user_events_enabled
                     if is_user_events_enabled() and email:
