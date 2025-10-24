@@ -1099,7 +1099,7 @@ def get_events_by_date_with_attendance():
 
                 # Get event students who belong to this class
                 event_students = frappe.get_all("SIS Event Student",
-                                               filters={"parent": event_id},
+                                               filters={"event_id": event_id},
                                                fields=["class_student_id", "status"])
 
                 event_debug["total_event_students"] = len(event_students)
