@@ -1001,6 +1001,54 @@ def get_education_stage():
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
+def test_overlap():
+    """
+    Test overlap logic với event và period cụ thể
+    """
+    try:
+        # Test case: Event 08:00-16:00 vs Tiết 1-10
+        event_start = frappe.request.args.get('event_start', '08:00:00')
+        event_end = frappe.request.args.get('event_end', '16:00:00')
+        period_start = frappe.request.args.get('period_start', '15:30:00')
+        period_end = frappe.request.args.get('period_end', '16:00:00')
+        
+        # Test time_to_minutes function
+        event_start_min = time_to_minutes(event_start)
+        event_end_min = time_to_minutes(event_end)
+        period_start_min = time_to_minutes(period_start)
+        period_end_min = time_to_minutes(period_end)
+        
+        # Test overlap
+        event_range = {'startTime': event_start, 'endTime': event_end}
+        period_range = {'start_time': period_start, 'end_time': period_end}
+        
+        overlap_result = time_ranges_overlap(event_range, period_range)
+        
+        # Manual calculation
+        manual_overlap = event_start_min < period_end_min and period_start_min < event_end_min
+        
+        result = {
+            "event_time": f"{event_start} - {event_end}",
+            "period_time": f"{period_start} - {period_end}",
+            "event_start_minutes": event_start_min,
+            "event_end_minutes": event_end_min,
+            "period_start_minutes": period_start_min,
+            "period_end_minutes": period_end_min,
+            "overlap_function_result": overlap_result,
+            "manual_overlap_calculation": manual_overlap,
+            "formula": f"{event_start_min} < {period_end_min} AND {period_start_min} < {event_end_min}",
+            "match": overlap_result == manual_overlap
+        }
+        
+        return success_response(result)
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return error_response(f"Test failed: {str(e)}\n{error_detail}", code="TEST_ERROR")
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
 def debug_class_students():
     """
     Debug API để kiểm tra class students của một lớp
