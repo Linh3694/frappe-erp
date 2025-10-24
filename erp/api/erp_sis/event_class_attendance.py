@@ -942,12 +942,32 @@ def get_events_by_date_with_attendance():
     try:
         frappe.logger().info("🚀 [Backend] get_events_by_date_with_attendance called")
 
-        # Get request parameters
-        class_id = frappe.form_dict.get("class_id")
-        date = frappe.form_dict.get("date")
+        # Debug: Log all possible parameter sources
+        debug_info = {
+            "form_dict": dict(frappe.form_dict),
+            "local_form_dict": dict(frappe.local.form_dict) if hasattr(frappe.local, 'form_dict') else {},
+            "request_args": dict(frappe.request.args) if hasattr(frappe.request, 'args') else {},
+            "request_method": frappe.request.method if hasattr(frappe.request, 'method') else None,
+            "request_data": frappe.request.data.decode('utf-8') if hasattr(frappe.request, 'data') and frappe.request.data else None
+        }
+
+        frappe.logger().info(f"🔍 [Debug] Parameter sources: {debug_info}")
+
+        # Try multiple ways to get parameters
+        class_id = (frappe.form_dict.get("class_id") or
+                   frappe.local.form_dict.get("class_id") or
+                   frappe.request.args.get("class_id"))
+
+        date = (frappe.form_dict.get("date") or
+                frappe.local.form_dict.get("date") or
+                frappe.request.args.get("date"))
+
+        frappe.logger().info(f"📝 [Debug] Extracted parameters - class_id: '{class_id}', date: '{date}'")
 
         if not class_id or not date:
-            return error_response("Missing class_id or date", code="MISSING_PARAMS")
+            debug_info["extracted_class_id"] = class_id
+            debug_info["extracted_date"] = date
+            return error_response("Missing class_id or date", code="MISSING_PARAMS", debug_info=debug_info)
 
         frappe.logger().info(f"📝 [Backend] Parameters: class_id={class_id}, date={date}")
 
