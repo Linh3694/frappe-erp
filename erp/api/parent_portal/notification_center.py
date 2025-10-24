@@ -125,9 +125,26 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
                     debug_logs.append(f"  Read status check: read={notif.get('read')}, isRead={notif.get('isRead')}, status={notif.get('status')}, final_is_read={is_read}")
                 
                 # Build notification object TRƯỚC KHI filter
-                # Clean up title, message, student_name (remove extra whitespace and newlines)
-                title = (notif.get('title', 'No title') or 'No title').strip()
-                message = (notif.get('message', 'No message') or 'No message').strip()
+                # Clean up title, message, student_name (handle both string and object formats)
+                raw_title = notif.get('title', 'No title') or 'No title'
+                raw_message = notif.get('message', 'No message') or 'No message'
+                
+                # Handle title - can be string or object {vi: "...", en: "..."}
+                if isinstance(raw_title, dict):
+                    title = raw_title  # Keep object as-is for frontend to handle
+                elif isinstance(raw_title, str):
+                    title = raw_title.strip()
+                else:
+                    title = str(raw_title).strip()
+                
+                # Handle message - can be string or object {vi: "...", en: "..."}
+                if isinstance(raw_message, dict):
+                    message = raw_message  # Keep object as-is for frontend to handle
+                elif isinstance(raw_message, str):
+                    message = raw_message.strip()
+                else:
+                    message = str(raw_message).strip()
+                
                 student_name = get_student_name_from_notification(notif)
                 if student_name:
                     student_name = student_name.strip()
