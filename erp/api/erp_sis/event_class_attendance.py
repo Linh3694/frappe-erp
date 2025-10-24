@@ -988,64 +988,27 @@ def get_events_by_date_with_attendance():
     try:
         frappe.logger().info("🚀 [Backend] get_events_by_date_with_attendance called")
 
-        # Debug: Log all possible parameter sources
-        debug_info = {
-            "form_dict": dict(frappe.form_dict),
-            "local_form_dict": dict(frappe.local.form_dict) if hasattr(frappe.local, 'form_dict') else {},
-            "request_args": dict(frappe.request.args) if hasattr(frappe.request, 'args') else {},
-            "request_method": frappe.request.method if hasattr(frappe.request, 'method') else None,
-            "request_data": frappe.request.data.decode('utf-8') if hasattr(frappe.request, 'data') and frappe.request.data else None
-        }
-
-        frappe.logger().info(f"🔍 [Debug] Parameter sources: {debug_info}")
-
-        # Try multiple ways to get parameters
-        class_id = (frappe.form_dict.get("class_id") or
-                   frappe.local.form_dict.get("class_id") or
-                   frappe.request.args.get("class_id"))
-
-        date = (frappe.form_dict.get("date") or
-                frappe.local.form_dict.get("date") or
-                frappe.request.args.get("date"))
-
-        frappe.logger().info(f"📝 [Debug] Extracted parameters - class_id: '{class_id}', date: '{date}'")
+        # Get request parameters
+        class_id = frappe.form_dict.get("class_id")
+        date = frappe.form_dict.get("date")
 
         if not class_id or not date:
             debug_info["extracted_class_id"] = class_id
             debug_info["extracted_date"] = date
             return error_response("Missing class_id or date", code="MISSING_PARAMS", debug_info=debug_info)
 
-        # Always include debug info in response for troubleshooting
-        debug_info["extracted_class_id"] = class_id
-        debug_info["extracted_date"] = date
+        # Include minimal debug info for production
+        debug_info["events_found"] = len(events)
+        debug_info["events_returned"] = len(result_events)
 
         frappe.logger().info(f"📝 [Backend] Parameters: class_id={class_id}, date={date}")
 
-        # Get all approved events (and also check for other statuses for debugging)
+        # Get all approved events
         events = frappe.get_all("SIS Event",
                                fields=["name", "title", "status"],
                                filters={"status": "approved"})
 
-        # Debug: Force include our specific event if it's not in the list
-        event_ids = [e['name'] for e in events]
-        if "SIS-EVENT-3261554" not in event_ids:
-            frappe.logger().info("⚠️ [Debug] SIS-EVENT-3261554 not found in approved events list, adding it manually")
-            events.append({
-                "name": "SIS-EVENT-3261554",
-                "title": "Test điểm danh",
-                "status": "approved"
-            })
-
-        # Debug: Check if our specific event exists and what status it has
-        specific_event = frappe.get_all("SIS Event",
-                                      fields=["name", "title", "status"],
-                                      filters={"name": "SIS-EVENT-3261554"})
-
-        debug_info["specific_event_SIS-EVENT-3261554"] = specific_event[0] if specific_event else "NOT FOUND"
-        debug_info["events_manually_added"] = ["SIS-EVENT-3261554"] if "SIS-EVENT-3261554" not in event_ids else []
-
-        frappe.logger().info(f"📊 [Backend] Found {len(events)} approved events (including manually added)")
-        frappe.logger().info(f"📋 [Debug] Event names: {[e['name'] for e in events]}")
+        frappe.logger().info(f"📊 [Backend] Found {len(events)} approved events")
 
         result_events = []
         event_filter_debug = []  # Track why events are filtered out
@@ -1065,9 +1028,6 @@ def get_events_by_date_with_attendance():
             try:
                 event_id = event['name']
 
-                # Special debug for our specific event
-                if event_id == "SIS-EVENT-3261554":
-                    frappe.logger().info(f"🎯 [Debug] Processing our specific event: {event}")
 
                 # Get event date times for this specific date
                 event_date_times = frappe.get_all("SIS Event Date Time",
@@ -1077,7 +1037,6 @@ def get_events_by_date_with_attendance():
                                                  },
                                                  fields=["start_time", "end_time"])
 
-                frappe.logger().info(f"🔍 [Debug] Event {event_id} - date_times found: {len(event_date_times)} for date {date}")
 
                 event_debug = {
                     "event_id": event_id,
@@ -1139,7 +1098,8 @@ def get_events_by_date_with_attendance():
                             student_doc = type('MockStudent', (), {
                                 'student_name': f'Student {student_id}',
                                 'student_code': student_id.split('-')[-1] if '-' in student_id else student_id,
-                                'user_image': None
+                                'user_image': None,
+                                'image': None
                             })()
 
                     # Get attendance status for this event on this date
@@ -1157,12 +1117,18 @@ def get_events_by_date_with_attendance():
                     if status in ['present', 'late']:
                         attended_count += 1
 
+                    # Try to get image from various fields
+                    user_image = (getattr(student_doc, 'user_image', None) or
+                                getattr(student_doc, 'image', None) or
+                                getattr(student_doc, 'photo', None) or
+                                getattr(student_doc, 'avatar', None))
+
                     students_info.append({
                         "studentId": student_id,
-                        "studentName": getattr(student_doc, 'student_name', '') or '',
+                        "studentName": getattr(student_doc, 'student_name', '') or getattr(student_doc, 'full_name', '') or '',
                         "studentCode": getattr(student_doc, 'student_code', '') or '',
                         "status": status,
-                        "userImage": getattr(student_doc, 'user_image', None)
+                        "userImage": user_image
                     })
 
                 # Use the first date time (assuming events have only one time slot per day)
