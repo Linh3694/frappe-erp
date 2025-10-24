@@ -189,12 +189,10 @@ def sync_event_to_class_attendance():
             frappe.logger().info("✅ No overlapping schedules found")
             return success_response({"synced_count": 0}, "No overlapping periods")
 
-        # Lấy danh sách học sinh tham gia sự kiện (child table)
-        event_students = frappe.db.sql("""
-            SELECT student_id, student_code, student_name
-            FROM `tabSIS Event Student`
-            WHERE parenttype = 'SIS Event' AND parent = %s AND status = 'approved'
-        """, (event_id,), as_dict=True)
+        # Lấy danh sách học sinh tham gia sự kiện
+        event_students = frappe.get_all("SIS Event Student",
+                                      filters={"event_id": event_id, "status": "approved"},
+                                      fields=["student_id", "student_code", "student_name"])
 
         synced_count = 0
 
@@ -457,16 +455,13 @@ def get_events_by_class_period():
                             except Exception as e1:
                                 debug_logs.append(f"❌ [Backend] Try 1 failed: {str(e1)}")
                             
-                            # Try 2: parent field if first failed
+                            # Try 2: using event_id if first failed
                             if not event_students:
                                 try:
-                                    # Try with SQL for child table
-                                    event_students = frappe.db.sql("""
-                                        SELECT class_student_id, status
-                                        FROM `tabSIS Event Student`
-                                        WHERE parenttype = 'SIS Event' AND parent = %s
-                                    """, (event['name'],), as_dict=True)
-                                    debug_logs.append(f"🔍 [Backend] Try 2 - SQL query: {len(event_students)} students")
+                                    event_students = frappe.get_all("SIS Event Student",
+                                                                   filters={"event_id": event['name']},
+                                                                   fields=["class_student_id", "status"])
+                                    debug_logs.append(f"🔍 [Backend] Try 2 - event_id filter: {len(event_students)} students")
                                 except Exception as e2:
                                     debug_logs.append(f"❌ [Backend] Try 2 failed: {str(e2)}")
                             
@@ -797,12 +792,9 @@ def batch_get_event_attendance():
                     continue
                 
                 # Get event students (once per event)
-                # SIS Event Student might be a child table, use SQL for safety
-                event_students = frappe.db.sql("""
-                    SELECT class_student_id, status
-                    FROM `tabSIS Event Student`
-                    WHERE parenttype = 'SIS Event' AND parent = %s
-                """, (event['name'],), as_dict=True)
+                event_students = frappe.get_all("SIS Event Student",
+                                               filters={"event_id": event['name']},
+                                               fields=["class_student_id", "status"])
                 
                 frappe.logger().info(f"👥 [Debug] Event {event['name']}: found {len(event_students)} event students")
                 
@@ -1028,24 +1020,10 @@ def debug_event_structure():
                                          filters={"event_id": event_id},
                                          fields=["name", "event_date", "start_time", "end_time"])
         
-        # Get event students - try different field names
-        event_students = []
-        try:
-            # Try with event_id field first
-            event_students = frappe.get_all("SIS Event Student",
-                                           filters={"event_id": event_id},
-                                           fields=["name", "student_id", "student_name", "student_code", "class_student_id", "status"])
-        except Exception as e1:
-            frappe.logger().error(f"❌ Try 1 (event_id) failed: {str(e1)}")
-            try:
-                # Try with parent field (for child tables)
-                event_students = frappe.db.sql("""
-                    SELECT name, student_id, student_name, student_code, class_student_id, status
-                    FROM `tabSIS Event Student`
-                    WHERE parenttype = 'SIS Event' AND parent = %s
-                """, (event_id,), as_dict=True)
-            except Exception as e2:
-                frappe.logger().error(f"❌ Try 2 (parent via SQL) failed: {str(e2)}")
+        # Get event students - standalone table with event_id
+        event_students = frappe.get_all("SIS Event Student",
+                                       filters={"event_id": event_id},
+                                       fields=["name", "student_id", "student_name", "student_code", "class_student_id", "status"])
         
         # Get event attendance if date provided
         event_attendance = []
