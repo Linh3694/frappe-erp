@@ -3,9 +3,8 @@
 
 import frappe
 from frappe import _
-from frappe.utils import nowdate, get_datetime, add_days, getdate
+from frappe.utils import nowdate, get_datetime, add_days, getdate, now_datetime
 import json
-from datetime import datetime, date
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -62,7 +61,7 @@ def get_monitor_daily_trips():
                 dt.trip_status,
                 dt.notes,
                 br.route_name,
-                bv.bus_number,
+                bv.vehicle_code as bus_number,
                 bv.license_plate,
                 COUNT(dts.name) as total_students,
                 SUM(CASE WHEN dts.student_status = 'Boarded' THEN 1 ELSE 0 END) as boarded_count,
@@ -154,10 +153,9 @@ def get_daily_trip_detail(trip_id=None):
         trip_data = frappe.db.sql("""
             SELECT
                 dt.*,
-                br.route_name, br.short_name as route_short_name,
-                br.description as route_description,
-                bv.bus_number, bv.license_plate, bv.bus_model,
-                bd.driver_name, bd.phone_number as driver_phone
+                br.route_name,
+                bv.vehicle_code as bus_number, bv.license_plate, bv.vehicle_type as bus_model,
+                bd.full_name as driver_name, bd.phone_number as driver_phone
             FROM `tabSIS Bus Daily Trip` dt
             LEFT JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
             LEFT JOIN `tabSIS Bus Transportation` bv ON dt.vehicle_id = bv.name
@@ -176,19 +174,18 @@ def get_daily_trip_detail(trip_id=None):
                 dts.class_name,
                 dts.student_status,
                 dts.boarding_time,
-                dts.boarding_method,
                 dts.drop_off_time,
-                dts.drop_off_method,
                 dts.absent_reason,
-                dts.emergency_contact,
-                dts.medical_notes,
+                dts.pickup_location,
+                dts.drop_off_location,
+                dts.notes,
                 cs.user_image as photo_url,
                 cs.dob,
                 cs.gender
             FROM `tabSIS Bus Daily Trip Student` dts
             LEFT JOIN `tabCRM Student` cs ON dts.student_id = cs.name
             WHERE dts.parent = %s
-            ORDER BY dts.student_name ASC
+            ORDER BY dts.pickup_order ASC
         """, (trip_id,), as_dict=True)
 
         # Add fallback photo from SIS Photo if needed
@@ -207,7 +204,7 @@ def get_daily_trip_detail(trip_id=None):
         # Calculate statistics
         stats = {
             "total_students": len(students),
-            "not_checked": sum(1 for s in students if s.student_status == "Not Checked"),
+            "not_boarded": sum(1 for s in students if s.student_status == "Not Boarded"),
             "boarded": sum(1 for s in students if s.student_status == "Boarded"),
             "dropped_off": sum(1 for s in students if s.student_status == "Dropped Off"),
             "absent": sum(1 for s in students if s.student_status == "Absent")
@@ -216,13 +213,13 @@ def get_daily_trip_detail(trip_id=None):
         # Generate warnings
         warnings = []
         if trip_data["trip_type"] == "Đón":
-            if stats["not_checked"] > 0:
-                warnings.append(f"Còn {stats['not_checked']} học sinh chưa lên xe")
-            if stats["not_checked"] > stats["total_students"] * 0.2:
+            if stats["not_boarded"] > 0:
+                warnings.append(f"Còn {stats['not_boarded']} học sinh chưa lên xe")
+            if stats["not_boarded"] > stats["total_students"] * 0.2:
                 warnings.append("⚠️ Hơn 20% học sinh chưa check-in")
         else:  # Trả
-            if stats["not_checked"] + stats["boarded"] > 0:
-                remaining = stats["not_checked"] + stats["boarded"]
+            if stats["not_boarded"] + stats["boarded"] > 0:
+                remaining = stats["not_boarded"] + stats["boarded"]
                 warnings.append(f"Còn {remaining} học sinh chưa xuống xe")
 
         trip_data["students"] = students
@@ -397,10 +394,10 @@ def complete_daily_trip():
 
         if trip.trip_type == "Đón":  # Pickup
             completed = sum(1 for s in students if s.student_status in ["Boarded", "Absent"])
-            pending = sum(1 for s in students if s.student_status == "Not Checked")
+            pending = sum(1 for s in students if s.student_status == "Not Boarded")
         else:  # Drop-off
             completed = sum(1 for s in students if s.student_status in ["Dropped Off", "Absent"])
-            pending = sum(1 for s in students if s.student_status in ["Not Checked", "Boarded"])
+            pending = sum(1 for s in students if s.student_status in ["Not Boarded", "Boarded"])
 
         completion_rate = (completed / total * 100) if total > 0 else 0
 
