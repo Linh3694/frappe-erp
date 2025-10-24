@@ -35,36 +35,154 @@ class SISBusDailyTrip(Document):
 			frappe.throw("Ngày chạy không được là ngày trong quá khứ")
 
 	def validate_trip_assignment(self):
-		"""Validate that monitors are not assigned to multiple trips on same date"""
+		"""Validate that monitors, driver, and vehicle are not assigned to multiple trips on same date+trip_type from ACTIVE routes"""
 		if self.monitor1_id == self.monitor2_id:
 			frappe.throw("Monitor 1 và Monitor 2 không được giống nhau")
 
-		# Check if monitors are already assigned to OTHER ROUTES' trips on same date
-		# Allow same monitors within same route but different trip types/times
+		# Check if resources (monitor, driver, vehicle) are already assigned to OTHER ACTIVE ROUTES' trips
+		# on same date AND same trip_type (Đón hoặc Trả)
+		# Allow same resources within same route for different trip types
+		# Only check against Active routes to allow reusing resources from Inactive routes
 		# Handle case where self.name might be None for new documents
+		
 		if self.name:
-			# For existing documents, exclude current trip by name
-			existing_trips = frappe.db.sql("""
-				SELECT name, route_id, trip_type
-				FROM `tabSIS Bus Daily Trip`
-				WHERE trip_date = %s
-				AND (monitor1_id = %s OR monitor2_id = %s OR monitor1_id = %s OR monitor2_id = %s)
-				AND name != %s
-				AND route_id != %s
-			""", (self.trip_date, self.monitor1_id, self.monitor1_id, self.monitor2_id, self.monitor2_id, self.name, self.route_id), as_dict=True)
+			# For existing documents, exclude current trip by name and route
+			
+			# Check monitors
+			if self.monitor1_id or self.monitor2_id:
+				monitor_conditions = []
+				monitor_params = [self.trip_date, self.trip_type]
+				
+				if self.monitor1_id:
+					monitor_conditions.append("dt.monitor1_id = %s OR dt.monitor2_id = %s")
+					monitor_params.extend([self.monitor1_id, self.monitor1_id])
+				if self.monitor2_id:
+					monitor_conditions.append("dt.monitor1_id = %s OR dt.monitor2_id = %s")
+					monitor_params.extend([self.monitor2_id, self.monitor2_id])
+				
+				monitor_params.extend([self.name, self.route_id])
+				
+				monitor_query = f"""
+					SELECT dt.name, dt.route_id, br.route_name
+					FROM `tabSIS Bus Daily Trip` dt
+					INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+					WHERE dt.trip_date = %s AND dt.trip_type = %s
+					AND ({' OR '.join(monitor_conditions)})
+					AND dt.name != %s
+					AND dt.route_id != %s
+					AND br.status = 'Active'
+				"""
+				monitor_conflicts = frappe.db.sql(monitor_query, monitor_params, as_dict=True)
+				
+				if monitor_conflicts:
+					route_names = [f"{t.route_name}" for t in monitor_conflicts]
+					frappe.throw(f"Monitor đã phân công cho chuyến {self.trip_type} khác: {', '.join(set(route_names))}")
+			
+			# Check driver
+			if self.driver_id:
+				driver_query = """
+					SELECT dt.name, dt.route_id, br.route_name
+					FROM `tabSIS Bus Daily Trip` dt
+					INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+					WHERE dt.trip_date = %s AND dt.trip_type = %s
+					AND dt.driver_id = %s
+					AND dt.name != %s
+					AND dt.route_id != %s
+					AND br.status = 'Active'
+				"""
+				driver_params = [self.trip_date, self.trip_type, self.driver_id, self.name, self.route_id]
+				driver_conflicts = frappe.db.sql(driver_query, driver_params, as_dict=True)
+				
+				if driver_conflicts:
+					route_names = [f"{t.route_name}" for t in driver_conflicts]
+					frappe.throw(f"Tài xế đã phân công cho chuyến {self.trip_type} khác: {', '.join(set(route_names))}")
+			
+			# Check vehicle
+			if self.vehicle_id:
+				vehicle_query = """
+					SELECT dt.name, dt.route_id, br.route_name
+					FROM `tabSIS Bus Daily Trip` dt
+					INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+					WHERE dt.trip_date = %s AND dt.trip_type = %s
+					AND dt.vehicle_id = %s
+					AND dt.name != %s
+					AND dt.route_id != %s
+					AND br.status = 'Active'
+				"""
+				vehicle_params = [self.trip_date, self.trip_type, self.vehicle_id, self.name, self.route_id]
+				vehicle_conflicts = frappe.db.sql(vehicle_query, vehicle_params, as_dict=True)
+				
+				if vehicle_conflicts:
+					route_names = [f"{t.route_name}" for t in vehicle_conflicts]
+					frappe.throw(f"Xe đã phân công cho chuyến {self.trip_type} khác: {', '.join(set(route_names))}")
+		
 		else:
 			# For new documents, only exclude by route_id
-			existing_trips = frappe.db.sql("""
-				SELECT name, route_id, trip_type
-				FROM `tabSIS Bus Daily Trip`
-				WHERE trip_date = %s
-				AND (monitor1_id = %s OR monitor2_id = %s OR monitor1_id = %s OR monitor2_id = %s)
-				AND route_id != %s
-			""", (self.trip_date, self.monitor1_id, self.monitor1_id, self.monitor2_id, self.monitor2_id, self.route_id), as_dict=True)
-
-		if existing_trips:
-			route_names = [trip.route_id for trip in existing_trips]
-			frappe.throw(f"Monitor đã được phân công cho chuyến khác trong ngày: {', '.join(set(route_names))}")
+			
+			# Check monitors
+			if self.monitor1_id or self.monitor2_id:
+				monitor_conditions = []
+				monitor_params = [self.trip_date, self.trip_type]
+				
+				if self.monitor1_id:
+					monitor_conditions.append("dt.monitor1_id = %s OR dt.monitor2_id = %s")
+					monitor_params.extend([self.monitor1_id, self.monitor1_id])
+				if self.monitor2_id:
+					monitor_conditions.append("dt.monitor1_id = %s OR dt.monitor2_id = %s")
+					monitor_params.extend([self.monitor2_id, self.monitor2_id])
+				
+				monitor_params.append(self.route_id)
+				
+				monitor_query = f"""
+					SELECT dt.name, dt.route_id, br.route_name
+					FROM `tabSIS Bus Daily Trip` dt
+					INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+					WHERE dt.trip_date = %s AND dt.trip_type = %s
+					AND ({' OR '.join(monitor_conditions)})
+					AND dt.route_id != %s
+					AND br.status = 'Active'
+				"""
+				monitor_conflicts = frappe.db.sql(monitor_query, monitor_params, as_dict=True)
+				
+				if monitor_conflicts:
+					route_names = [f"{t.route_name}" for t in monitor_conflicts]
+					frappe.throw(f"Monitor đã phân công cho chuyến {self.trip_type} khác: {', '.join(set(route_names))}")
+			
+			# Check driver
+			if self.driver_id:
+				driver_query = """
+					SELECT dt.name, dt.route_id, br.route_name
+					FROM `tabSIS Bus Daily Trip` dt
+					INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+					WHERE dt.trip_date = %s AND dt.trip_type = %s
+					AND dt.driver_id = %s
+					AND dt.route_id != %s
+					AND br.status = 'Active'
+				"""
+				driver_params = [self.trip_date, self.trip_type, self.driver_id, self.route_id]
+				driver_conflicts = frappe.db.sql(driver_query, driver_params, as_dict=True)
+				
+				if driver_conflicts:
+					route_names = [f"{t.route_name}" for t in driver_conflicts]
+					frappe.throw(f"Tài xế đã phân công cho chuyến {self.trip_type} khác: {', '.join(set(route_names))}")
+			
+			# Check vehicle
+			if self.vehicle_id:
+				vehicle_query = """
+					SELECT dt.name, dt.route_id, br.route_name
+					FROM `tabSIS Bus Daily Trip` dt
+					INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+					WHERE dt.trip_date = %s AND dt.trip_type = %s
+					AND dt.vehicle_id = %s
+					AND dt.route_id != %s
+					AND br.status = 'Active'
+				"""
+				vehicle_params = [self.trip_date, self.trip_type, self.vehicle_id, self.route_id]
+				vehicle_conflicts = frappe.db.sql(vehicle_query, vehicle_params, as_dict=True)
+				
+				if vehicle_conflicts:
+					route_names = [f"{t.route_name}" for t in vehicle_conflicts]
+					frappe.throw(f"Xe đã phân công cho chuyến {self.trip_type} khác: {', '.join(set(route_names))}")
 
 	def on_update(self):
 		"""Update trip status based on current time"""

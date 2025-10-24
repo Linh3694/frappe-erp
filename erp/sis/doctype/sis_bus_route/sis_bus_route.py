@@ -99,28 +99,69 @@ class SISBusRoute(Document):
 					conflicts.append(f"Monitor 2 đã ở tuyến Active {route.route_name}")
 			frappe.throw(f"Trùng monitor: {'; '.join(set(conflicts))}")
 		
-		# Also check if monitors have future daily trips from other routes
+		# Also check if resources (monitor, driver, vehicle) have future daily trips from OTHER ACTIVE routes
+		# This ensures no resource conflicts when creating/updating route
 		from datetime import datetime, timedelta
 		today = datetime.now().date()
 		future_date = today + timedelta(days=30)
 		
 		exclude_route = self.name if self.name else "NONE"
-		placeholders = ','.join(['%s'] * len(monitors_to_check))
 		
-		future_trips_query = f"""
-			SELECT DISTINCT route_id, trip_date
-			FROM `tabSIS Bus Daily Trip`
-			WHERE (monitor1_id IN ({placeholders}) OR monitor2_id IN ({placeholders}))
-			AND trip_date BETWEEN %s AND %s
-			AND route_id != %s
-			LIMIT 5
-		"""
-		params = monitors_to_check + monitors_to_check + [today, future_date, exclude_route]
-		conflicting_trips = frappe.db.sql(future_trips_query, params, as_dict=True)
+		# Check monitors
+		if monitors_to_check:
+			placeholders = ','.join(['%s'] * len(monitors_to_check))
+			monitor_trips_query = f"""
+				SELECT DISTINCT dt.route_id, dt.trip_date, dt.trip_type, br.route_name
+				FROM `tabSIS Bus Daily Trip` dt
+				INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+				WHERE (dt.monitor1_id IN ({placeholders}) OR dt.monitor2_id IN ({placeholders}))
+				AND dt.trip_date BETWEEN %s AND %s
+				AND dt.route_id != %s
+				AND br.status = 'Active'
+				LIMIT 3
+			"""
+			params = monitors_to_check + monitors_to_check + [today, future_date, exclude_route]
+			monitor_conflicts = frappe.db.sql(monitor_trips_query, params, as_dict=True)
+			
+			if monitor_conflicts:
+				trip_info = [f"{t.route_name} - {t.trip_type} ({t.trip_date})" for t in monitor_conflicts]
+				frappe.throw(f"Monitor đã có lịch chạy xe: {', '.join(trip_info)}...")
 		
-		if conflicting_trips:
-			trip_info = [f"{t.route_id} ({t.trip_date})" for t in conflicting_trips[:3]]
-			frappe.throw(f"Monitor đã có lịch chạy xe tại: {', '.join(trip_info)}...")
+		# Check driver
+		if self.driver_id:
+			driver_trips_query = """
+				SELECT DISTINCT dt.route_id, dt.trip_date, dt.trip_type, br.route_name
+				FROM `tabSIS Bus Daily Trip` dt
+				INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+				WHERE dt.driver_id = %s
+				AND dt.trip_date BETWEEN %s AND %s
+				AND dt.route_id != %s
+				AND br.status = 'Active'
+				LIMIT 3
+			"""
+			driver_conflicts = frappe.db.sql(driver_trips_query, [self.driver_id, today, future_date, exclude_route], as_dict=True)
+			
+			if driver_conflicts:
+				trip_info = [f"{t.route_name} - {t.trip_type} ({t.trip_date})" for t in driver_conflicts]
+				frappe.throw(f"Tài xế đã có lịch chạy xe: {', '.join(trip_info)}...")
+		
+		# Check vehicle
+		if self.vehicle_id:
+			vehicle_trips_query = """
+				SELECT DISTINCT dt.route_id, dt.trip_date, dt.trip_type, br.route_name
+				FROM `tabSIS Bus Daily Trip` dt
+				INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+				WHERE dt.vehicle_id = %s
+				AND dt.trip_date BETWEEN %s AND %s
+				AND dt.route_id != %s
+				AND br.status = 'Active'
+				LIMIT 3
+			"""
+			vehicle_conflicts = frappe.db.sql(vehicle_trips_query, [self.vehicle_id, today, future_date, exclude_route], as_dict=True)
+			
+			if vehicle_conflicts:
+				trip_info = [f"{t.route_name} - {t.trip_type} ({t.trip_date})" for t in vehicle_conflicts]
+				frappe.throw(f"Xe đã có lịch chạy: {', '.join(trip_info)}...")
 
 	def after_insert(self):
 		"""Create daily trips when route is created"""
