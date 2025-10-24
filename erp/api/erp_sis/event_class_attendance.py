@@ -1121,11 +1121,27 @@ def get_events_by_date_with_attendance():
                     if status in ['present', 'late']:
                         attended_count += 1
 
-                    # Try to get image from various fields
-                    user_image = (getattr(student_doc, 'user_image', None) or
-                                getattr(student_doc, 'image', None) or
-                                getattr(student_doc, 'photo', None) or
-                                getattr(student_doc, 'avatar', None))
+                    # Get student image from SIS Photo table
+                    user_image = None
+                    try:
+                        # Query SIS Photo table for this student
+                        photo_record = frappe.get_all("SIS Photo",
+                                                     filters={"student_id": student_id, "status": "Active"},
+                                                     fields=["name", "photo_url"],
+                                                     order_by="creation desc",
+                                                     limit_page_length=1)
+                        if photo_record and photo_record[0].get("photo_url"):
+                            user_image = photo_record[0]["photo_url"]
+                            frappe.logger().info(f"📸 [Debug] Found photo for student {student_id}: {user_image}")
+                        else:
+                            frappe.logger().info(f"📸 [Debug] No photo found for student {student_id}")
+                    except Exception as photo_error:
+                        frappe.logger().warning(f"⚠️ [Debug] Error getting photo for student {student_id}: {str(photo_error)}")
+                        # Fallback to student record fields if SIS Photo fails
+                        user_image = (getattr(student_doc, 'user_image', None) or
+                                    getattr(student_doc, 'image', None) or
+                                    getattr(student_doc, 'photo', None) or
+                                    getattr(student_doc, 'avatar', None))
 
                     students_info.append({
                         "studentId": student_id,
