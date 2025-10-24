@@ -813,13 +813,18 @@ def batch_get_event_attendance():
                     continue
                 
                 # Check which periods this event overlaps with
+                # Convert timedelta to string if needed
+                start_time_raw = matching_dt.get('start_time', '')
+                end_time_raw = matching_dt.get('end_time', '')
+                
                 event_time_range = {
-                    'startTime': str(matching_dt.get('start_time', '')),
-                    'endTime': str(matching_dt.get('end_time', ''))
+                    'startTime': str(start_time_raw) if start_time_raw else '',
+                    'endTime': str(end_time_raw) if end_time_raw else ''
                 }
 
                 frappe.logger().info(f"🎯 [Debug] Event {event['name']} ({event['title']}) time range: {event_time_range}")
-                frappe.logger().info(f"🎯 [Debug] Event time types: start_time type={type(matching_dt.get('start_time'))}, end_time type={type(matching_dt.get('end_time'))}")
+                frappe.logger().info(f"🎯 [Debug] Event time types: start_time type={type(start_time_raw)}, end_time type={type(end_time_raw)}")
+                frappe.logger().info(f"🎯 [Debug] Event time values: start={start_time_raw}, end={end_time_raw}")
 
                 # Track if this event overlaps with any period
                 event_has_overlap = False
@@ -830,20 +835,22 @@ def batch_get_event_attendance():
                         frappe.logger().warning(f"⚠️ [Debug] No schedule found for period {period_name}")
                         continue
 
-                    schedule_time = {
-                        'start_time': schedule.get('start_time'),
-                        'end_time': schedule.get('end_time')
-                    }
-
-                    frappe.logger().info(f"📅 [Debug] Checking period '{period_name}': event={event_time_range}, schedule={schedule_time}")
-                    frappe.logger().info(f"📅 [Debug] Schedule time types: start_time type={type(schedule.get('start_time'))}, end_time type={type(schedule.get('end_time'))}")
+                    # Use schedule directly for overlap check (contains start_time and end_time)
+                    # time_ranges_overlap expects: range2.get('start_time') and range2.get('end_time')
+                    schedule_start_raw = schedule.get('start_time')
+                    schedule_end_raw = schedule.get('end_time')
+                    
+                    frappe.logger().info(f"📅 [Debug] Checking period '{period_name}':")
+                    frappe.logger().info(f"📅 [Debug]   Event: {event_time_range}")
+                    frappe.logger().info(f"📅 [Debug]   Schedule: start={schedule_start_raw} (type={type(schedule_start_raw)}), end={schedule_end_raw} (type={type(schedule_end_raw)})")
 
                     overlap = time_ranges_overlap(event_time_range, schedule)
                     overlap_debug.append({
                         "event": event['name'],
                         "period": period_name,
                         "event_time": event_time_range,
-                        "schedule_time": schedule_time,
+                        "schedule_start": str(schedule_start_raw) if schedule_start_raw else None,
+                        "schedule_end": str(schedule_end_raw) if schedule_end_raw else None,
                         "overlap": overlap
                     })
                     frappe.logger().info(f"🧮 [Debug] Overlap result for {period_name}: {overlap}")
