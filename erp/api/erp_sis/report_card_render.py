@@ -548,8 +548,12 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             
             # Helper functions loaded
             if template_criteria:
-                # Map existing data to template criteria
-                existing_criteria = subject.get("criteria", {})
+                # Map existing data to template criteria - READ FROM subject_eval section
+                existing_criteria = {}
+                subject_eval_data = data.get("subject_eval", {})
+                if subject_id and subject_id in subject_eval_data:
+                    existing_criteria = subject_eval_data[subject_id].get("criteria", {})
+                
                 for template_crit in template_criteria:
                     crit_id = template_crit.get("id", "")
                     criteria_list.append({
@@ -591,8 +595,12 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             # Load comments from template
             
             if template_comments:
-                # Map existing data to template comments
-                existing_comments = subject.get("comments", {})
+                # Map existing data to template comments - READ FROM subject_eval section
+                existing_comments = {}
+                subject_eval_data = data.get("subject_eval", {})
+                if subject_id and subject_id in subject_eval_data:
+                    existing_comments = subject_eval_data[subject_id].get("comments", {})
+                
                 for template_comment in template_comments:
                     comment_id = template_comment.get("id", "")
                     comments_list.append({
