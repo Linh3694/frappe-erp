@@ -1001,6 +1001,38 @@ def get_education_stage():
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
+def debug_class_students():
+    """
+    Debug API để kiểm tra class students của một lớp
+    """
+    try:
+        class_id = frappe.request.args.get('class_id')
+        
+        if not class_id:
+            return error_response("Missing class_id", code="MISSING_PARAMS")
+        
+        # Get class students
+        class_students = frappe.get_all("SIS Class Student",
+                                       filters={"class_id": class_id},
+                                       fields=["name", "student_id", "class_id"])
+        
+        result = {
+            "class_id": class_id,
+            "students_count": len(class_students),
+            "students": class_students
+        }
+        
+        return success_response(result)
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        frappe.logger().error(f"❌ debug_class_students error: {str(e)}")
+        frappe.logger().error(f"❌ Traceback: {error_detail}")
+        return error_response(f"Failed to debug class students: {str(e)}", code="DEBUG_ERROR")
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
 def debug_event_structure():
     """
     Debug API để kiểm tra cấu trúc của một event cụ thể
