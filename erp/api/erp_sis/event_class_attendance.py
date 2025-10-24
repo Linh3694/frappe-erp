@@ -1021,10 +1021,17 @@ def get_events_by_date_with_attendance():
 
         frappe.logger().info(f"📝 [Backend] Parameters: class_id={class_id}, date={date}")
 
-        # Get all approved events
+        # Get all approved events (and also check for other statuses for debugging)
         events = frappe.get_all("SIS Event",
                                fields=["name", "title", "status"],
                                filters={"status": "approved"})
+
+        # Debug: Check if our specific event exists and what status it has
+        specific_event = frappe.get_all("SIS Event",
+                                      fields=["name", "title", "status"],
+                                      filters={"name": "SIS-EVENT-3261554"})
+
+        debug_info["specific_event_SIS-EVENT-3261554"] = specific_event[0] if specific_event else "NOT FOUND"
 
         frappe.logger().info(f"📊 [Backend] Found {len(events)} approved events")
 
@@ -1170,7 +1177,7 @@ def get_events_by_date_with_attendance():
         debug_info["events_found"] = len(events)
         debug_info["result_events_count"] = len(result_events)
         debug_info["class_student_ids_sample"] = list(class_student_ids)[:5]  # Show first 5 class student IDs
-        debug_info["event_filter_debug"] = event_filter_debug  # Show why events were filtered
+        debug_info["event_filter_debug"] = event_filter_debug[:5]  # Show first 5 filtered events
 
         return success_response(result_events, debug_info=debug_info)
 
