@@ -988,6 +988,9 @@ def get_events_by_date_with_attendance():
     try:
         frappe.logger().info("🚀 [Backend] get_events_by_date_with_attendance called")
 
+        # Initialize debug info
+        debug_info = {}
+
         # Get request parameters
         class_id = frappe.form_dict.get("class_id")
         date = frappe.form_dict.get("date")
