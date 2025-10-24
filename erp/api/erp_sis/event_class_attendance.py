@@ -991,9 +991,14 @@ def get_events_by_date_with_attendance():
         # Initialize debug info
         debug_info = {}
 
-        # Get request parameters
-        class_id = frappe.form_dict.get("class_id")
-        date = frappe.form_dict.get("date")
+        # Get request parameters - try multiple sources
+        class_id = (frappe.form_dict.get("class_id") or
+                   frappe.request.args.get("class_id") or
+                   frappe.local.form_dict.get("class_id"))
+
+        date = (frappe.form_dict.get("date") or
+                frappe.request.args.get("date") or
+                frappe.local.form_dict.get("date"))
 
         if not class_id or not date:
             debug_info["extracted_class_id"] = class_id
