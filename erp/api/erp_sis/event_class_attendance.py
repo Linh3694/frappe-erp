@@ -943,8 +943,8 @@ def get_events_by_date_with_attendance():
         frappe.logger().info("🚀 [Backend] get_events_by_date_with_attendance called")
 
         # Get request parameters
-        class_id = frappe.local.form_dict.get("class_id")
-        date = frappe.local.form_dict.get("date")
+        class_id = frappe.form_dict.get("class_id")
+        date = frappe.form_dict.get("date")
 
         if not class_id or not date:
             return error_response("Missing class_id or date", code="MISSING_PARAMS")
