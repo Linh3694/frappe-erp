@@ -1064,6 +1064,10 @@ def get_events_by_date_with_attendance():
             try:
                 event_id = event['name']
 
+                # Special debug for our specific event
+                if event_id == "SIS-EVENT-3261554":
+                    frappe.logger().info(f"🎯 [Debug] Processing our specific event: {event}")
+
                 # Get event date times for this specific date
                 event_date_times = frappe.get_all("SIS Event Date Time",
                                                  filters={
@@ -1082,6 +1086,10 @@ def get_events_by_date_with_attendance():
                     "class_event_students": 0,
                     "reason_filtered": None
                 }
+
+                if event_id == "SIS-EVENT-3261554":
+                    frappe.logger().info(f"🎯 [Debug] Event debug created: {event_debug}")
+                    event_debug["date_times_details"] = event_date_times  # Show actual date times
 
                 if not event_date_times:
                     event_debug["reason_filtered"] = f"No date_times for date {date}"
@@ -1173,6 +1181,9 @@ def get_events_by_date_with_attendance():
 
                 # Mark as passed all filters
                 event_debug["passed_all_filters"] = True
+                if event_id == "SIS-EVENT-3261554":
+                    frappe.logger().info(f"✅ [Debug] Event SIS-EVENT-3261554 PASSED ALL FILTERS!")
+                    frappe.logger().info(f"✅ [Debug] Final event data: {event_debug}")
                 event_filter_debug.append(event_debug)
 
             except Exception as event_error:
