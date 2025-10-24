@@ -1012,8 +1012,10 @@ def debug_event_structure():
         if not event_id:
             return error_response("Missing event_id", code="MISSING_PARAMS")
         
-        # Get event info
-        event = frappe.get_doc("SIS Event", event_id)
+        # Get event info - use get_value instead of get_doc to avoid loading child tables
+        event_info = frappe.db.get_value("SIS Event", event_id, ["title", "status"], as_dict=True)
+        if not event_info:
+            return error_response("Event not found", code="EVENT_NOT_FOUND")
         
         # Get event date times
         event_date_times = frappe.get_all("SIS Event Date Time",
@@ -1034,8 +1036,8 @@ def debug_event_structure():
         
         result = {
             "event_id": event_id,
-            "event_title": event.title,
-            "event_status": event.status,
+            "event_title": event_info.get("title"),
+            "event_status": event_info.get("status"),
             "date_times_count": len(event_date_times),
             "date_times": event_date_times,
             "students_count": len(event_students),
@@ -1047,7 +1049,10 @@ def debug_event_structure():
         return success_response(result)
         
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
         frappe.logger().error(f"❌ debug_event_structure error: {str(e)}")
+        frappe.logger().error(f"❌ Traceback: {error_detail}")
         return error_response(f"Failed to debug event: {str(e)}", code="DEBUG_ERROR")
 
 
