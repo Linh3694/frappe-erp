@@ -62,7 +62,6 @@ def get_monitor_daily_trips():
                 dt.trip_status,
                 dt.notes,
                 br.route_name,
-                br.short_name as route_short_name,
                 bv.bus_number,
                 bv.license_plate,
                 COUNT(dts.name) as total_students,
