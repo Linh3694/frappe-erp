@@ -907,3 +907,160 @@ def get_education_stage():
         frappe.logger().error(f"❌ [Backend] Error getting education_stage_id: {str(e)}")
         frappe.log_error(f"get_education_stage error: {str(e)}")
         return error_response(f"Failed to get education stage: {str(e)}", code="GET_STAGE_ERROR")
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def get_events_by_date_with_attendance():
+    """
+    Get all events for a specific date with attendance information for a class.
+
+    Request params:
+    - class_id: string (required)
+    - date: string (YYYY-MM-DD) (required)
+
+    Returns:
+    [
+        {
+            "eventId": "EVENT-001",
+            "eventTitle": "Đá bóng",
+            "startTime": "18:00",
+            "endTime": "19:00",
+            "students": [
+                {
+                    "studentId": "STU-001",
+                    "studentName": "Nguyễn Văn A",
+                    "studentCode": "HS001",
+                    "status": "present",  // present, absent, late, excused
+                    "userImage": "/files/avatar.jpg"
+                }
+            ],
+            "totalParticipants": 25,
+            "attendedCount": 23
+        }
+    ]
+    """
+    try:
+        frappe.logger().info("🚀 [Backend] get_events_by_date_with_attendance called")
+
+        # Get request parameters
+        class_id = frappe.local.form_dict.get("class_id")
+        date = frappe.local.form_dict.get("date")
+
+        if not class_id or not date:
+            return error_response("Missing class_id or date", code="MISSING_PARAMS")
+
+        frappe.logger().info(f"📝 [Backend] Parameters: class_id={class_id}, date={date}")
+
+        # Get all approved events
+        events = frappe.get_all("SIS Event",
+                               fields=["name", "title", "status"],
+                               filters={"status": "approved"})
+
+        frappe.logger().info(f"📊 [Backend] Found {len(events)} approved events")
+
+        result_events = []
+
+        # Get class students for filtering
+        class_students = frappe.get_all("SIS Class Student",
+                                       filters={"class_id": class_id},
+                                       fields=["name", "student_id"])
+
+        class_student_ids = [cs['name'] for cs in class_students]
+        class_student_dict = {cs['name']: cs['student_id'] for cs in class_students}
+
+        frappe.logger().info(f"👥 [Backend] Class has {len(class_students)} students")
+
+        # Process each event
+        for event in events:
+            try:
+                event_id = event['name']
+
+                # Get event date times for this specific date
+                event_date_times = frappe.get_all("SIS Event Date Time",
+                                                 filters={
+                                                     "event_id": event_id,
+                                                     "event_date": date
+                                                 },
+                                                 fields=["start_time", "end_time"])
+
+                if not event_date_times:
+                    continue  # Event doesn't happen on this date
+
+                # Get event students who belong to this class
+                event_students = frappe.get_all("SIS Event Student",
+                                               filters={"parent": event_id},
+                                               fields=["class_student_id", "status"])
+
+                # Filter students who are in the specified class
+                class_event_students = [
+                    es for es in event_students
+                    if es['class_student_id'] in class_student_ids
+                ]
+
+                if not class_event_students:
+                    continue  # No students from this class participate
+
+                # Get student details and attendance status
+                students_info = []
+                attended_count = 0
+
+                for es in class_event_students:
+                    student_id = class_student_dict[es['class_student_id']]
+
+                    # Get student details
+                    student_doc = frappe.get_doc("SIS Student", student_id)
+
+                    # Get attendance status for this event on this date
+                    attendance_status = frappe.db.get_value("SIS Event Attendance",
+                                                          {
+                                                              "event_id": event_id,
+                                                              "student_id": student_id,
+                                                              "attendance_date": date
+                                                          },
+                                                          "status")
+
+                    # Default to 'excused' if no attendance record (for events)
+                    status = attendance_status or 'excused'
+
+                    if status in ['present', 'late']:
+                        attended_count += 1
+
+                    students_info.append({
+                        "studentId": student_id,
+                        "studentName": student_doc.student_name or '',
+                        "studentCode": student_doc.student_code or '',
+                        "status": status,
+                        "userImage": student_doc.user_image or None
+                    })
+
+                # Use the first date time (assuming events have only one time slot per day)
+                dt = event_date_times[0]
+
+                result_events.append({
+                    "eventId": event_id,
+                    "eventTitle": event['title'],
+                    "startTime": str(dt.get('start_time', '')),
+                    "endTime": str(dt.get('end_time', '')),
+                    "students": students_info,
+                    "totalParticipants": len(students_info),
+                    "attendedCount": attended_count
+                })
+
+            except Exception as event_error:
+                frappe.logger().warning(f"⚠️ [Backend] Error processing event {event.get('name')}: {str(event_error)}")
+                continue
+
+        # Sort events by start time
+        result_events.sort(key=lambda x: x['startTime'])
+
+        frappe.logger().info(f"✅ [Backend] get_events_by_date_with_attendance completed: {len(result_events)} events")
+
+        return success_response(result_events)
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        frappe.logger().error(f"❌ [Backend] get_events_by_date_with_attendance error: {str(e)}")
+        frappe.logger().error(f"❌ [Backend] Full traceback: {error_detail}")
+        frappe.log_error(f"get_events_by_date_with_attendance: {str(e)[:100]}", "Events By Date Error")
+        return error_response(f"Failed to get events by date: {str(e)}", code="GET_EVENTS_BY_DATE_ERROR")
