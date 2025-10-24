@@ -1001,6 +1001,57 @@ def get_education_stage():
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
+def debug_event_structure():
+    """
+    Debug API để kiểm tra cấu trúc của một event cụ thể
+    """
+    try:
+        event_id = frappe.request.args.get('event_id')
+        date = frappe.request.args.get('date')
+        
+        if not event_id:
+            return error_response("Missing event_id", code="MISSING_PARAMS")
+        
+        # Get event info
+        event = frappe.get_doc("SIS Event", event_id)
+        
+        # Get event date times
+        event_date_times = frappe.get_all("SIS Event Date Time",
+                                         filters={"event_id": event_id},
+                                         fields=["name", "event_date", "start_time", "end_time"])
+        
+        # Get event students
+        event_students = frappe.get_all("SIS Event Student",
+                                       filters={"parent": event_id},
+                                       fields=["name", "student_id", "student_name", "student_code", "class_student_id", "status"])
+        
+        # Get event attendance if date provided
+        event_attendance = []
+        if date:
+            event_attendance = frappe.get_all("SIS Event Attendance",
+                                            filters={"event_id": event_id, "attendance_date": date},
+                                            fields=["student_id", "student_name", "status"])
+        
+        result = {
+            "event_id": event_id,
+            "event_title": event.title,
+            "event_status": event.status,
+            "date_times_count": len(event_date_times),
+            "date_times": event_date_times,
+            "students_count": len(event_students),
+            "students": event_students,
+            "attendance_count": len(event_attendance),
+            "attendance": event_attendance
+        }
+        
+        return success_response(result)
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ debug_event_structure error: {str(e)}")
+        return error_response(f"Failed to debug event: {str(e)}", code="DEBUG_ERROR")
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
 def get_events_by_date_with_attendance():
     """
     Get all events for a specific date with attendance information for a class.
