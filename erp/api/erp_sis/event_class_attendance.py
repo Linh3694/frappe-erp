@@ -1127,11 +1127,11 @@ def get_events_by_date_with_attendance():
                         # Query SIS Photo table for this student
                         photo_record = frappe.get_all("SIS Photo",
                                                      filters={"student_id": student_id, "status": "Active"},
-                                                     fields=["name", "photo_url"],
+                                                     fields=["name", "photo"],
                                                      order_by="creation desc",
                                                      limit_page_length=1)
-                        if photo_record and photo_record[0].get("photo_url"):
-                            user_image = photo_record[0]["photo_url"]
+                        if photo_record and photo_record[0].get("photo"):
+                            user_image = photo_record[0]["photo"]
                             frappe.logger().info(f"📸 [Debug] Found photo for student {student_id}: {user_image}")
                         else:
                             frappe.logger().info(f"📸 [Debug] No photo found for student {student_id}")
