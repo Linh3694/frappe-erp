@@ -70,7 +70,7 @@ def get_monitor_daily_trips():
             FROM `tabSIS Bus Daily Trip` dt
             LEFT JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
             LEFT JOIN `tabSIS Bus Transportation` bv ON dt.vehicle_id = bv.name
-            LEFT JOIN `tabSIS Bus Daily Trip Student` dts ON dts.parent = dt.name
+            LEFT JOIN `tabSIS Bus Daily Trip Student` dts ON dts.daily_trip_id = dt.name
             WHERE (dt.monitor1_id = %s OR dt.monitor2_id = %s)
               AND dt.trip_date = %s
               AND dt.docstatus != 2
@@ -184,7 +184,7 @@ def get_daily_trip_detail(trip_id=None):
                 cs.gender
             FROM `tabSIS Bus Daily Trip Student` dts
             LEFT JOIN `tabCRM Student` cs ON dts.student_id = cs.name
-            WHERE dts.parent = %s
+            WHERE dts.daily_trip_id = %s
             ORDER BY dts.pickup_order ASC
         """, (trip_id,), as_dict=True)
 
@@ -388,8 +388,12 @@ def complete_daily_trip():
         if trip.trip_status == "Completed":
             return validation_error_response({"trip_id": ["Trip is already completed"]})
 
-        # Calculate completion stats
-        students = trip.students  # Child table
+        # Calculate completion stats - get students from database
+        students = frappe.get_all(
+            "SIS Bus Daily Trip Student",
+            filters={"daily_trip_id": trip_id},
+            fields=["name", "student_id", "student_status"]
+        )
         total = len(students)
 
         if trip.trip_type == "Đón":  # Pickup
