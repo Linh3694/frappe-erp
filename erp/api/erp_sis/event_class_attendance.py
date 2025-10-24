@@ -1128,8 +1128,19 @@ def get_events_by_date_with_attendance():
                 for es in class_event_students:
                     student_id = class_student_dict[es['class_student_id']]
 
-                    # Get student details
-                    student_doc = frappe.get_doc("SIS Student", student_id)
+                    # Get student details - try different DocTypes
+                    try:
+                        student_doc = frappe.get_doc("SIS Student", student_id)
+                    except:
+                        try:
+                            student_doc = frappe.get_doc("CRM Student", student_id)
+                        except:
+                            # If both fail, create minimal student info
+                            student_doc = type('MockStudent', (), {
+                                'student_name': f'Student {student_id}',
+                                'student_code': student_id.split('-')[-1] if '-' in student_id else student_id,
+                                'user_image': None
+                            })()
 
                     # Get attendance status for this event on this date
                     attendance_status = frappe.db.get_value("SIS Event Attendance",
