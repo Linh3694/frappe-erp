@@ -955,7 +955,7 @@ def get_education_stage():
         return error_response(f"Failed to get education stage: {str(e)}", code="GET_STAGE_ERROR")
 
 
-@frappe.whitelist(allow_guest=False, methods=["GET"])
+@frappe.whitelist(allow_guest=True, methods=["GET"])
 def get_events_by_date_with_attendance():
     """
     Get all events for a specific date with attendance information for a class.
