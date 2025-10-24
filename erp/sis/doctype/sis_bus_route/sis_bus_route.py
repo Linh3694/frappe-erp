@@ -51,34 +51,52 @@ class SISBusRoute(Document):
 		
 		if self.monitor1_id == self.monitor2_id:
 			frappe.throw("Monitor 1 và Monitor 2 không được giống nhau")
-
-		# TEMPORARILY DISABLE monitor assignment validation for debugging
-		frappe.logger().info("⚠️  WARNING: Monitor assignment validation DISABLED for debugging")
-		return
 		
 		# Check if monitors are already assigned to other routes
 		# Handle case where self.name might be None for new documents
+		# Only check if monitor1_id or monitor2_id is provided
+		monitors_to_check = []
+		if self.monitor1_id:
+			monitors_to_check.append(self.monitor1_id)
+		if self.monitor2_id:
+			monitors_to_check.append(self.monitor2_id)
+		
+		if not monitors_to_check:
+			return  # No monitors to validate
+		
 		if self.name:
 			# For existing documents, exclude current route
-			existing_routes = frappe.db.sql("""
-				SELECT name, route_name
+			placeholders = ','.join(['%s'] * len(monitors_to_check))
+			query = f"""
+				SELECT name, route_name, monitor1_id, monitor2_id
 				FROM `tabSIS Bus Route`
-				WHERE (monitor1_id = %s OR monitor2_id = %s)
+				WHERE (monitor1_id IN ({placeholders}) OR monitor2_id IN ({placeholders}))
 				AND name != %s
 				AND status = 'Active'
-			""", (self.monitor1_id, self.monitor2_id, self.name))
+			"""
+			params = monitors_to_check + monitors_to_check + [self.name]
+			existing_routes = frappe.db.sql(query, params, as_dict=True)
 		else:
 			# For new documents, check all routes
-			existing_routes = frappe.db.sql("""
-				SELECT name, route_name
+			placeholders = ','.join(['%s'] * len(monitors_to_check))
+			query = f"""
+				SELECT name, route_name, monitor1_id, monitor2_id
 				FROM `tabSIS Bus Route`
-				WHERE (monitor1_id = %s OR monitor2_id = %s)
+				WHERE (monitor1_id IN ({placeholders}) OR monitor2_id IN ({placeholders}))
 				AND status = 'Active'
-			""", (self.monitor1_id, self.monitor2_id))
+			"""
+			params = monitors_to_check + monitors_to_check
+			existing_routes = frappe.db.sql(query, params, as_dict=True)
 
 		if existing_routes:
-			route_names = [route[1] for route in existing_routes]
-			frappe.throw(f"Monitor đã được phán công cho tuyến: {', '.join(route_names)}")
+			# Build detailed error message
+			conflicts = []
+			for route in existing_routes:
+				if self.monitor1_id in [route.monitor1_id, route.monitor2_id]:
+					conflicts.append(f"Monitor 1 đã ở tuyến {route.route_name}")
+				if self.monitor2_id in [route.monitor1_id, route.monitor2_id]:
+					conflicts.append(f"Monitor 2 đã ở tuyến {route.route_name}")
+			frappe.throw(f"Trùng monitor: {'; '.join(set(conflicts))}")
 
 	def after_insert(self):
 		"""Create daily trips when route is created"""

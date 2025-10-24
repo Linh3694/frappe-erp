@@ -41,14 +41,26 @@ class SISBusDailyTrip(Document):
 
 		# Check if monitors are already assigned to OTHER ROUTES' trips on same date
 		# Allow same monitors within same route but different trip types/times
-		existing_trips = frappe.db.sql("""
-			SELECT name, route_id, trip_type
-			FROM `tabSIS Bus Daily Trip`
-			WHERE trip_date = %s
-			AND (monitor1_id = %s OR monitor2_id = %s OR monitor1_id = %s OR monitor2_id = %s)
-			AND name != %s
-			AND route_id != %s
-		""", (self.trip_date, self.monitor1_id, self.monitor1_id, self.monitor2_id, self.monitor2_id, self.name, self.route_id), as_dict=True)
+		# Handle case where self.name might be None for new documents
+		if self.name:
+			# For existing documents, exclude current trip by name
+			existing_trips = frappe.db.sql("""
+				SELECT name, route_id, trip_type
+				FROM `tabSIS Bus Daily Trip`
+				WHERE trip_date = %s
+				AND (monitor1_id = %s OR monitor2_id = %s OR monitor1_id = %s OR monitor2_id = %s)
+				AND name != %s
+				AND route_id != %s
+			""", (self.trip_date, self.monitor1_id, self.monitor1_id, self.monitor2_id, self.monitor2_id, self.name, self.route_id), as_dict=True)
+		else:
+			# For new documents, only exclude by route_id
+			existing_trips = frappe.db.sql("""
+				SELECT name, route_id, trip_type
+				FROM `tabSIS Bus Daily Trip`
+				WHERE trip_date = %s
+				AND (monitor1_id = %s OR monitor2_id = %s OR monitor1_id = %s OR monitor2_id = %s)
+				AND route_id != %s
+			""", (self.trip_date, self.monitor1_id, self.monitor1_id, self.monitor2_id, self.monitor2_id, self.route_id), as_dict=True)
 
 		if existing_trips:
 			route_names = [trip.route_id for trip in existing_trips]
