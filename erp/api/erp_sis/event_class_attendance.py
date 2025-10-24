@@ -721,6 +721,7 @@ def batch_get_event_attendance():
                                    filters={"status": "approved"})
         
         frappe.logger().info(f"📊 [Backend] Found {len(all_events)} approved events total")
+        frappe.logger().info(f"📊 [Backend] Events list: {[e['name'] + ' - ' + e['title'] for e in all_events]}")
         
         # Get timetable columns for these periods (once)
         schedule_filters = {"period_type": "study", "period_name": ["in", periods]}
@@ -795,6 +796,8 @@ def batch_get_event_attendance():
                                                filters={"parent": event['name']},
                                                fields=["class_student_id", "status"])
                 
+                frappe.logger().info(f"👥 [Debug] Event {event['name']}: found {len(event_students)} event students")
+                
                 # Match with class students
                 matching_student_ids = []
                 for es in event_students:
@@ -803,7 +806,10 @@ def batch_get_event_attendance():
                         student_id = class_student_dict[class_student_id]
                         matching_student_ids.append(student_id)
                 
+                frappe.logger().info(f"👥 [Debug] Event {event['name']}: {len(matching_student_ids)} matching students from this class")
+                
                 if not matching_student_ids:
+                    frappe.logger().warning(f"⚠️ [Debug] Event {event['name']} has no students from class {class_id}, skipping overlap check")
                     continue
                 
                 # Check which periods this event overlaps with
@@ -907,7 +913,10 @@ def batch_get_event_attendance():
 
         # Include debug info in response
         debug_info = {
+            "date_requested": date,
+            "class_id": class_id,
             "events_found": len(all_events),
+            "events_list": [{"name": e["name"], "title": e["title"]} for e in all_events[:5]],  # First 5 events
             "schedules_found": len(schedules),
             "schedule_filters": schedule_filters,
             "requested_periods": periods,
