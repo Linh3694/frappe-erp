@@ -19,32 +19,40 @@ def time_to_minutes(time_input):
         if isinstance(time_input, dict):
             frappe.logger().error(f"❌ time_to_minutes received dict instead of time: {time_input}")
             return 0
-        
+
         # Handle timedelta objects (from database)
         if hasattr(time_input, 'total_seconds'):
             total_seconds = int(time_input.total_seconds())
             return total_seconds // 60  # Convert seconds to minutes
-        
+
         # Handle datetime.time objects
         if hasattr(time_input, 'hour') and hasattr(time_input, 'minute'):
             return time_input.hour * 60 + time_input.minute
-        
+
         # Handle string format
         time_str = str(time_input).strip()
-        
+
+        # Handle empty or invalid strings
+        if not time_str or time_str == 'None':
+            return 0
+
         # Remove seconds if present (HH:MM:SS -> HH:MM)
         if time_str.count(':') == 2:
             time_str = ':'.join(time_str.split(':')[:2])
-        
+
         if ':' not in time_str:
             frappe.logger().error(f"❌ time_to_minutes: no ':' found in '{time_str}'")
             return 0
-            
+
         parts = time_str.split(':')
+        if len(parts) < 2:
+            frappe.logger().error(f"❌ time_to_minutes: invalid time format '{time_str}'")
+            return 0
+
         hours = int(parts[0])
         minutes = int(parts[1])
         return hours * 60 + minutes
-        
+
     except Exception as e:
         frappe.logger().error(f"❌ Error in time_to_minutes with input '{time_input}' (type: {type(time_input)}): {str(e)}")
         return 0
@@ -56,10 +64,15 @@ def time_ranges_overlap(range1, range2):
     end1 = time_to_minutes(range1.get('endTime', ''))
     start2 = time_to_minutes(range2.get('start_time', ''))
     end2 = time_to_minutes(range2.get('end_time', ''))
-    
+
     frappe.logger().info(f"🧮 [Backend] Time conversion: range1({range1.get('startTime')}->{start1}, {range1.get('endTime')}->{end1}), range2({range2.get('start_time')}->{start2}, {range2.get('end_time')}->{end2})")
-    
+
     # Two ranges overlap if: start1 < end2 AND start2 < end1
+    # Handle edge case where end time is 0 (invalid time)
+    if end1 == 0 or end2 == 0:
+        frappe.logger().info("🧮 [Backend] Invalid end time detected, cannot calculate overlap")
+        return False
+
     overlap = start1 < end2 and start2 < end1
     frappe.logger().info(f"🧮 [Backend] Overlap calculation: {start1} < {end2} AND {start2} < {end1} = {overlap}")
     return overlap
@@ -796,26 +809,28 @@ def batch_get_event_attendance():
 
                 frappe.logger().info(f"🎯 [Debug] Event {event['name']} time range: {event_time_range}")
 
+                # Track if this event overlaps with any period
+                event_has_overlap = False
+
                 for period_name in periods:
                     schedule = schedule_map.get(period_name)
                     if not schedule:
-                        frappe.logger().info(f"⚠️ [Debug] No schedule found for period: {period_name}")
+                        frappe.logger().info(f"⚠️ [Debug] No schedule found for period {period_name}")
                         continue
 
-                    frappe.logger().info(f"📅 [Debug] Checking overlap for {period_name}: event={event_time_range}, schedule={schedule}")
+                    schedule_time = {
+                        'start_time': schedule.get('start_time'),
+                        'end_time': schedule.get('end_time')
+                    }
 
-                    overlap_result = time_ranges_overlap(event_time_range, schedule)
-                    overlap_debug.append({
-                        "event_id": event['name'],
-                        "event_title": event['title'],
-                        "period_name": period_name,
-                        "event_time": event_time_range,
-                        "schedule_time": {"start_time": schedule.get('start_time'), "end_time": schedule.get('end_time')},
-                        "overlap": overlap_result
-                    })
+                    frappe.logger().info(f"📅 [Debug] Checking {period_name}: event={event_time_range}, schedule={schedule_time}")
 
-                    if overlap_result:
+                    overlap = time_ranges_overlap(event_time_range, schedule)
+                    frappe.logger().info(f"🧮 [Debug] Overlap result for {period_name}: {overlap}")
+
+                    if overlap:
                         frappe.logger().info(f"✅ [Debug] OVERLAP FOUND! Event {event['name']} overlaps with {period_name}")
+                        event_has_overlap = True
                         # Event affects this period!
                         result[period_name]["events"].append({
                             "eventId": event['name'],
@@ -824,6 +839,11 @@ def batch_get_event_attendance():
                         })
                     else:
                         frappe.logger().info(f"❌ [Debug] NO OVERLAP: Event {event['name']} does not overlap with {period_name}")
+
+                # Debug: Log if event has no overlaps but has participants
+                if not event_has_overlap and matching_student_ids:
+                    frappe.logger().warning(f"⚠️ [Debug] Event {event['name']} has {len(matching_student_ids)} participants but no overlapping periods found!")
+                    frappe.logger().warning(f"⚠️ [Debug] Event time: {event_time_range}, Available periods: {list(schedule_map.keys())}")
                 
             except Exception as event_error:
                 frappe.logger().warning(f"⚠️ [Backend] Error processing event {event.get('name')}: {str(event_error)}")
