@@ -724,8 +724,10 @@ def batch_get_event_attendance():
             period_name = s.get('period_name')
             if period_name:
                 schedule_map[period_name] = s
-        
+
         frappe.logger().info(f"📚 [Backend] Loaded {len(schedules)} schedules for {len(periods)} periods")
+        frappe.logger().info(f"📋 [Debug] Schedule map: {schedule_map}")
+        frappe.logger().info(f"📋 [Debug] Requested periods: {periods}")
         
         # Get class students (once)
         class_students = frappe.get_all("SIS Class Student",
@@ -1020,6 +1022,8 @@ def get_events_by_date_with_attendance():
                 if not class_event_students:
                     continue  # No students from this class participate
 
+                frappe.logger().info(f"🎯 [Backend] Found event {event_id} with {len(class_event_students)} students from class {class_id}")
+
                 # Get student details and attendance status
                 students_info = []
                 attended_count = 0
@@ -1056,11 +1060,24 @@ def get_events_by_date_with_attendance():
                 # Use the first date time (assuming events have only one time slot per day)
                 dt = event_date_times[0]
 
+                # Format time to HH:MM format
+                start_time = str(dt.get('start_time', ''))
+                end_time = str(dt.get('end_time', ''))
+
+                # Extract HH:MM from time strings like "08:00:00" or "8:00:00"
+                try:
+                    if start_time and ':' in start_time:
+                        start_time = start_time.split(':')[0].zfill(2) + ':' + start_time.split(':')[1]
+                    if end_time and ':' in end_time:
+                        end_time = end_time.split(':')[0].zfill(2) + ':' + end_time.split(':')[1]
+                except:
+                    pass  # Keep original format if parsing fails
+
                 result_events.append({
                     "eventId": event_id,
                     "eventTitle": event['title'],
-                    "startTime": str(dt.get('start_time', '')),
-                    "endTime": str(dt.get('end_time', '')),
+                    "startTime": start_time,
+                    "endTime": end_time,
                     "students": students_info,
                     "totalParticipants": len(students_info),
                     "attendedCount": attended_count
