@@ -713,11 +713,22 @@ def batch_get_event_attendance():
         schedule_filters = {"period_type": "study", "period_name": ["in", periods]}
         if education_stage_id:
             schedule_filters["education_stage_id"] = education_stage_id
-            
+
+        frappe.logger().info(f"🔍 [Debug] Schedule filters: {schedule_filters}")
+
         schedules = frappe.get_all("SIS Timetable Column",
                                   fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
                                   filters=schedule_filters)
-        
+
+        frappe.logger().info(f"📚 [Debug] Raw schedules found: {schedules}")
+
+        # Debug: Check all available schedules for this education stage
+        if education_stage_id:
+            all_schedules_for_stage = frappe.get_all("SIS Timetable Column",
+                                                   filters={"education_stage_id": education_stage_id},
+                                                   fields=["name", "period_name", "period_type", "period_priority"])
+            frappe.logger().info(f"📚 [Debug] All schedules for education_stage {education_stage_id}: {all_schedules_for_stage}")
+
         # Create period_name -> schedule mapping
         schedule_map = {}
         for s in schedules:
@@ -840,7 +851,18 @@ def batch_get_event_attendance():
                         period_data["statuses"][student_id] = status
         
         frappe.logger().info(f"✅ [Backend] batch_get_event_attendance completed successfully")
-        return success_response(result)
+
+        # Include debug info in response
+        debug_info = {
+            "events_found": len(all_events),
+            "schedules_found": len(schedules),
+            "schedule_filters": schedule_filters,
+            "requested_periods": periods,
+            "education_stage_id": education_stage_id,
+            "class_students_count": len(class_students)
+        }
+
+        return success_response(result, debug_info=debug_info)
         
     except Exception as e:
         import traceback
@@ -971,6 +993,10 @@ def get_events_by_date_with_attendance():
             debug_info["extracted_date"] = date
             return error_response("Missing class_id or date", code="MISSING_PARAMS", debug_info=debug_info)
 
+        # Always include debug info in response for troubleshooting
+        debug_info["extracted_class_id"] = class_id
+        debug_info["extracted_date"] = date
+
         frappe.logger().info(f"📝 [Backend] Parameters: class_id={class_id}, date={date}")
 
         # Get all approved events
@@ -1092,7 +1118,11 @@ def get_events_by_date_with_attendance():
 
         frappe.logger().info(f"✅ [Backend] get_events_by_date_with_attendance completed: {len(result_events)} events")
 
-        return success_response(result_events)
+        # Include debug info in response
+        debug_info["events_found"] = len(events)
+        debug_info["result_events_count"] = len(result_events)
+
+        return success_response(result_events, debug_info=debug_info)
 
     except Exception as e:
         import traceback
