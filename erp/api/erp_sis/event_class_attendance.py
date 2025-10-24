@@ -775,14 +775,19 @@ def batch_get_event_attendance():
                                                  filters={"event_id": event['name']},
                                                  fields=["event_date", "start_time", "end_time"])
                 
+                frappe.logger().info(f"🔍 [Debug] Event {event['name']}: found {len(event_date_times)} date times")
+                
                 # Check if event affects our date
                 matching_dt = None
                 for dt in event_date_times:
+                    frappe.logger().info(f"🔍 [Debug] Checking date time: event_date={dt.get('event_date')} vs requested date={date}")
                     if str(dt.get('event_date')) == date:
                         matching_dt = dt
+                        frappe.logger().info(f"✅ [Debug] Found matching date time for event {event['name']}")
                         break
                 
                 if not matching_dt:
+                    frappe.logger().info(f"⚠️ [Debug] Event {event['name']} has no matching date time for {date}")
                     continue
                 
                 # Get event students (once per event)
@@ -807,7 +812,8 @@ def batch_get_event_attendance():
                     'endTime': str(matching_dt.get('end_time', ''))
                 }
 
-                frappe.logger().info(f"🎯 [Debug] Event {event['name']} time range: {event_time_range}")
+                frappe.logger().info(f"🎯 [Debug] Event {event['name']} ({event['title']}) time range: {event_time_range}")
+                frappe.logger().info(f"🎯 [Debug] Event time types: start_time type={type(matching_dt.get('start_time'))}, end_time type={type(matching_dt.get('end_time'))}")
 
                 # Track if this event overlaps with any period
                 event_has_overlap = False
@@ -815,7 +821,7 @@ def batch_get_event_attendance():
                 for period_name in periods:
                     schedule = schedule_map.get(period_name)
                     if not schedule:
-                        frappe.logger().info(f"⚠️ [Debug] No schedule found for period {period_name}")
+                        frappe.logger().warning(f"⚠️ [Debug] No schedule found for period {period_name}")
                         continue
 
                     schedule_time = {
@@ -823,9 +829,17 @@ def batch_get_event_attendance():
                         'end_time': schedule.get('end_time')
                     }
 
-                    frappe.logger().info(f"📅 [Debug] Checking {period_name}: event={event_time_range}, schedule={schedule_time}")
+                    frappe.logger().info(f"📅 [Debug] Checking period '{period_name}': event={event_time_range}, schedule={schedule_time}")
+                    frappe.logger().info(f"📅 [Debug] Schedule time types: start_time type={type(schedule.get('start_time'))}, end_time type={type(schedule.get('end_time'))}")
 
                     overlap = time_ranges_overlap(event_time_range, schedule)
+                    overlap_debug.append({
+                        "event": event['name'],
+                        "period": period_name,
+                        "event_time": event_time_range,
+                        "schedule_time": schedule_time,
+                        "overlap": overlap
+                    })
                     frappe.logger().info(f"🧮 [Debug] Overlap result for {period_name}: {overlap}")
 
                     if overlap:
@@ -901,7 +915,9 @@ def batch_get_event_attendance():
             "class_students_count": len(class_students),
             "schedule_map_keys": list(schedule_map.keys()) if schedule_map else [],
             "schedule_samples": list(schedule_map.values())[:2] if schedule_map else [],  # Show first 2 schedules as sample
-            "overlap_check_results": overlap_debug[:10]  # Show first 10 overlap checks
+            "overlap_check_results": overlap_debug,  # Show ALL overlap checks for debugging
+            "total_overlap_checks": len(overlap_debug),
+            "overlaps_found": len([d for d in overlap_debug if d.get('overlap')])
         }
 
         return success_response(result, debug_info=debug_info)
