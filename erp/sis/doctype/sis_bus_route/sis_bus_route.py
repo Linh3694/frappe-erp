@@ -45,14 +45,14 @@ class SISBusRoute(Document):
 				frappe.throw("Monitor 2 không tồn tại")
 
 	def validate_monitor_assignment(self):
-		"""Validate that monitors are not assigned to multiple routes"""
+		"""Validate that monitors are not assigned to multiple routes or daily trips"""
 		frappe.logger().info("🔍 DEBUG: validate_monitor_assignment called")
 		frappe.logger().info(f"🔍 DEBUG: monitor1_id={self.monitor1_id}, monitor2_id={self.monitor2_id}, self.name={self.name}")
 		
 		if self.monitor1_id == self.monitor2_id:
 			frappe.throw("Monitor 1 và Monitor 2 không được giống nhau")
 		
-		# Check if monitors are already assigned to other routes
+		# Check if monitors are already assigned to other routes OR daily trips
 		# Handle case where self.name might be None for new documents
 		# Only check if monitor1_id or monitor2_id is provided
 		monitors_to_check = []
@@ -64,6 +64,7 @@ class SISBusRoute(Document):
 		if not monitors_to_check:
 			return  # No monitors to validate
 		
+		# Check active routes
 		if self.name:
 			# For existing documents, exclude current route
 			placeholders = ','.join(['%s'] * len(monitors_to_check))
@@ -93,10 +94,33 @@ class SISBusRoute(Document):
 			conflicts = []
 			for route in existing_routes:
 				if self.monitor1_id in [route.monitor1_id, route.monitor2_id]:
-					conflicts.append(f"Monitor 1 đã ở tuyến {route.route_name}")
+					conflicts.append(f"Monitor 1 đã ở tuyến Active {route.route_name}")
 				if self.monitor2_id in [route.monitor1_id, route.monitor2_id]:
-					conflicts.append(f"Monitor 2 đã ở tuyến {route.route_name}")
+					conflicts.append(f"Monitor 2 đã ở tuyến Active {route.route_name}")
 			frappe.throw(f"Trùng monitor: {'; '.join(set(conflicts))}")
+		
+		# Also check if monitors have future daily trips from other routes
+		from datetime import datetime, timedelta
+		today = datetime.now().date()
+		future_date = today + timedelta(days=30)
+		
+		exclude_route = self.name if self.name else "NONE"
+		placeholders = ','.join(['%s'] * len(monitors_to_check))
+		
+		future_trips_query = f"""
+			SELECT DISTINCT route_id, trip_date
+			FROM `tabSIS Bus Daily Trip`
+			WHERE (monitor1_id IN ({placeholders}) OR monitor2_id IN ({placeholders}))
+			AND trip_date BETWEEN %s AND %s
+			AND route_id != %s
+			LIMIT 5
+		"""
+		params = monitors_to_check + monitors_to_check + [today, future_date, exclude_route]
+		conflicting_trips = frappe.db.sql(future_trips_query, params, as_dict=True)
+		
+		if conflicting_trips:
+			trip_info = [f"{t.route_id} ({t.trip_date})" for t in conflicting_trips[:3]]
+			frappe.throw(f"Monitor đã có lịch chạy xe tại: {', '.join(trip_info)}...")
 
 	def after_insert(self):
 		"""Create daily trips when route is created"""
