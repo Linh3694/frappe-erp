@@ -1005,10 +1005,6 @@ def get_events_by_date_with_attendance():
             debug_info["extracted_date"] = date
             return error_response("Missing class_id or date", code="MISSING_PARAMS", debug_info=debug_info)
 
-        # Include minimal debug info for production
-        debug_info["events_found"] = len(events)
-        debug_info["events_returned"] = len(result_events)
-
         frappe.logger().info(f"📝 [Backend] Parameters: class_id={class_id}, date={date}")
 
         # Get all approved events
