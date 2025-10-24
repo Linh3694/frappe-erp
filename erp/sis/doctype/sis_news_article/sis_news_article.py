@@ -215,22 +215,36 @@ def send_news_publish_notification(article_id, title_vn, title_en, education_sta
         parent_emails = list(set(parent_emails))
         frappe.logger().info(f"📰 [News Notification] Sending to {len(parent_emails)} parents")
         
-        # Prepare notification
-        title = "Tin tức"
-        body = title_vn if title_vn else title_en
+        # Prepare bilingual notification (like attendance and contact log)
+        title_notification_vi = "Tin tức"
+        title_notification_en = "News"
+        message_vi = title_vn if title_vn else "Bạn có tin tức mới"
+        message_en = title_en if title_en else "You have new news"
         
         # Call notification-service API
         notification_service_url = frappe.conf.get("notification_service_url", "http://172.16.20.115:5001")
         
         payload = {
-            "title": title,
-            "body": body,
+            # Send both translations so service worker can display immediately
+            "title": {
+                "vi": title_notification_vi,
+                "en": title_notification_en
+            },
+            "message": {
+                "vi": message_vi,
+                "en": message_en
+            },
+            # Keep keys for frontend app to use (optional)
+            "titleKey": "news_notification_title",
+            "messageKey": "news_notification_message",
             "recipients": parent_emails,
+            "notification_type": "news",
             "type": "system",
             "priority": "medium",
             "channel": "push",
             "data": {
                 "type": "news",
+                "notificationType": "news",  # Also add to ensure proper mapping
                 "article_id": article_id,
                 "title_vn": title_vn,
                 "title_en": title_en

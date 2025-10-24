@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 import json
+import requests
 from typing import Any, Dict, List, Optional
 
 from erp.utils.campus_utils import get_current_campus_from_context
@@ -1376,6 +1377,13 @@ def approve_report_card():
         
         frappe.logger().info(f"✅ Report {report_id} approved successfully")
         
+        # Send notification to parents after approval
+        try:
+            _send_report_card_notification(report)
+        except Exception as notif_error:
+            frappe.logger().error(f"⚠️ Failed to send notification for report {report_id}: {str(notif_error)}")
+            # Don't fail the approval if notification fails
+        
         return success_response(
             data={
                 "report_id": report_id,
@@ -1397,6 +1405,111 @@ def approve_report_card():
             code="SERVER_ERROR",
             logs=[str(e), frappe.get_traceback()]
         )
+
+
+def _send_report_card_notification(report):
+    """
+    Send push notification to parents when report card is approved/published
+    
+    Args:
+        report: SIS Student Report Card document
+    """
+    import requests
+    
+    try:
+        frappe.logger().info(f"📊 [Report Card Notification] Starting notification for report: {report.name}")
+        
+        # Get student info
+        student_id = report.student_id
+        student_name = frappe.db.get_value("CRM Student", student_id, "student_name")
+        
+        if not student_name:
+            frappe.logger().warning(f"⚠️ [Report Card Notification] Student not found: {student_id}")
+            return
+        
+        # Get parent emails for this student
+        relationships = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"student": student_id},
+            fields=["guardian"]
+        )
+        
+        parent_emails = []
+        for rel in relationships:
+            if rel.guardian:
+                try:
+                    guardian_id = frappe.db.get_value("CRM Guardian", rel.guardian, "guardian_id")
+                    if guardian_id:
+                        # Parent email format: guardian_id@parent.wellspring.edu.vn
+                        email = f"{guardian_id}@parent.wellspring.edu.vn"
+                        parent_emails.append(email)
+                except Exception:
+                    continue
+        
+        if not parent_emails:
+            frappe.logger().info(f"📊 [Report Card Notification] No parent emails found for student: {student_id}")
+            return
+        
+        # Deduplicate parent emails
+        parent_emails = list(set(parent_emails))
+        frappe.logger().info(f"📊 [Report Card Notification] Sending to {len(parent_emails)} parents")
+        
+        # Prepare bilingual notification
+        title_vi = "Báo cáo học tập"
+        title_en = "Report Card"
+        message_vi = f"Học sinh {student_name} có báo cáo học tập mới."
+        message_en = f"Student {student_name} has a new report card."
+        
+        # Call notification-service API
+        notification_service_url = frappe.conf.get("notification_service_url", "http://172.16.20.115:5001")
+        
+        payload = {
+            # Send both translations so service worker can display immediately
+            "title": {
+                "vi": title_vi,
+                "en": title_en
+            },
+            "message": {
+                "vi": message_vi,
+                "en": message_en
+            },
+            # Keep keys for frontend app to use (optional)
+            "titleKey": "report_card_notification_title",
+            "messageKey": "report_card_notification_message",
+            "recipients": parent_emails,
+            "notification_type": "report_card",
+            "type": "system",
+            "priority": "high",
+            "channel": "push",
+            "data": {
+                "type": "report_card",
+                "notificationType": "report_card",  # Also add to ensure proper mapping
+                "student_id": student_id,
+                "student_name": student_name,
+                "report_id": report.name,
+                "report_card_id": report.name  # Also add as report_card_id
+            }
+        }
+        
+        frappe.logger().info(f"📊 [Report Card Notification] Calling notification service: {notification_service_url}/api/notifications/send")
+        
+        response = requests.post(
+            f"{notification_service_url}/api/notifications/send",
+            json=payload,
+            timeout=10
+        )
+        
+        frappe.logger().info(f"📊 [Report Card Notification] Response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            frappe.logger().info(f"✅ [Report Card Notification] Successfully sent notification for report: {report.name}")
+        else:
+            frappe.logger().warning(f"⚠️ [Report Card Notification] Failed to send notification: {response.status_code} - {response.text[:200]}")
+            
+    except Exception as e:
+        frappe.logger().error(f"❌ [Report Card Notification] Error sending notification: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
 
 
 def render_report_card_html(report_data):

@@ -360,22 +360,36 @@ def send_contact_log():
                     try:
                         print(f"📨 Preparing to send notification to {len(parent_emails)} parent(s): {parent_emails}")
                         
-                        # New simplified title and body format
-                        title = "Sổ liên lạc"
-                        body_text = f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay."
+                        # Bilingual title and message format (like attendance notifications)
+                        title_vi = "Sổ liên lạc"
+                        title_en = "Communication eBook"
+                        message_vi = f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay."
+                        message_en = f"Student {student_name} has new feedback for today's class."
                         
                         # Call notification-service API directly (internal network)
                         notification_service_url = frappe.conf.get("notification_service_url", "http://172.16.20.115:5001")
                         
                         payload = {
-                            "title": title,
-                            "body": body_text,
+                            # Send both translations so service worker can display immediately
+                            "title": {
+                                "vi": title_vi,
+                                "en": title_en
+                            },
+                            "message": {
+                                "vi": message_vi,
+                                "en": message_en
+                            },
+                            # Keep keys for frontend app to use (optional)
+                            "titleKey": "contact_log_notification_title",
+                            "messageKey": "contact_log_notification_message",
                             "recipients": parent_emails,
+                            "notification_type": "contact_log",
                             "type": "system", 
                             "priority": "high",
                             "channel": "push",
                             "data": {
                                 "type": "contact_log",  # Custom type in data field
+                                "notificationType": "contact_log",  # Also add to ensure proper mapping
                                 "student_id": student_log.student_id,
                                 "student_name": student_name,
                                 "teacher_name": teacher_name,
