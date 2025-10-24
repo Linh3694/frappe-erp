@@ -1022,17 +1022,38 @@ def debug_event_structure():
                                          filters={"event_id": event_id},
                                          fields=["name", "event_date", "start_time", "end_time"])
         
-        # Get event students - standalone table with event_id
+        # Get event students - check which fields exist
+        es_fields = ["name", "class_student_id", "status"]
+        
+        # Check for student_id or student field
+        if frappe.db.has_column("SIS Event Student", "student_id"):
+            es_fields.append("student_id")
+        elif frappe.db.has_column("SIS Event Student", "student"):
+            es_fields.append("student")
+            
+        if frappe.db.has_column("SIS Event Student", "student_name"):
+            es_fields.append("student_name")
+        if frappe.db.has_column("SIS Event Student", "student_code"):
+            es_fields.append("student_code")
+        
         event_students = frappe.get_all("SIS Event Student",
                                        filters={"event_id": event_id},
-                                       fields=["name", "student_id", "student_name", "student_code", "class_student_id", "status"])
+                                       fields=es_fields)
         
         # Get event attendance if date provided
         event_attendance = []
         if date:
+            ea_fields = ["status"]
+            if frappe.db.has_column("SIS Event Attendance", "student_id"):
+                ea_fields.append("student_id")
+            elif frappe.db.has_column("SIS Event Attendance", "student"):
+                ea_fields.append("student")
+            if frappe.db.has_column("SIS Event Attendance", "student_name"):
+                ea_fields.append("student_name")
+                
             event_attendance = frappe.get_all("SIS Event Attendance",
                                             filters={"event_id": event_id, "attendance_date": date},
-                                            fields=["student_id", "student_name", "status"])
+                                            fields=ea_fields)
         
         result = {
             "event_id": event_id,
@@ -1042,8 +1063,10 @@ def debug_event_structure():
             "date_times": event_date_times,
             "students_count": len(event_students),
             "students": event_students,
+            "students_fields": es_fields,
             "attendance_count": len(event_attendance),
-            "attendance": event_attendance
+            "attendance": event_attendance,
+            "attendance_fields": ea_fields if date else []
         }
         
         return success_response(result)
