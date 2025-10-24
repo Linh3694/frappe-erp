@@ -1029,6 +1029,7 @@ def get_events_by_date_with_attendance():
         frappe.logger().info(f"📊 [Backend] Found {len(events)} approved events")
 
         result_events = []
+        event_filter_debug = []  # Track why events are filtered out
 
         # Get class students for filtering
         class_students = frappe.get_all("SIS Class Student",
@@ -1053,7 +1054,20 @@ def get_events_by_date_with_attendance():
                                                  },
                                                  fields=["start_time", "end_time"])
 
+                frappe.logger().info(f"🔍 [Debug] Event {event_id} - date_times found: {len(event_date_times)} for date {date}")
+
+                event_debug = {
+                    "event_id": event_id,
+                    "event_title": event['title'],
+                    "date_times_count": len(event_date_times),
+                    "total_event_students": 0,
+                    "class_event_students": 0,
+                    "reason_filtered": None
+                }
+
                 if not event_date_times:
+                    event_debug["reason_filtered"] = f"No date_times for date {date}"
+                    event_filter_debug.append(event_debug)
                     continue  # Event doesn't happen on this date
 
                 # Get event students who belong to this class
@@ -1061,13 +1075,21 @@ def get_events_by_date_with_attendance():
                                                filters={"parent": event_id},
                                                fields=["class_student_id", "status"])
 
+                event_debug["total_event_students"] = len(event_students)
+                frappe.logger().info(f"👥 [Debug] Event {event_id} - total event_students: {len(event_students)}")
+
                 # Filter students who are in the specified class
                 class_event_students = [
                     es for es in event_students
                     if es['class_student_id'] in class_student_ids
                 ]
 
+                event_debug["class_event_students"] = len(class_event_students)
+                frappe.logger().info(f"✅ [Debug] Event {event_id} - class_event_students: {len(class_event_students)} (class has {len(class_student_ids)} students)")
+
                 if not class_event_students:
+                    event_debug["reason_filtered"] = f"No students from class {class_id} (class has {len(class_student_ids)} students, event has {len(event_students)} total students)"
+                    event_filter_debug.append(event_debug)
                     continue  # No students from this class participate
 
                 frappe.logger().info(f"🎯 [Backend] Found event {event_id} with {len(class_event_students)} students from class {class_id}")
@@ -1131,6 +1153,10 @@ def get_events_by_date_with_attendance():
                     "attendedCount": attended_count
                 })
 
+                # Mark as passed all filters
+                event_debug["passed_all_filters"] = True
+                event_filter_debug.append(event_debug)
+
             except Exception as event_error:
                 frappe.logger().warning(f"⚠️ [Backend] Error processing event {event.get('name')}: {str(event_error)}")
                 continue
@@ -1143,6 +1169,8 @@ def get_events_by_date_with_attendance():
         # Include debug info in response
         debug_info["events_found"] = len(events)
         debug_info["result_events_count"] = len(result_events)
+        debug_info["class_student_ids_sample"] = list(class_student_ids)[:5]  # Show first 5 class student IDs
+        debug_info["event_filter_debug"] = event_filter_debug  # Show why events were filtered
 
         return success_response(result_events, debug_info=debug_info)
 
