@@ -750,6 +750,7 @@ def batch_get_event_attendance():
         
         # Result structure
         result = {}
+        overlap_debug = []  # Track overlap checking results
         for period in periods:
             result[period] = {"events": [], "statuses": {}}
         
@@ -792,19 +793,37 @@ def batch_get_event_attendance():
                     'startTime': str(matching_dt.get('start_time', '')),
                     'endTime': str(matching_dt.get('end_time', ''))
                 }
-                
+
+                frappe.logger().info(f"🎯 [Debug] Event {event['name']} time range: {event_time_range}")
+
                 for period_name in periods:
                     schedule = schedule_map.get(period_name)
                     if not schedule:
+                        frappe.logger().info(f"⚠️ [Debug] No schedule found for period: {period_name}")
                         continue
-                    
-                    if time_ranges_overlap(event_time_range, schedule):
+
+                    frappe.logger().info(f"📅 [Debug] Checking overlap for {period_name}: event={event_time_range}, schedule={schedule}")
+
+                    overlap_result = time_ranges_overlap(event_time_range, schedule)
+                    overlap_debug.append({
+                        "event_id": event['name'],
+                        "event_title": event['title'],
+                        "period_name": period_name,
+                        "event_time": event_time_range,
+                        "schedule_time": {"start_time": schedule.get('start_time'), "end_time": schedule.get('end_time')},
+                        "overlap": overlap_result
+                    })
+
+                    if overlap_result:
+                        frappe.logger().info(f"✅ [Debug] OVERLAP FOUND! Event {event['name']} overlaps with {period_name}")
                         # Event affects this period!
                         result[period_name]["events"].append({
                             "eventId": event['name'],
                             "eventTitle": event['title'],
                             "studentIds": matching_student_ids
                         })
+                    else:
+                        frappe.logger().info(f"❌ [Debug] NO OVERLAP: Event {event['name']} does not overlap with {period_name}")
                 
             except Exception as event_error:
                 frappe.logger().warning(f"⚠️ [Backend] Error processing event {event.get('name')}: {str(event_error)}")
@@ -859,7 +878,10 @@ def batch_get_event_attendance():
             "schedule_filters": schedule_filters,
             "requested_periods": periods,
             "education_stage_id": education_stage_id,
-            "class_students_count": len(class_students)
+            "class_students_count": len(class_students),
+            "schedule_map_keys": list(schedule_map.keys()) if schedule_map else [],
+            "schedule_samples": list(schedule_map.values())[:2] if schedule_map else [],  # Show first 2 schedules as sample
+            "overlap_check_results": overlap_debug[:10]  # Show first 10 overlap checks
         }
 
         return success_response(result, debug_info=debug_info)
