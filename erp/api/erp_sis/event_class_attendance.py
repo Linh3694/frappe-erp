@@ -1045,6 +1045,7 @@ def get_events_by_date_with_attendance():
         debug_info["events_manually_added"] = ["SIS-EVENT-3261554"] if "SIS-EVENT-3261554" not in event_ids else []
 
         frappe.logger().info(f"📊 [Backend] Found {len(events)} approved events (including manually added)")
+        frappe.logger().info(f"📋 [Debug] Event names: {[e['name'] for e in events]}")
 
         result_events = []
         event_filter_debug = []  # Track why events are filtered out
@@ -1198,6 +1199,7 @@ def get_events_by_date_with_attendance():
         # Include debug info in response
         debug_info["events_found"] = len(events)
         debug_info["result_events_count"] = len(result_events)
+        debug_info["event_names"] = [e['name'] for e in events]  # All event names found
         debug_info["class_student_ids_sample"] = list(class_student_ids)[:5]  # Show first 5 class student IDs
         debug_info["event_filter_debug"] = event_filter_debug[:5]  # Show first 5 filtered events
 
