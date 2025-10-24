@@ -189,10 +189,12 @@ def sync_event_to_class_attendance():
             frappe.logger().info("✅ No overlapping schedules found")
             return success_response({"synced_count": 0}, "No overlapping periods")
 
-        # Lấy danh sách học sinh tham gia sự kiện
-        event_students = frappe.get_all("SIS Event Student",
-                                      filters={"parent": event_id, "status": "approved"},
-                                      fields=["student_id", "student_code", "student_name"])
+        # Lấy danh sách học sinh tham gia sự kiện (child table)
+        event_students = frappe.db.sql("""
+            SELECT student_id, student_code, student_name
+            FROM `tabSIS Event Student`
+            WHERE parenttype = 'SIS Event' AND parent = %s AND status = 'approved'
+        """, (event_id,), as_dict=True)
 
         synced_count = 0
 
@@ -458,10 +460,13 @@ def get_events_by_class_period():
                             # Try 2: parent field if first failed
                             if not event_students:
                                 try:
-                                    event_students = frappe.get_all("SIS Event Student",
-                                                                   filters={"parent": event['name']},
-                                                                   fields=["class_student_id", "status"])
-                                    debug_logs.append(f"🔍 [Backend] Try 2 - parent filter: {len(event_students)} students")
+                                    # Try with SQL for child table
+                                    event_students = frappe.db.sql("""
+                                        SELECT class_student_id, status
+                                        FROM `tabSIS Event Student`
+                                        WHERE parenttype = 'SIS Event' AND parent = %s
+                                    """, (event['name'],), as_dict=True)
+                                    debug_logs.append(f"🔍 [Backend] Try 2 - SQL query: {len(event_students)} students")
                                 except Exception as e2:
                                     debug_logs.append(f"❌ [Backend] Try 2 failed: {str(e2)}")
                             
