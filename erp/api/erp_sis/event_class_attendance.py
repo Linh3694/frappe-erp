@@ -1159,10 +1159,10 @@ def get_events_by_date_with_attendance():
 
                     students_info.append({
                         "studentId": student_id,
-                        "studentName": student_doc.student_name or '',
-                        "studentCode": student_doc.student_code or '',
+                        "studentName": getattr(student_doc, 'student_name', '') or '',
+                        "studentCode": getattr(student_doc, 'student_code', '') or '',
                         "status": status,
-                        "userImage": student_doc.user_image or None
+                        "userImage": getattr(student_doc, 'user_image', None)
                     })
 
                 # Use the first date time (assuming events have only one time slot per day)
