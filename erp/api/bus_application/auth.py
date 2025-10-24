@@ -348,9 +348,9 @@ def verify_otp_and_login(phone_number, otp):
         else:
             logs.append(f"✅ User already exists: {user_email}")
 
-        # Generate JWT token (30 days expiry as per Context.md)
+        # Generate JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
-        token = generate_jwt_token(user_email, expires_in_days=30)
+        token = generate_jwt_token(user_email)
         logs.append("JWT token generated")
 
         # Clear OTP from cache
@@ -406,7 +406,7 @@ def verify_otp_and_login(phone_number, otp):
                 "campus": campus_info,
                 "school_year": school_year_info,
                 "token": token,
-                "expires_in": 30 * 24 * 60 * 60  # 30 days in seconds
+                "expires_in": 365 * 24 * 60 * 60  # 365 days in seconds
             },
             "logs": logs
         }
@@ -553,7 +553,7 @@ def refresh_token():
 
         # Generate new JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
-        token = generate_jwt_token(user_email, expires_in_days=30)
+        token = generate_jwt_token(user_email)
 
         return {
             "success": True,
