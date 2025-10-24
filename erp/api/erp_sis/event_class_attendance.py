@@ -1189,6 +1189,9 @@ def get_events_by_date_with_attendance():
 
             except Exception as event_error:
                 frappe.logger().warning(f"⚠️ [Backend] Error processing event {event.get('name')}: {str(event_error)}")
+                if event.get('name') == "SIS-EVENT-3261554":
+                    frappe.logger().error(f"❌ [Debug] CRITICAL ERROR processing SIS-EVENT-3261554: {str(event_error)}")
+                    debug_info["error_processing_SIS-EVENT-3261554"] = str(event_error)
                 continue
 
         # Sort events by start time
@@ -1201,7 +1204,8 @@ def get_events_by_date_with_attendance():
         debug_info["result_events_count"] = len(result_events)
         debug_info["event_names"] = [e['name'] for e in events]  # All event names found
         debug_info["class_student_ids_sample"] = list(class_student_ids)[:5]  # Show first 5 class student IDs
-        debug_info["event_filter_debug"] = event_filter_debug[:5]  # Show first 5 filtered events
+        debug_info["event_filter_debug"] = event_filter_debug[:10]  # Show first 10 filtered events
+        debug_info["events_processed_count"] = len(event_filter_debug)  # How many events were processed
 
         return success_response(result_events, debug_info=debug_info)
 
