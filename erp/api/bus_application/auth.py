@@ -137,7 +137,7 @@ def send_sms_via_vivas(phone_number, message):
 
 
 @frappe.whitelist(allow_guest=True)
-@rate_limit(limit=5, seconds=3600)  # 5 attempts per hour
+@rate_limit(limit=100, seconds=3600)  # 5 attempts per hour
 def request_otp(phone_number):
     """
     Request OTP for bus monitor phone number authentication
@@ -165,15 +165,24 @@ def request_otp(phone_number):
         normalized_phone = normalize_phone_number(phone_number)
         logs.append(f"📱 Normalized phone: {normalized_phone}")
 
-        # Find bus monitor by phone number
+        # Create alternative phone formats for searching
+        # DB might store as: 09XXXXXXXX, 84XXXXXXXXX, or +84XXXXXXXXX
+        phone_formats = [
+            normalized_phone,  # 84XXXXXXXXX
+            f"+{normalized_phone}",  # +84XXXXXXXXX
+            f"0{normalized_phone[2:]}" if normalized_phone.startswith("84") else normalized_phone  # 09XXXXXXXX
+        ]
+        logs.append(f"🔍 Searching with phone formats: {phone_formats}")
+
+        # Find bus monitor by phone number (try all formats)
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"phone_number": normalized_phone, "status": "Active"},
+            filters={"phone_number": ["in", phone_formats], "status": "Active"},
             fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id"]
         )
 
         if not monitors:
-            logs.append(f"❌ No active bus monitor found with phone: {normalized_phone}")
+            logs.append(f"❌ No active bus monitor found with phone formats: {phone_formats}")
             return {
                 "success": False,
                 "message": "Không tìm thấy giám sát viên với số điện thoại này",
@@ -287,10 +296,19 @@ def verify_otp_and_login(phone_number, otp):
 
         logs.append(f"✅ OTP verified successfully")
 
-        # Get monitor details
+        # Create alternative phone formats for searching
+        # DB might store as: 09XXXXXXXX, 84XXXXXXXXX, or +84XXXXXXXXX
+        phone_formats = [
+            normalized_phone,  # 84XXXXXXXXX
+            f"+{normalized_phone}",  # +84XXXXXXXXX
+            f"0{normalized_phone[2:]}" if normalized_phone.startswith("84") else normalized_phone  # 09XXXXXXXX
+        ]
+        logs.append(f"🔍 Searching with phone formats: {phone_formats}")
+
+        # Get monitor details (try all formats)
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"phone_number": normalized_phone, "status": "Active"},
+            filters={"phone_number": ["in", phone_formats], "status": "Active"},
             fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address"]
         )
 
