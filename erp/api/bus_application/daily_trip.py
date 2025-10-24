@@ -60,8 +60,6 @@ def get_monitor_daily_trips():
                 dt.trip_date,
                 dt.trip_type,
                 dt.trip_status,
-                dt.started_at,
-                dt.completed_at,
                 dt.notes,
                 br.route_name,
                 br.short_name as route_short_name,
@@ -87,13 +85,15 @@ def get_monitor_daily_trips():
             total = trip.total_students or 0
             if total > 0:
                 if trip.trip_type == "Đón":
-                    trip.completion_percentage = round((trip.boarded_count / total) * 100, 1)
+                    completed = trip.boarded_count or 0
+                    trip.completion_percentage = round((completed / total) * 100, 1)
                 else:  # Trả
-                    trip.completion_percentage = round((trip.dropped_count / total) * 100, 1)
+                    completed = trip.dropped_count or 0
+                    trip.completion_percentage = round((completed / total) * 100, 1)
             else:
                 trip.completion_percentage = 0
 
-            # Add warning flags
+            # Add warning flags - cảnh báo nếu completion < 80% và đang In Progress
             trip.has_warning = (
                 trip.trip_status == "In Progress" and
                 trip.completion_percentage < 80
