@@ -2013,16 +2013,27 @@ def get_event_attendance():
             try:
                 frappe.logger().debug(f"🔍 Loading class student: {es.class_student_id}")
                 cs = frappe.get_doc("SIS Class Student", es.class_student_id)
-                
+
                 frappe.logger().debug(f"🔍 Loading student: {cs.student_id}")
                 student = frappe.get_doc("CRM Student", cs.student_id)
-                
+
+                # Get class name from class_id
+                class_name = None
+                if hasattr(cs, 'class_id') and cs.class_id:
+                    try:
+                        class_doc = frappe.get_doc("SIS Class", cs.class_id)
+                        class_name = getattr(class_doc, 'title', None) or getattr(class_doc, 'class_name', None)
+                        frappe.logger().debug(f"🔍 Loaded class name: {class_name} for class_id: {cs.class_id}")
+                    except Exception as class_e:
+                        frappe.logger().debug(f"🔍 Could not load class {cs.class_id}: {str(class_e)}")
+
                 participants.append({
                     "event_student_id": es.name,
                     "class_student_id": es.class_student_id,
                     "student_id": cs.student_id,
                     "student_name": student.student_name,
                     "student_code": student.student_code,
+                    "class_name": class_name,
                     "user_image": getattr(student, 'user_image', None)
                 })
                 frappe.logger().debug(f"🔍 Successfully processed student: {student.student_name}")
