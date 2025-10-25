@@ -17,5 +17,7 @@ class SISBusDailyTripStudent(Document):
 		if self.student_id and not frappe.db.exists("CRM Student", self.student_id):
 			frappe.throw("Học sinh không tồn tại")
 
+		# Only validate class_student_id if it has a value
+		# Allow NULL when student is removed from class
 		if self.class_student_id and not frappe.db.exists("SIS Class Student", self.class_student_id):
 			frappe.throw("Học sinh trong lớp không tồn tại")

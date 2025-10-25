@@ -69,23 +69,64 @@ class SISClassStudent(Document):
 	
 	def on_trash(self):
 		"""
-		When a Class Student assignment is deleted, cleanup related Student Subject records.
-		This ensures data consistency.
+		When a Class Student assignment is deleted, cleanup related records.
+		This ensures data consistency and prevents link errors.
 		"""
 		if not self.student_id or not self.class_id:
 			return
 		
+		cleanup_messages = []
+		
 		try:
-			# Delete Student Subject records for this student in this class
+			# 1. Delete Student Subject records for this student in this class
 			frappe.db.sql("""
 				DELETE FROM `tabSIS Student Subject`
 				WHERE student_id = %s
 				AND class_id = %s
 			""", (self.student_id, self.class_id))
 			
-			frappe.msgprint(
-				f"Đã xóa {frappe.db.sql_list('SELECT COUNT(*) FROM `tabSIS Student Subject` WHERE student_id = %s AND class_id = %s', (self.student_id, self.class_id))[0] if frappe.db.sql_list('SELECT COUNT(*) FROM `tabSIS Student Subject` WHERE student_id = %s AND class_id = %s', (self.student_id, self.class_id)) else 0} "
-				f"Student Subject records liên quan."
-			)
+			subject_count = frappe.db.sql("""
+				SELECT COUNT(*) FROM `tabSIS Student Subject` 
+				WHERE student_id = %s AND class_id = %s
+			""", (self.student_id, self.class_id))[0][0] if frappe.db.sql("""
+				SELECT COUNT(*) FROM `tabSIS Student Subject` 
+				WHERE student_id = %s AND class_id = %s
+			""", (self.student_id, self.class_id)) else 0
+			
+			if subject_count:
+				cleanup_messages.append(f"Đã xóa {subject_count} Student Subject records")
+			
 		except Exception as e:
 			frappe.log_error(f"Error cleaning up Student Subject on Class Student deletion: {str(e)}")
+		
+		try:
+			# 2. Update Bus Daily Trip Student records - clear class_student_id and class_name
+			bus_daily_trip_count = frappe.db.sql("""
+				UPDATE `tabSIS Bus Daily Trip Student`
+				SET class_student_id = NULL, class_name = ''
+				WHERE class_student_id = %s
+			""", (self.name,))
+			
+			if bus_daily_trip_count and bus_daily_trip_count > 0:
+				cleanup_messages.append(f"Đã cập nhật {bus_daily_trip_count} Bus Daily Trip Student records (xóa liên kết lớp)")
+			
+		except Exception as e:
+			frappe.log_error(f"Error updating Bus Daily Trip Student on Class Student deletion: {str(e)}")
+		
+		try:
+			# 3. Update Bus Route Student records - clear class_student_id
+			bus_route_count = frappe.db.sql("""
+				UPDATE `tabSIS Bus Route Student`
+				SET class_student_id = NULL
+				WHERE class_student_id = %s
+			""", (self.name,))
+			
+			if bus_route_count and bus_route_count > 0:
+				cleanup_messages.append(f"Đã cập nhật {bus_route_count} Bus Route Student records (xóa liên kết lớp)")
+			
+		except Exception as e:
+			frappe.log_error(f"Error updating Bus Route Student on Class Student deletion: {str(e)}")
+		
+		# Display summary message
+		if cleanup_messages:
+			frappe.msgprint("<br>".join(cleanup_messages))

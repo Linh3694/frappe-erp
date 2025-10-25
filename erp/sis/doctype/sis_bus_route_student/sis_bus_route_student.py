@@ -31,6 +31,8 @@ class SISBusRouteStudent(Document):
 			if not student_exists:
 				frappe.throw("Học sinh không tồn tại")
 
+		# Only validate class_student_id if it has a value
+		# Allow NULL when student is removed from class
 		if self.class_student_id:
 			class_student_exists = frappe.db.sql("SELECT name FROM `tabSIS Class Student` WHERE name = %s LIMIT 1", (self.class_student_id,))
 			if not class_student_exists:

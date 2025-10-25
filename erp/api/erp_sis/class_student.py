@@ -37,6 +37,66 @@ def _clear_class_log_student_link(class_student_id):
         return 0
 
 
+def sync_bus_records_for_class_change(student_id, class_student_id, new_class_id):
+    """
+    Sync Bus records when a student changes class.
+    Updates class_name in Bus Daily Trip Student and ensures proper class_student_id.
+    
+    Args:
+        student_id: The student ID
+        class_student_id: The SIS Class Student record ID
+        new_class_id: The new class ID
+    
+    Returns:
+        dict: Summary with counts of updated records
+    """
+    try:
+        # Get the new class name
+        new_class_name = frappe.db.get_value("SIS Class", new_class_id, "title") or ""
+        
+        # Update Bus Daily Trip Student records
+        daily_trip_result = frappe.db.sql("""
+            UPDATE `tabSIS Bus Daily Trip Student`
+            SET class_student_id = %s, class_name = %s
+            WHERE student_id = %s
+            AND (class_student_id IS NULL OR class_student_id = %s)
+        """, (class_student_id, new_class_name, student_id, class_student_id))
+        
+        daily_trip_count = daily_trip_result if daily_trip_result else 0
+        
+        # Update Bus Route Student records (just ensure class_student_id is correct)
+        route_result = frappe.db.sql("""
+            UPDATE `tabSIS Bus Route Student`
+            SET class_student_id = %s
+            WHERE student_id = %s
+            AND (class_student_id IS NULL OR class_student_id = %s)
+        """, (class_student_id, student_id, class_student_id))
+        
+        route_count = route_result if route_result else 0
+        
+        if daily_trip_count > 0 or route_count > 0:
+            frappe.logger().info(
+                f"🚌 Synced Bus records for student {student_id} to class {new_class_id}: "
+                f"{daily_trip_count} Daily Trip, {route_count} Route records updated"
+            )
+        
+        return {
+            "success": True,
+            "daily_trip_count": daily_trip_count,
+            "route_count": route_count,
+            "new_class_name": new_class_name
+        }
+        
+    except Exception as e:
+        frappe.logger().error(f"Failed to sync Bus records for class change: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "daily_trip_count": 0,
+            "route_count": 0
+        }
+
+
 def sync_student_subjects_for_class_change(student_id, new_class_id, school_year_id, campus_id, old_class_id=None):
     """
     Sync SIS Student Subject records when a student changes class.
@@ -454,6 +514,13 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                         old_class_id=old_class_id
                     )
                     
+                    # 🚌 SYNC BUS RECORDS: Update Bus records to new class
+                    bus_sync_result = sync_bus_records_for_class_change(
+                        student_id=student_id,
+                        class_student_id=target_name,
+                        new_class_id=class_id
+                    )
+                    
                     # Log sync results
                     if sync_result.get("success"):
                         frappe.logger().info(
@@ -465,6 +532,12 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                         frappe.logger().warning(
                             f"Student {student_id} moved to {class_id} but Student Subject sync had issues: "
                             f"{sync_result.get('error', 'Unknown error')}"
+                        )
+                    
+                    if bus_sync_result.get("success"):
+                        frappe.logger().info(
+                            f"🚌 Bus records synced: {bus_sync_result.get('daily_trip_count', 0)} Daily Trip, "
+                            f"{bus_sync_result.get('route_count', 0)} Route records updated"
                         )
                     
                     # Deduplicate: remove any extra regular records beyond the first
@@ -484,6 +557,14 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                         sync_msg_parts.append(f"created {sync_result.get('created_count', 0)} new")
                     sync_msg = ", ".join(sync_msg_parts) if sync_msg_parts else "no changes needed"
                     
+                    # Bus sync message
+                    bus_msg_parts = []
+                    if bus_sync_result.get('daily_trip_count', 0) > 0:
+                        bus_msg_parts.append(f"{bus_sync_result.get('daily_trip_count')} Daily Trip")
+                    if bus_sync_result.get('route_count', 0) > 0:
+                        bus_msg_parts.append(f"{bus_sync_result.get('route_count')} Route")
+                    bus_msg = f" Bus records updated: {', '.join(bus_msg_parts)}." if bus_msg_parts else ""
+                    
                     return single_item_response(
                         data={
                             "name": updated.name,
@@ -492,9 +573,10 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                             "school_year_id": updated.school_year_id,
                             "class_type": updated.class_type,
                             "campus_id": updated.campus_id,
-                            "sync_info": sync_result  # Include sync info in response
+                            "sync_info": sync_result,  # Include sync info in response
+                            "bus_sync_info": bus_sync_result  # Include bus sync info
                         },
-                        message=f"Student moved to new class. Subject records: {sync_msg}."
+                        message=f"Student moved to new class. Subject records: {sync_msg}.{bus_msg}"
                     )
                 except Exception as move_err:
                     frappe.logger().error(f"Failed to move regular class assignment: {str(move_err)}")
@@ -524,6 +606,13 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
             old_class_id=None  # Don't know old class for new assignment
         )
         
+        # 🚌 SYNC BUS RECORDS: Update Bus records to new class
+        bus_sync_result = sync_bus_records_for_class_change(
+            student_id=student_id,
+            class_student_id=class_student.name,
+            new_class_id=class_id
+        )
+        
         # Log sync results
         updated = sync_result.get("updated_count", 0)
         created = sync_result.get("created_count", 0)
@@ -541,6 +630,13 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                 f"Logs: {sync_result.get('logs', [])}"
             )
         
+        # Log bus sync results
+        if bus_sync_result.get("success"):
+            frappe.logger().info(
+                f"🚌 Bus records synced: {bus_sync_result.get('daily_trip_count', 0)} Daily Trip, "
+                f"{bus_sync_result.get('route_count', 0)} Route records updated"
+            )
+        
         frappe.db.commit()
 
         # Build informative message
@@ -555,6 +651,14 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
             sync_msg = "⚠️ no subject records created - report cards may be empty"
         else:
             sync_msg = ", ".join(sync_msg_parts)
+        
+        # Bus sync message
+        bus_msg_parts = []
+        if bus_sync_result.get('daily_trip_count', 0) > 0:
+            bus_msg_parts.append(f"{bus_sync_result.get('daily_trip_count')} Daily Trip")
+        if bus_sync_result.get('route_count', 0) > 0:
+            bus_msg_parts.append(f"{bus_sync_result.get('route_count')} Route")
+        bus_msg = f" Bus records updated: {', '.join(bus_msg_parts)}." if bus_msg_parts else ""
 
         return single_item_response(
             data={
@@ -564,9 +668,10 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                 "school_year_id": class_student.school_year_id,
                 "class_type": class_student.class_type,
                 "campus_id": class_student.campus_id,
-                "sync_info": sync_result  # Include sync info in response
+                "sync_info": sync_result,  # Include sync info in response
+                "bus_sync_info": bus_sync_result  # Include bus sync info
             },
-            message=f"Student assigned to class. Subject records: {sync_msg}."
+            message=f"Student assigned to class. Subject records: {sync_msg}.{bus_msg}"
         )
         
     except Exception as e:
