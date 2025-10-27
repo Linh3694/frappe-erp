@@ -287,6 +287,36 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         else:
                             test_point_titles = []
                     
+                    # ✨ Parse options snapshot (JSON fields)
+                    criteria_options = None
+                    scale_options = None
+                    comment_title_options = None
+                    
+                    try:
+                        import json as _json
+                        # Parse criteria_options
+                        criteria_opts_raw = getattr(subject_config, 'criteria_options', None)
+                        if criteria_opts_raw and isinstance(criteria_opts_raw, str):
+                            criteria_options = _json.loads(criteria_opts_raw)
+                        elif isinstance(criteria_opts_raw, list):
+                            criteria_options = criteria_opts_raw
+                        
+                        # Parse scale_options
+                        scale_opts_raw = getattr(subject_config, 'scale_options', None)
+                        if scale_opts_raw and isinstance(scale_opts_raw, str):
+                            scale_options = _json.loads(scale_opts_raw)
+                        elif isinstance(scale_opts_raw, list):
+                            scale_options = scale_opts_raw
+                        
+                        # Parse comment_title_options
+                        comment_opts_raw = getattr(subject_config, 'comment_title_options', None)
+                        if comment_opts_raw and isinstance(comment_opts_raw, str):
+                            comment_title_options = _json.loads(comment_opts_raw)
+                        elif isinstance(comment_opts_raw, list):
+                            comment_title_options = comment_opts_raw
+                    except Exception as parse_error:
+                        debug_info["options_parse_error"] = str(parse_error)
+                    
                     result = {
                         'test_point_enabled': getattr(subject_config, 'test_point_enabled', 0),
                         'test_point_titles': test_point_titles,
@@ -295,6 +325,10 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
                         'scale_id': getattr(subject_config, 'scale_id', ''),
                         'comment_title_enabled': getattr(subject_config, 'comment_title_enabled', 0),
                         'comment_title_id': getattr(subject_config, 'comment_title_id', ''),
+                        # ✨ Options snapshot
+                        'criteria_options': criteria_options,
+                        'scale_options': scale_options,
+                        'comment_title_options': comment_title_options,
                         '_debug_extraction': debug_info
                     }
                     return result
@@ -538,13 +572,22 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         
         # Load rubric structure from template  
         if template_config.get('rubric_enabled'):
-            criteria_id = template_config.get('criteria_id', '')
-            scale_id = template_config.get('scale_id', '')
+            criteria_options_snapshot = template_config.get('criteria_options', None)
+            scale_options_snapshot = template_config.get('scale_options', None)
             
-            # Load criteria from template
-            template_criteria = _load_evaluation_criteria_options(criteria_id)
-            # Load scale options
-            scale_options = _load_evaluation_scale_options(scale_id)
+            # Load criteria: Ưu tiên từ snapshot, fallback to template gốc
+            if criteria_options_snapshot and isinstance(criteria_options_snapshot, list):
+                template_criteria = criteria_options_snapshot
+            else:
+                criteria_id = template_config.get('criteria_id', '')
+                template_criteria = _load_evaluation_criteria_options(criteria_id)
+            
+            # Load scale: Ưu tiên từ snapshot, fallback to template gốc
+            if scale_options_snapshot and isinstance(scale_options_snapshot, list):
+                scale_options = [{"id": opt.get("name", opt.get("title", "")), "label": opt.get("title", "")} for opt in scale_options_snapshot]
+            else:
+                scale_id = template_config.get('scale_id', '')
+                scale_options = _load_evaluation_scale_options(scale_id)
             
             # Helper functions loaded
             if template_criteria:
@@ -589,8 +632,15 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         
         # Load comment structure from template  
         if template_config.get('comment_title_enabled'):
-            comment_title_id = template_config.get('comment_title_id', '')
-            template_comments = _load_comment_title_options(comment_title_id)
+            # ✨ PRIORITY 1: Load from options snapshot (độc lập cho mỗi template)
+            comment_title_options_snapshot = template_config.get('comment_title_options', None)
+            
+            # Load comments: Ưu tiên từ snapshot, fallback to template gốc
+            if comment_title_options_snapshot and isinstance(comment_title_options_snapshot, list):
+                template_comments = comment_title_options_snapshot
+            else:
+                comment_title_id = template_config.get('comment_title_id', '')
+                template_comments = _load_comment_title_options(comment_title_id)
             
             # Load comments from template
             
@@ -638,10 +688,27 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         # Load comment title options from template (same as subjects)
         homeroom_comment_titles = []
         try:
-            # Use same comment structure as subjects from template
+            # ✨ PRIORITY 1: Load from options snapshot (độc lập cho mỗi template)
             if template_id:
                 template_doc = frappe.get_doc("SIS Report Card Template", template_id)
-                if hasattr(template_doc, 'homeroom_comment_title_id') and template_doc.homeroom_comment_title_id:
+                
+                # Try to load from snapshot first
+                homeroom_comment_options_snapshot = None
+                try:
+                    import json as _json
+                    hc_opts_raw = getattr(template_doc, 'homeroom_comment_options', None)
+                    if hc_opts_raw and isinstance(hc_opts_raw, str):
+                        homeroom_comment_options_snapshot = _json.loads(hc_opts_raw)
+                    elif isinstance(hc_opts_raw, list):
+                        homeroom_comment_options_snapshot = hc_opts_raw
+                except:
+                    pass
+                
+                # Use snapshot if available
+                if homeroom_comment_options_snapshot and isinstance(homeroom_comment_options_snapshot, list):
+                    homeroom_comment_titles = homeroom_comment_options_snapshot
+                # Fallback to template gốc
+                elif hasattr(template_doc, 'homeroom_comment_title_id') and template_doc.homeroom_comment_title_id:
                     homeroom_comment_titles = _load_comment_title_options(template_doc.homeroom_comment_title_id)
         except:
             pass
