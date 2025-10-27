@@ -125,6 +125,32 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
             except Exception:
                 pass
 
+            # Options snapshot (criteria_options, scale_options, comment_title_options)
+            try:
+                import json as _json
+                criteria_opts = getattr(row, "criteria_options", None)
+                if criteria_opts and isinstance(criteria_opts, str):
+                    subject_detail["criteria_options"] = _json.loads(criteria_opts)
+                else:
+                    subject_detail["criteria_options"] = criteria_opts if isinstance(criteria_opts, list) else None
+                    
+                scale_opts = getattr(row, "scale_options", None)
+                if scale_opts and isinstance(scale_opts, str):
+                    subject_detail["scale_options"] = _json.loads(scale_opts)
+                else:
+                    subject_detail["scale_options"] = scale_opts if isinstance(scale_opts, list) else None
+                    
+                comment_opts = getattr(row, "comment_title_options", None)
+                if comment_opts and isinstance(comment_opts, str):
+                    subject_detail["comment_title_options"] = _json.loads(comment_opts)
+                else:
+                    subject_detail["comment_title_options"] = comment_opts if isinstance(comment_opts, list) else None
+            except Exception as e:
+                frappe.logger().error(f"Error parsing options snapshot: {str(e)}")
+                subject_detail["criteria_options"] = None
+                subject_detail["scale_options"] = None
+                subject_detail["comment_title_options"] = None
+
             subjects.append(subject_detail)
     except Exception:
         pass
@@ -137,6 +163,18 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
             class_ids = json.loads(class_ids_raw) if isinstance(class_ids_raw, str) else class_ids_raw
     except Exception:
         pass
+    
+    # Parse homeroom_comment_options snapshot (JSON field)
+    homeroom_comment_options = None
+    try:
+        import json as _json
+        hc_opts = getattr(doc, "homeroom_comment_options", None)
+        if hc_opts and isinstance(hc_opts, str):
+            homeroom_comment_options = _json.loads(hc_opts)
+        elif isinstance(hc_opts, list):
+            homeroom_comment_options = hc_opts
+    except Exception as e:
+        frappe.logger().error(f"Error parsing homeroom_comment_options: {str(e)}")
     
     return {
         "name": doc.name,
@@ -162,6 +200,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
         "conduct_ranking": getattr(doc, "conduct_ranking", None),
         "conduct_ranking_year": getattr(doc, "conduct_ranking_year", None),
         "homeroom_titles": homeroom_titles,
+        "homeroom_comment_options": homeroom_comment_options,
         "subject_eval_enabled": 1 if getattr(doc, "subject_eval_enabled", 0) else 0,
         "intl_overall_mark_enabled": 1 if getattr(doc, "intl_overall_mark_enabled", 0) else 0,
         "intl_overall_grade_enabled": 1 if getattr(doc, "intl_overall_grade_enabled", 0) else 0,
@@ -412,6 +451,18 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
         except Exception as e:
             frappe.logger().error(f"Error saving intl_ielts_config for subject {subject_id}: {str(e)}")
 
+        # Save options snapshot (criteria_options, scale_options, comment_title_options)
+        try:
+            import json as _json
+            if "criteria_options" in sub and sub.get("criteria_options") is not None:
+                row.set("criteria_options", _json.dumps(sub.get("criteria_options")))
+            if "scale_options" in sub and sub.get("scale_options") is not None:
+                row.set("scale_options", _json.dumps(sub.get("scale_options")))
+            if "comment_title_options" in sub and sub.get("comment_title_options") is not None:
+                row.set("comment_title_options", _json.dumps(sub.get("comment_title_options")))
+        except Exception as e:
+            frappe.logger().error(f"Error saving options snapshot for subject {subject_id}: {str(e)}")
+
         # If template has a form_id selected, auto-apply section toggles based on form
         try:
             if getattr(parent_doc, "form_id", None):
@@ -613,6 +664,10 @@ def create_template():
             "subject_eval_enabled": 1 if data.get("subject_eval_enabled") else 0,
         }
         
+        # Save homeroom_comment_options snapshot (JSON field)
+        if "homeroom_comment_options" in data and data.get("homeroom_comment_options") is not None:
+            doc_data["homeroom_comment_options"] = json.dumps(data.get("homeroom_comment_options"))
+        
         # Add class_ids if present (as JSON string for storage)
         if class_ids and isinstance(class_ids, list) and len(class_ids) > 0:
             doc_data["class_ids"] = json.dumps(class_ids)
@@ -774,6 +829,13 @@ def update_template(template_id: Optional[str] = None):
             else:
                 # Clear class_ids if empty/null (template for whole grade)
                 doc.set("class_ids", None)
+
+        # Handle homeroom_comment_options snapshot (JSON field)
+        if "homeroom_comment_options" in data:
+            if data.get("homeroom_comment_options") is not None:
+                doc.set("homeroom_comment_options", json.dumps(data.get("homeroom_comment_options")))
+            else:
+                doc.set("homeroom_comment_options", None)
 
         # Replace child tables if payload provided
         if "scores" in data:
