@@ -577,14 +577,28 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             
             # Load criteria: Ưu tiên từ snapshot, fallback to template gốc
             if criteria_options_snapshot and isinstance(criteria_options_snapshot, list):
-                template_criteria = criteria_options_snapshot
+                # Parse snapshot format: [{name, title}] -> [{id, label}]
+                template_criteria = []
+                for opt in criteria_options_snapshot:
+                    if isinstance(opt, dict):
+                        template_criteria.append({
+                            "id": opt.get("name") or opt.get("title", ""),
+                            "label": opt.get("title", "")
+                        })
             else:
                 criteria_id = template_config.get('criteria_id', '')
                 template_criteria = _load_evaluation_criteria_options(criteria_id)
             
             # Load scale: Ưu tiên từ snapshot, fallback to template gốc
             if scale_options_snapshot and isinstance(scale_options_snapshot, list):
-                scale_options = [{"id": opt.get("name", opt.get("title", "")), "label": opt.get("title", "")} for opt in scale_options_snapshot]
+                # Parse snapshot format: [{name, title}] -> [{id, label}]
+                scale_options = []
+                for opt in scale_options_snapshot:
+                    if isinstance(opt, dict):
+                        scale_options.append({
+                            "id": opt.get("name") or opt.get("title", ""),
+                            "label": opt.get("title", "")
+                        })
             else:
                 scale_id = template_config.get('scale_id', '')
                 scale_options = _load_evaluation_scale_options(scale_id)
@@ -637,7 +651,14 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             
             # Load comments: Ưu tiên từ snapshot, fallback to template gốc
             if comment_title_options_snapshot and isinstance(comment_title_options_snapshot, list):
-                template_comments = comment_title_options_snapshot
+                # Parse snapshot format: [{name, title}] -> [{id, label}]
+                template_comments = []
+                for opt in comment_title_options_snapshot:
+                    if isinstance(opt, dict):
+                        template_comments.append({
+                            "id": opt.get("name") or opt.get("title", ""),
+                            "label": opt.get("title", "")
+                        })
             else:
                 comment_title_id = template_config.get('comment_title_id', '')
                 template_comments = _load_comment_title_options(comment_title_id)
@@ -706,7 +727,14 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                 
                 # Use snapshot if available
                 if homeroom_comment_options_snapshot and isinstance(homeroom_comment_options_snapshot, list):
-                    homeroom_comment_titles = homeroom_comment_options_snapshot
+                    # Parse snapshot format: [{name, title}] -> [{id, label}]
+                    homeroom_comment_titles = []
+                    for opt in homeroom_comment_options_snapshot:
+                        if isinstance(opt, dict):
+                            homeroom_comment_titles.append({
+                                "id": opt.get("name") or opt.get("title", ""),
+                                "label": opt.get("title", "")
+                            })
                 # Fallback to template gốc
                 elif hasattr(template_doc, 'homeroom_comment_title_id') and template_doc.homeroom_comment_title_id:
                     homeroom_comment_titles = _load_comment_title_options(template_doc.homeroom_comment_title_id)
