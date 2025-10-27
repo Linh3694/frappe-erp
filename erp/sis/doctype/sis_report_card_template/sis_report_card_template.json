@@ -28,6 +28,7 @@
   "conduct_ranking",
   "conduct_ranking_year",
   "homeroom_titles",
+  "homeroom_comment_options",
   "subject_eval_enabled",
   "subjects"
  ],
@@ -57,6 +58,7 @@
   {"fieldname": "conduct_ranking", "fieldtype": "Select", "label": "Xếp loại rèn luyện", "options": "Tốt\nKhá\nTrung bình\nYếu"},
   {"fieldname": "conduct_ranking_year", "fieldtype": "Select", "label": "Xếp loại rèn luyện cả năm", "options": "Tốt\nKhá\nTrung bình\nYếu"},
   {"fieldname": "homeroom_titles", "fieldtype": "Table", "label": "Nhận xét chủ nhiệm", "options": "SIS Report Card Homeroom Title Map"},
+  {"fieldname": "homeroom_comment_options", "fieldtype": "Long Text", "label": "Homeroom Comment Options (JSON)"},
 
   {"fieldname": "subject_eval_enabled", "fieldtype": "Check", "label": "Bật đánh giá môn học"},
   {"fieldname": "subjects", "fieldtype": "Table", "label": "Cấu hình môn học", "options": "SIS Report Card Subject Config"},
