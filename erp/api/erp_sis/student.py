@@ -939,6 +939,8 @@ def search_students(search_term=None):
         students = frappe.db.sql(sql_query, params, as_dict=True)
 
         frappe.logger().info(f"SQL QUERY RETURNED {len(students)} students")
+        if students:
+            frappe.logger().info(f"FIRST 5 RESULTS: {[f'{s.student_name} ({s.student_code})' for s in students[:5]]}")
 
         # Post-filter in Python for better VN diacritics handling and strict contains
         def normalize_text(text: str) -> str:
