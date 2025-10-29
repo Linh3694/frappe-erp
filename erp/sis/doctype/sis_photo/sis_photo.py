@@ -563,7 +563,7 @@ def upload_single_photo():
                     )
                     for fid in old_files:
                         try:
-                            frappe.delete_doc("File", fid)
+                            frappe.delete_doc("File", fid, ignore_permissions=True)
                         except Exception:
                             continue
 
@@ -671,7 +671,7 @@ def upload_single_photo():
                     )
                     for fid in old_files:
                         try:
-                            frappe.delete_doc("File", fid)
+                            frappe.delete_doc("File", fid, ignore_permissions=True)
                         except Exception:
                             continue
 
