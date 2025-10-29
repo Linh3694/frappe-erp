@@ -699,6 +699,7 @@ def upload_single_photo():
             if existing_ctx:
                 existing_name = existing_ctx[0].name
                 photo_title = f"Photo of {student[0].student_name} ({student_code})"
+                logs.append(f"🔄 Existing photo found: {existing_name}, will overwrite")
                 # Ensure uniqueness for existing photos before overwrite
                 ensure_unique_student_photo(student_id, school_year_id, campus_id)
                 # Replace attachments on existing doc
@@ -712,13 +713,20 @@ def upload_single_photo():
                         },
                         pluck="name",
                     )
+                    logs.append(f"🗑️ Found {len(old_files)} old attachments to delete: {old_files}")
                     for fid in old_files:
                         try:
-                            frappe.delete_doc("File", fid, ignore_permissions=True)
-                        except Exception:
+                            if fid and fid.strip():
+                                logs.append(f"🗑️ Deleting old attachment: {fid}")
+                                frappe.delete_doc("File", fid, ignore_permissions=True)
+                            else:
+                                logs.append(f"⚠️ Skipping empty file ID: '{fid}'")
+                        except Exception as del_err:
+                            logs.append(f"⚠️ Error deleting file {fid}: {str(del_err)}")
                             continue
 
                     # Attach new file to existing photo
+                    logs.append(f"📎 Creating new File attachment with filename: {final_filename}")
                     photo_file = frappe.get_doc({
                         "doctype": "File",
                         "file_name": final_filename,
@@ -727,13 +735,16 @@ def upload_single_photo():
                         "attached_to_doctype": "SIS Photo",
                         "attached_to_name": existing_name,
                     })
+                    logs.append(f"💾 Saving file content ({len(final_content)} bytes)")
                     photo_file.save_file(content=final_content, decode=False)
                     photo_file.content_type = mimetypes.guess_type(final_filename)[0] or 'image/webp'
+                    logs.append(f"📝 Inserting File document")
                     if not frappe.has_permission("File", "create", user=frappe.session.user):
                         photo_file.insert(ignore_permissions=True)
                     else:
                         photo_file.insert()
                     frappe.db.commit()
+                    logs.append(f"✅ File document inserted: {photo_file.name}")
 
                     # Ensure file_url
                     if not getattr(photo_file, 'file_url', None):
@@ -761,7 +772,9 @@ def upload_single_photo():
                         "logs": logs
                     }
                 except Exception as ow_err:
+                    logs.append(f"❌ Failed to overwrite existing photo: {str(ow_err)}")
                     frappe.logger().error(f"Failed to overwrite existing student photo {existing_name}: {str(ow_err)}")
+                    logs.append(f"⚠️ Will try to create new photo record instead")
                     # Fall through to create new record if overwrite fails
 
         else:  # class
@@ -829,6 +842,7 @@ def upload_single_photo():
                             continue
 
                     # Attach new file to existing photo
+                    logs.append(f"📎 Creating new File attachment with filename: {final_filename}")
                     photo_file = frappe.get_doc({
                         "doctype": "File",
                         "file_name": final_filename,
@@ -837,13 +851,16 @@ def upload_single_photo():
                         "attached_to_doctype": "SIS Photo",
                         "attached_to_name": existing_name,
                     })
+                    logs.append(f"💾 Saving file content ({len(final_content)} bytes)")
                     photo_file.save_file(content=final_content, decode=False)
                     photo_file.content_type = mimetypes.guess_type(final_filename)[0] or 'image/webp'
+                    logs.append(f"📝 Inserting File document")
                     if not frappe.has_permission("File", "create", user=frappe.session.user):
                         photo_file.insert(ignore_permissions=True)
                     else:
                         photo_file.insert()
                     frappe.db.commit()
+                    logs.append(f"✅ File document inserted: {photo_file.name}")
 
                     # Ensure file_url
                     if not getattr(photo_file, 'file_url', None):
