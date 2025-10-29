@@ -958,12 +958,15 @@ def search_students(search_term=None):
 
         if search_term and str(search_term).strip():
             norm_q = normalize_text(str(search_term).strip())
+            search_lower = str(search_term).strip().lower()
             pre_count = len(students)
             students = [
                 s for s in students
                 if (
-                    normalize_text(s.get('student_name', '')) .find(norm_q) != -1
-                    or (s.get('student_code') or '').lower().find(norm_q.lower()) != -1
+                    # student_name: contains match (can be anywhere)
+                    normalize_text(s.get('student_name', '')).find(norm_q) != -1
+                    # student_code: prefix match (must start with)
+                    or (s.get('student_code') or '').lower().startswith(search_lower)
                 )
             ]
             frappe.logger().info(f"POST-FILTERED {pre_count} -> {len(students)} using normalized query='{norm_q}'")
