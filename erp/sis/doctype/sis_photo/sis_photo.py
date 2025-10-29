@@ -103,21 +103,52 @@ def upload_single_photo():
             frappe.logger().error(f"❌ File ID is empty or whitespace")
             frappe.throw("File ID is empty or invalid")
         
+        file_doc = None
+        
+        # Try multiple approaches to find the file
+        # 1. Try as direct File.name
         try:
             file_doc = frappe.get_doc("File", file_id)
-            if not file_doc:
-                frappe.logger().error(f"❌ File not found: '{file_id}'")
-                frappe.throw(f"File '{file_id}' not found")
+            frappe.logger().info(f"✅ Found file by name: {file_id}")
         except frappe.DoesNotExistError:
-            frappe.logger().error(f"❌ File does not exist: '{file_id}'")
-            # Try to find similar files for debugging
-            similar_files = frappe.get_all("File", 
-                filters={"file_name": ["like", f"%{file_id}%"]}, 
-                fields=["name", "file_name"], 
-                limit=5
+            frappe.logger().info(f"⚠️ File not found by name '{file_id}', trying other methods...")
+            
+            # 2. Try to find by file_name (original filename)
+            files = frappe.get_all("File",
+                filters={"file_name": file_id},
+                fields=["name", "file_name", "file_url"],
+                limit=1
             )
-            frappe.logger().info(f"📋 Similar files found: {similar_files}")
-            frappe.throw(f"File '{file_id}' does not exist. Check console for similar files.")
+            
+            if files:
+                file_doc = frappe.get_doc("File", files[0].name)
+                frappe.logger().info(f"✅ Found file by file_name: {files[0].name}")
+            else:
+                # 3. Try to find by file_url containing the file_id
+                files = frappe.get_all("File",
+                    filters={"file_url": ["like", f"%{file_id}%"]},
+                    fields=["name", "file_name", "file_url"],
+                    order_by="creation desc",
+                    limit=1
+                )
+                
+                if files:
+                    file_doc = frappe.get_doc("File", files[0].name)
+                    frappe.logger().info(f"✅ Found file by file_url pattern: {files[0].name}")
+                else:
+                    # 4. Last resort: try to find recently uploaded files
+                    recent_files = frappe.get_all("File",
+                        filters={"is_private": 0},
+                        fields=["name", "file_name", "file_url", "creation"],
+                        order_by="creation desc",
+                        limit=10
+                    )
+                    frappe.logger().error(f"❌ File '{file_id}' not found by any method")
+                    frappe.logger().info(f"📋 Recent files (last 10): {recent_files}")
+                    frappe.throw(f"File '{file_id}' not found. Please check if file was uploaded successfully.")
+        
+        if not file_doc:
+            frappe.throw(f"File '{file_id}' could not be retrieved")
 
         # Check file size (10MB limit for single image)
         max_size = 10 * 1024 * 1024  # 10MB in bytes
