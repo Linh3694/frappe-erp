@@ -70,11 +70,6 @@ def normalize_education_stage(raw_education_stage):
         return raw_education_stage
 
 
-def convert_menu_category_id(menu_category_id):
-    """Convert empty menu_category_id to __none__"""
-    return menu_category_id if menu_category_id else "__none__"
-
-
 def process_breakfast_items(meal_data, menu_name):
     """Process breakfast items from meal data"""
     items = []
@@ -87,7 +82,7 @@ def process_breakfast_items(meal_data, menu_name):
                 "doctype": "SIS Daily Menu Item",
                 "meal_type": "breakfast",
                 "meal_type_reference": option_key,
-                "menu_category_id": convert_menu_category_id(option_data.get("menu_category_id", "")),
+                "menu_category_id": option_data.get("menu_category_id", ""),
                 "display_name": option_data.get("display_name", ""),
                 "display_name_en": option_data.get("display_name_en", ""),
                 "education_stage": ""
@@ -108,7 +103,7 @@ def process_lunch_items(meal_data):
                 "doctype": "SIS Daily Menu Item",
                 "meal_type": "lunch",
                 "meal_type_reference": "set_a",
-                "menu_category_id": convert_menu_category_id(item_data.get("menu_category_id", "")),
+                "menu_category_id": item_data.get("menu_category_id", ""),
                 "display_name": item_data.get("display_name", ""),
                 "display_name_en": item_data.get("display_name_en", ""),
                 "education_stage": ""
@@ -122,7 +117,7 @@ def process_lunch_items(meal_data):
                 "doctype": "SIS Daily Menu Item",
                 "meal_type": "lunch",
                 "meal_type_reference": "set_au",
-                "menu_category_id": convert_menu_category_id(item_data.get("menu_category_id", "")),
+                "menu_category_id": item_data.get("menu_category_id", ""),
                 "display_name": item_data.get("display_name", ""),
                 "display_name_en": item_data.get("display_name_en", ""),
                 "education_stage": ""
@@ -136,7 +131,7 @@ def process_lunch_items(meal_data):
                 "doctype": "SIS Daily Menu Item",
                 "meal_type": "lunch",
                 "meal_type_reference": "eat_clean",
-                "menu_category_id": convert_menu_category_id(item_data.get("menu_category_id", "")),
+                "menu_category_id": item_data.get("menu_category_id", ""),
                 "display_name": item_data.get("display_name", ""),
                 "display_name_en": item_data.get("display_name_en", ""),
                 "education_stage": ""
@@ -152,7 +147,7 @@ def process_lunch_items(meal_data):
                 "doctype": "SIS Daily Menu Item",
                 "meal_type": "lunch",
                 "meal_type_reference": "buffet",
-                "menu_category_id": convert_menu_category_id(item_data.get("menu_category_id", "")),
+                "menu_category_id": item_data.get("menu_category_id", ""),
                 "display_name": item_data.get("display_name", ""),
                 "display_name_en": item_data.get("display_name_en", ""),
                 "education_stage": "",
@@ -183,7 +178,7 @@ def process_meal_items(meal_type, meal_data, meal_type_reference=""):
                 "doctype": "SIS Daily Menu Item",
                 "meal_type": meal_type,
                 "meal_type_reference": item_meal_type_ref,
-                "menu_category_id": convert_menu_category_id(item_data.get("menu_category_id", "")),
+                "menu_category_id": item_data.get("menu_category_id", ""),
                 "display_name": item_data.get("display_name", ""),
                 "display_name_en": item_data.get("display_name_en", ""),
                 "education_stage": education_stage

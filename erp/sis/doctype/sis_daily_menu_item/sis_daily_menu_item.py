@@ -16,7 +16,8 @@ class SISDailyMenuItem(Document):
             self.education_stage = ""
             
     def validate_menu_category(self):
-        """Validate that menu category exists"""
-        if self.menu_category_id:
+        """Validate that menu category exists if provided"""
+        # Allow empty menu_category_id
+        if self.menu_category_id and self.menu_category_id.strip():
             if not frappe.db.exists("SIS Menu Category", self.menu_category_id):
                 frappe.throw(f"Món ăn '{self.menu_category_id}' không tồn tại")
