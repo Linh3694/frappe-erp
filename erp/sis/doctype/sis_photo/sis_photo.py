@@ -40,10 +40,16 @@ def upload_single_photo():
 
         # Get uploaded file - try multiple sources
         frappe.logger().info("🔍 Starting file ID search...")
+        frappe.logger().info(f"📋 All form_dict keys: {list(frappe.form_dict.keys())}")
+        frappe.logger().info(f"📋 All form_dict: {frappe.form_dict}")
+        
+        if hasattr(frappe.request, 'args'):
+            frappe.logger().info(f"📋 All request.args: {dict(frappe.request.args)}")
+        
         file_id = frappe.form_dict.get("file_id")
         file_name_fallback = frappe.form_dict.get("file_name_fallback")
-        frappe.logger().info(f"📝 File ID from form_dict: {file_id}")
-        frappe.logger().info(f"📝 File name fallback from form_dict: {file_name_fallback}")
+        frappe.logger().info(f"📝 File ID from form_dict: '{file_id}' (type: {type(file_id)})")
+        frappe.logger().info(f"📝 File name fallback from form_dict: '{file_name_fallback}'")
 
         # Try request.form (Frappe's parsed FormData)
         if not file_id and hasattr(frappe.request, 'form'):
