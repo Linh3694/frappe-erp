@@ -218,8 +218,10 @@ def upload_single_photo():
                     frappe.logger().warning(f"⚠️  Found class '{class_check[0].title}' with matching name.")
 
         elif photo_type == "class" and class_name:
-            # Check if class_name looks like a student code (starts with WS)
-            if class_name.strip().startswith('WS') and class_name.strip()[2:].isdigit():
+            # Check if class_name looks like a student code (starts with WS followed by alphanumeric)
+            # Pattern: WS followed by letters and/or numbers (e.g., WS12310116, WS122A0187)
+            student_code_pattern = frappe.re.match(r'^WS[A-Z0-9]+$', class_name.strip(), frappe.re.IGNORECASE)
+            if student_code_pattern:
                 detected_type = "student"
                 detection_reason = f"Class name '{class_name}' matches student code pattern"
                 frappe.logger().warning(f"⚠️  {detection_reason}. Did you mean to upload a student photo?")
