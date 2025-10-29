@@ -399,6 +399,8 @@ def upload_single_photo():
 
         # Download and process the uploaded file
         file_path = file_doc.get_full_path()
+        logs.append(f"📁 File path (get_full_path): {file_path}")
+        logs.append(f"📁 File exists at get_full_path: {os.path.exists(file_path)}")
         frappe.logger().info(f"📁 File path (get_full_path): {file_path}")
         frappe.logger().info(f"📁 File exists at get_full_path: {os.path.exists(file_path)}")
 
@@ -413,6 +415,8 @@ def upload_single_photo():
 
         # Try alternative path construction
         alt_file_path = frappe.get_site_path("public", "files", file_doc.file_name)
+        logs.append(f"📁 Alternative file path: {alt_file_path}")
+        logs.append(f"📁 File exists at alt path: {os.path.exists(alt_file_path)}")
         frappe.logger().info(f"📁 Alternative file path: {alt_file_path}")
         frappe.logger().info(f"📁 File exists at alt path: {os.path.exists(alt_file_path)}")
 
@@ -446,6 +450,7 @@ def upload_single_photo():
                         actual_file_path = alt_path
                         break
 
+        logs.append(f"📁 File doc details: name={file_doc.name}, file_name={file_doc.file_name}, file_url={getattr(file_doc, 'file_url', 'None')}")
         frappe.logger().info(f"📁 File doc details: name={file_doc.name}, file_name={file_doc.file_name}, file_url={getattr(file_doc, 'file_url', 'None')}")
 
         # Try multiple paths to find the file
@@ -459,12 +464,28 @@ def upload_single_photo():
                 actual_file_path = sanitized_path
 
         if not actual_file_path:
+            logs.append(f"❌ File not found at any path:")
+            logs.append(f"  - get_full_path: {file_path} (exists: {os.path.exists(file_path)})")
+            logs.append(f"  - alt_path: {alt_file_path} (exists: {os.path.exists(alt_file_path)})")
+            if hasattr(file_doc, 'file_url') and file_doc.file_url:
+                logs.append(f"  - sanitized_path: {sanitized_path} (exists: {os.path.exists(sanitized_path)})")
+            
             frappe.logger().error(f"❌ File not found at any path:")
             frappe.logger().error(f"  - get_full_path: {file_path}")
             frappe.logger().error(f"  - alt_path: {alt_file_path}")
             if hasattr(file_doc, 'file_url') and file_doc.file_url:
                 frappe.logger().error(f"  - sanitized_path: {sanitized_path}")
-            frappe.throw("File không tồn tại trên server")
+            
+            return {
+                "success": False,
+                "message": f"File document exists but physical file not found on server. File ID: {file_doc.name}",
+                "logs": logs,
+                "file_doc": {
+                    "name": file_doc.name,
+                    "file_name": file_doc.file_name,
+                    "file_url": getattr(file_doc, 'file_url', None)
+                }
+            }
 
         frappe.logger().info(f"✅ Using file path: {actual_file_path}")
         file_path = actual_file_path
