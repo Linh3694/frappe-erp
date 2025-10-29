@@ -1017,9 +1017,11 @@ def upload_single_photo():
     except Exception as e:
         error_msg = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
         frappe.log_error(f"Error in upload_single_photo: {error_msg}")
+        logs.append(f"❌ Error in upload_single_photo: {error_msg}")
         return {
             "success": False,
-            "message": str(e)
+            "message": str(e),
+            "logs": logs
         }
 
 
