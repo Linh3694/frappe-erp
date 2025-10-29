@@ -338,14 +338,6 @@ def create_guardian():
                 message="Guardian name is required",
                 errors={"guardian_name": ["Required"]}
             )
-                
-        # Check if guardian name already exists
-        existing_name = frappe.db.exists("CRM Guardian", {"guardian_name": guardian_name})
-        if existing_name:
-            return error_response(
-                message=f"Giám hộ với tên '{guardian_name}' đã tồn tại",
-                code="GUARDIAN_NAME_EXISTS"
-            )
         
         # Check if phone number already exists
         if formatted_phone:
@@ -911,7 +903,6 @@ def bulk_import_guardians():
             order_by="creation asc"
         )
         
-        existing_names = {g['guardian_name'].lower() for g in existing_guardians if g.get('guardian_name')}
         existing_phones = {}
         for g in existing_guardians:
             if g.get('phone_number'):
@@ -994,14 +985,6 @@ def bulk_import_guardians():
                 if not guardian_name:
                     error_count += 1
                     error_msg = f"Row {index + 2}: Guardian name is required"
-                    errors.append(error_msg)
-                    logs.append(error_msg)
-                    continue
-                
-                # Check name uniqueness
-                if guardian_name.lower() in existing_names:
-                    error_count += 1
-                    error_msg = f"Row {index + 2}: Guardian name '{guardian_name}' already exists"
                     errors.append(error_msg)
                     logs.append(error_msg)
                     continue
@@ -1091,8 +1074,7 @@ def bulk_import_guardians():
                 final_email = guardian_doc.email or ''
                 frappe.logger().info(f"Guardian {guardian_doc.name} final saved state - phone: '{final_phone}', email: '{final_email}'")
                 
-                # Track this creation for uniqueness checking in subsequent rows
-                existing_names.add(guardian_name.lower())
+                # Track phone number for uniqueness checking in subsequent rows
                 if formatted_phone:
                     existing_phones[formatted_phone] = guardian_doc.name
                 

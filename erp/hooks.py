@@ -197,6 +197,21 @@ has_permission = {
 #     "Event": "erp.event.get_events"
 # }
 
+# User Management Hooks - Trigger webhooks khi User thay đổi
+doc_events = {
+	"User": {
+		"after_insert": [
+			"erp.common.user_hooks.trigger_user_webhooks"
+		],
+		"on_update": [
+			"erp.common.user_hooks.trigger_user_webhooks"
+		],
+		"on_trash": [
+			"erp.common.user_hooks.trigger_user_webhooks"
+		]
+	}
+}
+
 # Scheduled Tasks
 # ---------------
 
