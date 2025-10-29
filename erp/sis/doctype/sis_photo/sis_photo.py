@@ -34,27 +34,35 @@ class SISPhoto(Document):
 @frappe.whitelist(allow_guest=True)
 def upload_single_photo():
     """Upload single photo for student or class"""
+    logs = []  # Collect logs to return in response
+    
     try:
         # Initialize parsed parameters
         parsed_params = {}
 
         # Get uploaded file - try multiple sources
-        frappe.logger().info("🔍 Starting file ID search...")
-        frappe.logger().info(f"📋 All form_dict keys: {list(frappe.form_dict.keys())}")
-        frappe.logger().info(f"📋 All form_dict: {frappe.form_dict}")
+        logs.append("🔍 Starting file ID search...")
+        logs.append(f"📋 All form_dict keys: {list(frappe.form_dict.keys())}")
+        
+        # Don't log full form_dict if it's too large
+        form_dict_str = str(frappe.form_dict)
+        if len(form_dict_str) > 500:
+            logs.append(f"📋 form_dict too large ({len(form_dict_str)} chars), showing keys only")
+        else:
+            logs.append(f"📋 All form_dict: {frappe.form_dict}")
         
         if hasattr(frappe.request, 'args'):
-            frappe.logger().info(f"📋 All request.args: {dict(frappe.request.args)}")
+            logs.append(f"📋 All request.args: {dict(frappe.request.args)}")
         
         file_id = frappe.form_dict.get("file_id")
         file_name_fallback = frappe.form_dict.get("file_name_fallback")
-        frappe.logger().info(f"📝 File ID from form_dict: '{file_id}' (type: {type(file_id)})")
-        frappe.logger().info(f"📝 File name fallback from form_dict: '{file_name_fallback}'")
+        logs.append(f"📝 File ID from form_dict: '{file_id}' (type: {type(file_id).__name__})")
+        logs.append(f"📝 File name fallback from form_dict: '{file_name_fallback}'")
 
         # Try request.form (Frappe's parsed FormData)
         if not file_id and hasattr(frappe.request, 'form'):
             file_id = frappe.request.form.get("file_id")
-            frappe.logger().info(f"📝 File ID from request.form: {file_id}")
+            logs.append(f"📝 File ID from request.form: {file_id}")
         
         if not file_name_fallback and hasattr(frappe.request, 'form'):
             file_name_fallback = frappe.request.form.get("file_name_fallback")
@@ -62,11 +70,11 @@ def upload_single_photo():
         # Try request.args (URL parameters)
         if not file_id and hasattr(frappe.request, 'args'):
             file_id = frappe.request.args.get("file_id")
-            frappe.logger().info(f"📝 File ID from request.args: {file_id}")
+            logs.append(f"📝 File ID from request.args: {file_id}")
         
         if not file_name_fallback and hasattr(frappe.request, 'args'):
             file_name_fallback = frappe.request.args.get("file_name_fallback")
-            frappe.logger().info(f"📝 File name fallback from request.args: {file_name_fallback}")
+            logs.append(f"📝 File name fallback from request.args: {file_name_fallback}")
 
             # Also get other parameters from URL args
             if not parsed_params.get("photo_type"):
@@ -108,15 +116,23 @@ def upload_single_photo():
                 "has_request_data": bool(frappe.request and frappe.request.data)
             }
 
-            frappe.logger().error(f"File ID is required - debug info: {debug_info}")
-            frappe.throw(f"File ID is required. Form dict: {list(frappe.form_dict.keys())}, Parsed: {parsed_params}")
+            logs.append(f"❌ File ID is required - debug info: {debug_info}")
+            return {
+                "success": False,
+                "message": f"File ID is required. Form dict keys: {list(frappe.form_dict.keys())}",
+                "logs": logs
+            }
 
-        frappe.logger().info(f"🔍 Looking for File with ID: '{file_id}' (length: {len(file_id)})")
+        logs.append(f"🔍 Looking for File with ID: '{file_id}' (length: {len(file_id)})")
         
         # Validate file_id before querying
         if not file_id or not file_id.strip():
-            frappe.logger().error(f"❌ File ID is empty or whitespace")
-            frappe.throw("File ID is empty or invalid")
+            logs.append(f"❌ File ID is empty or whitespace")
+            return {
+                "success": False,
+                "message": "File ID is empty or invalid",
+                "logs": logs
+            }
         
         file_doc = None
         
@@ -124,9 +140,9 @@ def upload_single_photo():
         # 1. Try as direct File.name
         try:
             file_doc = frappe.get_doc("File", file_id)
-            frappe.logger().info(f"✅ Found file by name: {file_id}")
+            logs.append(f"✅ Found file by name: {file_id}")
         except frappe.DoesNotExistError:
-            frappe.logger().info(f"⚠️ File not found by name '{file_id}', trying other methods...")
+            logs.append(f"⚠️ File not found by name '{file_id}', trying other methods...")
             
             # 2. Try to find by file_name (original filename)
             files = frappe.get_all("File",
@@ -137,7 +153,7 @@ def upload_single_photo():
             
             if files:
                 file_doc = frappe.get_doc("File", files[0].name)
-                frappe.logger().info(f"✅ Found file by file_name: {files[0].name}")
+                logs.append(f"✅ Found file by file_name: {files[0].name}")
             else:
                 # 3. Try to find by file_url containing the file_id
                 files = frappe.get_all("File",
@@ -149,11 +165,11 @@ def upload_single_photo():
                 
                 if files:
                     file_doc = frappe.get_doc("File", files[0].name)
-                    frappe.logger().info(f"✅ Found file by file_url pattern: {files[0].name}")
+                    logs.append(f"✅ Found file by file_url pattern: {files[0].name}")
                 else:
                     # 4. If file_name_fallback provided, try to find by exact filename (most recent)
                     if file_name_fallback:
-                        frappe.logger().info(f"⚠️ Trying fallback with file_name: {file_name_fallback}")
+                        logs.append(f"⚠️ Trying fallback with file_name: {file_name_fallback}")
                         files = frappe.get_all("File",
                             filters={"file_name": file_name_fallback, "is_private": 0},
                             fields=["name", "file_name", "file_url", "creation"],
@@ -163,7 +179,7 @@ def upload_single_photo():
                         
                         if files:
                             file_doc = frappe.get_doc("File", files[0].name)
-                            frappe.logger().info(f"✅ Found file by fallback file_name: {files[0].name}")
+                            logs.append(f"✅ Found file by fallback file_name: {files[0].name}")
                     
                     if not file_doc:
                         # 5. Last resort: try to find recently uploaded files for debugging
@@ -173,12 +189,22 @@ def upload_single_photo():
                             order_by="creation desc",
                             limit=10
                         )
-                        frappe.logger().error(f"❌ File '{file_id}' not found by any method")
-                        frappe.logger().info(f"📋 Recent files (last 10): {recent_files}")
-                        frappe.throw(f"File '{file_id}' not found. Please check if file was uploaded successfully.")
+                        logs.append(f"❌ File '{file_id}' not found by any method")
+                        logs.append(f"📋 Recent files (last 10): {[f['name'] + ' - ' + f['file_name'] for f in recent_files]}")
+                        return {
+                            "success": False,
+                            "message": f"File '{file_id}' not found. Check logs for recent files.",
+                            "logs": logs,
+                            "recent_files": recent_files
+                        }
         
         if not file_doc:
-            frappe.throw(f"File '{file_id}' could not be retrieved")
+            logs.append(f"❌ File '{file_id}' could not be retrieved")
+            return {
+                "success": False,
+                "message": f"File '{file_id}' could not be retrieved",
+                "logs": logs
+            }
 
         # Check file size (10MB limit for single image)
         max_size = 10 * 1024 * 1024  # 10MB in bytes
