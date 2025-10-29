@@ -41,17 +41,26 @@ def upload_single_photo():
         # Get uploaded file - try multiple sources
         frappe.logger().info("🔍 Starting file ID search...")
         file_id = frappe.form_dict.get("file_id")
+        file_name_fallback = frappe.form_dict.get("file_name_fallback")
         frappe.logger().info(f"📝 File ID from form_dict: {file_id}")
+        frappe.logger().info(f"📝 File name fallback from form_dict: {file_name_fallback}")
 
         # Try request.form (Frappe's parsed FormData)
         if not file_id and hasattr(frappe.request, 'form'):
             file_id = frappe.request.form.get("file_id")
             frappe.logger().info(f"📝 File ID from request.form: {file_id}")
+        
+        if not file_name_fallback and hasattr(frappe.request, 'form'):
+            file_name_fallback = frappe.request.form.get("file_name_fallback")
 
         # Try request.args (URL parameters)
         if not file_id and hasattr(frappe.request, 'args'):
             file_id = frappe.request.args.get("file_id")
             frappe.logger().info(f"📝 File ID from request.args: {file_id}")
+        
+        if not file_name_fallback and hasattr(frappe.request, 'args'):
+            file_name_fallback = frappe.request.args.get("file_name_fallback")
+            frappe.logger().info(f"📝 File name fallback from request.args: {file_name_fallback}")
 
             # Also get other parameters from URL args
             if not parsed_params.get("photo_type"):
@@ -136,16 +145,31 @@ def upload_single_photo():
                     file_doc = frappe.get_doc("File", files[0].name)
                     frappe.logger().info(f"✅ Found file by file_url pattern: {files[0].name}")
                 else:
-                    # 4. Last resort: try to find recently uploaded files
-                    recent_files = frappe.get_all("File",
-                        filters={"is_private": 0},
-                        fields=["name", "file_name", "file_url", "creation"],
-                        order_by="creation desc",
-                        limit=10
-                    )
-                    frappe.logger().error(f"❌ File '{file_id}' not found by any method")
-                    frappe.logger().info(f"📋 Recent files (last 10): {recent_files}")
-                    frappe.throw(f"File '{file_id}' not found. Please check if file was uploaded successfully.")
+                    # 4. If file_name_fallback provided, try to find by exact filename (most recent)
+                    if file_name_fallback:
+                        frappe.logger().info(f"⚠️ Trying fallback with file_name: {file_name_fallback}")
+                        files = frappe.get_all("File",
+                            filters={"file_name": file_name_fallback, "is_private": 0},
+                            fields=["name", "file_name", "file_url", "creation"],
+                            order_by="creation desc",
+                            limit=1
+                        )
+                        
+                        if files:
+                            file_doc = frappe.get_doc("File", files[0].name)
+                            frappe.logger().info(f"✅ Found file by fallback file_name: {files[0].name}")
+                    
+                    if not file_doc:
+                        # 5. Last resort: try to find recently uploaded files for debugging
+                        recent_files = frappe.get_all("File",
+                            filters={"is_private": 0},
+                            fields=["name", "file_name", "file_url", "creation"],
+                            order_by="creation desc",
+                            limit=10
+                        )
+                        frappe.logger().error(f"❌ File '{file_id}' not found by any method")
+                        frappe.logger().info(f"📋 Recent files (last 10): {recent_files}")
+                        frappe.throw(f"File '{file_id}' not found. Please check if file was uploaded successfully.")
         
         if not file_doc:
             frappe.throw(f"File '{file_id}' could not be retrieved")
