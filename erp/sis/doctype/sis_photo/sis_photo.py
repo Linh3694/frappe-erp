@@ -96,11 +96,28 @@ def upload_single_photo():
             frappe.logger().error(f"File ID is required - debug info: {debug_info}")
             frappe.throw(f"File ID is required. Form dict: {list(frappe.form_dict.keys())}, Parsed: {parsed_params}")
 
-        frappe.logger().info(f"🔍 Looking for File with ID: {file_id}")
-        file_doc = frappe.get_doc("File", file_id)
-        if not file_doc:
-            frappe.logger().error(f"❌ File not found: {file_id}")
-            frappe.throw("File not found")
+        frappe.logger().info(f"🔍 Looking for File with ID: '{file_id}' (length: {len(file_id)})")
+        
+        # Validate file_id before querying
+        if not file_id or not file_id.strip():
+            frappe.logger().error(f"❌ File ID is empty or whitespace")
+            frappe.throw("File ID is empty or invalid")
+        
+        try:
+            file_doc = frappe.get_doc("File", file_id)
+            if not file_doc:
+                frappe.logger().error(f"❌ File not found: '{file_id}'")
+                frappe.throw(f"File '{file_id}' not found")
+        except frappe.DoesNotExistError:
+            frappe.logger().error(f"❌ File does not exist: '{file_id}'")
+            # Try to find similar files for debugging
+            similar_files = frappe.get_all("File", 
+                filters={"file_name": ["like", f"%{file_id}%"]}, 
+                fields=["name", "file_name"], 
+                limit=5
+            )
+            frappe.logger().info(f"📋 Similar files found: {similar_files}")
+            frappe.throw(f"File '{file_id}' does not exist. Check console for similar files.")
 
         # Check file size (10MB limit for single image)
         max_size = 10 * 1024 * 1024  # 10MB in bytes
