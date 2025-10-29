@@ -602,11 +602,13 @@ def upload_single_photo():
                 except Exception:
                     pass
 
+                logs.append(f"✅ User avatar updated successfully: {avatar_url}")
                 return {
                     "success": True,
                     "message": "User avatar updated successfully",
                     "photo_id": f"user_{user_id}",
-                    "file_url": avatar_url
+                    "file_url": avatar_url,
+                    "logs": logs
                 }
             except Exception as e:
                 frappe.log_error(f"Error updating user avatar for {user_identifier}: {str(e)}")
@@ -705,11 +707,13 @@ def upload_single_photo():
                     }, update_modified=True)
                     frappe.db.commit()
 
+                    logs.append(f"✅ Photo overwritten successfully: {existing_name}")
                     return {
                         "success": True,
                         "message": "Photo overwritten successfully",
                         "photo_id": existing_name,
                         "file_url": new_url,
+                        "logs": logs
                     }
                 except Exception as ow_err:
                     frappe.logger().error(f"Failed to overwrite existing student photo {existing_name}: {str(ow_err)}")
@@ -813,11 +817,13 @@ def upload_single_photo():
                     }, update_modified=True)
                     frappe.db.commit()
 
+                    logs.append(f"✅ Class photo overwritten successfully: {existing_name}")
                     return {
                         "success": True,
                         "message": "Class photo overwritten successfully",
                         "photo_id": existing_name,
                         "file_url": new_url,
+                        "logs": logs
                     }
                 except Exception as ow_err:
                     frappe.logger().error(f"Failed to overwrite existing class photo {existing_name}: {str(ow_err)}")
@@ -994,11 +1000,13 @@ def upload_single_photo():
                 frappe.logger().error(f"❌ Error checking file existence: {str(file_check_error)}")
                 raise Exception(f"File verification failed: {str(file_check_error)}")
 
+            logs.append(f"✅ Photo uploaded successfully: {photo_doc.name}")
             return {
                 "success": True,
                 "message": "Photo uploaded successfully",
                 "photo_id": photo_doc.name,
-                "file_url": photo_url
+                "file_url": photo_url,
+                "logs": logs
             }
 
         except Exception as e:
