@@ -91,6 +91,19 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
         
         print(f"📊 [Notification Center] Raw notifications count: {len(raw_notifications)}")
         
+        # DEBUG: Print unique types from raw_notifications
+        unique_types = set()
+        for notif in raw_notifications:
+            notif_type = notif.get('type')
+            data_type = notif.get('data', {}).get('type')
+            notif_type_data = notif.get('data', {}).get('notificationType')
+            unique_types.add(f"type:{notif_type}")
+            if data_type:
+                unique_types.add(f"data.type:{data_type}")
+            if notif_type_data:
+                unique_types.add(f"notificationType:{notif_type_data}")
+        print(f"🔍 [DEBUG] Unique notification types found: {unique_types}")
+        
         # Transform notifications sang format frontend cần
         notifications = []
         error_count = 0
