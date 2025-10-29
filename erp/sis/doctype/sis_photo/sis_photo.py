@@ -487,17 +487,30 @@ def upload_single_photo():
                 }
             }
 
+        logs.append(f"✅ Using file path: {actual_file_path}")
         frappe.logger().info(f"✅ Using file path: {actual_file_path}")
         file_path = actual_file_path
 
         # Read the original file
-        with open(file_path, 'rb') as f:
-            original_content = f.read()
+        logs.append(f"📖 Reading file content from: {file_path}")
+        try:
+            with open(file_path, 'rb') as f:
+                original_content = f.read()
+            logs.append(f"✅ File content read successfully, size: {len(original_content)} bytes")
+        except Exception as read_error:
+            logs.append(f"❌ Error reading file: {str(read_error)}")
+            return {
+                "success": False,
+                "message": f"Error reading file: {str(read_error)}",
+                "logs": logs
+            }
 
         # Keep original image format - no conversion needed
+        logs.append(f"🖼️ Processing image...")
         try:
             # Validate image format and content
             src_image = Image.open(io.BytesIO(original_content))
+            logs.append(f"✅ Image opened successfully, format: {src_image.format}, size: {src_image.size}")
 
             # Verify it's a valid image
             src_image.verify()
@@ -637,12 +650,14 @@ def upload_single_photo():
 
         # Find the appropriate student or class record
         if photo_type == "student":
+            logs.append(f"🔍 Finding student with code: {student_code}")
             # Find student by student_code
             student = frappe.get_all("CRM Student",
                 filters={"student_code": student_code},
                 fields=["name", "student_name"]
             )
             if not student:
+                logs.append(f"❌ Student not found with code: {student_code}")
                 # Check if this might be a class name instead
                 class_check = frappe.get_all("SIS Class",
                     filters={"title": student_code.strip()},
@@ -650,13 +665,22 @@ def upload_single_photo():
                     limit=1
                 )
                 if class_check:
-                    frappe.throw(f"Student with code '{student_code}' not found. However, a class with this name exists. Did you mean to upload a class photo instead?")
+                    return {
+                        "success": False,
+                        "message": f"Student with code '{student_code}' not found. However, a class with this name exists.",
+                        "logs": logs
+                    }
                 else:
-                    frappe.throw(f"Student with code '{student_code}' not found. Please check the student code or ensure the student exists.")
+                    return {
+                        "success": False,
+                        "message": f"Student with code '{student_code}' not found.",
+                        "logs": logs
+                    }
 
             student_id = student[0].name
             photo_title = f"Photo of {student[0].student_name} ({student_code})"
             identifier = student_id
+            logs.append(f"✅ Found student: {student[0].student_name} (ID: {student_id})")
 
             # Overwrite strategy: if an entry exists for same student + campus + year, update it
             existing_ctx = frappe.get_all(
