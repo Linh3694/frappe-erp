@@ -230,7 +230,7 @@ def send_news_publish_notification(article_id, title_vn, title_en, education_sta
                 "vi": title_notification_vi,
                 "en": title_notification_en
             },
-            "message": {
+            "body": {
                 "vi": message_vi,
                 "en": message_en
             },

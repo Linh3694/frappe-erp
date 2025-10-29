@@ -401,7 +401,7 @@ def send_contact_log():
                                 "vi": title_vi,
                                 "en": title_en
                             },
-                            "message": {
+                            "body": {
                                 "vi": message_vi,
                                 "en": message_en
                             },

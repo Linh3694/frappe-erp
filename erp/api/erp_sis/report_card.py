@@ -1531,7 +1531,7 @@ def _send_report_card_notification(report):
                 "vi": title_vi,
                 "en": title_en
             },
-            "message": {
+            "body": {
                 "vi": message_vi,
                 "en": message_en
             },
