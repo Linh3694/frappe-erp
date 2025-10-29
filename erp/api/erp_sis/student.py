@@ -906,9 +906,13 @@ def search_students(search_term=None):
         where_clauses = ["campus_id = %s"]
         params = [campus_id]
         if search_term and str(search_term).strip():
-            like = f"%{str(search_term).strip()}%"
+            # For student_code: prefix match (starts with)
+            # For student_name: contains match (can be anywhere)
+            search_clean = str(search_term).strip()
+            like_prefix = f"{search_clean}%"  # Starts with (for student_code)
+            like_contains = f"%{search_clean}%"  # Contains (for student_name)
             where_clauses.append("(LOWER(student_name) LIKE LOWER(%s) OR LOWER(student_code) LIKE LOWER(%s))")
-            params.extend([like, like])
+            params.extend([like_contains, like_prefix])
         conditions = " AND ".join(where_clauses)
         frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
         
