@@ -52,28 +52,36 @@ def _get_student_parent_emails(student_id):
     """Get all parent emails for a student"""
     # Query relationships to find parents
     try:
+        print(f"🔍 [_get_student_parent_emails] Looking for relationships for student_id: {student_id}")
         relationships = frappe.get_all(
             "CRM Family Relationship",
             filters={"student": student_id},
             fields=["guardian"]
         )
-    except Exception:
+        print(f"🔍 [_get_student_parent_emails] Found {len(relationships)} relationships")
+    except Exception as e:
+        print(f"❌ [_get_student_parent_emails] Error querying relationships: {str(e)}")
         return []
     
     parent_emails = []
-    for rel in relationships:
+    for idx, rel in enumerate(relationships):
+        print(f"🔍 [_get_student_parent_emails] Relationship {idx}: {rel}")
         if rel.guardian:
             try:
                 # Get guardian document - use get_value instead of get_doc to avoid DocType not found exceptions
                 guardian_id = frappe.db.get_value("CRM Guardian", rel.guardian, "guardian_id")
+                print(f"🔍 [_get_student_parent_emails] Guardian {rel.guardian} -> guardian_id: {guardian_id}")
                 if guardian_id:
                     # Parent email format: guardian_id@parent.wellspring.edu.vn
                     email = f"{guardian_id}@parent.wellspring.edu.vn"
                     parent_emails.append(email)
-            except Exception:
+                    print(f"✅ [_get_student_parent_emails] Added email: {email}")
+            except Exception as e:
                 # Silently skip guardians that don't exist or have issues
+                print(f"⚠️ [_get_student_parent_emails] Error processing guardian {rel.guardian}: {str(e)}")
                 continue
     
+    print(f"✅ [_get_student_parent_emails] Final parent_emails: {parent_emails}")
     return parent_emails
 
 
@@ -297,17 +305,31 @@ def send_contact_log():
     Updates status to "Sent" and sends push notifications
     """
     try:
+        print("=" * 80)
+        print("📨 [CONTACT_LOG] ========== START send_contact_log ==========")
+        print("=" * 80)
+        
         body = _get_body() or {}
+        print(f"📨 [CONTACT_LOG] Request body: {body}")
+        
         class_id = body.get('class_id')
         student_log_ids = body.get('student_log_ids') or []
         
+        print(f"📨 [CONTACT_LOG] class_id: {class_id}")
+        print(f"📨 [CONTACT_LOG] student_log_ids: {student_log_ids}")
+        
         if not class_id or not student_log_ids:
+            print(f"❌ [CONTACT_LOG] Missing params - class_id: {bool(class_id)}, student_log_ids: {bool(student_log_ids)}")
             return error_response(message="Missing class_id or student_log_ids", code="MISSING_PARAMS")
         
         # Validate teacher access
+        print(f"📨 [CONTACT_LOG] Validating teacher access...")
         _validate_homeroom_teacher_access(class_id)
+        print(f"✅ [CONTACT_LOG] Teacher access validated")
         
         teacher_name = _get_teacher_name(frappe.session.user)
+        print(f"📨 [CONTACT_LOG] teacher_name: {teacher_name}")
+        
         sent_count = 0
         failed_count = 0
         results = []
@@ -337,9 +359,13 @@ def send_contact_log():
                 student_log.contact_log_sent_at = frappe.utils.now_datetime()
                 student_log.save()
                 
+                print(f"📨 [CONTACT_LOG] Processing student_id: {student_log.student_id}")
+                print(f"📨 [CONTACT_LOG] Student name: {student_name}")
+                
                 # Try to send push notifications (best effort)
                 # Get parent emails
                 parent_emails = _get_student_parent_emails(student_log.student_id)
+                print(f"📨 [CONTACT_LOG] Parent emails found: {parent_emails}")
                 
                 if not parent_emails:
                     # No parents, but still mark as sent
