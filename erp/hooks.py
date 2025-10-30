@@ -378,6 +378,11 @@ before_request = ["erp.utils.auth_middleware.jwt_auth_middleware"]
 #     "erp.utils.hooks.on_logout"
 # ]
 
+# Fixtures - Explicitly register child tables to prevent orphaning
+fixtures = [
+    {"dt": "DocType", "name": "ERP Administrative Room Class"}
+]
+
 scheduler_events = {
     "cron": {
         # Renew subscription mỗi 30 phút
