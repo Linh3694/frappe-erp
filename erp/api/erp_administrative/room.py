@@ -1594,42 +1594,6 @@ def import_buildings():
 
 
 @frappe.whitelist(allow_guest=False)
-def debug_timetable_subjects():
-    """Debug API to check timetable subjects data"""
-    try:
-        count = frappe.db.count("SIS Timetable Subject")
-        subjects = frappe.get_all(
-            "SIS Timetable Subject",
-            fields=["name", "title_vn", "title_en", "education_stage_id"],
-            limit=20
-        )
-
-        # Also check education grades
-        grades_count = frappe.db.count("SIS Education Grade")
-        grades = frappe.get_all(
-            "SIS Education Grade",
-            fields=["name", "title_vn", "education_stage"],
-            limit=10
-        )
-
-        return success_response(
-            data={
-                "timetable_subjects": {
-                    "count": count,
-                    "subjects": subjects
-                },
-                "education_grades": {
-                    "count": grades_count,
-                    "grades": grades
-                }
-            },
-            message="Debug data"
-        )
-    except Exception as e:
-        return error_response(f"Error: {str(e)}")
-
-
-@frappe.whitelist(allow_guest=False)
 def get_timetable_subjects_for_room_class(education_grade: str = None):
     """Get timetable subjects filtered by education grade for room class assignment"""
     try:
