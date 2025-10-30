@@ -666,11 +666,30 @@ class RoomExcelImporter:
             return {"success": False, "message": "pandas library not available"}
 
         try:
+            # Debug: Check if file exists and readable
+            import os
+            frappe.logger().info(f"Excel file path: {file_path}")
+            frappe.logger().info(f"File exists: {os.path.exists(file_path)}")
+            if os.path.exists(file_path):
+                frappe.logger().info(f"File size: {os.path.getsize(file_path)} bytes")
+
             # Load building mapping
             self.load_building_mapping()
 
             # Read Excel file (skip first row if it's sample data)
-            df = pd.read_excel(file_path, header=0)  # header=0 means first row is header
+            frappe.logger().info("Attempting to read Excel file...")
+            try:
+                df = pd.read_excel(file_path, header=0)  # header=0 means first row is header
+                frappe.logger().info(f"Excel file read successfully. Shape: {df.shape}")
+                frappe.logger().info(f"Columns: {list(df.columns)}")
+            except Exception as excel_error:
+                frappe.logger().error(f"Error reading Excel file: {str(excel_error)}")
+                return {
+                    "success": False,
+                    "message": f"Error reading Excel file: {str(excel_error)}",
+                    "errors": [f"Could not read Excel file: {str(excel_error)}"],
+                    "warnings": self.warnings
+                }
 
             if not self.validate_excel_structure(df):
                 return {
