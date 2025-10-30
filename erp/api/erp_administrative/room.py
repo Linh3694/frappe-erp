@@ -7,6 +7,10 @@ from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.api_response import success_response, error_response
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 
 
 @frappe.whitelist(allow_guest=False)
@@ -451,6 +455,376 @@ def delete_room():
     except Exception as e:
         frappe.log_error(f"Error deleting room: {str(e)}")
         return error_response(f"Error deleting room: {str(e)}")
+
+
+class RoomExcelImporter:
+    """Handle Excel import for Rooms with validation and mapping"""
+
+    def __init__(self, campus_id: str):
+        self.campus_id = campus_id
+        self.errors: list = []
+        self.warnings: list = []
+        self.building_mapping = {}
+
+    def validate_excel_structure(self, df):
+        """Validate Excel file structure for room import
+
+        Required columns: title_vn, title_en, short_title, room_type, building_title
+        Optional columns: capacity
+        """
+        if len(df) == 0:
+            self.errors.append("Excel file is empty or has no data rows")
+            return False
+
+        # Normalize column names
+        df = self.normalize_columns(df)
+
+        required_cols = ['title_vn', 'title_en', 'short_title', 'room_type', 'building_title']
+        cols_lower = [str(c).strip().lower() for c in df.columns]
+
+        missing_cols = []
+        for col in required_cols:
+            if col not in cols_lower:
+                missing_cols.append(col)
+
+        if missing_cols:
+            self.errors.append(f"Missing required columns: {', '.join(missing_cols)}")
+            return False
+
+        return True
+
+    def normalize_columns(self, df):
+        """Rename Vietnamese/variant headers to canonical English headers"""
+        try:
+            canonical_map = {
+                'tên tiếng việt': 'title_vn',
+                'tên vn': 'title_vn',
+                'vietnamese name': 'title_vn',
+                'tên tiếng anh': 'title_en',
+                'tên en': 'title_en',
+                'english name': 'title_en',
+                'ký hiệu': 'short_title',
+                'short title': 'short_title',
+                'mã phòng': 'short_title',
+                'loại phòng': 'room_type',
+                'room type': 'room_type',
+                'tòa nhà': 'building_title',
+                'building': 'building_title',
+                'tên tòa nhà': 'building_title',
+                'sức chứa': 'capacity',
+                'capacity': 'capacity',
+                'số lượng': 'capacity'
+            }
+            rename_map = {}
+            for col in df.columns:
+                key = str(col).strip().lower()
+                if key in canonical_map:
+                    rename_map[col] = canonical_map[key]
+            if rename_map:
+                df = df.rename(columns=rename_map)
+        except Exception:
+            pass
+        return df
+
+    def normalize_room_type(self, room_type_str):
+        """Convert Vietnamese room types to English codes"""
+        if not room_type_str:
+            return None
+
+        room_type_lower = str(room_type_str).strip().lower()
+
+        # Map Vietnamese names to English codes
+        room_type_mapping = {
+            'phòng lớp học': 'classroom_room',
+            'phòng học': 'classroom_room',
+            'lớp học': 'classroom_room',
+            'phòng họp': 'meeting_room',
+            'họp': 'meeting_room',
+            'hội trường': 'auditorium',
+            'auditorium': 'auditorium',
+            'sân ngoài trời': 'outdoor',
+            'sân': 'outdoor',
+            'phòng làm việc': 'office',
+            'văn phòng': 'office',
+            'phòng chức năng': 'function_room',
+            'chức năng': 'function_room'
+        }
+
+        # Direct English mapping
+        direct_mapping = {
+            'classroom_room': 'classroom_room',
+            'meeting_room': 'meeting_room',
+            'auditorium': 'auditorium',
+            'outdoor': 'outdoor',
+            'office': 'office',
+            'function_room': 'function_room'
+        }
+
+        # Try Vietnamese mapping first, then direct English
+        if room_type_lower in room_type_mapping:
+            return room_type_mapping[room_type_lower]
+        elif room_type_lower in direct_mapping:
+            return direct_mapping[room_type_lower]
+
+        return None
+
+    def load_building_mapping(self):
+        """Load building mapping for the campus"""
+        try:
+            buildings = frappe.get_all(
+                "ERP Administrative Building",
+                filters={"campus_id": self.campus_id},
+                fields=["name", "title_vn", "title_en", "short_title"]
+            )
+
+            for building in buildings:
+                # Map by title_vn, title_en, and short_title
+                self.building_mapping[building.title_vn.lower()] = building.name
+                self.building_mapping[building.title_en.lower()] = building.name
+                self.building_mapping[building.short_title.lower()] = building.name
+
+        except Exception as e:
+            self.errors.append(f"Error loading building mapping: {str(e)}")
+
+    def find_building_id(self, building_title):
+        """Find building ID by title"""
+        if not building_title:
+            return None
+
+        title_lower = str(building_title).strip().lower()
+        return self.building_mapping.get(title_lower)
+
+    def validate_room_data(self, row_data):
+        """Validate individual room data"""
+        errors = []
+
+        # Required fields
+        if not row_data.get('title_vn'):
+            errors.append("title_vn is required")
+        if not row_data.get('title_en'):
+            errors.append("title_en is required")
+        if not row_data.get('short_title'):
+            errors.append("short_title is required")
+
+        # Room type validation
+        room_type = self.normalize_room_type(row_data.get('room_type'))
+        if not room_type:
+            errors.append(f"Invalid room_type: {row_data.get('room_type')}")
+        else:
+            row_data['room_type'] = room_type  # Update with normalized value
+
+        # Building validation
+        building_id = self.find_building_id(row_data.get('building_title'))
+        if not building_id:
+            errors.append(f"Building not found: {row_data.get('building_title')}")
+        else:
+            row_data['building_id'] = building_id
+
+        # Capacity validation
+        capacity = row_data.get('capacity')
+        if capacity is not None:
+            try:
+                capacity = int(capacity)
+                if capacity < 0:
+                    errors.append("Capacity must be non-negative")
+                row_data['capacity'] = capacity
+            except (ValueError, TypeError):
+                errors.append("Capacity must be a valid number")
+
+        return errors
+
+    def process_excel_import(self, file_path, dry_run=False):
+        """Process Excel import for rooms"""
+        if not pd:
+            return {"success": False, "message": "pandas library not available"}
+
+        try:
+            # Load building mapping
+            self.load_building_mapping()
+
+            # Read Excel file
+            df = pd.read_excel(file_path)
+
+            if not self.validate_excel_structure(df):
+                return {
+                    "success": False,
+                    "message": "Excel structure validation failed",
+                    "errors": self.errors,
+                    "warnings": self.warnings
+                }
+
+            # Normalize columns
+            df = self.normalize_columns(df)
+
+            # Process each row
+            processed_rooms = []
+            validation_errors = []
+
+            for index, row in df.iterrows():
+                row_data = {
+                    'title_vn': row.get('title_vn'),
+                    'title_en': row.get('title_en'),
+                    'short_title': row.get('short_title'),
+                    'room_type': row.get('room_type'),
+                    'building_title': row.get('building_title'),
+                    'capacity': row.get('capacity')
+                }
+
+                # Validate row data
+                row_errors = self.validate_room_data(row_data)
+                if row_errors:
+                    validation_errors.append({
+                        "row": index + 2,  # +2 because Excel is 1-indexed and has header
+                        "data": row_data,
+                        "errors": row_errors
+                    })
+                else:
+                    processed_rooms.append(row_data)
+
+            if validation_errors and dry_run:
+                return {
+                    "success": False,
+                    "message": "Validation failed",
+                    "validation_errors": validation_errors,
+                    "total_rows": len(df),
+                    "valid_rows": len(processed_rooms)
+                }
+
+            if not dry_run and processed_rooms:
+                # Create rooms in database
+                created_count = 0
+                for room_data in processed_rooms:
+                    try:
+                        room_doc = frappe.get_doc({
+                            "doctype": "ERP Administrative Room",
+                            "title_vn": room_data['title_vn'],
+                            "title_en": room_data['title_en'],
+                            "short_title": room_data['short_title'],
+                            "room_type": room_data['room_type'],
+                            "building_id": room_data['building_id'],
+                            "capacity": room_data.get('capacity', 0),
+                            "campus_id": self.campus_id
+                        })
+                        room_doc.insert()
+                        created_count += 1
+                    except Exception as e:
+                        self.errors.append(f"Error creating room {room_data.get('title_vn')}: {str(e)}")
+
+                frappe.db.commit()
+
+            return {
+                "success": True,
+                "message": f"Import completed successfully. Created {created_count} rooms." if not dry_run else "Dry run completed successfully",
+                "total_rows": len(df),
+                "created_count": created_count if not dry_run else 0,
+                "errors": self.errors,
+                "warnings": self.warnings
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Error processing Excel import: {str(e)}",
+                "errors": self.errors
+            }
+
+
+def save_uploaded_file(file_data, filename):
+    """Save uploaded file temporarily"""
+    import os
+    import uuid
+
+    # Create temp directory if it doesn't exist
+    temp_dir = "/tmp/frappe_uploads"
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
+
+    # Generate unique filename
+    unique_filename = f"{uuid.uuid4()}_{filename}"
+    file_path = os.path.join(temp_dir, unique_filename)
+
+    # Save file
+    with open(file_path, 'wb') as f:
+        if hasattr(file_data, 'read'):
+            f.write(file_data.read())
+        else:
+            f.write(file_data)
+
+    return file_path
+
+
+@frappe.whitelist(allow_guest=False)
+def import_rooms():
+    """Import rooms from Excel file"""
+    try:
+        # Get current user's campus
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                campus_id = "CAMPUS-00001"
+
+        # Check for dry_run parameter
+        dry_run = frappe.local.form_dict.get("dry_run", "false").lower() == "true"
+
+        # Process Excel import if file is provided
+        files = frappe.request.files
+
+        if files and 'file' in files:
+            file_data = files['file']
+            if not file_data:
+                return validation_error_response({"file": ["No file uploaded"]})
+
+            # Save file temporarily
+            file_path = save_uploaded_file(file_data, "rooms_import.xlsx")
+
+            # Process Excel import
+            importer = RoomExcelImporter(campus_id)
+            result = importer.process_excel_import(file_path, dry_run)
+
+            # Clean up temp file
+            try:
+                import os
+                os.remove(file_path)
+            except Exception:
+                pass
+
+            if result["success"]:
+                return success_response(result, result["message"])
+            else:
+                return validation_error_response(result["message"], {
+                    "errors": result.get("errors", []),
+                    "validation_errors": result.get("validation_errors", []),
+                    "warnings": result.get("warnings", [])
+                })
+        else:
+            return validation_error_response({"file": ["No file uploaded"]})
+
+    except Exception as e:
+        frappe.log_error(f"Error importing rooms: {str(e)}")
+        return error_response(f"Error importing rooms: {str(e)}")
+
+
+@frappe.whitelist(methods=["GET"])
+def get_import_job_status():
+    """Get the status/result of room import background job"""
+    try:
+        cache_key = f"room_import_result_{frappe.session.user}"
+        cached_result = frappe.cache().get_value(cache_key)
+
+        if cached_result:
+            frappe.cache().delete_value(cache_key)
+            return success_response(cached_result, "Import job completed")
+        else:
+            return success_response({"status": "processing"}, "Import job is still processing")
+
+    except Exception as e:
+        frappe.log_error(f"Error getting import job status: {str(e)}")
+        return error_response(f"Error getting import job status: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False)
