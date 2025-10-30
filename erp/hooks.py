@@ -209,6 +209,11 @@ doc_events = {
 		"on_trash": [
 			"erp.common.user_hooks.trigger_user_webhooks"
 		]
+	},
+	"SIS Class": {
+		"on_update": [
+			"erp.api.erp_administrative.room.sync_class_room_assignment"
+		]
 	}
 }
 

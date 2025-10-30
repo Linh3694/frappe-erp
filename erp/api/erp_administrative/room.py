@@ -1594,6 +1594,103 @@ def import_buildings():
 
 
 @frappe.whitelist(allow_guest=False)
+def available_rooms_for_class_selection(class_type: str = None):
+    """Get available rooms for class selection based on class type"""
+    try:
+        if not class_type:
+            return validation_error_response("class_type is required", {"class_type": ["class_type is required"]})
+
+        # Get all rooms
+        rooms = frappe.get_all(
+            "ERP Administrative Room",
+            fields=[
+                "name",
+                "title_vn",
+                "title_en",
+                "short_title",
+                "room_type",
+                "building_id",
+                "capacity"
+            ],
+            filters={"campus_id": frappe.local.session.get("campus_id")},
+            order_by="title_vn asc"
+        )
+
+        enhanced_rooms = []
+
+        for room in rooms:
+            # Get building info
+            building_title = None
+            if room.building_id:
+                building_info = frappe.get_all(
+                    "ERP Administrative Building",
+                    fields=["title_vn"],
+                    filters={"name": room.building_id},
+                    limit=1
+                )
+                if building_info:
+                    building_title = building_info[0].get("title_vn")
+
+            enhanced_room = {
+                "name": room.name,
+                "title": room.title_vn,
+                "short_title": room.short_title,
+                "room_type": room.room_type,
+                "building_title": building_title,
+                "capacity": room.capacity,
+                "suggested_usage": None,
+                "suggested_usage_display": None,
+                "available": True,
+                "reason": None
+            }
+
+            # Apply filtering logic based on class_type
+            if class_type == "regular":
+                # Only classroom rooms available and check if already has homeroom
+                if room.room_type != "classroom_room":
+                    enhanced_room["available"] = False
+                    enhanced_room["reason"] = "Chỉ phòng học mới có thể làm lớp chủ nhiệm"
+                else:
+                    # Check if room already has a homeroom class
+                    room_doc = frappe.get_doc("ERP Administrative Room", room.name)
+                    has_homeroom = False
+                    if hasattr(room_doc, 'room_classes'):
+                        for room_class in room_doc.room_classes:
+                            if room_class.usage_type == "homeroom":
+                                has_homeroom = True
+                                break
+
+                    if has_homeroom:
+                        enhanced_room["available"] = False
+                        enhanced_room["reason"] = "Phòng này đã có lớp chủ nhiệm"
+                    else:
+                        enhanced_room["suggested_usage"] = "homeroom"
+                        enhanced_room["suggested_usage_display"] = "Lớp chủ nhiệm"
+
+            else:  # mixed or club classes
+                # All rooms available, will be functional
+                enhanced_room["suggested_usage"] = "functional"
+                enhanced_room["suggested_usage_display"] = "Lớp chức năng"
+
+            enhanced_rooms.append(enhanced_room)
+
+        # Filter to only available rooms for regular classes, show all for others
+        if class_type == "regular":
+            result_rooms = [room for room in enhanced_rooms if room["available"]]
+        else:
+            result_rooms = enhanced_rooms
+
+        return success_response(
+            data=result_rooms,
+            message="Available rooms retrieved successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error getting available rooms: {str(e)}")
+        return error_response(f"Error getting available rooms: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
 def get_room_classes(room_id: str = None):
     """Get all classes assigned to a room"""
     try:
@@ -1928,6 +2025,68 @@ def add_room_class():
     except Exception as e:
         frappe.log_error(f"Error adding room class: {str(e)}")
         return error_response(f"Error adding room class: {str(e)}")
+
+
+def sync_class_room_assignment(doc, method):
+    """Sync room assignment when SIS Class.room field is updated"""
+    try:
+        # Only process if room field was changed
+        if not doc.has_value_changed('room'):
+            return
+
+        old_room = doc.get_doc_before_save().get('room') if doc.get_doc_before_save() else None
+        new_room = doc.room
+
+        # Remove from old room if exists
+        if old_room:
+            try:
+                old_room_doc = frappe.get_doc("ERP Administrative Room", old_room)
+                if hasattr(old_room_doc, 'room_classes'):
+                    # Find and remove this class from old room
+                    for i, room_class in enumerate(old_room_doc.room_classes):
+                        if room_class.class_id == doc.name and room_class.usage_type == "homeroom":
+                            old_room_doc.room_classes.pop(i)
+                            old_room_doc.save()
+                            frappe.logger().info(f"Removed class {doc.name} from old room {old_room}")
+                            break
+            except Exception as e:
+                frappe.logger().warning(f"Could not remove class {doc.name} from old room {old_room}: {str(e)}")
+
+        # Add to new room if exists
+        if new_room:
+            try:
+                new_room_doc = frappe.get_doc("ERP Administrative Room", new_room)
+
+                # Check if already exists
+                existing = False
+                if hasattr(new_room_doc, 'room_classes'):
+                    for room_class in new_room_doc.room_classes:
+                        if room_class.class_id == doc.name:
+                            existing = True
+                            break
+
+                if not existing:
+                    # Determine usage type
+                    usage_type = "homeroom" if doc.class_type == "regular" else "functional"
+
+                    # Add to child table
+                    new_room_doc.append("room_classes", {
+                        "class_id": doc.name,
+                        "usage_type": usage_type,
+                        "class_title": doc.title,
+                        "school_year_id": doc.school_year_id,
+                        "education_grade": doc.education_grade,
+                        "academic_program": doc.academic_program,
+                        "homeroom_teacher": doc.homeroom_teacher
+                    })
+                    new_room_doc.save()
+                    frappe.logger().info(f"Added class {doc.name} to new room {new_room} with usage {usage_type}")
+
+            except Exception as e:
+                frappe.logger().warning(f"Could not add class {doc.name} to new room {new_room}: {str(e)}")
+
+    except Exception as e:
+        frappe.logger().error(f"Error syncing class room assignment: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
