@@ -1812,6 +1812,14 @@ def get_room_classes(room_id: str = None):
         child_table_has_data = False
 
         try:
+            # First try without filters to see if table works
+            all_records = frappe.get_all(
+                "ERP Administrative Room Class",
+                fields=["name", "parent", "parenttype", "class_id", "usage_type"],
+                limit=10
+            )
+            frappe.logger().info(f"All records in child table: {all_records}")
+
             # Get from child table directly using database query
             room_classes_data = frappe.get_all(
                 "ERP Administrative Room Class",
@@ -1823,18 +1831,17 @@ def get_room_classes(room_id: str = None):
                 order_by="creation asc"
             )
 
-            # If no data found, try with different table name
+            # If no data found, try SQL query
             if not room_classes_data:
                 frappe.logger().info("No data found with frappe.get_all, trying SQL...")
-                # Try with underscores in table name
                 room_classes_data = frappe.db.sql(f"""
                     SELECT name, class_id, usage_type, subject_id,
                            class_title, school_year_id, education_grade, academic_program, homeroom_teacher
-                    FROM `tabERP_Administrative_Room_Class`
+                    FROM `tabERP Administrative Room Class`
                     WHERE parent = '{room_id}' AND parenttype = 'ERP Administrative Room'
                     ORDER BY creation ASC
                 """, as_dict=True)
-                frappe.logger().info(f"SQL query with underscores found {len(room_classes_data)} records")
+                frappe.logger().info(f"SQL query found {len(room_classes_data)} records")
 
             frappe.logger().info(f"Found {len(room_classes_data)} room classes in database for room {room_id}")
             frappe.logger().info(f"Room classes data: {room_classes_data}")
