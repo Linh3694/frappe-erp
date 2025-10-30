@@ -1594,6 +1594,72 @@ def import_buildings():
 
 
 @frappe.whitelist(allow_guest=False)
+def get_timetable_subjects_for_room_class(education_grade: str = None):
+    """Get timetable subjects filtered by education grade for room class assignment"""
+    try:
+        if not education_grade:
+            return validation_error_response("education_grade is required", {"education_grade": ["education_grade is required"]})
+
+        # Get timetable subjects filtered by education grade
+        subjects = frappe.get_all(
+            "SIS Timetable Subject",
+            fields=[
+                "name",
+                "subject_name",
+                "subject_code",
+                "education_grade",
+                "academic_program"
+            ],
+            filters={"education_grade": education_grade},
+            order_by="subject_name asc"
+        )
+
+        # Enhance with additional info
+        enhanced_subjects = []
+        for subject in subjects:
+            enhanced_subject = {
+                "name": subject.name,
+                "subject_name": subject.subject_name,
+                "subject_code": subject.subject_code,
+                "education_grade": subject.education_grade,
+                "academic_program": subject.academic_program
+            }
+
+            # Get education grade title
+            if subject.education_grade:
+                grade_info = frappe.get_all(
+                    "SIS Education Grade",
+                    fields=["title_vn"],
+                    filters={"name": subject.education_grade},
+                    limit=1
+                )
+                if grade_info:
+                    enhanced_subject["education_grade_title"] = grade_info[0].get("title_vn")
+
+            # Get academic program title
+            if subject.academic_program:
+                program_info = frappe.get_all(
+                    "SIS Academic Program",
+                    fields=["title_vn"],
+                    filters={"name": subject.academic_program},
+                    limit=1
+                )
+                if program_info:
+                    enhanced_subject["academic_program_title"] = program_info[0].get("title_vn")
+
+            enhanced_subjects.append(enhanced_subject)
+
+        return success_response(
+            data=enhanced_subjects,
+            message="Timetable subjects retrieved successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error getting timetable subjects: {str(e)}")
+        return error_response(f"Error getting timetable subjects: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
 def available_rooms_for_class_selection(class_type: str):
     """Get available rooms for class selection based on class type"""
     try:
@@ -1893,6 +1959,7 @@ def add_room_class():
         room_id = data.get("room_id")
         class_id = data.get("class_id")
         usage_type = data.get("usage_type")
+        subject_id = data.get("subject_id")  # Optional for functional classes
 
         # Validate room exists
         if not frappe.db.exists("ERP Administrative Room", room_id):
@@ -1976,6 +2043,24 @@ def add_room_class():
             frappe.logger().info(f"Updated SIS Class {class_id} room to {room_id} for homeroom usage")
 
         else:  # functional usage
+            # For functional usage, require subject_id
+            if not subject_id:
+                return validation_error_response(
+                    "Môn học là bắt buộc",
+                    {"subject_id": ["Phải chọn môn học cho lớp chức năng"]}
+                )
+
+            # Validate subject exists and belongs to correct education grade
+            if not frappe.db.exists("SIS Timetable Subject", subject_id):
+                return validation_error_response("Môn học không tồn tại", {"subject_id": ["Môn học không tồn tại"]})
+
+            subject_doc = frappe.get_doc("SIS Timetable Subject", subject_id)
+            if subject_doc.education_grade != class_info.education_grade:
+                return validation_error_response(
+                    "Môn học không phù hợp",
+                    {"subject_id": ["Môn học phải thuộc khối học của lớp"]}
+                )
+
             # For functional usage, check if class is already a homeroom somewhere (legacy check)
             if class_info.room and class_info.room != room_id and class_info.class_type == "regular":
                 return validation_error_response(
@@ -1998,7 +2083,8 @@ def add_room_class():
                 "school_year_id": class_info.school_year_id,
                 "education_grade": class_info.education_grade,
                 "academic_program": class_info.academic_program,
-                "homeroom_teacher": class_info.homeroom_teacher
+                "homeroom_teacher": class_info.homeroom_teacher,
+                "subject_id": subject_id if usage_type == "functional" else None
             }
 
             room_class_doc = frappe.get_doc(room_class_data)
@@ -2016,6 +2102,7 @@ def add_room_class():
                 "room_id": room_id,
                 "class_id": class_id,
                 "usage_type": usage_type,
+                "subject_id": subject_id,
                 "class_title": class_info.title,
                 "class_type": class_info.class_type
             },

@@ -10,6 +10,7 @@
   "usage_type",
   "class_title",
   "school_year_id",
+  "subject_id",
   "column_break_1",
   "education_grade",
   "academic_program",
@@ -64,6 +65,13 @@
    "fieldname": "homeroom_teacher",
    "fieldtype": "Data",
    "label": "Homeroom Teacher",
+   "read_only": 1
+  },
+  {
+   "fieldname": "subject_id",
+   "fieldtype": "Link",
+   "label": "Subject",
+   "options": "SIS Timetable Subject",
    "read_only": 1
   }
  ],
