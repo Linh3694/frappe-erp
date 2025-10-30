@@ -1594,7 +1594,7 @@ def import_buildings():
 
 
 @frappe.whitelist(allow_guest=False)
-def available_rooms_for_class_selection(class_type: str = None):
+def available_rooms_for_class_selection(class_type: str):
     """Get available rooms for class selection based on class type"""
     try:
         if not class_type:
