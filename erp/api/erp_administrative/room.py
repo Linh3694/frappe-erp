@@ -1738,7 +1738,7 @@ def add_room_class():
         else:
             data = frappe.local.form_dict or {}
 
-        required = ["room_id", "class_id", "usage_type"]
+        required = ["room_id", "class_id"]
         for field in required:
             if not data.get(field):
                 return validation_error_response({field: [f"{field} is required"]})
@@ -1755,12 +1755,17 @@ def add_room_class():
         if not frappe.db.exists("SIS Class", class_id):
             return not_found_response("Class not found")
 
+        # Get class info
+        class_info = frappe.get_doc("SIS Class", class_id)
+
+        # Auto-determine usage_type if not provided
+        if not usage_type:
+            usage_type = "homeroom" if class_info.class_type == "regular" else "functional"
+            frappe.logger().info(f"Auto-determined usage_type for class {class_id}: {usage_type} (class_type: {class_info.class_type})")
+
         # Validate usage_type
         if usage_type not in ["homeroom", "functional"]:
             return validation_error_response("Invalid usage type", {"usage_type": ["Usage type must be 'homeroom' or 'functional'"]})
-
-        # Get class info
-        class_info = frappe.get_doc("SIS Class", class_id)
 
         # Get room document
         room_doc = frappe.get_doc("ERP Administrative Room", room_id)
