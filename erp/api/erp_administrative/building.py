@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
+from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -156,13 +157,25 @@ def create_building():
         if existing_code:
             return validation_error_response({"short_title": [f"Building with short title '{short_title}' already exists"]})
         
+        # Get campus from user context or fallback
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                # Final fallback to known campus
+                campus_id = "CAMPUS-00001"
+
         # Create new building
         building_doc = frappe.get_doc({
             "doctype": "ERP Administrative Building",
             "title_vn": title_vn,
             "title_en": title_en,
             "short_title": short_title,
-            "campus_id": "campus-1"  # Default campus
+            "campus_id": campus_id
         })
         
         building_doc.insert()

@@ -13,13 +13,18 @@ from erp.utils.api_response import success_response, error_response
 def get_all_rooms():
     """Get all rooms with basic information - SIMPLE VERSION"""
     try:
-        # Get current user's campus information from roles  
+        # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                # Final fallback to known campus
+                campus_id = "CAMPUS-00001"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using fallback: {campus_id}")
         
         # Get buildings for this campus to filter rooms
         building_filters = {"campus_id": campus_id}
@@ -95,9 +100,15 @@ def get_room_by_id():
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
-            campus_id = "campus-1"
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                # Final fallback to known campus
+                campus_id = "CAMPUS-00001"
         
         # Get room and check if it belongs to a building in this campus
         room = frappe.get_doc("ERP Administrative Room", room_id)
@@ -179,10 +190,16 @@ def create_room():
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                # Final fallback to known campus
+                campus_id = "CAMPUS-00001"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using fallback: {campus_id}")
         
         # Verify building exists and belongs to same campus
         building_exists = frappe.db.exists(
@@ -275,9 +292,15 @@ def update_room():
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
-            campus_id = "campus-1"
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                # Final fallback to known campus
+                campus_id = "CAMPUS-00001"
         
         # Get existing document and verify access
         try:
@@ -395,9 +418,15 @@ def delete_room():
         
         # Get campus from user context
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
-            campus_id = "campus-1"
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                # Final fallback to known campus
+                campus_id = "CAMPUS-00001"
         
         # Get existing document and verify access
         try:

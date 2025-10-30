@@ -50,8 +50,17 @@ def get_campus_id_from_user_roles(user_email=None):
         # This matches frontend logic: campus-1, campus-2, etc.
         campus_index = campus_roles.index(campus_role) + 1
         default_campus_id = f"campus-{campus_index}"
-        frappe.logger().warning(f"SIS Campus not found for title '{campus_title}', using default: '{default_campus_id}'")
 
+        # Try to map to actual SIS Campus format: campus-1 -> CAMPUS-00001
+        try:
+            mapped_campus = f"CAMPUS-{campus_index:05d}"
+            if frappe.db.exists("SIS Campus", mapped_campus):
+                frappe.logger().info(f"Mapped default campus {default_campus_id} to existing {mapped_campus}")
+                return mapped_campus
+        except Exception:
+            pass
+
+        frappe.logger().warning(f"SIS Campus not found for title '{campus_title}', using default: '{default_campus_id}'")
         return default_campus_id
         
     except Exception as e:
@@ -138,8 +147,17 @@ def get_all_campus_ids_from_user_roles(user_email=None):
             if campus_id:
                 campus_ids.append(campus_id)
             else:
-                # Use default format
-                campus_ids.append(f"campus-{i + 1}")
+                # Use default format, then try to map to actual campus
+                default_campus_id = f"campus-{i + 1}"
+                try:
+                    campus_index = i + 1
+                    mapped_campus = f"CAMPUS-{campus_index:05d}"
+                    if frappe.db.exists("SIS Campus", mapped_campus):
+                        campus_ids.append(mapped_campus)
+                    else:
+                        campus_ids.append(default_campus_id)
+                except Exception:
+                    campus_ids.append(default_campus_id)
 
         frappe.logger().info(f"User {user_email} has access to campuses: {campus_ids}")
         return campus_ids
@@ -290,8 +308,36 @@ def get_current_campus_from_context():
         frappe.logger().info(f"No campus_id in context, falling back to user roles for user: {user}")
         role_based_campus = get_campus_id_from_user_roles(user)
         frappe.logger().info(f"Role-based campus for user {user}: '{role_based_campus}'")
-        # Final fallback: default active campus for mobile
-        return role_based_campus or "campus-1"
+
+        # If we got a role-based campus, try to resolve it to actual SIS Campus
+        if role_based_campus and role_based_campus.startswith("campus-"):
+            # Map campus-1 to CAMPUS-00001, campus-2 to CAMPUS-00002, etc.
+            try:
+                campus_index = int(role_based_campus.split("-")[1])
+                mapped_campus = f"CAMPUS-{campus_index:05d}"
+                # Check if this campus exists
+                if frappe.db.exists("SIS Campus", mapped_campus):
+                    frappe.logger().info(f"Mapped role-based campus {role_based_campus} to {mapped_campus}")
+                    return mapped_campus
+                else:
+                    frappe.logger().warning(f"Mapped campus {mapped_campus} does not exist, will fallback")
+            except (ValueError, IndexError) as e:
+                frappe.logger().error(f"Error mapping campus: {str(e)}")
+
+        # Final fallback: try to get first available campus or default to CAMPUS-00001
+        try:
+            first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+            if first_campus:
+                frappe.logger().info(f"Using first available campus: {first_campus}")
+                return first_campus
+            else:
+                frappe.logger().warning("No campuses found in database")
+        except Exception as e:
+            frappe.logger().error(f"Error getting first campus: {str(e)}")
+
+        # Hard fallback to known campus if database query fails
+        frappe.logger().info("Using hard fallback campus: CAMPUS-00001")
+        return "CAMPUS-00001"
 
     except Exception as e:
         frappe.logger().error(f"Error getting current campus from context: {str(e)}")
