@@ -66,5 +66,7 @@
    "label": "Homeroom Teacher",
    "read_only": 1
   }
- ]
+ ],
+ "sort_field": "usage_type",
+ "sort_order": "ASC"
 }
