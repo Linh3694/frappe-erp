@@ -992,10 +992,12 @@ def get_teacher_week():
                     teacher_names_list.append(teacher_user_map.get(r.get("teacher_2_id")) or "")
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
 
-                # Enrich with room information
+            # Enrich with room information for Teacher Timetable data
+            for r in rows:
                 try:
                     from erp.api.erp_administrative.room import get_room_for_class_subject
                     room_info = get_room_for_class_subject(r.get("class_id"), r.get("subject_title"))
+                    frappe.logger().info(f"🏫 ROOM INFO: class={r.get('class_id')}, subject={r.get('subject_title')} -> room={room_info.get('room_name')}, type={room_info.get('room_type')}")
                     r["room_id"] = room_info.get("room_id")
                     r["room_name"] = room_info.get("room_name")
                     r["room_type"] = room_info.get("room_type")
