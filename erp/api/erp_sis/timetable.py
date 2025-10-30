@@ -754,6 +754,9 @@ def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
             "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
             "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
             "class_id": r.get("class_id"),
+            "room_id": r.get("room_id"),
+            "room_name": r.get("room_name"),
+            "room_type": r.get("room_type"),
         })
     return result
 
@@ -1007,11 +1010,31 @@ def get_teacher_week():
                     frappe.logger().info(f"🏫 ROOM ENRICH: Added room info to row: {r.get('room_name')}")
                 except Exception as room_error:
                     frappe.logger().warning(f"Failed to get room for class {r.get('class_id')}, subject {r.get('subject_title')}: {str(room_error)}")
+                    import traceback
+                    frappe.logger().error(f"Room error traceback: {traceback.format_exc()}")
                     r["room_id"] = None
                     r["room_name"] = "Lỗi tải phòng"
                     r["room_type"] = None
         except Exception as enrich_error:
-            pass
+            frappe.logger().error(f"Error in enrichment section: {str(enrich_error)}")
+            import traceback
+            frappe.logger().error(f"Enrichment error traceback: {traceback.format_exc()}")
+            # Still try to add room info even if other enrichment failed
+            try:
+                from erp.api.erp_administrative.room import get_room_for_class_subject
+                for r in rows:
+                    if not r.get("room_id"):
+                        try:
+                            room_info = get_room_for_class_subject(r.get("class_id"), r.get("subject_title"))
+                            r["room_id"] = room_info.get("room_id")
+                            r["room_name"] = room_info.get("room_name")
+                            r["room_type"] = room_info.get("room_type")
+                        except Exception:
+                            r["room_id"] = None
+                            r["room_name"] = "Chưa có phòng"
+                            r["room_type"] = None
+            except Exception:
+                pass
 
         entries = _build_entries(rows, ws)
         frappe.logger().info(f"📝 TIMETABLE: Built {len(entries)} entries from {len(rows)} rows")
@@ -1234,12 +1257,31 @@ def get_class_week():
                     r["room_type"] = room_info.get("room_type")
                 except Exception as room_error:
                     frappe.logger().warning(f"Failed to get room for class {r.get('class_id')}, subject {r.get('subject_title')}: {str(room_error)}")
+                    import traceback
+                    frappe.logger().error(f"Room error traceback: {traceback.format_exc()}")
                     r["room_id"] = None
                     r["room_name"] = "Lỗi tải phòng"
                     r["room_type"] = None
-
         except Exception as enrich_error:
-            pass
+            frappe.logger().error(f"Error in enrichment section: {str(enrich_error)}")
+            import traceback
+            frappe.logger().error(f"Enrichment error traceback: {traceback.format_exc()}")
+            # Still try to add room info even if other enrichment failed
+            try:
+                from erp.api.erp_administrative.room import get_room_for_class_subject
+                for r in rows:
+                    if not r.get("room_id"):
+                        try:
+                            room_info = get_room_for_class_subject(r.get("class_id"), r.get("subject_title"))
+                            r["room_id"] = room_info.get("room_id")
+                            r["room_name"] = room_info.get("room_name")
+                            r["room_type"] = room_info.get("room_type")
+                        except Exception:
+                            r["room_id"] = None
+                            r["room_name"] = "Chưa có phòng"
+                            r["room_type"] = None
+            except Exception:
+                pass
 
         entries = _build_entries(rows, ws)
         
