@@ -1014,7 +1014,7 @@ def import_rooms():
         if files and 'file' in files:
             file_data = files['file']
             if not file_data:
-                return validation_error_response({"file": ["No file uploaded"]})
+                return validation_error_response("No file uploaded", {"file": ["No file uploaded"]})
 
             # Debug file information before saving
             frappe.logger().info(f"File data type: {type(file_data)}")
@@ -1547,7 +1547,7 @@ def import_buildings():
         if files and 'file' in files:
             file_data = files['file']
             if not file_data:
-                return validation_error_response({"file": ["No file uploaded"]})
+                return validation_error_response("No file uploaded", {"file": ["No file uploaded"]})
 
             # Debug file information before saving
             frappe.logger().info(f"File data type: {type(file_data)}")
@@ -1603,7 +1603,7 @@ def get_room_classes(room_id: str = None):
             if not room_id and frappe.request and frappe.request.args:
                 room_id = frappe.request.args.get('room_id') or frappe.request.args.get('name')
         if not room_id:
-            return validation_error_response({"room_id": ["Room ID is required"]})
+            return validation_error_response("Room ID is required", {"room_id": ["Room ID is required"]})
 
         # Check if room exists
         if not frappe.db.exists("ERP Administrative Room", room_id):
@@ -1707,7 +1707,7 @@ def add_room_class():
 
         # Validate usage_type
         if usage_type not in ["homeroom", "functional"]:
-            return validation_error_response({"usage_type": ["Usage type must be 'homeroom' or 'functional'"]})
+            return validation_error_response("Invalid usage type", {"usage_type": ["Usage type must be 'homeroom' or 'functional'"]})
 
         # Get class info
         class_info = frappe.get_doc("SIS Class", class_id)
@@ -1818,7 +1818,7 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
             if not room_id and frappe.request and frappe.request.args:
                 room_id = frappe.request.args.get('room_id')
         if not room_id:
-            return validation_error_response({"room_id": ["Room ID is required"]})
+            return validation_error_response("Room ID is required", {"room_id": ["Room ID is required"]})
 
         # Get current campus
         campus_id = get_current_campus_from_context()
