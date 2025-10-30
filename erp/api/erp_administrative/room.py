@@ -1601,18 +1601,16 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
             return validation_error_response("education_grade is required", {"education_grade": ["education_grade is required"]})
 
         # Get timetable subjects filtered by education grade
-        # TEMPORARILY COMMENT OUT FILTER TO TEST
         subjects = frappe.get_all(
             "SIS Timetable Subject",
             fields=[
                 "name",
-                "subject_name",
-                "subject_code",
-                "education_grade",
-                "academic_program"
+                "title_vn",
+                "title_en",
+                "education_stage_id"
             ],
-            # filters={"education_grade": education_grade},
-            order_by="subject_name asc"
+            # filters={"education_grade": education_grade},  # TODO: Need to check relationship
+            order_by="title_vn asc"
         )
 
         # Enhance with additional info
@@ -1620,10 +1618,9 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
         for subject in subjects:
             enhanced_subject = {
                 "name": subject.name,
-                "subject_name": subject.subject_name,
-                "subject_code": subject.subject_code,
-                "education_grade": subject.education_grade,
-                "academic_program": subject.academic_program
+                "subject_name": subject.title_vn or subject.title_en,
+                "subject_code": subject.name,  # Use name as code for now
+                "education_stage_id": subject.education_stage_id
             }
 
             # Get education grade title
