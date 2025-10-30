@@ -1812,54 +1812,17 @@ def get_room_classes(room_id: str = None):
         child_table_has_data = False
 
         try:
-            # First try without filters to see if table works
-            try:
-                all_records = frappe.get_all(
-                    "ERP Administrative Room Class",
-                    fields=["name", "parent", "parenttype", "class_id", "usage_type"],
-                    limit=10
-                )
-                frappe.logger().info(f"All records in child table: {all_records}")
-            except Exception as e:
-                frappe.logger().error(f"Error getting all records: {str(e)}")
-
-            # Get from child table directly using database query
-            try:
-                room_classes_data = frappe.get_all(
-                    "ERP Administrative Room Class",
-                    fields=[
-                        "name", "class_id", "usage_type", "subject_id",
-                        "class_title", "school_year_id", "education_grade", "academic_program", "homeroom_teacher"
-                    ],
-                    filters={"parent": room_id, "parenttype": "ERP Administrative Room"},
-                    order_by="creation asc"
-                )
-                frappe.logger().info(f"frappe.get_all found {len(room_classes_data)} records")
-            except Exception as e:
-                frappe.logger().error(f"Error with frappe.get_all: {str(e)}")
-                room_classes_data = []
-
-            # If no data found with frappe.get_all, use SQL query
-            if not room_classes_data:
-                frappe.logger().info("No data found with frappe.get_all, using SQL query...")
-                try:
-                    room_classes_data = frappe.db.sql(f"""
-                        SELECT name, class_id, usage_type, subject_id,
-                               class_title, school_year_id, education_grade, academic_program, homeroom_teacher
-                        FROM `tabERP Administrative Room Class`
-                        WHERE parent = '{room_id}' AND parenttype = 'ERP Administrative Room'
-                        ORDER BY creation ASC
-                    """, as_dict=True)
-                    frappe.logger().info(f"SQL query found {len(room_classes_data)} records: {room_classes_data}")
-                except Exception as e:
-                    frappe.logger().error(f"Error with SQL query: {str(e)}")
-                    room_classes_data = []
-
-            frappe.logger().info(f"Final result: Found {len(room_classes_data)} room classes for room {room_id}")
+            # Use SQL query directly since frappe.get_all has issues with child tables
+            room_classes_data = frappe.db.sql(f"""
+                SELECT name, class_id, usage_type, subject_id,
+                       class_title, school_year_id, education_grade, academic_program, homeroom_teacher
+                FROM `tabERP Administrative Room Class`
+                WHERE parent = '{room_id}' AND parenttype = 'ERP Administrative Room'
+                ORDER BY creation ASC
+            """, as_dict=True)
 
             if room_classes_data:
                 child_table_has_data = True
-                frappe.logger().info(f"Processing {len(room_classes_data)} classes from child table")
 
                 for room_class in room_classes_data:
                     frappe.logger().info(f"Processing room class: {room_class.class_id}, usage: {room_class.usage_type}")
