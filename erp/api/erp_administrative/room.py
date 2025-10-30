@@ -472,6 +472,9 @@ class RoomExcelImporter:
         Required columns: title_vn, title_en, short_title, room_type, building_title
         Optional columns: capacity
         """
+        # Debug: Log columns read from Excel
+        frappe.logger().info(f"Excel columns read: {list(df.columns)}")
+
         # Check if dataframe is empty after reading
         if df is None or df.empty:
             self.errors.append("Excel file could not be read or is empty")
@@ -479,6 +482,9 @@ class RoomExcelImporter:
 
         # Normalize column names
         df = self.normalize_columns(df)
+
+        # Debug: Log columns after normalization
+        frappe.logger().info(f"Excel columns after normalization: {list(df.columns)}")
 
         required_cols = ['title_vn', 'title_en', 'short_title', 'room_type', 'building_title']
         cols_lower = [str(c).strip().lower() for c in df.columns]
@@ -492,12 +498,19 @@ class RoomExcelImporter:
             self.errors.append(f"Missing required columns: {', '.join(missing_cols)}")
             return False
 
+        # Debug: Log first few rows to see data structure
+        frappe.logger().info(f"First 3 rows of data: {df.head(3).to_dict('records')}")
+
         # Check if there's at least one data row (skip empty rows)
         data_rows = 0
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             # Check if at least one required field has data
-            if any(str(row.get(col, '')).strip() for col in required_cols):
+            has_data = any(str(row.get(col, '')).strip() for col in required_cols)
+            frappe.logger().info(f"Row {idx}: has_data={has_data}, data={dict(row)}")
+            if has_data:
                 data_rows += 1
+
+        frappe.logger().info(f"Total data rows found: {data_rows}")
 
         if data_rows == 0:
             self.errors.append("No valid data rows found. Please ensure data starts from row 2 and required columns are filled")
@@ -521,8 +534,10 @@ class RoomExcelImporter:
                 'loại phòng': 'room_type',
                 'room type': 'room_type',
                 'tòa nhà': 'building_title',
+                'toà nhà': 'building_title',
                 'building': 'building_title',
                 'tên tòa nhà': 'building_title',
+                'tên toà nhà': 'building_title',
                 'sức chứa': 'capacity',
                 'capacity': 'capacity',
                 'số lượng': 'capacity'
@@ -654,8 +669,8 @@ class RoomExcelImporter:
             # Load building mapping
             self.load_building_mapping()
 
-            # Read Excel file
-            df = pd.read_excel(file_path)
+                   # Read Excel file (skip first row if it's sample data)
+                   df = pd.read_excel(file_path, header=0)  # header=0 means first row is header
 
             if not self.validate_excel_structure(df):
                 return {
