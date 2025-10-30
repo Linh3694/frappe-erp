@@ -1594,6 +1594,42 @@ def import_buildings():
 
 
 @frappe.whitelist(allow_guest=False)
+def debug_timetable_subjects():
+    """Debug API to check timetable subjects data"""
+    try:
+        count = frappe.db.count("SIS Timetable Subject")
+        subjects = frappe.get_all(
+            "SIS Timetable Subject",
+            fields=["name", "title_vn", "title_en", "education_stage_id"],
+            limit=20
+        )
+
+        # Also check education grades
+        grades_count = frappe.db.count("SIS Education Grade")
+        grades = frappe.get_all(
+            "SIS Education Grade",
+            fields=["name", "title_vn", "education_stage"],
+            limit=10
+        )
+
+        return success_response(
+            data={
+                "timetable_subjects": {
+                    "count": count,
+                    "subjects": subjects
+                },
+                "education_grades": {
+                    "count": grades_count,
+                    "grades": grades
+                }
+            },
+            message="Debug data"
+        )
+    except Exception as e:
+        return error_response(f"Error: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
 def get_timetable_subjects_for_room_class(education_grade: str = None):
     """Get timetable subjects filtered by education grade for room class assignment"""
     try:
@@ -1623,27 +1659,16 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
                 "education_stage_id": subject.education_stage_id
             }
 
-            # Get education grade title
-            if subject.education_grade:
-                grade_info = frappe.get_all(
-                    "SIS Education Grade",
+            # Get education stage title if education_stage_id exists
+            if subject.education_stage_id:
+                stage_info = frappe.get_all(
+                    "SIS Education Stage",
                     fields=["title_vn"],
-                    filters={"name": subject.education_grade},
+                    filters={"name": subject.education_stage_id},
                     limit=1
                 )
-                if grade_info:
-                    enhanced_subject["education_grade_title"] = grade_info[0].get("title_vn")
-
-            # Get academic program title
-            if subject.academic_program:
-                program_info = frappe.get_all(
-                    "SIS Academic Program",
-                    fields=["title_vn"],
-                    filters={"name": subject.academic_program},
-                    limit=1
-                )
-                if program_info:
-                    enhanced_subject["academic_program_title"] = program_info[0].get("title_vn")
+                if stage_info:
+                    enhanced_subject["education_stage_title"] = stage_info[0].get("title_vn")
 
             enhanced_subjects.append(enhanced_subject)
 
@@ -2065,16 +2090,12 @@ def add_room_class():
                     {"subject_id": ["Phải chọn môn học cho lớp chức năng"]}
                 )
 
-            # Validate subject exists and belongs to correct education grade
+            # Validate subject exists
             if not frappe.db.exists("SIS Timetable Subject", subject_id):
                 return validation_error_response("Môn học không tồn tại", {"subject_id": ["Môn học không tồn tại"]})
 
-            subject_doc = frappe.get_doc("SIS Timetable Subject", subject_id)
-            if subject_doc.education_grade != class_info.education_grade:
-                return validation_error_response(
-                    "Môn học không phù hợp",
-                    {"subject_id": ["Môn học phải thuộc khối học của lớp"]}
-                )
+            # TODO: Add validation for subject compatibility with class education grade
+            # Currently skipping validation as relationship needs to be clarified
 
             # For functional usage, check if class is already a homeroom somewhere (legacy check)
             if class_info.room and class_info.room != room_id and class_info.class_type == "regular":
