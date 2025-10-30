@@ -1775,12 +1775,21 @@ def available_rooms_for_class_selection(class_type: str):
 @frappe.whitelist(allow_guest=False)
 def get_room_classes(room_id: str = None):
     """Get all classes assigned to a room"""
+    frappe.logger().info("get_room_classes function called")
     try:
+        frappe.logger().info(f"Initial room_id parameter: {room_id}")
+        frappe.logger().info(f"frappe.local.form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"frappe.request: {frappe.request}")
+        if frappe.request and hasattr(frappe.request, 'data'):
+            frappe.logger().info(f"frappe.request.data: {frappe.request.data}")
+
         if not room_id:
             form = frappe.local.form_dict or {}
             room_id = form.get("room_id") or form.get("name")
+            frappe.logger().info(f"room_id from form: {room_id}")
             if not room_id and frappe.request and frappe.request.args:
                 room_id = frappe.request.args.get('room_id') or frappe.request.args.get('name')
+                frappe.logger().info(f"room_id from args: {room_id}")
             # Also check in request body for POST requests
             if not room_id and frappe.request and frappe.request.data:
                 try:
@@ -2008,9 +2017,20 @@ def get_room_classes(room_id: str = None):
 
                 enhanced_classes.append(enhanced_class)
 
+        # Add debug info to response
+        debug_info = {
+            "room_id": room_id,
+            "child_table_has_data": child_table_has_data,
+            "total_classes_found": len(enhanced_classes),
+            "classes": [{"name": c["name"], "usage_type": c["usage_type"]} for c in enhanced_classes]
+        }
+
+        frappe.logger().info(f"Returning {len(enhanced_classes)} classes for room {room_id}")
+
         return success_response(
             data=enhanced_classes,
-            message="Room classes fetched successfully"
+            message="Room classes fetched successfully",
+            debug=debug_info
         )
 
     except Exception as e:
