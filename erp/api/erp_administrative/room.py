@@ -669,8 +669,8 @@ class RoomExcelImporter:
             # Load building mapping
             self.load_building_mapping()
 
-                   # Read Excel file (skip first row if it's sample data)
-                   df = pd.read_excel(file_path, header=0)  # header=0 means first row is header
+            # Read Excel file (skip first row if it's sample data)
+            df = pd.read_excel(file_path, header=0)  # header=0 means first row is header
 
             if not self.validate_excel_structure(df):
                 return {
