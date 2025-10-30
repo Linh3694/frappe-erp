@@ -24,7 +24,9 @@
   "capacity",
   "column_break_1",
   "room_type",
-  "building_id"
+  "building_id",
+  "room_classes_section",
+  "room_classes"
  ],
  "fields": [
   {
@@ -84,6 +86,18 @@
    "label": "Building",
    "options": "ERP Administrative Building",
    "reqd": 1
+  },
+  {
+   "fieldname": "room_classes_section",
+   "fieldtype": "Section Break",
+   "label": "Room Classes"
+  },
+  {
+   "fieldname": "room_classes",
+   "fieldtype": "Table",
+   "label": "Room Classes",
+   "options": "ERP Administrative Room Class",
+   "read_only": 0
   }
  ],
  "index_web_pages_for_search": 1,

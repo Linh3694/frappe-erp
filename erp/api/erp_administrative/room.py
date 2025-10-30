@@ -1617,60 +1617,102 @@ def get_room_classes(room_id: str = None):
         if not frappe.db.exists("ERP Administrative Room", room_id):
             return not_found_response("Room not found")
 
-        # Get room classes from child table
-        # Note: This assumes we add a child table "Room Classes" to ERP Administrative Room
-        # For now, we'll get classes that have this room assigned
-        classes = frappe.get_all(
-            "SIS Class",
-            fields=[
-                "name",
-                "title",
-                "short_title",
-                "class_type",
-                "school_year_id",
-                "campus_id",
-                "education_grade",
-                "academic_program",
-                "homeroom_teacher",
-                "creation",
-                "modified"
-            ],
-            filters={"room": room_id},
-            order_by="title asc"
-        )
-
-        # Enhance with usage type based on class_type
+        # Get room classes from child table (new method)
         enhanced_classes = []
-        for class_data in classes:
-            enhanced_class = class_data.copy()
+        try:
+            # Get from child table if exists
+            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+            if hasattr(room_doc, 'room_classes') and room_doc.room_classes:
+                for room_class in room_doc.room_classes:
+                    class_doc = frappe.get_doc("SIS Class", room_class.class_id)
 
-            # Determine usage type based on class_type
-            if class_data.get("class_type") == "regular":
-                enhanced_class["usage_type"] = "homeroom"
-                enhanced_class["usage_type_display"] = "Lớp chủ nhiệm"
-            else:
-                enhanced_class["usage_type"] = "functional"
-                enhanced_class["usage_type_display"] = "Lớp chức năng"
+                    enhanced_class = {
+                        "name": class_doc.name,
+                        "title": class_doc.title,
+                        "short_title": class_doc.short_title,
+                        "class_type": class_doc.class_type,
+                        "school_year_id": class_doc.school_year_id,
+                        "campus_id": class_doc.campus_id,
+                        "education_grade": class_doc.education_grade,
+                        "academic_program": class_doc.academic_program,
+                        "homeroom_teacher": class_doc.homeroom_teacher,
+                        "creation": class_doc.creation,
+                        "modified": class_doc.modified,
+                        "usage_type": room_class.usage_type,
+                        "usage_type_display": "Lớp chủ nhiệm" if room_class.usage_type == "homeroom" else "Lớp chức năng"
+                    }
 
-            # Add teacher info
-            if class_data.get("homeroom_teacher"):
-                teacher_info = frappe.get_all(
-                    "SIS Teacher",
-                    fields=["user_id"],
-                    filters={"name": class_data["homeroom_teacher"]},
-                    limit=1
-                )
-                if teacher_info and teacher_info[0].get("user_id"):
-                    user_info = frappe.get_all(
-                        "User",
-                        fields=["full_name"],
-                        filters={"name": teacher_info[0]["user_id"]},
+                    # Add teacher info
+                    if class_doc.homeroom_teacher:
+                        teacher_info = frappe.get_all(
+                            "SIS Teacher",
+                            fields=["user_id"],
+                            filters={"name": class_doc.homeroom_teacher},
+                            limit=1
+                        )
+                        if teacher_info and teacher_info[0].get("user_id"):
+                            user_info = frappe.get_all(
+                                "User",
+                                fields=["full_name"],
+                                filters={"name": teacher_info[0]["user_id"]},
+                                limit=1
+                            )
+                            if user_info:
+                                enhanced_class["homeroom_teacher_name"] = user_info[0].get("full_name")
+
+                    enhanced_classes.append(enhanced_class)
+        except Exception as e:
+            frappe.logger().warning(f"Error fetching from child table, falling back to legacy method: {str(e)}")
+            # Fallback to legacy method (classes with room field)
+            classes = frappe.get_all(
+                "SIS Class",
+                fields=[
+                    "name",
+                    "title",
+                    "short_title",
+                    "class_type",
+                    "school_year_id",
+                    "campus_id",
+                    "education_grade",
+                    "academic_program",
+                    "homeroom_teacher",
+                    "creation",
+                    "modified"
+                ],
+                filters={"room": room_id},
+                order_by="title asc"
+            )
+
+            for class_data in classes:
+                enhanced_class = class_data.copy()
+
+                # Determine usage type based on class_type
+                if class_data.get("class_type") == "regular":
+                    enhanced_class["usage_type"] = "homeroom"
+                    enhanced_class["usage_type_display"] = "Lớp chủ nhiệm"
+                else:
+                    enhanced_class["usage_type"] = "functional"
+                    enhanced_class["usage_type_display"] = "Lớp chức năng"
+
+                # Add teacher info
+                if class_data.get("homeroom_teacher"):
+                    teacher_info = frappe.get_all(
+                        "SIS Teacher",
+                        fields=["user_id"],
+                        filters={"name": class_data["homeroom_teacher"]},
                         limit=1
                     )
-                    if user_info:
-                        enhanced_class["homeroom_teacher_name"] = user_info[0].get("full_name")
+                    if teacher_info and teacher_info[0].get("user_id"):
+                        user_info = frappe.get_all(
+                            "User",
+                            fields=["full_name"],
+                            filters={"name": teacher_info[0]["user_id"]},
+                            limit=1
+                        )
+                        if user_info:
+                            enhanced_class["homeroom_teacher_name"] = user_info[0].get("full_name")
 
-            enhanced_classes.append(enhanced_class)
+                enhanced_classes.append(enhanced_class)
 
         return success_response(
             data=enhanced_classes,
@@ -1720,7 +1762,24 @@ def add_room_class():
         # Get class info
         class_info = frappe.get_doc("SIS Class", class_id)
 
-        # Business logic: sync with SIS Class room field
+        # Get room document
+        room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+
+        # Check if class is already assigned to this room
+        existing_assignment = None
+        if hasattr(room_doc, 'room_classes'):
+            for room_class in room_doc.room_classes:
+                if room_class.class_id == class_id:
+                    existing_assignment = room_class
+                    break
+
+        if existing_assignment:
+            return validation_error_response(
+                "Lớp đã được gán cho phòng này",
+                {"class_id": ["Lớp này đã được gán cho phòng này rồi."]}
+            )
+
+        # Business logic: sync with SIS Class room field for homeroom
         if usage_type == "homeroom":
             # For homeroom usage, only allow if class_type is "regular"
             if class_info.class_type != "regular":
@@ -1729,7 +1788,17 @@ def add_room_class():
                     {"usage_type": ["Chỉ lớp có loại 'regular' mới có thể làm lớp chủ nhiệm"]}
                 )
 
-            # Check if room already has a homeroom class
+            # Check if room already has a homeroom class (both in child table and legacy room field)
+            # Check child table
+            if hasattr(room_doc, 'room_classes'):
+                for room_class in room_doc.room_classes:
+                    if room_class.usage_type == "homeroom":
+                        return validation_error_response(
+                            "Phòng đã có lớp chủ nhiệm",
+                            {"room_id": ["Phòng này đã có lớp chủ nhiệm. Một phòng chỉ có thể có 1 lớp chủ nhiệm."]}
+                        )
+
+            # Check legacy room field for backward compatibility
             existing_homeroom = frappe.get_all(
                 "SIS Class",
                 fields=["name", "title"],
@@ -1737,25 +1806,25 @@ def add_room_class():
                 limit=1
             )
 
-            if existing_homeroom and existing_homeroom[0].name != class_id:
+            if existing_homeroom:
                 return validation_error_response(
                     "Phòng đã có lớp chủ nhiệm",
                     {"room_id": [f"Phòng này đã có lớp chủ nhiệm: {existing_homeroom[0].title}. Một phòng chỉ có thể có 1 lớp chủ nhiệm."]}
                 )
 
-            # Check if class is already homeroom for another room
+            # Check if class is already homeroom for another room (legacy check)
             if class_info.room and class_info.room != room_id:
                 return validation_error_response(
                     "Lớp đã là chủ nhiệm cho phòng khác",
                     {"class_id": ["Lớp này đã là lớp chủ nhiệm cho phòng khác. Không thể gán làm chủ nhiệm cho phòng này."]}
                 )
 
-            # Update class.room to this room
+            # Update class.room to this room (legacy compatibility)
             frappe.db.set_value("SIS Class", class_id, "room", room_id)
             frappe.logger().info(f"Updated SIS Class {class_id} room to {room_id} for homeroom usage")
 
         else:  # functional usage
-            # For functional usage, check if class is already a homeroom somewhere
+            # For functional usage, check if class is already a homeroom somewhere (legacy check)
             if class_info.room and class_info.room != room_id and class_info.class_type == "regular":
                 return validation_error_response(
                     "Lớp đã là chủ nhiệm",
@@ -1764,8 +1833,29 @@ def add_room_class():
 
             # For functional usage, we don't update class.room field to avoid conflicts with homeroom assignments
 
-        # TODO: Add to Room Classes child table when implemented
-        # For now, we rely on the SIS Class room field logic above
+        # Add to Room Classes child table
+        try:
+            room_class_data = {
+                "doctype": "ERP Administrative Room Class",
+                "parent": room_id,
+                "parenttype": "ERP Administrative Room",
+                "parentfield": "room_classes",
+                "class_id": class_id,
+                "usage_type": usage_type,
+                "class_title": class_info.title,
+                "school_year_id": class_info.school_year_id,
+                "education_grade": class_info.education_grade,
+                "academic_program": class_info.academic_program,
+                "homeroom_teacher": class_info.homeroom_teacher
+            }
+
+            room_class_doc = frappe.get_doc(room_class_data)
+            room_class_doc.insert()
+            frappe.logger().info(f"Added class {class_id} to room {room_id} with usage {usage_type}")
+
+        except Exception as e:
+            frappe.logger().error(f"Failed to add to child table: {str(e)}")
+            return error_response(f"Không thể thêm lớp vào phòng: {str(e)}")
 
         frappe.db.commit()
 
@@ -1818,12 +1908,30 @@ def remove_room_class():
         # Get class info
         class_info = frappe.get_doc("SIS Class", class_id)
 
-        # If this room is set as the class's room, remove it
+        # Get room document
+        room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+
+        # Remove from Room Classes child table
+        removed = False
+        if hasattr(room_doc, 'room_classes'):
+            for i, room_class in enumerate(room_doc.room_classes):
+                if room_class.class_id == class_id:
+                    # Remove the child record
+                    frappe.delete_doc("ERP Administrative Room Class", room_class.name)
+                    removed = True
+                    frappe.logger().info(f"Removed class {class_id} from room {room_id} child table")
+                    break
+
+        # Fallback: If this room is set as the class's room (legacy), remove it
         if class_info.room == room_id:
             frappe.db.set_value("SIS Class", class_id, "room", None)
-            frappe.logger().info(f"Removed room {room_id} from SIS Class {class_id}")
+            frappe.logger().info(f"Removed room {room_id} from SIS Class {class_id} (legacy)")
 
-        # TODO: Remove from Room Classes child table when implemented
+        if not removed:
+            return validation_error_response(
+                "Lớp không được gán cho phòng này",
+                {"class_id": ["Lớp này không được gán cho phòng này."]}
+            )
 
         frappe.db.commit()
 
@@ -1883,15 +1991,29 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
             order_by="title asc"
         )
 
-        # Check if room already has a homeroom class
-        existing_homeroom = frappe.get_all(
-            "SIS Class",
-            fields=["name", "title"],
-            filters={"room": room_id, "class_type": "regular"},
-            limit=1
-        )
+        # Check if room already has a homeroom class (both child table and legacy)
+        room_has_homeroom = False
 
-        room_has_homeroom = len(existing_homeroom) > 0
+        try:
+            # Check child table first
+            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+            if hasattr(room_doc, 'room_classes'):
+                for room_class in room_doc.room_classes:
+                    if room_class.usage_type == "homeroom":
+                        room_has_homeroom = True
+                        break
+        except Exception:
+            pass
+
+        # Fallback to legacy check
+        if not room_has_homeroom:
+            existing_homeroom = frappe.get_all(
+                "SIS Class",
+                fields=["name", "title"],
+                filters={"room": room_id, "class_type": "regular"},
+                limit=1
+            )
+            room_has_homeroom = len(existing_homeroom) > 0
 
         # Filter classes that are available
         available_classes = []
