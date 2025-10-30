@@ -2480,32 +2480,54 @@ def get_room_for_class_subject(class_id: str, subject_title: str = None) -> Dict
         Dict with room_id, room_name, room_type ('functional' or 'homeroom')
     """
     try:
+        # Get all room assignments for this class
+        room_assignments = frappe.get_all(
+            "ERP Administrative Room Class",
+            fields=["parent", "usage_type", "subject_id"],
+            filters={"class_id": class_id}
+        )
+
+        frappe.logger().info(f"🏫 ROOM DEBUG: Found {len(room_assignments)} room assignments for class {class_id}")
+
         # First try to find functional room if subject is provided
         if subject_title:
-            functional_rooms = frappe.get_all(
-                "ERP Administrative Room Class",
-                fields=["parent", "subject_name"],
-                filters={
-                    "class_id": class_id,
-                    "usage_type": "functional"
+            for assignment in room_assignments:
+                if assignment.get("usage_type") == "functional" and assignment.get("subject_id"):
+                    # Get subject title from subject_id
+                    try:
+                        subject_doc = frappe.get_doc("SIS Timetable Subject", assignment["subject_id"])
+                        subject_name = subject_doc.title_vn or subject_doc.title_en or ""
+                        frappe.logger().info(f"🏫 ROOM DEBUG: Checking subject '{subject_name}' against '{subject_title}'")
+
+                        if subject_name and subject_title.lower() in subject_name.lower():
+                            # Get room details
+                            room_doc = frappe.get_doc("ERP Administrative Room", assignment["parent"])
+                            return {
+                                "room_id": assignment["parent"],
+                                "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
+                                "room_type": "functional"
+                            }
+                    except Exception as subj_error:
+                        frappe.logger().warning(f"Error getting subject {assignment.get('subject_id')}: {str(subj_error)}")
+
+        # Try to find any room assignment for this class (homeroom or functional)
+        for assignment in room_assignments:
+            if assignment.get("parent"):
+                # Get room details
+                room_doc = frappe.get_doc("ERP Administrative Room", assignment["parent"])
+                room_type = assignment.get("usage_type") or "homeroom"
+                frappe.logger().info(f"🏫 ROOM DEBUG: Found room {assignment['parent']} ({room_type}) for class {class_id}")
+                return {
+                    "room_id": assignment["parent"],
+                    "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
+                    "room_type": room_type
                 }
-            )
 
-            # Try exact match first
-            for room in functional_rooms:
-                if room.get("subject_name") and subject_title.lower() in room["subject_name"].lower():
-                    # Get room details
-                    room_doc = frappe.get_doc("ERP Administrative Room", room["parent"])
-                    return {
-                        "room_id": room["parent"],
-                        "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
-                        "room_type": "functional"
-                    }
-
-        # Fallback: get homeroom for the class
+        # Final fallback: get homeroom from class directly
         class_doc = frappe.get_doc("SIS Class", class_id)
         if class_doc.room:
             room_doc = frappe.get_doc("ERP Administrative Room", class_doc.room)
+            frappe.logger().info(f"🏫 ROOM DEBUG: Using homeroom {class_doc.room} from class {class_id}")
             return {
                 "room_id": class_doc.room,
                 "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
@@ -2513,6 +2535,7 @@ def get_room_for_class_subject(class_id: str, subject_title: str = None) -> Dict
             }
 
         # No room found
+        frappe.logger().info(f"🏫 ROOM DEBUG: No room found for class {class_id}")
         return {
             "room_id": None,
             "room_name": "Chưa có phòng",
