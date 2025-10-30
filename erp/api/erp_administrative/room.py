@@ -1591,3 +1591,278 @@ def import_buildings():
     except Exception as e:
         frappe.log_error(f"Error importing buildings: {str(e)}")
         return error_response(f"Error importing buildings: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_room_classes(room_id: str = None):
+    """Get all classes assigned to a room"""
+    try:
+        if not room_id:
+            form = frappe.local.form_dict or {}
+            room_id = form.get("room_id") or form.get("name")
+            if not room_id and frappe.request and frappe.request.args:
+                room_id = frappe.request.args.get('room_id') or frappe.request.args.get('name')
+        if not room_id:
+            return validation_error_response({"room_id": ["Room ID is required"]})
+
+        # Check if room exists
+        if not frappe.db.exists("ERP Administrative Room", room_id):
+            return not_found_response("Room not found")
+
+        # Get room classes from child table
+        # Note: This assumes we add a child table "Room Classes" to ERP Administrative Room
+        # For now, we'll get classes that have this room assigned
+        classes = frappe.get_all(
+            "SIS Class",
+            fields=[
+                "name",
+                "title",
+                "short_title",
+                "class_type",
+                "school_year_id",
+                "campus_id",
+                "education_grade",
+                "academic_program",
+                "homeroom_teacher",
+                "creation",
+                "modified"
+            ],
+            filters={"room": room_id},
+            order_by="title asc"
+        )
+
+        # Enhance with usage type based on class_type
+        enhanced_classes = []
+        for class_data in classes:
+            enhanced_class = class_data.copy()
+
+            # Determine usage type based on class_type
+            if class_data.get("class_type") == "regular":
+                enhanced_class["usage_type"] = "homeroom"
+                enhanced_class["usage_type_display"] = "Lớp chủ nhiệm"
+            else:
+                enhanced_class["usage_type"] = "functional"
+                enhanced_class["usage_type_display"] = "Lớp chức năng"
+
+            # Add teacher info
+            if class_data.get("homeroom_teacher"):
+                teacher_info = frappe.get_all(
+                    "SIS Teacher",
+                    fields=["user_id"],
+                    filters={"name": class_data["homeroom_teacher"]},
+                    limit=1
+                )
+                if teacher_info and teacher_info[0].get("user_id"):
+                    user_info = frappe.get_all(
+                        "User",
+                        fields=["full_name"],
+                        filters={"name": teacher_info[0]["user_id"]},
+                        limit=1
+                    )
+                    if user_info:
+                        enhanced_class["homeroom_teacher_name"] = user_info[0].get("full_name")
+
+            enhanced_classes.append(enhanced_class)
+
+        return success_response(
+            data=enhanced_classes,
+            message="Room classes fetched successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching room classes: {str(e)}")
+        return error_response(f"Error fetching room classes: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def add_room_class():
+    """Add a class to a room"""
+    try:
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body or '{}')
+            except Exception:
+                data = frappe.local.form_dict or {}
+        else:
+            data = frappe.local.form_dict or {}
+
+        required = ["room_id", "class_id", "usage_type"]
+        for field in required:
+            if not data.get(field):
+                return validation_error_response({field: [f"{field} is required"]})
+
+        room_id = data.get("room_id")
+        class_id = data.get("class_id")
+        usage_type = data.get("usage_type")
+
+        # Validate room exists
+        if not frappe.db.exists("ERP Administrative Room", room_id):
+            return not_found_response("Room not found")
+
+        # Validate class exists
+        if not frappe.db.exists("SIS Class", class_id):
+            return not_found_response("Class not found")
+
+        # Validate usage_type
+        if usage_type not in ["homeroom", "functional"]:
+            return validation_error_response({"usage_type": ["Usage type must be 'homeroom' or 'functional'"]})
+
+        # Get class info
+        class_info = frappe.get_doc("SIS Class", class_id)
+
+        # Business logic: sync with SIS Class room field
+        if usage_type == "homeroom":
+            # For homeroom usage, only allow if class_type is "regular"
+            if class_info.class_type == "regular":
+                # Update class.room to this room
+                frappe.db.set_value("SIS Class", class_id, "room", room_id)
+                frappe.logger().info(f"Updated SIS Class {class_id} room to {room_id} for homeroom usage")
+            else:
+                return validation_error_response({
+                    "usage_type": ["Không thể đặt lớp này làm lớp chủ nhiệm vì loại lớp không phải là 'regular'"]
+                })
+        else:
+            # For functional usage, check if class already has a homeroom room
+            if class_info.room and class_info.room != room_id:
+                return validation_error_response({
+                    "class_id": ["Lớp này đã có phòng chủ nhiệm. Không thể thêm làm phòng chức năng."]
+                })
+            # For functional usage, we don't update class.room field to avoid conflicts
+
+        # TODO: Add to Room Classes child table when implemented
+        # For now, we rely on the SIS Class room field logic above
+
+        frappe.db.commit()
+
+        return success_response(
+            data={
+                "room_id": room_id,
+                "class_id": class_id,
+                "usage_type": usage_type,
+                "class_title": class_info.title,
+                "class_type": class_info.class_type
+            },
+            message="Class added to room successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error adding room class: {str(e)}")
+        return error_response(f"Error adding room class: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def remove_room_class():
+    """Remove a class from a room"""
+    try:
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body or '{}')
+            except Exception:
+                data = frappe.local.form_dict or {}
+        else:
+            data = frappe.local.form_dict or {}
+
+        required = ["room_id", "class_id"]
+        for field in required:
+            if not data.get(field):
+                return validation_error_response({field: [f"{field} is required"]})
+
+        room_id = data.get("room_id")
+        class_id = data.get("class_id")
+
+        # Validate room exists
+        if not frappe.db.exists("ERP Administrative Room", room_id):
+            return not_found_response("Room not found")
+
+        # Validate class exists
+        if not frappe.db.exists("SIS Class", class_id):
+            return not_found_response("Class not found")
+
+        # Get class info
+        class_info = frappe.get_doc("SIS Class", class_id)
+
+        # If this room is set as the class's room, remove it
+        if class_info.room == room_id:
+            frappe.db.set_value("SIS Class", class_id, "room", None)
+            frappe.logger().info(f"Removed room {room_id} from SIS Class {class_id}")
+
+        # TODO: Remove from Room Classes child table when implemented
+
+        frappe.db.commit()
+
+        return success_response(
+            data={
+                "room_id": room_id,
+                "class_id": class_id,
+                "class_title": class_info.title
+            },
+            message="Class removed from room successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error removing room class: {str(e)}")
+        return error_response(f"Error removing room class: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_available_classes_for_room(room_id: str = None, school_year_id: str = None):
+    """Get classes that can be assigned to a room (not already assigned to other rooms)"""
+    try:
+        if not room_id:
+            form = frappe.local.form_dict or {}
+            room_id = form.get("room_id")
+            if not room_id and frappe.request and frappe.request.args:
+                room_id = frappe.request.args.get('room_id')
+        if not room_id:
+            return validation_error_response({"room_id": ["Room ID is required"]})
+
+        # Get current campus
+        campus_id = get_current_campus_from_context()
+
+        filters = {"campus_id": campus_id or "campus-1"}
+
+        if school_year_id:
+            filters["school_year_id"] = school_year_id
+
+        # Get all classes for this campus/year
+        classes = frappe.get_all(
+            "SIS Class",
+            fields=[
+                "name",
+                "title",
+                "short_title",
+                "class_type",
+                "room"
+            ],
+            filters=filters,
+            order_by="title asc"
+        )
+
+        # Filter classes that are available (don't have a room or have this room)
+        available_classes = []
+        for class_data in classes:
+            if not class_data.get("room") or class_data.get("room") == room_id:
+                available_class = class_data.copy()
+
+                # Add display info
+                if class_data.get("class_type") == "regular":
+                    available_class["suggested_usage"] = "homeroom"
+                    available_class["suggested_usage_display"] = "Lớp chủ nhiệm"
+                else:
+                    available_class["suggested_usage"] = "functional"
+                    available_class["suggested_usage_display"] = "Lớp chức năng"
+
+                available_classes.append(available_class)
+
+        return success_response(
+            data=available_classes,
+            message="Available classes fetched successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching available classes: {str(e)}")
+        return error_response(f"Error fetching available classes: {str(e)}")
