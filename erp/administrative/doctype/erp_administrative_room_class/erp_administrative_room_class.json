@@ -3,6 +3,7 @@
  "name": "ERP Administrative Room Class",
  "module": "Administrative",
  "istable": 1,
+ "parent_doctype": "ERP Administrative Room",
  "engine": "InnoDB",
  "field_order": [
   "class_id",
