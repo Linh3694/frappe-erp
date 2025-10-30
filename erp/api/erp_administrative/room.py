@@ -1600,7 +1600,20 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
         if not education_grade:
             return validation_error_response("education_grade is required", {"education_grade": ["education_grade is required"]})
 
-        # Get timetable subjects filtered by education grade
+        # Get education stage from education grade
+        education_grade_doc = frappe.get_all(
+            "SIS Education Grade",
+            fields=["education_stage_id"],
+            filters={"name": education_grade},
+            limit=1
+        )
+
+        if not education_grade_doc or not education_grade_doc[0].get("education_stage_id"):
+            return validation_error_response("Education grade not found or has no education stage", {"education_grade": ["Invalid education grade"]})
+
+        education_stage_id = education_grade_doc[0]["education_stage_id"]
+
+        # Get timetable subjects filtered by education stage
         subjects = frappe.get_all(
             "SIS Timetable Subject",
             fields=[
@@ -1609,7 +1622,7 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
                 "title_en",
                 "education_stage_id"
             ],
-            # filters={"education_grade": education_grade},  # TODO: Need to check relationship
+            filters={"education_stage_id": education_stage_id},
             order_by="title_vn asc"
         )
 
@@ -1620,6 +1633,7 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
                 "name": subject.name,
                 "subject_name": subject.title_vn or subject.title_en,
                 "subject_code": subject.name,  # Use name as code for now
+                "education_grade": education_grade,
                 "education_stage_id": subject.education_stage_id
             }
 
@@ -2286,7 +2300,8 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
                 "title",
                 "short_title",
                 "class_type",
-                "room"
+                "room",
+                "education_grade"
             ],
             filters=filters,
             order_by="title asc"
