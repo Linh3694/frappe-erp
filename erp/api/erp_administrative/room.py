@@ -1813,6 +1813,20 @@ def get_room_classes(room_id: str = None):
                         if program_info:
                             academic_program_title = program_info[0].get("title_vn")
 
+                    # Get subject info if it's a functional class
+                    subject_name = None
+                    subject_code = None
+                    if room_class.usage_type == "functional" and room_class.subject_id:
+                        subject_info = frappe.get_all(
+                            "SIS Timetable Subject",
+                            fields=["subject_name", "subject_code"],
+                            filters={"name": room_class.subject_id},
+                            limit=1
+                        )
+                        if subject_info:
+                            subject_name = subject_info[0].get("subject_name")
+                            subject_code = subject_info[0].get("subject_code")
+
                     enhanced_class = {
                         "name": class_doc.name,
                         "title": class_doc.title,
@@ -1826,7 +1840,10 @@ def get_room_classes(room_id: str = None):
                         "creation": class_doc.creation,
                         "modified": class_doc.modified,
                         "usage_type": room_class.usage_type,
-                        "usage_type_display": "Lớp chủ nhiệm" if room_class.usage_type == "homeroom" else "Lớp chức năng"
+                        "usage_type_display": "Lớp chủ nhiệm" if room_class.usage_type == "homeroom" else "Lớp chức năng",
+                        "subject_id": room_class.subject_id,
+                        "subject_name": subject_name,
+                        "subject_code": subject_code
                     }
 
                     # Add teacher info
