@@ -2030,7 +2030,7 @@ def get_room_classes(room_id: str = None):
         return success_response(
             data=enhanced_classes,
             message="Room classes fetched successfully",
-            debug=debug_info
+            debug_info=debug_info
         )
 
     except Exception as e:
