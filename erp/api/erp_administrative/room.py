@@ -474,7 +474,7 @@ class RoomExcelImporter:
         """
         # Check if dataframe is empty after reading
         if df is None or df.empty:
-            self.errors.append("Excel file could not be read or is empty")
+            self.errors.append("File Excel không thể đọc được hoặc file trống. Vui lòng kiểm tra: 1) File có đúng định dạng .xlsx hoặc .xls không? 2) File có bị hỏng không? 3) Bạn đã điền dữ liệu vào file mẫu chưa?")
             return False
 
         # Normalize column names
@@ -693,10 +693,11 @@ class RoomExcelImporter:
                 debug_info.append(f"First 3 rows: {df.head(3).to_dict('records')}")
             except Exception as excel_error:
                 debug_info.append(f"Error reading Excel file: {str(excel_error)}")
+                error_msg = "Không thể đọc file Excel. Vui lòng kiểm tra: 1) File có đúng định dạng Excel (.xlsx hoặc .xls) không? 2) File có bị hỏng hoặc mật khẩu bảo vệ không? 3) Bạn có đang tải file mẫu đã điền đúng không?"
                 return {
                     "success": False,
-                    "message": f"Error reading Excel file: {str(excel_error)}",
-                    "errors": [f"Could not read Excel file: {str(excel_error)}"],
+                    "message": error_msg,
+                    "errors": [error_msg],
                     "debug_info": debug_info,
                     "warnings": self.warnings
                 }
