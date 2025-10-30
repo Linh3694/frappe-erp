@@ -77,7 +77,7 @@ def _get_redis_client():
 
 def is_user_events_enabled() -> bool:
     flag = _get_conf("FRAPPE_USER_EVENTS_ENABLED")
-    return _bool(flag, default=False)
+    return _bool(flag, default=True)  # Mặc định enable cho hệ thống nội bộ
 
 
 def publish(channel: str, message: Dict[str, Any]) -> bool:
