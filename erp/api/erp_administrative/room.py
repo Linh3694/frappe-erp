@@ -687,13 +687,69 @@ class RoomExcelImporter:
             # Read Excel file (skip first row if it's sample data)
             debug_info.append("Attempting to read Excel file...")
             try:
-                df = pd.read_excel(file_path, header=0)  # header=0 means first row is header
+                # First check if pandas is available
+                if not pd:
+                    return {
+                        "success": False,
+                        "message": "Pandas library not available on server",
+                        "errors": ["Server configuration error: pandas library missing"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                # Try reading Excel file with multiple approaches
+                df = None
+                excel_error = None
+
+                # Approach 1: Standard read_excel
+                try:
+                    df = pd.read_excel(file_path, header=0, engine='openpyxl')
+                    debug_info.append("Successfully read with openpyxl engine")
+                except Exception as e1:
+                    debug_info.append(f"openpyxl failed: {str(e1)}")
+                    excel_error = e1
+                    try:
+                        # Approach 2: Try xlrd engine for .xls files
+                        df = pd.read_excel(file_path, header=0, engine='xlrd')
+                        debug_info.append("Successfully read with xlrd engine")
+                    except Exception as e2:
+                        debug_info.append(f"xlrd also failed: {str(e2)}")
+                        try:
+                            # Approach 3: Try without specifying engine
+                            df = pd.read_excel(file_path, header=0)
+                            debug_info.append("Successfully read without specifying engine")
+                        except Exception as e3:
+                            debug_info.append(f"All approaches failed. Last error: {str(e3)}")
+                            excel_error = e3
+
+                if df is None:
+                    error_msg = f"Không thể đọc file Excel bằng bất kỳ phương pháp nào. Lỗi cuối cùng: {str(excel_error) if excel_error else 'Unknown error'}. Vui lòng kiểm tra: 1) File có đúng định dạng Excel (.xlsx hoặc .xls) không? 2) File có bị hỏng hoặc có mật khẩu không? 3) File có được lưu từ Excel thật sự không?"
+                    return {
+                        "success": False,
+                        "message": error_msg,
+                        "errors": [error_msg],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
                 debug_info.append(f"Excel file read successfully. Shape: {df.shape}")
                 debug_info.append(f"Columns: {list(df.columns)}")
-                debug_info.append(f"First 3 rows: {df.head(3).to_dict('records')}")
+
+                # Check if dataframe has any data
+                if df.empty:
+                    return {
+                        "success": False,
+                        "message": "File Excel được đọc thành công nhưng không có dữ liệu. Vui lòng kiểm tra file có chứa dữ liệu không.",
+                        "errors": ["File Excel trống hoặc không có dữ liệu hợp lệ"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                debug_info.append(f"First 3 rows: {df.head(3).to_dict('records') if len(df) >= 3 else 'Less than 3 rows'}")
+
             except Exception as excel_error:
-                debug_info.append(f"Error reading Excel file: {str(excel_error)}")
-                error_msg = "Không thể đọc file Excel. Vui lòng kiểm tra: 1) File có đúng định dạng Excel (.xlsx hoặc .xls) không? 2) File có bị hỏng hoặc mật khẩu bảo vệ không? 3) Bạn có đang tải file mẫu đã điền đúng không?"
+                debug_info.append(f"Unexpected error reading Excel file: {str(excel_error)}")
+                error_msg = f"Lỗi không mong muốn khi đọc file Excel: {str(excel_error)}. Vui lòng thử lại hoặc liên hệ hỗ trợ kỹ thuật."
                 return {
                     "success": False,
                     "message": error_msg,
