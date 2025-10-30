@@ -1813,7 +1813,7 @@ def get_room_classes(room_id: str = None):
 
         try:
             # Get from child table directly using database query
-            room_classes_data = frappe.db.get_all(
+            room_classes_data = frappe.get_all(
                 "ERP Administrative Room Class",
                 fields=[
                     "name", "class_id", "usage_type", "subject_id",
@@ -1826,17 +1826,13 @@ def get_room_classes(room_id: str = None):
             frappe.logger().info(f"Found {len(room_classes_data)} room classes in database for room {room_id}")
             frappe.logger().info(f"Room classes data: {room_classes_data}")
 
-            # Also try frappe.get_all
-            room_classes_data_alt = frappe.get_all(
-                "ERP Administrative Room Class",
-                fields=[
-                    "name", "class_id", "usage_type", "subject_id",
-                    "class_title", "school_year_id", "education_grade", "academic_program", "homeroom_teacher"
-                ],
-                filters={"parent": room_id, "parenttype": "ERP Administrative Room"},
-                order_by="creation asc"
-            )
-            frappe.logger().info(f"Using frappe.get_all found {len(room_classes_data_alt)} room classes")
+            # Debug: Try SQL query
+            sql_result = frappe.db.sql(f"""
+                SELECT name, class_id, usage_type FROM `tabERP Administrative Room Class`
+                WHERE parent = '{room_id}' AND parenttype = 'ERP Administrative Room'
+                ORDER BY creation ASC
+            """, as_dict=True)
+            frappe.logger().info(f"SQL query found {len(sql_result)} records: {sql_result}")
 
             if room_classes_data:
                 child_table_has_data = True
