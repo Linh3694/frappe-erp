@@ -2494,8 +2494,11 @@ def get_room_for_class_subject(class_id: str, subject_title: str = None) -> Dict
         room_assignments = frappe.db.sql(room_assignments_query, (class_id,), as_dict=True)
 
         frappe.logger().info(f"🏫 ROOM DEBUG: Found {len(room_assignments)} room assignments for class {class_id}")
+        
+        if room_assignments:
+            frappe.logger().info(f"🏫 ROOM DEBUG: Room assignments: {[(a.get('parent'), a.get('usage_type'), a.get('subject_id')) for a in room_assignments]}")
 
-        # First try to find functional room if subject is provided
+        # Priority 1: Try to find functional room matching subject if subject is provided
         if subject_title:
             for assignment in room_assignments:
                 if assignment.get("usage_type") == "functional" and assignment.get("subject_id"):
@@ -2508,6 +2511,7 @@ def get_room_for_class_subject(class_id: str, subject_title: str = None) -> Dict
                         if subject_name and subject_title.lower() in subject_name.lower():
                             # Get room details
                             room_doc = frappe.get_doc("ERP Administrative Room", assignment["parent"])
+                            frappe.logger().info(f"🏫 ROOM DEBUG: Found matching functional room {assignment['parent']} for subject '{subject_title}'")
                             return {
                                 "room_id": assignment["parent"],
                                 "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
@@ -2516,18 +2520,40 @@ def get_room_for_class_subject(class_id: str, subject_title: str = None) -> Dict
                     except Exception as subj_error:
                         frappe.logger().warning(f"Error getting subject {assignment.get('subject_id')}: {str(subj_error)}")
 
-        # Try to find any room assignment for this class (homeroom or functional)
+        # Priority 2: Try to find homeroom room (preferred for any subject)
+        homeroom_room = None
+        for assignment in room_assignments:
+            if assignment.get("usage_type") == "homeroom" and assignment.get("parent"):
+                homeroom_room = assignment
+                break
+        
+        if homeroom_room:
+            try:
+                room_doc = frappe.get_doc("ERP Administrative Room", homeroom_room["parent"])
+                frappe.logger().info(f"🏫 ROOM DEBUG: Found homeroom room {homeroom_room['parent']} for class {class_id}")
+                return {
+                    "room_id": homeroom_room["parent"],
+                    "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
+                    "room_type": "homeroom"
+                }
+            except Exception as room_error:
+                frappe.logger().warning(f"Error getting homeroom room {homeroom_room.get('parent')}: {str(room_error)}")
+
+        # Priority 3: Try to find any room assignment (fallback to any functional room)
         for assignment in room_assignments:
             if assignment.get("parent"):
-                # Get room details
-                room_doc = frappe.get_doc("ERP Administrative Room", assignment["parent"])
-                room_type = assignment.get("usage_type") or "homeroom"
-                frappe.logger().info(f"🏫 ROOM DEBUG: Found room {assignment['parent']} ({room_type}) for class {class_id}")
-                return {
-                    "room_id": assignment["parent"],
-                    "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
-                    "room_type": room_type
-                }
+                try:
+                    room_doc = frappe.get_doc("ERP Administrative Room", assignment["parent"])
+                    room_type = assignment.get("usage_type") or "homeroom"
+                    frappe.logger().info(f"🏫 ROOM DEBUG: Found room {assignment['parent']} ({room_type}) for class {class_id}")
+                    return {
+                        "room_id": assignment["parent"],
+                        "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
+                        "room_type": room_type
+                    }
+                except Exception as room_error:
+                    frappe.logger().warning(f"Error getting room {assignment.get('parent')}: {str(room_error)}")
+                    continue
 
         # Final fallback: get homeroom from class directly
         class_doc = frappe.get_doc("SIS Class", class_id)
