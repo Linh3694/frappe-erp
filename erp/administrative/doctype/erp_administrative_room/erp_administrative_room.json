@@ -75,7 +75,7 @@
    "fieldname": "room_type",
    "fieldtype": "Select",
    "label": "Room Type",
-   "options": "classroom\nfunction",
+   "options": "classroom_room\nmeeting_room\nauditorium\noutdoor\noffice\nfunction_room",
    "reqd": 1
   },
   {
