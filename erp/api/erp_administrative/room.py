@@ -472,9 +472,6 @@ class RoomExcelImporter:
         Required columns: title_vn, title_en, short_title, room_type, building_title
         Optional columns: capacity
         """
-        # Debug: Log columns read from Excel
-        frappe.logger().info(f"Excel columns read: {list(df.columns)}")
-
         # Check if dataframe is empty after reading
         if df is None or df.empty:
             self.errors.append("Excel file could not be read or is empty")
@@ -482,9 +479,6 @@ class RoomExcelImporter:
 
         # Normalize column names
         df = self.normalize_columns(df)
-
-        # Debug: Log columns after normalization
-        frappe.logger().info(f"Excel columns after normalization: {list(df.columns)}")
 
         required_cols = ['title_vn', 'title_en', 'short_title', 'room_type', 'building_title']
         cols_lower = [str(c).strip().lower() for c in df.columns]
@@ -498,19 +492,13 @@ class RoomExcelImporter:
             self.errors.append(f"Missing required columns: {', '.join(missing_cols)}")
             return False
 
-        # Debug: Log first few rows to see data structure
-        frappe.logger().info(f"First 3 rows of data: {df.head(3).to_dict('records')}")
-
         # Check if there's at least one data row (skip empty rows)
         data_rows = 0
         for idx, row in df.iterrows():
             # Check if at least one required field has data
             has_data = any(str(row.get(col, '')).strip() for col in required_cols)
-            frappe.logger().info(f"Row {idx}: has_data={has_data}, data={dict(row)}")
             if has_data:
                 data_rows += 1
-
-        frappe.logger().info(f"Total data rows found: {data_rows}")
 
         if data_rows == 0:
             self.errors.append("No valid data rows found. Please ensure data starts from row 2 and required columns are filled")
@@ -668,26 +656,48 @@ class RoomExcelImporter:
         try:
             # Debug: Check if file exists and readable
             import os
-            frappe.logger().info(f"Excel file path: {file_path}")
-            frappe.logger().info(f"File exists: {os.path.exists(file_path)}")
+            debug_info = []
+            debug_info.append(f"Excel file path: {file_path}")
+            debug_info.append(f"File exists: {os.path.exists(file_path)}")
+
             if os.path.exists(file_path):
-                frappe.logger().info(f"File size: {os.path.getsize(file_path)} bytes")
+                file_size = os.path.getsize(file_path)
+                debug_info.append(f"File size: {file_size} bytes")
+
+                if file_size == 0:
+                    return {
+                        "success": False,
+                        "message": "Excel file is empty (0 bytes)",
+                        "errors": ["Uploaded file is empty"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+            else:
+                return {
+                    "success": False,
+                    "message": "Excel file not found",
+                    "errors": ["File was not uploaded successfully"],
+                    "debug_info": debug_info,
+                    "warnings": self.warnings
+                }
 
             # Load building mapping
             self.load_building_mapping()
 
             # Read Excel file (skip first row if it's sample data)
-            frappe.logger().info("Attempting to read Excel file...")
+            debug_info.append("Attempting to read Excel file...")
             try:
                 df = pd.read_excel(file_path, header=0)  # header=0 means first row is header
-                frappe.logger().info(f"Excel file read successfully. Shape: {df.shape}")
-                frappe.logger().info(f"Columns: {list(df.columns)}")
+                debug_info.append(f"Excel file read successfully. Shape: {df.shape}")
+                debug_info.append(f"Columns: {list(df.columns)}")
+                debug_info.append(f"First 3 rows: {df.head(3).to_dict('records')}")
             except Exception as excel_error:
-                frappe.logger().error(f"Error reading Excel file: {str(excel_error)}")
+                debug_info.append(f"Error reading Excel file: {str(excel_error)}")
                 return {
                     "success": False,
                     "message": f"Error reading Excel file: {str(excel_error)}",
                     "errors": [f"Could not read Excel file: {str(excel_error)}"],
+                    "debug_info": debug_info,
                     "warnings": self.warnings
                 }
 
@@ -696,7 +706,8 @@ class RoomExcelImporter:
                     "success": False,
                     "message": "Excel structure validation failed",
                     "errors": self.errors,
-                    "warnings": self.warnings
+                    "warnings": self.warnings,
+                    "debug_info": debug_info
                 }
 
             # Normalize columns
@@ -733,7 +744,8 @@ class RoomExcelImporter:
                     "message": "Validation failed",
                     "validation_errors": validation_errors,
                     "total_rows": len(df),
-                    "valid_rows": len(processed_rooms)
+                    "valid_rows": len(processed_rooms),
+                    "debug_info": debug_info
                 }
 
             if not dry_run and processed_rooms:
@@ -764,14 +776,17 @@ class RoomExcelImporter:
                 "total_rows": len(df),
                 "created_count": created_count if not dry_run else 0,
                 "errors": self.errors,
-                "warnings": self.warnings
+                "warnings": self.warnings,
+                "debug_info": debug_info
             }
 
         except Exception as e:
+            debug_info.append(f"Exception occurred: {str(e)}")
             return {
                 "success": False,
                 "message": f"Error processing Excel import: {str(e)}",
-                "errors": self.errors
+                "errors": self.errors,
+                "debug_info": debug_info
             }
 
 
