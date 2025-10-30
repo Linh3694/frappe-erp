@@ -1597,6 +1597,22 @@ def import_buildings():
 def get_timetable_subjects_for_room_class(education_grade: str = None):
     """Get timetable subjects filtered by education grade for room class assignment"""
     try:
+        # Handle both GET and POST requests
+        if not education_grade:
+            form = frappe.local.form_dict or {}
+            education_grade = form.get("education_grade")
+            if not education_grade and frappe.request and frappe.request.args:
+                education_grade = frappe.request.args.get('education_grade')
+            # Also check in request body for POST requests
+            if not education_grade and frappe.request and frappe.request.data:
+                try:
+                    body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                    data = json.loads(body or '{}')
+                    education_grade = data.get('education_grade')
+                except Exception:
+                    pass
+
+        frappe.logger().info(f"get_timetable_subjects_for_room_class called with education_grade: {education_grade}")
         if not education_grade:
             return validation_error_response("education_grade is required", {"education_grade": ["education_grade is required"]})
 
@@ -2307,6 +2323,11 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
             order_by="title asc"
         )
 
+        # Debug: Log first few classes to check education_grade
+        frappe.logger().info(f"Classes fetched: {len(classes)}")
+        if classes:
+            frappe.logger().info(f"First class: {classes[0]}")
+
         # Check if room already has a homeroom class (both child table and legacy)
         room_has_homeroom = False
 
@@ -2367,6 +2388,9 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
 
             if can_be_homeroom or can_be_functional:
                 available_class = class_data.copy()
+
+                # Debug: Check education_grade
+                frappe.logger().info(f"Processing class {class_data.get('name')}, education_grade: {class_data.get('education_grade')}")
 
                 # Determine suggested usage based on availability and room state
                 if can_be_homeroom and not room_has_homeroom:
