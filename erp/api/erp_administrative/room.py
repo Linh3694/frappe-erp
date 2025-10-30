@@ -472,8 +472,9 @@ class RoomExcelImporter:
         Required columns: title_vn, title_en, short_title, room_type, building_title
         Optional columns: capacity
         """
-        if len(df) == 0:
-            self.errors.append("Excel file is empty or has no data rows")
+        # Check if dataframe is empty after reading
+        if df is None or df.empty:
+            self.errors.append("Excel file could not be read or is empty")
             return False
 
         # Normalize column names
@@ -489,6 +490,17 @@ class RoomExcelImporter:
 
         if missing_cols:
             self.errors.append(f"Missing required columns: {', '.join(missing_cols)}")
+            return False
+
+        # Check if there's at least one data row (skip empty rows)
+        data_rows = 0
+        for _, row in df.iterrows():
+            # Check if at least one required field has data
+            if any(str(row.get(col, '')).strip() for col in required_cols):
+                data_rows += 1
+
+        if data_rows == 0:
+            self.errors.append("No valid data rows found. Please ensure data starts from row 2 and required columns are filled")
             return False
 
         return True
