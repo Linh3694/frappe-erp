@@ -427,14 +427,22 @@ def _get_class_timetable_for_date(class_id, target_date):
             row["teacher_names"] = ", ".join(teacher_names)
             row["teacher_ids"] = teacher_ids
 
-            # Get room info
-            if row.get("room_id"):
-                try:
-                    room = frappe.get_doc("SIS Room", row["room_id"])
-                    row["room_title"] = room.title
-                except:
-                    row["room_title"] = ""
-            else:
+            # Get room info using new room assignment logic
+            try:
+                from erp.api.erp_administrative.room import get_room_for_class_subject
+                # Use timetable_subject_title if available, otherwise use subject_title
+                subject_title_for_room = row.get("timetable_subject_title") or row.get("subject_title") or None
+                room_info = get_room_for_class_subject(class_id, subject_title_for_room)
+                row["room_id"] = room_info.get("room_id")
+                row["room_name"] = room_info.get("room_name")
+                row["room_type"] = room_info.get("room_type")
+                # Keep room_title for backward compatibility
+                row["room_title"] = room_info.get("room_name") or ""
+            except Exception as room_error:
+                logs.append(f"⚠️ Could not get room info for class {class_id}, subject {row.get('subject_title')}: {str(room_error)}")
+                row["room_id"] = None
+                row["room_name"] = "Chưa có phòng"
+                row["room_type"] = None
                 row["room_title"] = ""
 
             # Column info (period_name, start_time, end_time, period_type) is already set
@@ -456,6 +464,20 @@ def _get_class_timetable_for_date(class_id, target_date):
                 row["curriculum_id"] = ""
                 row["teacher_names"] = ""
                 row["teacher_ids"] = []
+                # For non-study periods, still try to get homeroom room
+                if not row.get("room_id"):
+                    try:
+                        from erp.api.erp_administrative.room import get_room_for_class_subject
+                        room_info = get_room_for_class_subject(class_id, None)
+                        row["room_id"] = room_info.get("room_id")
+                        row["room_name"] = room_info.get("room_name")
+                        row["room_type"] = room_info.get("room_type")
+                        row["room_title"] = room_info.get("room_name") or ""
+                    except Exception:
+                        row["room_id"] = None
+                        row["room_name"] = "Chưa có phòng"
+                        row["room_type"] = None
+                        row["room_title"] = ""
 
         # Check for date-specific overrides (from custom table)
         overrides = []
@@ -574,12 +596,43 @@ def _get_class_timetable_for_date(class_id, target_date):
                     row["teacher_names"] = ", ".join(teacher_names)
                     row["teacher_ids"] = teacher_ids
                     
-                    if override.get("room_id"):
-                        row["room_id"] = override["room_id"]
-                        try:
-                            room = frappe.get_doc("SIS Room", override["room_id"])
-                            row["room_title"] = room.title
-                        except:
+                    # Update room info using new room assignment logic (after override subject is updated)
+                    try:
+                        from erp.api.erp_administrative.room import get_room_for_class_subject
+                        # Use timetable_subject_title if available, otherwise use subject_title
+                        subject_title_for_room = row.get("timetable_subject_title") or row.get("subject_title") or None
+                        room_info = get_room_for_class_subject(class_id, subject_title_for_room)
+                        row["room_id"] = room_info.get("room_id")
+                        row["room_name"] = room_info.get("room_name")
+                        row["room_type"] = room_info.get("room_type")
+                        # Keep room_title for backward compatibility
+                        row["room_title"] = room_info.get("room_name") or ""
+                    except Exception as room_error:
+                        logs.append(f"⚠️ Could not get room info for override: {str(room_error)}")
+                        # Fallback to override room_id if provided
+                        if override.get("room_id"):
+                            row["room_id"] = override["room_id"]
+                            try:
+                                from erp.api.erp_administrative.room import get_room_for_class_subject
+                                # Try to get room name from ERP Administrative Room
+                                try:
+                                    room_doc = frappe.get_doc("ERP Administrative Room", override["room_id"])
+                                    row["room_name"] = room_doc.title_vn or room_doc.title_en or room_doc.name
+                                    row["room_type"] = "homeroom"  # Default assumption
+                                    row["room_title"] = row["room_name"]
+                                except:
+                                    row["room_name"] = ""
+                                    row["room_type"] = None
+                                    row["room_title"] = ""
+                            except:
+                                row["room_id"] = None
+                                row["room_name"] = "Chưa có phòng"
+                                row["room_type"] = None
+                                row["room_title"] = ""
+                        else:
+                            row["room_id"] = None
+                            row["room_name"] = "Chưa có phòng"
+                            row["room_type"] = None
                             row["room_title"] = ""
         
         return {
