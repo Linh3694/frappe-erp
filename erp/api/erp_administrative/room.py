@@ -1813,6 +1813,19 @@ def get_room_classes(room_id: str = None):
             )
 
             frappe.logger().info(f"Found {len(room_classes_data)} room classes in database for room {room_id}")
+            frappe.logger().info(f"Room classes data: {room_classes_data}")
+
+            # Also try frappe.get_all
+            room_classes_data_alt = frappe.get_all(
+                "ERP Administrative Room Class",
+                fields=[
+                    "name", "class_id", "usage_type", "subject_id",
+                    "class_title", "school_year_id", "education_grade", "academic_program", "homeroom_teacher"
+                ],
+                filters={"parent": room_id, "parenttype": "ERP Administrative Room"},
+                order_by="creation asc"
+            )
+            frappe.logger().info(f"Using frappe.get_all found {len(room_classes_data_alt)} room classes")
 
             if room_classes_data:
                 child_table_has_data = True
@@ -2129,8 +2142,11 @@ def add_room_class():
 
         # Add to Room Classes child table
         try:
+            frappe.logger().info(f"Attempting to add class {class_id} to room {room_id}")
+
             # Get the room document
             room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+            frappe.logger().info(f"Got room doc: {room_doc.name}")
 
             # Append new room class to the child table
             room_class_data = {
@@ -2144,13 +2160,21 @@ def add_room_class():
                 "subject_id": subject_id if usage_type == "functional" else None
             }
 
+            frappe.logger().info(f"Appending room class data: {room_class_data}")
             room_doc.append("room_classes", room_class_data)
-            room_doc.save()
+
+            frappe.logger().info(f"Saving room doc...")
+            room_doc.save(ignore_permissions=True)
+            frappe.logger().info(f"Room doc saved successfully")
+
             frappe.db.commit()  # Ensure the transaction is committed
             frappe.logger().info(f"Added class {class_id} to room {room_id} with usage {usage_type}")
 
         except Exception as e:
             frappe.logger().error(f"Failed to add to child table: {str(e)}")
+            frappe.logger().error(f"Exception type: {type(e).__name__}")
+            import traceback
+            frappe.logger().error(f"Traceback: {traceback.format_exc()}")
             return error_response(f"Không thể thêm lớp vào phòng: {str(e)}")
 
         frappe.db.commit()
