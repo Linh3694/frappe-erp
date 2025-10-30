@@ -805,10 +805,40 @@ class RoomExcelImporter:
 
                 # Check if dataframe has any data
                 if df.empty:
+                    debug_info.append(f"DataFrame is empty. Shape: {df.shape}")
                     return {
                         "success": False,
-                        "message": "File Excel được đọc thành công nhưng không có dữ liệu. Vui lòng kiểm tra file có chứa dữ liệu không.",
+                        "message": "File Excel được đọc thành công nhưng không có dữ liệu. Vui lòng kiểm tra: 1) Bạn đã điền dữ liệu vào file mẫu chưa? 2) Dữ liệu có bắt đầu từ dòng 2 trở đi không? 3) File có bị xóa nhầm dữ liệu không?",
                         "errors": ["File Excel trống hoặc không có dữ liệu hợp lệ"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                # Check if there are any non-empty rows (skip header row)
+                data_rows = 0
+                for idx, row in df.iterrows():
+                    # Check if row has any meaningful data
+                    has_data = any(str(val).strip() for val in row.values if pd.notna(val))
+                    if has_data:
+                        data_rows += 1
+
+                debug_info.append(f"Found {data_rows} rows with data (excluding header)")
+
+                if data_rows == 0:
+                    # Show sample of what was read
+                    sample_rows = []
+                    for idx, row in df.head(5).iterrows():
+                        sample_rows.append(f"Row {idx + 1}: {dict(row)}")
+
+                    debug_info.extend([
+                        "Sample rows from file:",
+                        *sample_rows
+                    ])
+
+                    return {
+                        "success": False,
+                        "message": f"File Excel có {len(df)} dòng nhưng không có dữ liệu hợp lệ. Vui lòng kiểm tra: 1) Dữ liệu có bắt đầu từ dòng 2 không? 2) Các cột có đúng tên không? 3) Ô dữ liệu có bị trống không?",
+                        "errors": [f"Không tìm thấy dữ liệu hợp lệ trong {len(df)} dòng của file"],
                         "debug_info": debug_info,
                         "warnings": self.warnings
                     }
@@ -1084,3 +1114,480 @@ def get_buildings_for_selection():
             "data": [],
             "message": f"Error fetching buildings: {str(e)}"
         }
+
+
+class BuildingExcelImporter:
+    """Handle Excel import for Buildings with validation and mapping"""
+
+    def __init__(self, campus_id: str):
+        self.campus_id = campus_id
+        self.errors: list = []
+        self.warnings: list = []
+
+    def validate_excel_structure(self, df):
+        """Validate Excel file structure for building import
+
+        Required columns: title_vn, title_en, short_title
+        Optional columns: description
+        """
+        # Check if dataframe is empty after reading
+        if df is None or df.empty:
+            self.errors.append("File Excel không thể đọc được hoặc file trống. Vui lòng kiểm tra: 1) File có đúng định dạng .xlsx hoặc .xls không? 2) File có bị hỏng không? 3) Bạn đã điền dữ liệu vào file mẫu chưa?")
+            return False
+
+        # Normalize column names
+        df = self.normalize_columns(df)
+
+        required_cols = ['title_vn', 'title_en', 'short_title']
+        cols_lower = [str(c).strip().lower() for c in df.columns]
+
+        missing_cols = []
+        for col in required_cols:
+            if col not in cols_lower:
+                missing_cols.append(col)
+
+        if missing_cols:
+            self.errors.append(f"Missing required columns: {', '.join(missing_cols)}")
+            return False
+
+        # Check if there's at least one data row (skip empty rows)
+        data_rows = 0
+        for idx, row in df.iterrows():
+            # Check if at least one required field has data
+            has_data = any(str(row.get(col, '')).strip() for col in required_cols)
+            if has_data:
+                data_rows += 1
+
+        if data_rows == 0:
+            self.errors.append("No valid data rows found. Please ensure data starts from row 2 and required columns are filled")
+            return False
+
+        return True
+
+    def normalize_columns(self, df):
+        """Rename Vietnamese/variant headers to canonical English headers"""
+        try:
+            canonical_map = {
+                'tên tiếng việt': 'title_vn',
+                'tên vn': 'title_vn',
+                'vietnamese name': 'title_vn',
+                'tên tiếng anh': 'title_en',
+                'tên en': 'title_en',
+                'english name': 'title_en',
+                'ký hiệu': 'short_title',
+                'short title': 'short_title',
+                'mã tòa nhà': 'short_title',
+                'mô tả': 'description',
+                'description': 'description'
+            }
+            rename_map = {}
+            for col in df.columns:
+                key = str(col).strip().lower()
+                if key in canonical_map:
+                    rename_map[col] = canonical_map[key]
+            if rename_map:
+                df = df.rename(columns=rename_map)
+        except Exception:
+            pass
+        return df
+
+    def process_excel_import(self, file_path, dry_run=False):
+        """Process Excel import for buildings"""
+        if not pd:
+            return {"success": False, "message": "pandas library not available"}
+
+        try:
+            # Debug: Check if file exists and readable
+            import os
+            debug_info = []
+            debug_info.append(f"Excel file path: {file_path}")
+            debug_info.append(f"File exists: {os.path.exists(file_path)}")
+
+            if os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+                debug_info.append(f"File size: {file_size} bytes")
+
+                if file_size == 0:
+                    return {
+                        "success": False,
+                        "message": "Excel file is empty (0 bytes)",
+                        "errors": ["Uploaded file is empty"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+            else:
+                return {
+                    "success": False,
+                    "message": "Excel file not found",
+                    "errors": ["File was not uploaded successfully"],
+                    "debug_info": debug_info,
+                    "warnings": self.warnings
+                }
+
+            # Basic file validation before pandas
+            debug_info.append("Basic file validation...")
+            try:
+                with open(file_path, 'rb') as f:
+                    file_header = f.read(512)  # Read first 512 bytes
+
+                file_size = len(file_header)
+                debug_info.append(f"File header size: {file_size} bytes")
+
+                if file_size < 4:
+                    return {
+                        "success": False,
+                        "message": "File quá nhỏ, có thể không phải file Excel hợp lệ.",
+                        "errors": ["File size too small"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                # Check for Excel signatures
+                header_hex = file_header[:8].hex()
+                debug_info.append(f"File header (hex): {header_hex}")
+
+                # Check for common Excel signatures
+                if header_hex.startswith('504b0304'):  # PK\x03\x04 - ZIP/XLSX
+                    debug_info.append("Detected ZIP/XLSX file signature")
+                elif header_hex.startswith('d0cf11e0a1b11ae1'):  # XLS signature
+                    debug_info.append("Detected XLS file signature")
+                else:
+                    debug_info.append("Warning: File does not have standard Excel signature")
+
+            except Exception as file_error:
+                debug_info.append(f"Error reading file header: {str(file_error)}")
+                return {
+                    "success": False,
+                    "message": f"Không thể đọc header của file: {str(file_error)}",
+                    "errors": [f"File header read error: {str(file_error)}"],
+                    "debug_info": debug_info,
+                    "warnings": self.warnings
+                }
+
+            # Read Excel file (skip first row if it's sample data)
+            debug_info.append("Attempting to read Excel file with pandas...")
+            try:
+                # First check if pandas is available
+                if not pd:
+                    return {
+                        "success": False,
+                        "message": "Pandas library not available on server",
+                        "errors": ["Server configuration error: pandas library missing"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                # Try reading Excel file with multiple approaches
+                df = None
+                excel_error = None
+
+                # Approach 1: Standard read_excel with openpyxl
+                try:
+                    df = pd.read_excel(file_path, header=0, engine='openpyxl')
+                    debug_info.append("Successfully read with pandas + openpyxl engine")
+                except Exception as e1:
+                    debug_info.append(f"Pandas + openpyxl failed: {str(e1)}")
+                    excel_error = e1
+
+                    # Approach 2: Try direct openpyxl if available
+                    try:
+                        import openpyxl
+                        wb = openpyxl.load_workbook(file_path, data_only=True)
+                        sheet = wb.active
+
+                        # Convert to pandas DataFrame manually
+                        data = []
+                        headers = []
+                        for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
+                            if row_idx == 0:  # First row is headers
+                                headers = [str(cell) if cell is not None else '' for cell in row]
+                            else:
+                                data.append([cell for cell in row])
+
+                        if headers and data:
+                            df = pd.DataFrame(data, columns=headers)
+                            debug_info.append("Successfully read with direct openpyxl")
+                        else:
+                            raise Exception("No headers or data found")
+
+                    except ImportError:
+                        debug_info.append("openpyxl not available for direct reading")
+                    except Exception as e2:
+                        debug_info.append(f"Direct openpyxl failed: {str(e2)}")
+
+                        # Approach 3: Try xlrd engine for .xls files
+                        try:
+                            df = pd.read_excel(file_path, header=0, engine='xlrd')
+                            debug_info.append("Successfully read with pandas + xlrd engine")
+                        except Exception as e3:
+                            debug_info.append(f"Pandas + xlrd also failed: {str(e3)}")
+
+                            # Approach 4: Try without specifying engine
+                            try:
+                                df = pd.read_excel(file_path, header=0)
+                                debug_info.append("Successfully read without specifying engine")
+                            except Exception as e4:
+                                debug_info.append(f"All pandas approaches failed. Last error: {str(e4)}")
+                                excel_error = e4
+
+                if df is None:
+                    error_msg = f"Không thể đọc file Excel bằng bất kỳ phương pháp nào. Lỗi cuối cùng: {str(excel_error) if excel_error else 'Unknown error'}. Vui lòng kiểm tra: 1) File có đúng định dạng Excel (.xlsx hoặc .xls) không? 2) File có bị hỏng hoặc có mật khẩu không? 3) File có được lưu từ Excel thật sự không?"
+                    return {
+                        "success": False,
+                        "message": error_msg,
+                        "errors": [error_msg],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                debug_info.append(f"Excel file read successfully. Shape: {df.shape}")
+                debug_info.append(f"Columns: {list(df.columns)}")
+
+                # Check if dataframe has any data
+                if df.empty:
+                    debug_info.append(f"DataFrame is empty. Shape: {df.shape}")
+                    return {
+                        "success": False,
+                        "message": "File Excel được đọc thành công nhưng không có dữ liệu. Vui lòng kiểm tra: 1) Bạn đã điền dữ liệu vào file mẫu chưa? 2) Dữ liệu có bắt đầu từ dòng 2 trở đi không? 3) File có bị xóa nhầm dữ liệu không?",
+                        "errors": ["File Excel trống hoặc không có dữ liệu hợp lệ"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                # Check if there are any non-empty rows (skip header row)
+                data_rows = 0
+                for idx, row in df.iterrows():
+                    # Check if row has any meaningful data
+                    has_data = any(str(val).strip() for val in row.values if pd.notna(val))
+                    if has_data:
+                        data_rows += 1
+
+                debug_info.append(f"Found {data_rows} rows with data (excluding header)")
+
+                if data_rows == 0:
+                    # Show sample of what was read
+                    sample_rows = []
+                    for idx, row in df.head(5).iterrows():
+                        sample_rows.append(f"Row {idx + 1}: {dict(row)}")
+
+                    debug_info.extend([
+                        "Sample rows from file:",
+                        *sample_rows
+                    ])
+
+                    return {
+                        "success": False,
+                        "message": f"File Excel có {len(df)} dòng nhưng không có dữ liệu hợp lệ. Vui lòng kiểm tra: 1) Dữ liệu có bắt đầu từ dòng 2 không? 2) Các cột có đúng tên không? 3) Ô dữ liệu có bị trống không?",
+                        "errors": [f"Không tìm thấy dữ liệu hợp lệ trong {len(df)} dòng của file"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                debug_info.append(f"First 3 rows: {df.head(3).to_dict('records') if len(df) >= 3 else 'Less than 3 rows'}")
+
+            except Exception as excel_error:
+                debug_info.append(f"Unexpected error reading Excel file: {str(excel_error)}")
+                error_msg = f"Lỗi không mong muốn khi đọc file Excel: {str(excel_error)}. Vui lòng thử lại hoặc liên hệ hỗ trợ kỹ thuật."
+                return {
+                    "success": False,
+                    "message": error_msg,
+                    "errors": [error_msg],
+                    "debug_info": debug_info,
+                    "warnings": self.warnings
+                }
+
+            if not self.validate_excel_structure(df):
+                return {
+                    "success": False,
+                    "message": "Excel structure validation failed",
+                    "errors": self.errors,
+                    "warnings": self.warnings,
+                    "debug_info": debug_info
+                }
+
+            # Normalize columns
+            df = self.normalize_columns(df)
+
+            # Process each row
+            processed_buildings = []
+            validation_errors = []
+
+            for index, row in df.iterrows():
+                row_data = {
+                    'title_vn': row.get('title_vn'),
+                    'title_en': row.get('title_en'),
+                    'short_title': row.get('short_title'),
+                    'description': row.get('description')
+                }
+
+                # Validate row data
+                row_errors = self.validate_building_data(row_data)
+                if row_errors:
+                    validation_errors.append({
+                        "row": index + 2,  # +2 because Excel is 1-indexed and has header
+                        "data": row_data,
+                        "errors": row_errors
+                    })
+                else:
+                    processed_buildings.append(row_data)
+
+            if validation_errors and dry_run:
+                return {
+                    "success": False,
+                    "message": "Validation failed",
+                    "validation_errors": validation_errors,
+                    "total_rows": len(df),
+                    "valid_rows": len(processed_buildings),
+                    "debug_info": debug_info
+                }
+
+            if not dry_run and processed_buildings:
+                # Create buildings in database
+                created_count = 0
+                for building_data in processed_buildings:
+                    try:
+                        building_doc = frappe.get_doc({
+                            "doctype": "ERP Administrative Building",
+                            "title_vn": building_data['title_vn'],
+                            "title_en": building_data['title_en'],
+                            "short_title": building_data['short_title'],
+                            "description": building_data.get('description', ''),
+                            "campus_id": self.campus_id
+                        })
+                        building_doc.insert()
+                        created_count += 1
+                    except Exception as e:
+                        self.errors.append(f"Error creating building {building_data.get('title_vn')}: {str(e)}")
+
+                frappe.db.commit()
+
+            return {
+                "success": True,
+                "message": f"Import completed successfully. Created {created_count} buildings." if not dry_run else "Dry run completed successfully",
+                "total_rows": len(df),
+                "created_count": created_count if not dry_run else 0,
+                "errors": self.errors,
+                "warnings": self.warnings,
+                "debug_info": debug_info
+            }
+
+        except Exception as e:
+            debug_info.append(f"Exception occurred: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Error processing Excel import: {str(e)}",
+                "errors": self.errors,
+                "debug_info": debug_info
+            }
+
+    def validate_building_data(self, row_data):
+        """Validate building row data"""
+        errors = []
+
+        # Required fields validation
+        if not row_data.get('title_vn') or str(row_data['title_vn']).strip() == '':
+            errors.append("Tên tiếng Việt không được để trống")
+
+        if not row_data.get('title_en') or str(row_data['title_en']).strip() == '':
+            errors.append("Tên tiếng Anh không được để trống")
+
+        if not row_data.get('short_title') or str(row_data['short_title']).strip() == '':
+            errors.append("Ký hiệu tòa nhà không được để trống")
+
+        # Check for duplicates in the same import
+        if hasattr(self, '_temp_buildings'):
+            for existing in self._temp_buildings:
+                if (existing['title_vn'] == row_data['title_vn'] or
+                    existing['title_en'] == row_data['title_en'] or
+                    existing['short_title'] == row_data['short_title']):
+                    errors.append("Tòa nhà đã tồn tại trong file import này")
+                    break
+
+        # Check against existing buildings in database
+        if row_data.get('title_vn'):
+            existing = frappe.db.exists("ERP Administrative Building", {
+                "title_vn": row_data['title_vn'],
+                "campus_id": self.campus_id
+            })
+            if existing:
+                errors.append(f"Tòa nhà với tên '{row_data['title_vn']}' đã tồn tại")
+
+        if row_data.get('short_title'):
+            existing = frappe.db.exists("ERP Administrative Building", {
+                "short_title": row_data['short_title'],
+                "campus_id": self.campus_id
+            })
+            if existing:
+                errors.append(f"Tòa nhà với ký hiệu '{row_data['short_title']}' đã tồn tại")
+
+        return errors
+
+
+@frappe.whitelist(allow_guest=False)
+def import_buildings():
+    """Import buildings from Excel file"""
+    try:
+        # Get current user's campus
+        campus_id = get_current_campus_from_context()
+
+        if not campus_id:
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                campus_id = "CAMPUS-00001"
+
+        # Check for dry_run parameter
+        dry_run = frappe.local.form_dict.get("dry_run", "false").lower() == "true"
+
+        # Process Excel import if file is provided
+        files = frappe.request.files
+
+        if files and 'file' in files:
+            file_data = files['file']
+            if not file_data:
+                return validation_error_response({"file": ["No file uploaded"]})
+
+            # Debug file information before saving
+            frappe.logger().info(f"File data type: {type(file_data)}")
+            frappe.logger().info(f"File data attributes: {dir(file_data) if hasattr(file_data, '__dict__') else 'No __dict__'}")
+
+            if hasattr(file_data, 'filename'):
+                frappe.logger().info(f"Original filename: {file_data.filename}")
+            if hasattr(file_data, 'content_type'):
+                frappe.logger().info(f"Content type: {file_data.content_type}")
+
+            # Save file temporarily
+            file_path = save_uploaded_file(file_data, "buildings_import.xlsx")
+
+            # Process Excel import
+            importer = BuildingExcelImporter(campus_id)
+            result = importer.process_excel_import(file_path, dry_run)
+
+            # Add file save info to debug_info if available
+            if 'debug_info' not in result:
+                result['debug_info'] = []
+            result['debug_info'].insert(0, f"File saved to: {file_path}")
+
+            # Clean up temp file
+            try:
+                import os
+                os.remove(file_path)
+            except Exception:
+                pass
+
+            if result["success"]:
+                return success_response(result, result["message"])
+            else:
+                return validation_error_response(result["message"], {
+                    "errors": result.get("errors", []),
+                    "validation_errors": result.get("validation_errors", []),
+                    "warnings": result.get("warnings", [])
+                })
+        else:
+            return validation_error_response({"file": ["No file uploaded"]})
+
+    except Exception as e:
+        frappe.log_error(f"Error importing buildings: {str(e)}")
+        return error_response(f"Error importing buildings: {str(e)}")
