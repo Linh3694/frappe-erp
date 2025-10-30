@@ -1812,14 +1812,19 @@ def get_room_classes(room_id: str = None):
         child_table_has_data = False
 
         try:
-            # Use Frappe ORM instead of raw SQL to avoid syntax issues
-            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+            # Use frappe.get_all to safely fetch child table records
+            room_classes_data = frappe.get_all(
+                "ERP Administrative Room Class",
+                fields=["name", "class_id", "usage_type", "subject_id", "class_title", "school_year_id", "education_grade", "academic_program", "homeroom_teacher"],
+                filters={"parent": room_id, "parenttype": "ERP Administrative Room"},
+                order_by="creation asc"
+            )
             
-            if hasattr(room_doc, 'room_classes') and room_doc.room_classes:
+            if room_classes_data:
                 child_table_has_data = True
-                frappe.logger().info(f"Found {len(room_doc.room_classes)} classes in child table")
+                frappe.logger().info(f"Found {len(room_classes_data)} classes in child table")
                 
-                for room_class in room_doc.room_classes:
+                for room_class in room_classes_data:
                     frappe.logger().info(f"Processing room class: {room_class.class_id}, usage: {room_class.usage_type}")
                     try:
                         class_doc = frappe.get_doc("SIS Class", room_class.class_id)
