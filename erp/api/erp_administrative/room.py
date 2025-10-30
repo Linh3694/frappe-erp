@@ -201,22 +201,18 @@ def create_room():
                 campus_id = "CAMPUS-00001"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using fallback: {campus_id}")
         
-        # Verify building exists and belongs to same campus
-        building_exists = frappe.db.exists(
-            "ERP Administrative Building",
-            {
-                "name": building_id,
-                "campus_id": campus_id
-            }
-        )
-        
-        if not building_exists:
+        # Get building details to extract campus_id
+        building_doc = frappe.get_doc("ERP Administrative Building", building_id)
+        building_campus_id = building_doc.campus_id
+
+        # Verify building exists and belongs to same campus (if we have campus context)
+        if campus_id and building_campus_id != campus_id:
             return {
                 "success": False,
                 "data": {},
-                "message": "Selected building does not exist or access denied"
+                "message": "Selected building does not belong to your campus"
             }
-        
+
         # Check if room title already exists in this building
         existing = frappe.db.exists(
             "ERP Administrative Room",
@@ -225,15 +221,15 @@ def create_room():
                 "building_id": building_id
             }
         )
-        
+
         if existing:
             return {
                 "success": False,
                 "data": {},
                 "message": f"Room with title '{title_vn}' already exists in this building"
             }
-        
-        # Create new room
+
+        # Create new room - use campus_id from the building
         room_doc = frappe.get_doc({
             "doctype": "ERP Administrative Room",
             "title_vn": title_vn,
@@ -241,7 +237,8 @@ def create_room():
             "short_title": short_title,
             "capacity": capacity or 0,
             "room_type": room_type,
-            "building_id": building_id
+            "building_id": building_id,
+            "campus_id": building_campus_id  # Use campus_id from building
         })
         
         room_doc.insert()
@@ -356,18 +353,16 @@ def update_room():
             room_doc.room_type = room_type
             
         if building_id and building_id != room_doc.building_id:
-            # Verify new building exists and belongs to same campus
-            building_exists = frappe.db.exists(
-                "ERP Administrative Building",
-                {
-                    "name": building_id,
-                    "campus_id": campus_id
-                }
-            )
-            
-            if not building_exists:
-                return error_response("Selected building does not exist or access denied")
+            # Get new building details to extract campus_id
+            new_building_doc = frappe.get_doc("ERP Administrative Building", building_id)
+            new_building_campus_id = new_building_doc.campus_id
+
+            # Verify new building belongs to same campus (if we have campus context)
+            if campus_id and new_building_campus_id != campus_id:
+                return error_response("Selected building does not belong to your campus")
+
             room_doc.building_id = building_id
+            room_doc.campus_id = new_building_campus_id  # Update campus_id when building changes
         
         room_doc.save()
         frappe.db.commit()
