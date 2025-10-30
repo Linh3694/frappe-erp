@@ -2466,3 +2466,62 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
     except Exception as e:
         frappe.log_error(f"Error fetching available classes: {str(e)}")
         return error_response(f"Error fetching available classes: {str(e)}")
+
+
+def get_room_for_class_subject(class_id: str, subject_title: str = None) -> Dict[str, Any]:
+    """Get room information for a class and subject combination.
+
+    Args:
+        class_id: SIS Class ID
+        subject_title: Subject title to match (optional)
+
+    Returns:
+        Dict with room_id, room_name, room_type ('functional' or 'homeroom')
+    """
+    try:
+        # First try to find functional room if subject is provided
+        if subject_title:
+            functional_rooms = frappe.get_all(
+                "ERP Administrative Room Class",
+                fields=["parent", "subject_name"],
+                filters={
+                    "class_id": class_id,
+                    "usage_type": "functional"
+                }
+            )
+
+            # Try exact match first
+            for room in functional_rooms:
+                if room.get("subject_name") and subject_title.lower() in room["subject_name"].lower():
+                    # Get room details
+                    room_doc = frappe.get_doc("ERP Administrative Room", room["parent"])
+                    return {
+                        "room_id": room["parent"],
+                        "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
+                        "room_type": "functional"
+                    }
+
+        # Fallback: get homeroom for the class
+        class_doc = frappe.get_doc("SIS Class", class_id)
+        if class_doc.room:
+            room_doc = frappe.get_doc("ERP Administrative Room", class_doc.room)
+            return {
+                "room_id": class_doc.room,
+                "room_name": room_doc.title_vn or room_doc.title_en or room_doc.name,
+                "room_type": "homeroom"
+            }
+
+        # No room found
+        return {
+            "room_id": None,
+            "room_name": "Chưa có phòng",
+            "room_type": None
+        }
+
+    except Exception as e:
+        frappe.logger().error(f"Error getting room for class {class_id}, subject {subject_title}: {str(e)}")
+        return {
+            "room_id": None,
+            "room_name": "Lỗi tải phòng",
+            "room_type": None
+        }
