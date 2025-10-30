@@ -1601,6 +1601,7 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
             return validation_error_response("education_grade is required", {"education_grade": ["education_grade is required"]})
 
         # Get timetable subjects filtered by education grade
+        # TEMPORARILY COMMENT OUT FILTER TO TEST
         subjects = frappe.get_all(
             "SIS Timetable Subject",
             fields=[
@@ -1610,7 +1611,7 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
                 "education_grade",
                 "academic_program"
             ],
-            filters={"education_grade": education_grade},
+            # filters={"education_grade": education_grade},
             order_by="subject_name asc"
         )
 
