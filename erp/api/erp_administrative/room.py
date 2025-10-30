@@ -1602,6 +1602,14 @@ def get_room_classes(room_id: str = None):
             room_id = form.get("room_id") or form.get("name")
             if not room_id and frappe.request and frappe.request.args:
                 room_id = frappe.request.args.get('room_id') or frappe.request.args.get('name')
+            # Also check in request body for POST requests
+            if not room_id and frappe.request and frappe.request.data:
+                try:
+                    body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                    data = json.loads(body or '{}')
+                    room_id = data.get('room_id')
+                except Exception:
+                    pass
         if not room_id:
             return validation_error_response("Room ID is required", {"room_id": ["Room ID is required"]})
 
@@ -1817,6 +1825,14 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
             room_id = form.get("room_id")
             if not room_id and frappe.request and frappe.request.args:
                 room_id = frappe.request.args.get('room_id')
+            # Also check in request body for POST requests
+            if not room_id and frappe.request and frappe.request.data:
+                try:
+                    body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
+                    data = json.loads(body or '{}')
+                    room_id = data.get('room_id')
+                except Exception:
+                    pass
         if not room_id:
             return validation_error_response("Room ID is required", {"room_id": ["Room ID is required"]})
 
