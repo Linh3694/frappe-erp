@@ -2481,11 +2481,17 @@ def get_room_for_class_subject(class_id: str, subject_title: str = None) -> Dict
     """
     try:
         # Get all room assignments for this class
-        room_assignments = frappe.get_all(
-            "ERP Administrative Room Class",
-            fields=["parent", "usage_type", "subject_id"],
-            filters={"class_id": class_id}
-        )
+        # Use SQL raw query to avoid Frappe auto-resolving Link fields to non-existent columns
+        room_assignments_query = """
+            SELECT 
+                name,
+                parent,
+                usage_type,
+                subject_id
+            FROM `tabERP Administrative Room Class`
+            WHERE class_id = %s
+        """
+        room_assignments = frappe.db.sql(room_assignments_query, (class_id,), as_dict=True)
 
         frappe.logger().info(f"🏫 ROOM DEBUG: Found {len(room_assignments)} room assignments for class {class_id}")
 

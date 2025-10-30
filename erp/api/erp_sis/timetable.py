@@ -770,6 +770,7 @@ def get_teacher_week():
     - class_id
     """
     try:
+        frappe.logger().info("🏫 TIMETABLE: get_teacher_week called")
         # Get parameters from frappe request
         teacher_id = frappe.local.form_dict.get("teacher_id") or frappe.request.args.get("teacher_id")
         week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
@@ -993,7 +994,9 @@ def get_teacher_week():
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
 
             # Enrich with room information for Teacher Timetable data
+            frappe.logger().info(f"🏫 ROOM ENRICH: Starting room enrichment for {len(rows)} rows")
             for r in rows:
+                frappe.logger().info(f"🏫 ROOM ENRICH: Processing class={r.get('class_id')}, subject={r.get('subject_title')}")
                 try:
                     from erp.api.erp_administrative.room import get_room_for_class_subject
                     room_info = get_room_for_class_subject(r.get("class_id"), r.get("subject_title"))
@@ -1001,6 +1004,7 @@ def get_teacher_week():
                     r["room_id"] = room_info.get("room_id")
                     r["room_name"] = room_info.get("room_name")
                     r["room_type"] = room_info.get("room_type")
+                    frappe.logger().info(f"🏫 ROOM ENRICH: Added room info to row: {r.get('room_name')}")
                 except Exception as room_error:
                     frappe.logger().warning(f"Failed to get room for class {r.get('class_id')}, subject {r.get('subject_title')}: {str(room_error)}")
                     r["room_id"] = None
@@ -1011,6 +1015,11 @@ def get_teacher_week():
 
         entries = _build_entries(rows, ws)
         frappe.logger().info(f"📝 TIMETABLE: Built {len(entries)} entries from {len(rows)} rows")
+
+        # Debug: Check room info in final entries
+        if entries:
+            sample_entry = entries[0]
+            frappe.logger().info(f"🏫 FINAL ENTRIES: Sample entry has room info: room_name={sample_entry.get('room_name')}, room_type={sample_entry.get('room_type')}, room_id={sample_entry.get('room_id')}")
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
         week_end = _add_days(ws, 6)
