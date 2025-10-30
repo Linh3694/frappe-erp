@@ -1723,21 +1723,46 @@ def add_room_class():
         # Business logic: sync with SIS Class room field
         if usage_type == "homeroom":
             # For homeroom usage, only allow if class_type is "regular"
-            if class_info.class_type == "regular":
-                # Update class.room to this room
-                frappe.db.set_value("SIS Class", class_id, "room", room_id)
-                frappe.logger().info(f"Updated SIS Class {class_id} room to {room_id} for homeroom usage")
-            else:
-                return validation_error_response({
-                    "usage_type": ["Không thể đặt lớp này làm lớp chủ nhiệm vì loại lớp không phải là 'regular'"]
-                })
-        else:
-            # For functional usage, check if class already has a homeroom room
+            if class_info.class_type != "regular":
+                return validation_error_response(
+                    "Không thể đặt lớp này làm lớp chủ nhiệm",
+                    {"usage_type": ["Chỉ lớp có loại 'regular' mới có thể làm lớp chủ nhiệm"]}
+                )
+
+            # Check if room already has a homeroom class
+            existing_homeroom = frappe.get_all(
+                "SIS Class",
+                fields=["name", "title"],
+                filters={"room": room_id, "class_type": "regular"},
+                limit=1
+            )
+
+            if existing_homeroom and existing_homeroom[0].name != class_id:
+                return validation_error_response(
+                    "Phòng đã có lớp chủ nhiệm",
+                    {"room_id": [f"Phòng này đã có lớp chủ nhiệm: {existing_homeroom[0].title}. Một phòng chỉ có thể có 1 lớp chủ nhiệm."]}
+                )
+
+            # Check if class is already homeroom for another room
             if class_info.room and class_info.room != room_id:
-                return validation_error_response({
-                    "class_id": ["Lớp này đã có phòng chủ nhiệm. Không thể thêm làm phòng chức năng."]
-                })
-            # For functional usage, we don't update class.room field to avoid conflicts
+                return validation_error_response(
+                    "Lớp đã là chủ nhiệm cho phòng khác",
+                    {"class_id": ["Lớp này đã là lớp chủ nhiệm cho phòng khác. Không thể gán làm chủ nhiệm cho phòng này."]}
+                )
+
+            # Update class.room to this room
+            frappe.db.set_value("SIS Class", class_id, "room", room_id)
+            frappe.logger().info(f"Updated SIS Class {class_id} room to {room_id} for homeroom usage")
+
+        else:  # functional usage
+            # For functional usage, check if class is already a homeroom somewhere
+            if class_info.room and class_info.room != room_id and class_info.class_type == "regular":
+                return validation_error_response(
+                    "Lớp đã là chủ nhiệm",
+                    {"class_id": ["Lớp này đang là lớp chủ nhiệm cho phòng khác. Không thể thêm làm phòng chức năng."]}
+                )
+
+            # For functional usage, we don't update class.room field to avoid conflicts with homeroom assignments
 
         # TODO: Add to Room Classes child table when implemented
         # For now, we rely on the SIS Class room field logic above
@@ -1858,17 +1883,62 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
             order_by="title asc"
         )
 
-        # Filter classes that are available (don't have a room or have this room)
+        # Check if room already has a homeroom class
+        existing_homeroom = frappe.get_all(
+            "SIS Class",
+            fields=["name", "title"],
+            filters={"room": room_id, "class_type": "regular"},
+            limit=1
+        )
+
+        room_has_homeroom = len(existing_homeroom) > 0
+
+        # Filter classes that are available
         available_classes = []
         for class_data in classes:
-            if not class_data.get("room") or class_data.get("room") == room_id:
+            is_current_room_class = class_data.get("room") == room_id
+            has_room = bool(class_data.get("room"))
+            is_regular_class = class_data.get("class_type") == "regular"
+
+            # Logic for available classes:
+            # 1. Classes without any room assigned
+            # 2. Classes assigned to current room (for editing)
+            # 3. For homeroom usage: only regular classes that are not homeroom for other rooms
+            # 4. For functional usage: all classes except those that are homeroom for other rooms
+
+            can_be_homeroom = False
+            can_be_functional = False
+
+            if not has_room:
+                # Class has no room - can be both homeroom and functional
+                can_be_homeroom = is_regular_class
+                can_be_functional = True
+            elif is_current_room_class:
+                # Class is assigned to current room - can edit usage type
+                can_be_homeroom = is_regular_class
+                can_be_functional = True
+            else:
+                # Class is assigned to another room
+                # Can only be functional, and only if it's not a regular class (not homeroom elsewhere)
+                can_be_homeroom = False
+                can_be_functional = not is_regular_class
+
+            # Apply the room-has-homeroom rule: if room already has homeroom, don't suggest homeroom for other classes
+            if room_has_homeroom and not is_current_room_class:
+                can_be_homeroom = False
+
+            if can_be_homeroom or can_be_functional:
                 available_class = class_data.copy()
 
-                # Add display info
-                if class_data.get("class_type") == "regular":
+                # Determine suggested usage based on availability and room state
+                if can_be_homeroom and not room_has_homeroom:
                     available_class["suggested_usage"] = "homeroom"
                     available_class["suggested_usage_display"] = "Lớp chủ nhiệm"
+                elif can_be_functional:
+                    available_class["suggested_usage"] = "functional"
+                    available_class["suggested_usage_display"] = "Lớp chức năng"
                 else:
+                    # Fallback - should not happen with current logic
                     available_class["suggested_usage"] = "functional"
                     available_class["suggested_usage_display"] = "Lớp chức năng"
 
