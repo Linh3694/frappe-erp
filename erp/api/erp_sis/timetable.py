@@ -1212,6 +1212,21 @@ def get_class_week():
                 if r.get("teacher_2_id"):
                     teacher_names_list.append(teacher_user_map.get(r.get("teacher_2_id")) or "")
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
+
+            # Enrich with room information
+            for r in rows:
+                try:
+                    from erp.api.erp_administrative.room import get_room_for_class_subject
+                    room_info = get_room_for_class_subject(r.get("class_id"), r.get("subject_title"))
+                    r["room_id"] = room_info.get("room_id")
+                    r["room_name"] = room_info.get("room_name")
+                    r["room_type"] = room_info.get("room_type")
+                except Exception as room_error:
+                    frappe.logger().warning(f"Failed to get room for class {r.get('class_id')}, subject {r.get('subject_title')}: {str(room_error)}")
+                    r["room_id"] = None
+                    r["room_name"] = "Lỗi tải phòng"
+                    r["room_type"] = None
+
         except Exception as enrich_error:
             pass
 
