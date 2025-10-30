@@ -804,12 +804,33 @@ def save_uploaded_file(file_data, filename):
     unique_filename = f"{uuid.uuid4()}_{filename}"
     file_path = os.path.join(temp_dir, unique_filename)
 
+    # Debug: Check file_data type and size
+    file_size = len(file_data) if not hasattr(file_data, 'read') else "unknown (stream)"
+    frappe.logger().info(f"Saving file: {filename}, size: {file_size}, type: {type(file_data)}")
+
     # Save file
-    with open(file_path, 'wb') as f:
-        if hasattr(file_data, 'read'):
-            f.write(file_data.read())
+    try:
+        with open(file_path, 'wb') as f:
+            if hasattr(file_data, 'read'):
+                content = file_data.read()
+                f.write(content)
+                actual_size = len(content)
+            else:
+                f.write(file_data)
+                actual_size = len(file_data)
+
+        # Verify file was saved
+        if os.path.exists(file_path):
+            saved_size = os.path.getsize(file_path)
+            frappe.logger().info(f"File saved successfully: {file_path}, saved size: {saved_size}")
+            if saved_size == 0:
+                frappe.logger().error("File was saved but is empty!")
         else:
-            f.write(file_data)
+            frappe.logger().error(f"File was not saved: {file_path}")
+
+    except Exception as save_error:
+        frappe.logger().error(f"Error saving file: {str(save_error)}")
+        raise save_error
 
     return file_path
 
@@ -846,6 +867,11 @@ def import_rooms():
             # Process Excel import
             importer = RoomExcelImporter(campus_id)
             result = importer.process_excel_import(file_path, dry_run)
+
+            # Add file save info to debug_info if available
+            if 'debug_info' not in result:
+                result['debug_info'] = []
+            result['debug_info'].insert(0, f"File saved to: {file_path}")
 
             # Clean up temp file
             try:
