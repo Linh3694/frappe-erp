@@ -23,16 +23,20 @@ def _publish_room(payload: dict) -> None:
             client = RedisWrapper.from_url(uri)
             client.publish(_get_room_channel(), json.dumps(payload, default=str))
             return
-    except Exception:
-        pass
+    except Exception as e:
+        # Log the exception instead of silent fail
+        try:
+            frappe.log_error(f"Failed to publish room event via RedisWrapper: {str(e)}", "erp.common.room_events")
+        except Exception:
+            pass
 
     # Fallback to default cache client
     try:
         client = frappe.cache()._redis
         client.publish(_get_room_channel(), json.dumps(payload, default=str))
-    except Exception:
+    except Exception as e:
         try:
-            frappe.log_error("Failed to publish room event", "erp.common.room_events")
+            frappe.log_error(f"Failed to publish room event via cache: {str(e)}", "erp.common.room_events")
         except Exception:
             pass
 
