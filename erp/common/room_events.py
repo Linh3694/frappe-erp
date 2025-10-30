@@ -112,7 +112,7 @@ def publish_all_rooms(batch_size: int = 500, only_active: bool = True, event_typ
     if only_active:
         filters["disabled"] = 0
 
-    total = frappe.db.count("SIS Room", filters)
+    total = frappe.db.count("ERP Administrative Room", filters)
     published = 0
     skipped = 0
 
