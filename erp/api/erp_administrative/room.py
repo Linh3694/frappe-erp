@@ -1643,12 +1643,12 @@ def get_room_classes(room_id: str = None):
                     if class_doc.academic_program:
                         program_info = frappe.get_all(
                             "SIS Academic Program",
-                            fields=["title"],
+                            fields=["title_vn"],
                             filters={"name": class_doc.academic_program},
                             limit=1
                         )
                         if program_info:
-                            academic_program_title = program_info[0].get("title")
+                            academic_program_title = program_info[0].get("title_vn")
 
                     enhanced_class = {
                         "name": class_doc.name,
@@ -1713,24 +1713,24 @@ def get_room_classes(room_id: str = None):
                 if class_data.get("education_grade"):
                     grade_info = frappe.get_all(
                         "SIS Education Grade",
-                        fields=["title"],
+                        fields=["title_vn"],
                         filters={"name": class_data["education_grade"]},
                         limit=1
                     )
                     if grade_info:
-                        education_grade_title = grade_info[0].get("title")
+                        education_grade_title = grade_info[0].get("title_vn")
 
                 # Get academic program title
                 academic_program_title = None
                 if class_data.get("academic_program"):
                     program_info = frappe.get_all(
                         "SIS Academic Program",
-                        fields=["title"],
+                        fields=["title_vn"],
                         filters={"name": class_data["academic_program"]},
                         limit=1
                     )
                     if program_info:
-                        academic_program_title = program_info[0].get("title")
+                        academic_program_title = program_info[0].get("title_vn")
 
                 enhanced_class = class_data.copy()
                 enhanced_class["education_grade"] = education_grade_title or class_data.get("education_grade")
