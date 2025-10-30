@@ -44,11 +44,15 @@ def _publish_room(payload: dict) -> None:
 def publish_room_event(event_type: str, room_name: str) -> None:
     """Publish room event to Redis for microservices"""
     if not frappe.conf.get("FRAPPE_ROOM_EVENTS_ENABLED", True):
+        frappe.logger().info(f"Room events disabled, skipping {event_type} for {room_name}")
         return
 
     try:
+        frappe.logger().info(f"Attempting to publish room event: {event_type} for {room_name}")
+
         # Get room doc
         room_doc = frappe.get_doc("ERP Administrative Room", room_name)
+        frappe.logger().info(f"Got room doc for {room_name}")
 
         # Build payload matching inventory-service expectations
         payload = {
@@ -63,6 +67,7 @@ def publish_room_event(event_type: str, room_name: str) -> None:
             "status": room_doc.status,
             "disabled": room_doc.disabled,
         }
+        frappe.logger().info(f"Built payload for {room_name}")
 
         message = {
             "type": event_type,
@@ -70,6 +75,7 @@ def publish_room_event(event_type: str, room_name: str) -> None:
             "source": "frappe",
             "timestamp": frappe.utils.now_datetime().isoformat() if hasattr(frappe, "utils") else None,
         }
+        frappe.logger().info(f"Built message for {event_type}")
 
         _publish_room(message)
         frappe.logger().info(f"📡 Published room event: {event_type} for {room_name}")
