@@ -684,8 +684,48 @@ class RoomExcelImporter:
             # Load building mapping
             self.load_building_mapping()
 
+            # Basic file validation before pandas
+            debug_info.append("Basic file validation...")
+            try:
+                with open(file_path, 'rb') as f:
+                    file_header = f.read(512)  # Read first 512 bytes
+
+                file_size = len(file_header)
+                debug_info.append(f"File header size: {file_size} bytes")
+
+                if file_size < 4:
+                    return {
+                        "success": False,
+                        "message": "File quá nhỏ, có thể không phải file Excel hợp lệ.",
+                        "errors": ["File size too small"],
+                        "debug_info": debug_info,
+                        "warnings": self.warnings
+                    }
+
+                # Check for Excel signatures
+                header_hex = file_header[:8].hex()
+                debug_info.append(f"File header (hex): {header_hex}")
+
+                # Check for common Excel signatures
+                if header_hex.startswith('504b0304'):  # PK\x03\x04 - ZIP/XLSX
+                    debug_info.append("Detected ZIP/XLSX file signature")
+                elif header_hex.startswith('d0cf11e0a1b11ae1'):  # XLS signature
+                    debug_info.append("Detected XLS file signature")
+                else:
+                    debug_info.append("Warning: File does not have standard Excel signature")
+
+            except Exception as file_error:
+                debug_info.append(f"Error reading file header: {str(file_error)}")
+                return {
+                    "success": False,
+                    "message": f"Không thể đọc header của file: {str(file_error)}",
+                    "errors": [f"File header read error: {str(file_error)}"],
+                    "debug_info": debug_info,
+                    "warnings": self.warnings
+                }
+
             # Read Excel file (skip first row if it's sample data)
-            debug_info.append("Attempting to read Excel file...")
+            debug_info.append("Attempting to read Excel file with pandas...")
             try:
                 # First check if pandas is available
                 if not pd:
@@ -701,26 +741,54 @@ class RoomExcelImporter:
                 df = None
                 excel_error = None
 
-                # Approach 1: Standard read_excel
+                # Approach 1: Standard read_excel with openpyxl
                 try:
                     df = pd.read_excel(file_path, header=0, engine='openpyxl')
-                    debug_info.append("Successfully read with openpyxl engine")
+                    debug_info.append("Successfully read with pandas + openpyxl engine")
                 except Exception as e1:
-                    debug_info.append(f"openpyxl failed: {str(e1)}")
+                    debug_info.append(f"Pandas + openpyxl failed: {str(e1)}")
                     excel_error = e1
+
+                    # Approach 2: Try direct openpyxl if available
                     try:
-                        # Approach 2: Try xlrd engine for .xls files
-                        df = pd.read_excel(file_path, header=0, engine='xlrd')
-                        debug_info.append("Successfully read with xlrd engine")
+                        import openpyxl
+                        wb = openpyxl.load_workbook(file_path, data_only=True)
+                        sheet = wb.active
+
+                        # Convert to pandas DataFrame manually
+                        data = []
+                        headers = []
+                        for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
+                            if row_idx == 0:  # First row is headers
+                                headers = [str(cell) if cell is not None else '' for cell in row]
+                            else:
+                                data.append([cell for cell in row])
+
+                        if headers and data:
+                            df = pd.DataFrame(data, columns=headers)
+                            debug_info.append("Successfully read with direct openpyxl")
+                        else:
+                            raise Exception("No headers or data found")
+
+                    except ImportError:
+                        debug_info.append("openpyxl not available for direct reading")
                     except Exception as e2:
-                        debug_info.append(f"xlrd also failed: {str(e2)}")
+                        debug_info.append(f"Direct openpyxl failed: {str(e2)}")
+
+                        # Approach 3: Try xlrd engine for .xls files
                         try:
-                            # Approach 3: Try without specifying engine
-                            df = pd.read_excel(file_path, header=0)
-                            debug_info.append("Successfully read without specifying engine")
+                            df = pd.read_excel(file_path, header=0, engine='xlrd')
+                            debug_info.append("Successfully read with pandas + xlrd engine")
                         except Exception as e3:
-                            debug_info.append(f"All approaches failed. Last error: {str(e3)}")
-                            excel_error = e3
+                            debug_info.append(f"Pandas + xlrd also failed: {str(e3)}")
+
+                            # Approach 4: Try without specifying engine
+                            try:
+                                df = pd.read_excel(file_path, header=0)
+                                debug_info.append("Successfully read without specifying engine")
+                            except Exception as e4:
+                                debug_info.append(f"All pandas approaches failed. Last error: {str(e4)}")
+                                excel_error = e4
 
                 if df is None:
                     error_msg = f"Không thể đọc file Excel bằng bất kỳ phương pháp nào. Lỗi cuối cùng: {str(excel_error) if excel_error else 'Unknown error'}. Vui lòng kiểm tra: 1) File có đúng định dạng Excel (.xlsx hoặc .xls) không? 2) File có bị hỏng hoặc có mật khẩu không? 3) File có được lưu từ Excel thật sự không?"
@@ -917,6 +985,15 @@ def import_rooms():
             file_data = files['file']
             if not file_data:
                 return validation_error_response({"file": ["No file uploaded"]})
+
+            # Debug file information before saving
+            frappe.logger().info(f"File data type: {type(file_data)}")
+            frappe.logger().info(f"File data attributes: {dir(file_data) if hasattr(file_data, '__dict__') else 'No __dict__'}")
+
+            if hasattr(file_data, 'filename'):
+                frappe.logger().info(f"Original filename: {file_data.filename}")
+            if hasattr(file_data, 'content_type'):
+                frappe.logger().info(f"Content type: {file_data.content_type}")
 
             # Save file temporarily
             file_path = save_uploaded_file(file_data, "rooms_import.xlsx")
