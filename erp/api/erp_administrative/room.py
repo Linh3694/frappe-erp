@@ -1812,19 +1812,14 @@ def get_room_classes(room_id: str = None):
         child_table_has_data = False
 
         try:
-            # Use SQL query directly since frappe.get_all has issues with child tables
-            room_classes_data = frappe.db.sql(f"""
-                SELECT name, class_id, usage_type, subject_id,
-                       class_title, school_year_id, education_grade, academic_program, homeroom_teacher
-                FROM `tabERP Administrative Room Class`
-                WHERE parent = '{room_id}' AND parenttype = 'ERP Administrative Room'
-                ORDER BY creation ASC
-            """, as_dict=True)
-
-            if room_classes_data:
+            # Use Frappe ORM instead of raw SQL to avoid syntax issues
+            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+            
+            if hasattr(room_doc, 'room_classes') and room_doc.room_classes:
                 child_table_has_data = True
-
-                for room_class in room_classes_data:
+                frappe.logger().info(f"Found {len(room_doc.room_classes)} classes in child table")
+                
+                for room_class in room_doc.room_classes:
                     frappe.logger().info(f"Processing room class: {room_class.class_id}, usage: {room_class.usage_type}")
                     try:
                         class_doc = frappe.get_doc("SIS Class", room_class.class_id)
@@ -1857,20 +1852,6 @@ def get_room_classes(room_id: str = None):
                         if program_info:
                             academic_program_title = program_info[0].get("title_vn")
 
-                    # Get subject info if it's a functional class
-                    subject_name = None
-                    subject_code = None
-                    if room_class.usage_type == "functional" and room_class.subject_id:
-                        subject_info = frappe.get_all(
-                            "SIS Timetable Subject",
-                            fields=["subject_name", "subject_code"],
-                            filters={"name": room_class.subject_id},
-                            limit=1
-                        )
-                        if subject_info:
-                            subject_name = subject_info[0].get("subject_name")
-                            subject_code = subject_info[0].get("subject_code")
-
                     enhanced_class = {
                         "name": class_doc.name,
                         "title": class_doc.title,
@@ -1886,9 +1867,18 @@ def get_room_classes(room_id: str = None):
                         "usage_type": room_class.usage_type,
                         "usage_type_display": "Lớp chủ nhiệm" if room_class.usage_type == "homeroom" else "Lớp chức năng",
                         "subject_id": room_class.subject_id,
-                        "subject_name": subject_name,
-                        "subject_code": subject_code
+                        "subject_name": None,
+                        "subject_code": None
                     }
+
+                    # Get subject info if subject_id exists
+                    if room_class.subject_id:
+                        try:
+                            subject_doc = frappe.get_doc("SIS Timetable Subject", room_class.subject_id)
+                            enhanced_class["subject_name"] = subject_doc.title_vn or subject_doc.title_en
+                            enhanced_class["subject_code"] = subject_doc.name
+                        except Exception as e:
+                            frappe.logger().warning(f"Failed to get subject {room_class.subject_id}: {str(e)}")
 
                     # Add teacher info
                     if class_doc.homeroom_teacher:
