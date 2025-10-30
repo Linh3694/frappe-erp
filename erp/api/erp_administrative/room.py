@@ -1801,13 +1801,24 @@ def get_room_classes(room_id: str = None):
         child_table_has_data = False
 
         try:
-            # Get from child table if exists
-            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
-            if hasattr(room_doc, 'room_classes') and room_doc.room_classes:
-                child_table_has_data = True
-                frappe.logger().info(f"Found {len(room_doc.room_classes)} classes in child table for room {room_id}")
+            # Get from child table directly using database query
+            room_classes_data = frappe.db.get_all(
+                "ERP Administrative Room Class",
+                fields=[
+                    "name", "class_id", "usage_type", "subject_id",
+                    "class_title", "school_year_id", "education_grade", "academic_program", "homeroom_teacher"
+                ],
+                filters={"parent": room_id, "parenttype": "ERP Administrative Room"},
+                order_by="creation asc"
+            )
 
-                for room_class in room_doc.room_classes:
+            frappe.logger().info(f"Found {len(room_classes_data)} room classes in database for room {room_id}")
+
+            if room_classes_data:
+                child_table_has_data = True
+                frappe.logger().info(f"Processing {len(room_classes_data)} classes from child table")
+
+                for room_class in room_classes_data:
                     frappe.logger().info(f"Processing room class: {room_class.class_id}, usage: {room_class.usage_type}")
                     class_doc = frappe.get_doc("SIS Class", room_class.class_id)
 
@@ -2118,11 +2129,11 @@ def add_room_class():
 
         # Add to Room Classes child table
         try:
+            # Get the room document
+            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+
+            # Append new room class to the child table
             room_class_data = {
-                "doctype": "ERP Administrative Room Class",
-                "parent": room_id,
-                "parenttype": "ERP Administrative Room",
-                "parentfield": "room_classes",
                 "class_id": class_id,
                 "usage_type": usage_type,
                 "class_title": class_info.title,
@@ -2133,8 +2144,9 @@ def add_room_class():
                 "subject_id": subject_id if usage_type == "functional" else None
             }
 
-            room_class_doc = frappe.get_doc(room_class_data)
-            room_class_doc.insert()
+            room_doc.append("room_classes", room_class_data)
+            room_doc.save()
+            frappe.db.commit()  # Ensure the transaction is committed
             frappe.logger().info(f"Added class {class_id} to room {room_id} with usage {usage_type}")
 
         except Exception as e:
