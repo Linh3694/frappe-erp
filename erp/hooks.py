@@ -210,6 +210,17 @@ doc_events = {
 			"erp.common.user_hooks.trigger_user_webhooks"
 		]
 	},
+	"ERP Administrative Room": {
+		"after_insert": [
+			"erp.common.room_events.on_room_after_insert"
+		],
+		"on_update": [
+			"erp.common.room_events.on_room_on_update"
+		],
+		"on_trash": [
+			"erp.common.room_events.on_room_on_trash"
+		]
+	},
 	"SIS Class": {
 		"on_update": [
 			"erp.api.erp_administrative.room.sync_class_room_assignment"
