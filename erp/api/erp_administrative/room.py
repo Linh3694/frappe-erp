@@ -1631,12 +1631,12 @@ def get_room_classes(room_id: str = None):
                     if class_doc.education_grade:
                         grade_info = frappe.get_all(
                             "SIS Education Grade",
-                            fields=["title"],
+                            fields=["title_vn"],
                             filters={"name": class_doc.education_grade},
                             limit=1
                         )
                         if grade_info:
-                            education_grade_title = grade_info[0].get("title")
+                            education_grade_title = grade_info[0].get("title_vn")
 
                     # Get academic program title
                     academic_program_title = None
