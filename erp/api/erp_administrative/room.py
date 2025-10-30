@@ -1626,6 +1626,30 @@ def get_room_classes(room_id: str = None):
                 for room_class in room_doc.room_classes:
                     class_doc = frappe.get_doc("SIS Class", room_class.class_id)
 
+                    # Get education grade title
+                    education_grade_title = None
+                    if class_doc.education_grade:
+                        grade_info = frappe.get_all(
+                            "SIS Education Grade",
+                            fields=["title"],
+                            filters={"name": class_doc.education_grade},
+                            limit=1
+                        )
+                        if grade_info:
+                            education_grade_title = grade_info[0].get("title")
+
+                    # Get academic program title
+                    academic_program_title = None
+                    if class_doc.academic_program:
+                        program_info = frappe.get_all(
+                            "SIS Academic Program",
+                            fields=["title"],
+                            filters={"name": class_doc.academic_program},
+                            limit=1
+                        )
+                        if program_info:
+                            academic_program_title = program_info[0].get("title")
+
                     enhanced_class = {
                         "name": class_doc.name,
                         "title": class_doc.title,
@@ -1633,8 +1657,8 @@ def get_room_classes(room_id: str = None):
                         "class_type": class_doc.class_type,
                         "school_year_id": class_doc.school_year_id,
                         "campus_id": class_doc.campus_id,
-                        "education_grade": class_doc.education_grade,
-                        "academic_program": class_doc.academic_program,
+                        "education_grade": education_grade_title or class_doc.education_grade,
+                        "academic_program": academic_program_title or class_doc.academic_program,
                         "homeroom_teacher": class_doc.homeroom_teacher,
                         "creation": class_doc.creation,
                         "modified": class_doc.modified,
@@ -1684,7 +1708,33 @@ def get_room_classes(room_id: str = None):
             )
 
             for class_data in classes:
+                # Get education grade title
+                education_grade_title = None
+                if class_data.get("education_grade"):
+                    grade_info = frappe.get_all(
+                        "SIS Education Grade",
+                        fields=["title"],
+                        filters={"name": class_data["education_grade"]},
+                        limit=1
+                    )
+                    if grade_info:
+                        education_grade_title = grade_info[0].get("title")
+
+                # Get academic program title
+                academic_program_title = None
+                if class_data.get("academic_program"):
+                    program_info = frappe.get_all(
+                        "SIS Academic Program",
+                        fields=["title"],
+                        filters={"name": class_data["academic_program"]},
+                        limit=1
+                    )
+                    if program_info:
+                        academic_program_title = program_info[0].get("title")
+
                 enhanced_class = class_data.copy()
+                enhanced_class["education_grade"] = education_grade_title or class_data.get("education_grade")
+                enhanced_class["academic_program"] = academic_program_title or class_data.get("academic_program")
 
                 # Determine usage type based on class_type
                 if class_data.get("class_type") == "regular":
