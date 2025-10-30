@@ -787,21 +787,41 @@ def get_rooms_for_selection():
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
-            # Fallback to default if no campus found
-            campus_id = "campus-1"
-            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-        
-        filters = {"campus_id": campus_id}
-            
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                # Final fallback to known campus
+                campus_id = "CAMPUS-00001"
+            frappe.logger().warning(f"No campus found for user {frappe.session.user}, using fallback: {campus_id}")
+
+        # Get buildings for this campus to filter rooms
+        building_filters = {"campus_id": campus_id}
+        buildings = frappe.get_all(
+            "ERP Administrative Building",
+            fields=["name"],
+            filters=building_filters
+        )
+
+        building_ids = [b.name for b in buildings]
+
+        if not building_ids:
+            return success_response(
+                data=[],
+                message="No buildings found for this campus"
+            )
+
+        # Get rooms that belong to buildings in this campus
         rooms = frappe.get_all(
             "ERP Administrative Room",
             fields=["name", "title_vn", "title_en", "short_title"],
-            filters=filters,
+            filters={"building_id": ["in", building_ids]},
             order_by="title_vn asc"
         )
-        
+
         return success_response(
             data=rooms,
             message="Rooms for selection fetched successfully"
@@ -1043,9 +1063,15 @@ def get_rooms_for_selection():
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
-        
+
         if not campus_id:
-            campus_id = "campus-1"
+            # Fallback: try to get first available campus from database
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                # Final fallback to known campus
+                campus_id = "CAMPUS-00001"
         
         # Get buildings for this campus to filter rooms
         building_filters = {"campus_id": campus_id}
