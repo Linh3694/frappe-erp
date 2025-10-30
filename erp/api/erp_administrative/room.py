@@ -1792,6 +1792,8 @@ def get_room_classes(room_id: str = None):
         if not room_id:
             return validation_error_response("Room ID is required", {"room_id": ["Room ID is required"]})
 
+        frappe.logger().info(f"get_room_classes processing room_id: {room_id}")
+
         # Check if room exists
         if not frappe.db.exists("ERP Administrative Room", room_id):
             return not_found_response("Room not found")
@@ -1833,7 +1835,12 @@ def get_room_classes(room_id: str = None):
 
                 for room_class in room_classes_data:
                     frappe.logger().info(f"Processing room class: {room_class.class_id}, usage: {room_class.usage_type}")
-                    class_doc = frappe.get_doc("SIS Class", room_class.class_id)
+                    try:
+                        class_doc = frappe.get_doc("SIS Class", room_class.class_id)
+                        frappe.logger().info(f"Got class doc: {class_doc.name}")
+                    except Exception as e:
+                        frappe.logger().error(f"Failed to get class doc {room_class.class_id}: {str(e)}")
+                        continue
 
                     # Get education grade title
                     education_grade_title = None
@@ -2014,6 +2021,7 @@ def get_room_classes(room_id: str = None):
 @frappe.whitelist(allow_guest=False, methods=['POST'])
 def add_room_class():
     """Add a class to a room"""
+    frappe.logger().info("add_room_class called")
     try:
         data = {}
         if frappe.request and frappe.request.data:
@@ -2190,6 +2198,7 @@ def add_room_class():
             },
             message="Class added to room successfully"
         )
+        frappe.logger().info(f"add_room_class completed successfully for class {class_id}")
 
     except Exception as e:
         frappe.log_error(f"Error adding room class: {str(e)}")
