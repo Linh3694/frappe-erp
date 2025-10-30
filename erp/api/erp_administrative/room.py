@@ -1612,7 +1612,6 @@ def get_timetable_subjects_for_room_class(education_grade: str = None):
                 except Exception:
                     pass
 
-        frappe.logger().info(f"get_timetable_subjects_for_room_class called with education_grade: {education_grade}")
         if not education_grade:
             return validation_error_response("education_grade is required", {"education_grade": ["education_grade is required"]})
 
@@ -1799,11 +1798,17 @@ def get_room_classes(room_id: str = None):
 
         # Get room classes from child table (new method)
         enhanced_classes = []
+        child_table_has_data = False
+
         try:
             # Get from child table if exists
             room_doc = frappe.get_doc("ERP Administrative Room", room_id)
             if hasattr(room_doc, 'room_classes') and room_doc.room_classes:
+                child_table_has_data = True
+                frappe.logger().info(f"Found {len(room_doc.room_classes)} classes in child table for room {room_id}")
+
                 for room_class in room_doc.room_classes:
+                    frappe.logger().info(f"Processing room class: {room_class.class_id}, usage: {room_class.usage_type}")
                     class_doc = frappe.get_doc("SIS Class", room_class.class_id)
 
                     # Get education grade title
@@ -1882,8 +1887,14 @@ def get_room_classes(room_id: str = None):
                                 enhanced_class["homeroom_teacher_name"] = user_info[0].get("full_name")
 
                     enhanced_classes.append(enhanced_class)
+
         except Exception as e:
-            frappe.logger().warning(f"Error fetching from child table, falling back to legacy method: {str(e)}")
+            frappe.logger().warning(f"Error fetching from child table: {str(e)}")
+            child_table_has_data = False
+
+        # If child table has no data or failed, fallback to legacy method
+        if not child_table_has_data:
+            frappe.logger().info(f"Falling back to legacy method for room {room_id}")
             # Fallback to legacy method (classes with room field)
             classes = frappe.get_all(
                 "SIS Class",
@@ -1904,7 +1915,12 @@ def get_room_classes(room_id: str = None):
                 order_by="title asc"
             )
 
+            frappe.logger().info(f"Found {len(classes)} classes via legacy method")
             for class_data in classes:
+                # Skip if already added from child table (to avoid duplicates)
+                if any(ec["name"] == class_data["name"] for ec in enhanced_classes):
+                    continue
+
                 # Get education grade title
                 education_grade_title = None
                 if class_data.get("education_grade"):
@@ -2323,10 +2339,6 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
             order_by="title asc"
         )
 
-        # Debug: Log first few classes to check education_grade
-        frappe.logger().info(f"Classes fetched: {len(classes)}")
-        if classes:
-            frappe.logger().info(f"First class: {classes[0]}")
 
         # Check if room already has a homeroom class (both child table and legacy)
         room_has_homeroom = False
@@ -2389,8 +2401,6 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
             if can_be_homeroom or can_be_functional:
                 available_class = class_data.copy()
 
-                # Debug: Check education_grade
-                frappe.logger().info(f"Processing class {class_data.get('name')}, education_grade: {class_data.get('education_grade')}")
 
                 # Determine suggested usage based on availability and room state
                 if can_be_homeroom and not room_has_homeroom:
