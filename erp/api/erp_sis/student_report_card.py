@@ -1361,7 +1361,7 @@ def get_previous_semester_score():
                 "student_id": student_id,
                 "school_year": academic_year,
                 "semester_part": "End Term 1",
-                "status": "approved",  # Chỉ lấy report đã duyệt
+                "status": "published",  # ✅ FIX: Changed from "approved" to "published" to match approve_report_card
                 "campus_id": campus_id
             },
             order_by="creation desc",
@@ -1372,7 +1372,7 @@ def get_previous_semester_score():
             return success_response({
                 "overall_score": None,
                 "report_id": None,
-                "error": "Không tìm thấy báo cáo End Term 1 đã duyệt cho học sinh này"
+                "error": "Không tìm thấy báo cáo End Term 1 đã phê duyệt (published) cho học sinh này"
             })
 
         report = previous_reports[0]
