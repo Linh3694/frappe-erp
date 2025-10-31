@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
+from frappe.exceptions import LinkExistsError
 import json
 from typing import Dict, Any
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
@@ -452,10 +453,20 @@ def delete_room():
         frappe.db.commit()
         
         return success_response(message="Room deleted successfully")
-        
+
+    except LinkExistsError as e:
+        # Handle case where room is linked to classes
+        error_msg = "Không thể xóa phòng vì nó đang được sử dụng bởi các lớp học. Vui lòng gỡ bỏ liên kết trước khi xóa."
+        return error_response(error_msg)
+
     except Exception as e:
-        frappe.log_error(f"Error deleting room: {str(e)}")
-        return error_response(f"Error deleting room: {str(e)}")
+        # Truncate error message to avoid CharacterLengthExceededError when logging
+        error_str = str(e)
+        if len(error_str) > 200:
+            error_str = error_str[:200] + "..."
+
+        frappe.log_error(f"Error deleting room: {error_str}")
+        return error_response("Có lỗi xảy ra khi xóa phòng. Vui lòng thử lại sau.")
 
 
 class RoomExcelImporter:
