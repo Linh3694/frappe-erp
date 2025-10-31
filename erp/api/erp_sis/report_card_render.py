@@ -534,6 +534,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                     "hs2_average": score_info.get("hs2_average"),
                     "hs3_average": score_info.get("hs3_average"),
                     "final_average": score_info.get("final_average"),
+                    "semester1_average": score_info.get("semester1_average"),  # ĐTB HK1 (for End Term 2)
+                    "year_average": score_info.get("year_average"),  # ĐTB cả năm (for End Term 2)
                     "weight1_count": score_info.get("weight1_count"),
                     "weight2_count": score_info.get("weight2_count"),
                     "weight3_count": score_info.get("weight3_count"),
