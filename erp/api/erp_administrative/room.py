@@ -627,11 +627,9 @@ class RoomExcelImporter:
 
         # Required fields
         if not row_data.get('title_vn'):
-            errors.append("title_vn is required")
-        if not row_data.get('title_en'):
-            errors.append("title_en is required")
+            errors.append("Tên tiếng Việt là bắt buộc")
         if not row_data.get('short_title'):
-            errors.append("short_title is required")
+            errors.append("Ký hiệu phòng là bắt buộc")
 
         # Room type validation
         room_type = self.normalize_room_type(row_data.get('room_type'))
@@ -640,23 +638,34 @@ class RoomExcelImporter:
         else:
             row_data['room_type'] = room_type  # Update with normalized value
 
-        # Building validation
+        # Building validation (optional)
         building_id = self.find_building_id(row_data.get('building_title'))
-        if not building_id:
-            errors.append(f"Building not found: {row_data.get('building_title')}")
-        else:
+        if building_id:
             row_data['building_id'] = building_id
+        else:
+            # Building not found, log warning but don't fail validation
+            if row_data.get('building_title'):
+                self.warnings.append(f"Toà nhà '{row_data.get('building_title')}' không tìm thấy trong hệ thống. Phòng sẽ được tạo mà không gán tòa nhà.")
+            row_data['building_id'] = None
 
-        # Capacity validation
+        # Capacity validation (optional)
         capacity = row_data.get('capacity')
-        if capacity is not None:
+        if capacity is not None and str(capacity).strip():
             try:
-                capacity = int(capacity)
-                if capacity < 0:
-                    errors.append("Capacity must be non-negative")
-                row_data['capacity'] = capacity
+                # Handle NaN values from pandas
+                if str(capacity).lower() == 'nan' or (hasattr(capacity, 'isnan') and capacity.isnan()):
+                    # Keep as None for empty capacity
+                    row_data['capacity'] = None
+                else:
+                    capacity = int(float(capacity))
+                    if capacity < 0:
+                        errors.append("Sức chứa phải là số không âm")
+                    row_data['capacity'] = capacity
             except (ValueError, TypeError):
-                errors.append("Capacity must be a valid number")
+                errors.append("Sức chứa phải là số hợp lệ")
+        else:
+            # Keep as None for empty capacity
+            row_data['capacity'] = None
 
         return errors
 
@@ -920,16 +929,24 @@ class RoomExcelImporter:
                 created_count = 0
                 for room_data in processed_rooms:
                     try:
-                        room_doc = frappe.get_doc({
+                        room_data_dict = {
                             "doctype": "ERP Administrative Room",
                             "title_vn": room_data['title_vn'],
-                            "title_en": room_data['title_en'],
+                            "title_en": room_data.get('title_en') or room_data['title_vn'],  # Fallback to title_vn if empty
                             "short_title": room_data['short_title'],
                             "room_type": room_data['room_type'],
-                            "building_id": room_data['building_id'],
-                            "capacity": room_data.get('capacity', 0),
                             "campus_id": self.campus_id
-                        })
+                        }
+
+                        # Only add building_id if it exists
+                        if room_data.get('building_id'):
+                            room_data_dict["building_id"] = room_data['building_id']
+
+                        # Only add capacity if it has a value
+                        if room_data.get('capacity') is not None:
+                            room_data_dict["capacity"] = room_data['capacity']
+
+                        room_doc = frappe.get_doc(room_data_dict)
                         room_doc.insert()
                         created_count += 1
                     except Exception as e:
@@ -937,15 +954,23 @@ class RoomExcelImporter:
 
                 frappe.db.commit()
 
-            return {
+            result = {
                 "success": True,
                 "message": f"Import completed successfully. Created {created_count} rooms." if not dry_run else "Dry run completed successfully",
                 "total_rows": len(df),
                 "created_count": created_count if not dry_run else 0,
+                "valid_rows": len(processed_rooms),
                 "errors": self.errors,
                 "warnings": self.warnings,
                 "debug_info": debug_info
             }
+
+            # Add validation errors if any
+            if validation_errors:
+                result["validation_errors"] = validation_errors
+                result["invalid_rows"] = len(validation_errors)
+
+            return result
 
         except Exception as e:
             debug_info.append(f"Exception occurred: {str(e)}")
