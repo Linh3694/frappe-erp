@@ -334,6 +334,30 @@ def get_student_data():
                 code="STUDENT_NOT_FOUND"
             )
         
+        # Get student photo if exists
+        student_photo = None
+        try:
+            # Find the most recent active student photo
+            photos = frappe.get_all(
+                "SIS Photo",
+                filters={
+                    "student_id": student.name,
+                    "type": "student",
+                    "status": "Active"
+                },
+                fields=["photo"],
+                order_by="creation desc",
+                limit=1
+            )
+
+            if photos and photos[0].get("photo"):
+                student_photo = photos[0]["photo"]
+                frappe.logger().info(f"✅ Found photo for student {student.name}: {student_photo}")
+            else:
+                frappe.logger().info(f"ℹ️ No photo found for student {student.name}")
+        except Exception as photo_err:
+            frappe.logger().warning(f"⚠️ Error fetching photo for student {student.name}: {str(photo_err)}")
+
         return single_item_response(
             data={
                 "name": student.name,
@@ -341,7 +365,8 @@ def get_student_data():
                 "student_code": student.student_code,
                 "dob": student.dob,
                 "gender": student.gender,
-                "campus_id": student.campus_id
+                "campus_id": student.campus_id,
+                "photo": student_photo
             },
             message="Student fetched successfully"
         )
