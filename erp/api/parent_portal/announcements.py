@@ -142,6 +142,8 @@ def get_announcements():
                 "status",
                 "sent_at",
                 "sent_by",
+                "recipients",
+                "recipient_type",
                 "created_at",
                 "created_by",
                 "updated_at",
@@ -151,6 +153,32 @@ def get_announcements():
             limit=limit,
             start=offset
         )
+
+        # Get student information for recipient filtering
+        student_grade_name = None
+        student_class_name = None
+        if student_id:
+            try:
+                # Get student's grade and class information
+                class_students = frappe.get_all(
+                    "SIS Class Student",
+                    filters={"student_id": student_id},
+                    fields=["class_id"],
+                    order_by="creation desc",
+                    limit=1
+                )
+
+                if class_students and class_students[0].class_id:
+                    class_id = class_students[0].class_id
+                    class_doc = frappe.get_doc("SIS Class", class_id)
+                    student_class_name = class_doc.title or class_doc.name
+
+                    # Get grade information
+                    if class_doc.education_grade:
+                        grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade)
+                        student_grade_name = grade_doc.title_en or grade_doc.title_vn or grade_doc.name
+            except Exception as e:
+                frappe.logger().error(f"Parent portal - Error getting student grade/class: {str(e)}")
 
         # Process announcements to add additional information
         processed_announcements = []
@@ -179,6 +207,47 @@ def get_announcements():
                 except:
                     pass
 
+            # Process recipients to get relevant tags for current student
+            relevant_tags = []
+            if announcement.recipients:
+                try:
+                    if isinstance(announcement.recipients, str):
+                        recipients = json.loads(announcement.recipients)
+                    else:
+                        recipients = announcement.recipients
+
+                    if isinstance(recipients, list):
+                        for recipient in recipients:
+                            if isinstance(recipient, dict):
+                                recipient_type = recipient.get('type')
+                                recipient_name = recipient.get('name', '')
+                                recipient_display_name = recipient.get('display_name', recipient_name)
+
+                                # Check if this recipient is relevant to current student
+                                is_relevant = False
+
+                                if recipient_type == 'grade' and student_grade_name:
+                                    # Check if student's grade matches this recipient
+                                    is_relevant = recipient_name == student_grade_name or recipient_display_name == student_grade_name
+                                elif recipient_type == 'class' and student_class_name:
+                                    # Check if student's class matches this recipient
+                                    is_relevant = recipient_name == student_class_name or recipient_display_name == student_class_name
+                                elif recipient_type == 'school':
+                                    # School-wide announcements are relevant to all students
+                                    is_relevant = True
+                                elif recipient_type == 'student':
+                                    # Check if student is specifically targeted
+                                    is_relevant = recipient_name == student_id
+
+                                if is_relevant:
+                                    relevant_tags.append({
+                                        "type": recipient_type,
+                                        "name": recipient_name,
+                                        "display_name": recipient_display_name
+                                    })
+                except Exception as e:
+                    frappe.logger().error(f"Parent portal - Error processing recipients for announcement {announcement.name}: {str(e)}")
+
             processed_announcement = {
                 "name": announcement.name,
                 "campus_id": announcement.campus_id,
@@ -191,6 +260,7 @@ def get_announcements():
                 "sent_at": announcement.sent_at,
                 "sent_by": announcement.sent_by,
                 "sender": sender_info,
+                "recipient_tags": relevant_tags,  # Relevant tags for current student
                 "created_at": announcement.created_at,
                 "created_by": announcement.created_by,
                 "updated_at": announcement.updated_at,
@@ -273,6 +343,31 @@ def get_announcement_detail(announcement_id):
             except:
                 pass
 
+        # Process recipients for detail view (same logic as list view)
+        relevant_tags = []
+        if announcement.recipients:
+            try:
+                if isinstance(announcement.recipients, str):
+                    recipients = json.loads(announcement.recipients)
+                else:
+                    recipients = announcement.recipients
+
+                if isinstance(recipients, list):
+                    # For detail view, show all recipients since it's a specific announcement
+                    for recipient in recipients:
+                        if isinstance(recipient, dict):
+                            recipient_type = recipient.get('type')
+                            recipient_name = recipient.get('name', '')
+                            recipient_display_name = recipient.get('display_name', recipient_name)
+
+                            relevant_tags.append({
+                                "type": recipient_type,
+                                "name": recipient_name,
+                                "display_name": recipient_display_name
+                            })
+            except Exception as e:
+                frappe.logger().error(f"Parent portal - Error processing recipients for announcement detail {announcement.name}: {str(e)}")
+
         processed_announcement = {
             "name": announcement.name,
             "campus_id": announcement.campus_id,
@@ -285,6 +380,7 @@ def get_announcement_detail(announcement_id):
             "sent_at": announcement.sent_at,
             "sent_by": announcement.sent_by,
             "sender": sender_info,
+            "recipient_tags": relevant_tags,  # All tags for this announcement
             "sent_count": announcement.sent_count,
             "received_count": announcement.received_count,
             "created_at": announcement.created_at,
