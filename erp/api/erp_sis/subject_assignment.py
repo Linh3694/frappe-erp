@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
+from datetime import datetime, timedelta
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.api_response import (
     success_response,
@@ -2312,7 +2313,10 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             continue
         
         instance_class_id = instance_info.class_id
-        row_date = row.get("date")  # ✅ Get actual date of this row
+        instance_start_date = instance_info.start_date
+        instance_end_date = instance_info.end_date
+        row_date = row.get("date")  # May be NULL
+        row_day_of_week = row.get("day_of_week")
         
         # Get assignment info
         assignment_key = (actual_subject, instance_class_id)
@@ -2350,7 +2354,7 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                 skipped_rows.append(row.name)
             continue
         
-        # ✅ FIX: Use row date for precise filtering
+        # ✅ FIX: Calculate dates on-the-fly from pattern
         should_be_assigned = False
         
         if assignment_info:
@@ -2361,23 +2365,47 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             if application_type == "full_year":
                 should_be_assigned = True
             elif application_type == "from_date" and assignment_start:
+                # ✅ NEW LOGIC: Calculate all dates for this day_of_week in instance period
                 if row_date:
-                    # ✅ Compare row's actual date with assignment dates
+                    # If row has specific date, use it directly
                     if row_date >= assignment_start:
                         if assignment_end:
                             should_be_assigned = row_date <= assignment_end
                         else:
                             should_be_assigned = True
+                elif row_day_of_week and instance_start_date and instance_end_date:
+                    # Calculate all dates matching this day_of_week in instance period
+                    day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+                    target_weekday = day_map.get(row_day_of_week)
+                    
+                    if target_weekday is not None:
+                        # Find first occurrence of this weekday in instance
+                        current_date = instance_start_date
+                        current_weekday = current_date.weekday()
+                        days_ahead = target_weekday - current_weekday
+                        if days_ahead < 0:
+                            days_ahead += 7
+                        first_occurrence = current_date + timedelta(days=days_ahead)
+                        
+                        # Check if ANY occurrence falls within assignment range
+                        check_date = first_occurrence
+                        while check_date <= instance_end_date:
+                            if check_date >= assignment_start:
+                                if assignment_end:
+                                    if check_date <= assignment_end:
+                                        should_be_assigned = True
+                                        break
+                                else:
+                                    should_be_assigned = True
+                                    break
+                            check_date += timedelta(days=7)  # Next week
                 else:
-                    # Fallback to instance-level check if date is missing
+                    # Fallback to instance-level check
                     should_be_assigned = instances_to_sync.get(row.parent, {}).get(assignment_key, False)
         
         # ✅ DEBUG
-        if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
-            if row_date:
-                debug_info.append(f"📅 Row {row.name}: date={row_date}, should_be_assigned={should_be_assigned}")
-            else:
-                debug_info.append(f"⚠️ Row {row.name}: NO DATE, using instance-level check={should_be_assigned}")
+        if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
+            debug_info.append(f"📅 Row {row.name}: day={row_day_of_week}, date={row_date}, should_be={should_be_assigned}")
         
         is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
         
