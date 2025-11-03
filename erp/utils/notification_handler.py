@@ -277,7 +277,8 @@ def send_bulk_parent_notifications(
     title: str,
     body: str,
     icon: Optional[str] = None,
-    actions: Optional[List] = None
+    actions: Optional[List] = None,
+    data: Optional[Dict] = None
 ) -> Dict:
     """
     Unified push notification sender
@@ -295,6 +296,7 @@ def send_bulk_parent_notifications(
         body: Notification body
         icon: Icon URL (optional)
         actions: Action buttons (optional)
+        data: Additional data to include in notification (optional)
     
     Returns:
         {
