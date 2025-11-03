@@ -240,10 +240,19 @@ def get_announcements():
                                     is_relevant = recipient_name == student_id
 
                                 if is_relevant:
+                                    # Handle special case for school-wide announcements
+                                    if recipient_type == 'school':
+                                        display_name_vn = "Toàn trường"
+                                        display_name_en = "All School"
+                                    else:
+                                        display_name_vn = recipient_display_name
+                                        display_name_en = recipient_display_name
+
                                     relevant_tags.append({
                                         "type": recipient_type,
                                         "name": recipient_name,
-                                        "display_name": recipient_display_name
+                                        "display_name": display_name_vn,
+                                        "display_name_en": display_name_en
                                     })
                 except Exception as e:
                     frappe.logger().error(f"Parent portal - Error processing recipients for announcement {announcement.name}: {str(e)}")
@@ -360,10 +369,19 @@ def get_announcement_detail(announcement_id):
                             recipient_name = recipient.get('name', '')
                             recipient_display_name = recipient.get('display_name', recipient_name)
 
+                            # Handle special case for school-wide announcements
+                            if recipient_type == 'school':
+                                display_name_vn = "Toàn trường"
+                                display_name_en = "All School"
+                            else:
+                                display_name_vn = recipient_display_name
+                                display_name_en = recipient_display_name
+
                             relevant_tags.append({
                                 "type": recipient_type,
                                 "name": recipient_name,
-                                "display_name": recipient_display_name
+                                "display_name": display_name_vn,
+                                "display_name_en": display_name_en
                             })
             except Exception as e:
                 frappe.logger().error(f"Parent portal - Error processing recipients for announcement detail {announcement.name}: {str(e)}")
