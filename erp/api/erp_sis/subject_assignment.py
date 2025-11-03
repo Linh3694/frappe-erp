@@ -2244,14 +2244,15 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     frappe.logger().info(f"🔍 SYNC DEBUG - Found {len(all_rows)} timetable rows")
     
     # OPTIMIZATION 4: Get all current assignments for this teacher with date fields
-    current_assignments = frappe.get_all(
-        "SIS Subject Assignment",
-        filters={
-            "teacher_id": teacher_id,
-            "campus_id": campus_id
-        },
-        fields=["actual_subject_id", "class_id", "application_type", "start_date", "end_date"]
-    )
+    # 🔧 FIX: Only query assignments for affected_subjects to avoid re-applying unrelated assignments
+    current_assignments = frappe.db.sql("""
+        SELECT actual_subject_id, class_id, application_type, start_date, end_date
+        FROM `tabSIS Subject Assignment`
+        WHERE teacher_id = %s
+          AND campus_id = %s
+          AND actual_subject_id IN ({})
+    """.format(','.join(['%s'] * len(affected_subjects))),
+    tuple([teacher_id, campus_id] + affected_subjects), as_dict=True)
     
     # Build lookup dict for fast checking with date fields
     teacher_assignment_map = {}
