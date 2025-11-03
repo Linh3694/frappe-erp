@@ -2306,7 +2306,8 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     updated_rows = []
     skipped_rows = []
     
-    # ✅ PASS 1: Remove teachers first (handle deletions)
+    # ✅ PASS 1: Remove teacher from ALL rows of affected subjects/classes
+    # This ensures clean slate before re-applying with correct date ranges
     for row in all_rows:
         actual_subject = subject_map.get(row.subject_id)
         if not actual_subject or actual_subject not in affected_subjects:
@@ -2318,20 +2319,19 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         
         instance_class_id = instance_info.class_id
         assignment_key = (actual_subject, instance_class_id)
-        assignment_info = teacher_assignment_map.get(assignment_key)
         
-        # If no assignment exists, remove teacher if present
-        if not assignment_info:
-            is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
-            if is_assigned:
-                if row.teacher_1_id == teacher_id:
-                    frappe.db.set_value("SIS Timetable Instance Row", row.name, "teacher_1_id", None, update_modified=False)
-                    updated_rows.append(row.name)
-                    frappe.logger().info(f"🗑️ PASS1 REMOVED - Row {row.name}: Removed {teacher_id} from teacher_1_id (assignment deleted)")
-                if row.teacher_2_id == teacher_id:
-                    frappe.db.set_value("SIS Timetable Instance Row", row.name, "teacher_2_id", None, update_modified=False)
-                    updated_rows.append(row.name)
-                    frappe.logger().info(f"🗑️ PASS1 REMOVED - Row {row.name}: Removed {teacher_id} from teacher_2_id (assignment deleted)")
+        # Remove teacher if present (regardless of whether assignment exists)
+        # This handles both DELETE and UPDATE scenarios
+        is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
+        if is_assigned:
+            if row.teacher_1_id == teacher_id:
+                frappe.db.set_value("SIS Timetable Instance Row", row.name, "teacher_1_id", None, update_modified=False)
+                updated_rows.append(row.name)
+                frappe.logger().info(f"🗑️ PASS1 REMOVED - Row {row.name}: Removed {teacher_id} from teacher_1_id")
+            if row.teacher_2_id == teacher_id:
+                frappe.db.set_value("SIS Timetable Instance Row", row.name, "teacher_2_id", None, update_modified=False)
+                updated_rows.append(row.name)
+                frappe.logger().info(f"🗑️ PASS1 REMOVED - Row {row.name}: Removed {teacher_id} from teacher_2_id")
     
     frappe.db.commit()
     frappe.logger().info(f"🗑️ PASS 1 Complete: Removed teacher from {len(updated_rows)} rows")
