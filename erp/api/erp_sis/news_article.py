@@ -935,7 +935,7 @@ def delete_news_article():
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def publish_news_article():
-    """Publish a draft article"""
+    """Publish a draft article and send notifications to parents"""
     try:
         data = frappe.local.form_dict
         article_id = data.get("article_id")
@@ -953,7 +953,66 @@ def publish_news_article():
 
         # Update status to published
         article.status = "published"
+        article.published_at = frappe.utils.now()
+        article.published_by = frappe.session.user
         article.save()
+
+        # Send notifications to parents using unified handler
+        try:
+            from erp.utils.notification_handler import send_bulk_parent_notifications, resolve_recipient_students
+            
+            # Get education stages from article
+            education_stage_ids = []
+            if article.education_stage_ids:
+                try:
+                    stage_ids_str = article.education_stage_ids
+                    if isinstance(stage_ids_str, str):
+                        # Handle potential JSON encoding
+                        if stage_ids_str.startswith('['):
+                            education_stage_ids = json.loads(stage_ids_str)
+                        else:
+                            education_stage_ids = [stage_ids_str]
+                    else:
+                        education_stage_ids = stage_ids_str if isinstance(stage_ids_str, list) else [stage_ids_str]
+                except (json.JSONDecodeError, TypeError):
+                    education_stage_ids = []
+            
+            # Convert stages to student list
+            recipients = [
+                {"id": stage_id, "type": "stage"} 
+                for stage_id in education_stage_ids
+            ]
+            
+            frappe.logger().info(f"📰 [News Article] Publishing {article_id}, targeting {len(recipients)} education stages")
+            
+            if recipients:
+                # Resolve to students
+                student_ids = resolve_recipient_students(recipients)
+                
+                if student_ids:
+                    notification_result = send_bulk_parent_notifications(
+                        recipient_type="news",
+                        recipients_data={
+                            "student_ids": student_ids,
+                            "article_id": article.name
+                        },
+                        title=article.title_vn or article.title_en,
+                        body=article.summary_vn[:100] if article.summary_vn else (article.summary_en[:100] if article.summary_en else ""),
+                        icon="/icon.png",
+                        data={
+                            "type": "news",
+                            "article_id": article.name,
+                            "title_en": article.title_en,
+                            "title_vn": article.title_vn,
+                            "url": f"/news/{article.name}"
+                        }
+                    )
+                    
+                    frappe.logger().info(f"✅ [News Article] Notification sent to {notification_result.get('total_parents', 0)} parents")
+        
+        except Exception as e:
+            frappe.logger().warning(f"⚠️ [News Article] Error sending notifications: {str(e)}")
+            # Don't fail publication if notification fails
 
         return success_response(
             message="News article published successfully"

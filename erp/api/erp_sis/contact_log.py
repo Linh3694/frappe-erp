@@ -302,7 +302,7 @@ def save_contact_log():
 def send_contact_log():
     """
     Send contact log to parents via push notification
-    Updates status to "Sent" and sends push notifications
+    Updates status to "Sent" and sends push notifications using unified handler
     """
     try:
         print("=" * 80)
@@ -319,7 +319,7 @@ def send_contact_log():
         print(f"📨 [CONTACT_LOG] student_log_ids: {student_log_ids}")
         
         if not class_id or not student_log_ids:
-            print(f"❌ [CONTACT_LOG] Missing params - class_id: {bool(class_id)}, student_log_ids: {bool(student_log_ids)}")
+            print(f"❌ [CONTACT_LOG] Missing params")
             return error_response(message="Missing class_id or student_log_ids", code="MISSING_PARAMS")
         
         # Validate teacher access
@@ -327,9 +327,8 @@ def send_contact_log():
         _validate_homeroom_teacher_access(class_id)
         print(f"✅ [CONTACT_LOG] Teacher access validated")
         
-        teacher_name = _get_teacher_name(frappe.session.user)
-        print(f"📨 [CONTACT_LOG] teacher_name: {teacher_name}")
-        
+        # Collect all student IDs and update status
+        student_ids = []
         sent_count = 0
         failed_count = 0
         results = []
@@ -338,152 +337,88 @@ def send_contact_log():
             try:
                 # Get student log
                 student_log = frappe.get_doc("SIS Class Log Student", log_id)
+                student_ids.append(student_log.student_id)
                 
-                # Get student name
-                student_name = _get_student_name(student_log.student_id)
-                
-                # Parse badges
-                badges_text = ""
-                if student_log.badges:
-                    try:
-                        badge_list = json.loads(student_log.badges)
-                        if badge_list:
-                            badge_names = [_get_badge_name(badge_id) for badge_id in badge_list]
-                            badges_text = "\n🏆 Huy hiệu: " + ", ".join(badge_names)
-                    except:
-                        pass
-                
-                # Update status to "Sent" first (before trying notifications)
+                # Update status to "Sent"
                 student_log.contact_log_status = "Sent"
                 student_log.contact_log_sent_by = frappe.session.user
                 student_log.contact_log_sent_at = frappe.utils.now_datetime()
                 student_log.save()
                 
-                print(f"📨 [CONTACT_LOG] Processing student_id: {student_log.student_id}")
-                print(f"📨 [CONTACT_LOG] Student name: {student_name}")
-                
-                # Try to send push notifications (best effort)
-                # Get parent emails
-                parent_emails = _get_student_parent_emails(student_log.student_id)
-                print(f"📨 [CONTACT_LOG] Parent emails found: {parent_emails}")
-                
-                if not parent_emails:
-                    # No parents, but still mark as sent
-                    sent_count += 1
-                    results.append({
-                        "student_id": student_log.student_id,
-                        "success": True,
-                        "message": "Sent (no parent contacts found)"
-                    })
-                    continue
-                
-                # Send push notification via notification-service (best effort)
-                notification_sent = False
-                if parent_emails:
-                    # Deduplicate parent emails to avoid MongoDB unique constraint error
-                    parent_emails = list(set(parent_emails))
-                    
-                    try:
-                        print(f"📨 Preparing to send notification to {len(parent_emails)} parent(s): {parent_emails}")
-                        
-                        # Bilingual title and message format (like attendance notifications)
-                        title_vi = "Sổ liên lạc"
-                        title_en = "Communication eBook"
-                        message_vi = f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay."
-                        message_en = f"Student {student_name} has new feedback for today's class."
-                        
-                        # Call notification-service API directly (internal network)
-                        notification_service_url = frappe.conf.get("notification_service_url", "http://172.16.20.115:5001")
-                        
-                        payload = {
-                            # Send both translations so service worker can display immediately
-                            "title": {
-                                "vi": title_vi,
-                                "en": title_en
-                            },
-                            "body": {
-                                "vi": message_vi,
-                                "en": message_en
-                            },
-                            # Keep keys for frontend app to use (optional)
-                            "titleKey": "contact_log_notification_title",
-                            "messageKey": "contact_log_notification_message",
-                            "recipients": parent_emails,
-                            "notification_type": "contact_log",
-                            "type": "system", 
-                            "priority": "high",
-                            "channel": "push",
-                            "data": {
-                                "type": "contact_log",  # Custom type in data field
-                                "notificationType": "contact_log",  # Also add to ensure proper mapping
-                                "student_id": student_log.student_id,
-                                "student_name": student_name,
-                                "teacher_name": teacher_name,
-                                "log_id": log_id
-                            }
-                        }
-                        
-                        print(f"📨 Calling notification service: {notification_service_url}/api/notifications/send")
-                        print(f"📨 Payload: {payload}")
-                        
-                        response = requests.post(
-                            f"{notification_service_url}/api/notifications/send",
-                            json=payload,
-                            timeout=5
-                        )
-                        
-                        print(f"📨 Notification service response status: {response.status_code}")
-                        print(f"📨 Notification service response body: {response.text[:200]}")
-                        
-                        if response.status_code == 200:
-                            notification_sent = True
-                            print(f"✅ Sent notification to {len(parent_emails)} parent(s)")
-                        else:
-                            print(f"⚠️ Notification service returned: {response.status_code} - {response.text[:100]}")
-                            
-                    except Exception as e:
-                        # Silently log but don't crash
-                        print(f"⚠️ Failed to send notifications: {str(e)[:200]}")
-                        import traceback
-                        print(traceback.format_exc()[:500])
-                
-                # Always count as sent (notification is best-effort)
+                print(f"📨 [CONTACT_LOG] Updated student_log: {log_id}")
                 sent_count += 1
-                results.append({
-                    "student_id": student_log.student_id,
-                    "success": True,
-                    "message": "Sent successfully" if notification_sent else "Sent (notifications may have failed)"
-                })
                 
             except Exception as e:
+                print(f"❌ [CONTACT_LOG] Error updating log {log_id}: {str(e)}")
                 failed_count += 1
                 results.append({
-                    "student_id": log_id,
+                    "student_log_id": log_id,
                     "success": False,
-                    "message": str(e)[:200]  # Truncate to avoid logging issues
+                    "message": str(e)
                 })
-                print(f"⚠️ Error sending contact log {log_id}: {str(e)[:200]}")
         
-        frappe.db.commit()
+        print(f"📨 [CONTACT_LOG] Updated {sent_count} logs, {failed_count} failed")
         
-        return success_response(
-            message=f"Sent to {sent_count} students, failed: {failed_count}",
-            data={
-                "sent_count": sent_count,
-                "failed_count": failed_count,
-                "total": len(student_log_ids),
-                "results": results
-            }
-        )
-    
-    except frappe.PermissionError as e:
-        return error_response(message=str(e), code="PERMISSION_ERROR")
+        if not student_ids:
+            print(f"⚠️ [CONTACT_LOG] No students to notify")
+            return error_response(
+                message="Failed to update contact logs",
+                code="UPDATE_FAILED"
+            )
+        
+        # Send notifications using unified handler
+        from erp.utils.notification_handler import send_bulk_parent_notifications
+        
+        try:
+            print(f"📨 [CONTACT_LOG] Sending notifications to parents of {len(student_ids)} students")
+            
+            notification_result = send_bulk_parent_notifications(
+                recipient_type="contact_log",
+                recipients_data={
+                    "student_ids": student_ids
+                },
+                title="Sổ liên lạc",
+                body="Học sinh của bạn có nhận xét mới về ngày học hôm nay.",
+                icon="/icon.png",
+                data={
+                    "type": "contact_log",
+                    "student_ids": student_ids,
+                    "timestamp": frappe.utils.now()
+                }
+            )
+            
+            print(f"✅ [CONTACT_LOG] Notifications sent - Success: {notification_result.get('success_count')}, Failed: {notification_result.get('failed_count')}")
+            
+            return success_response(
+                message="Contact logs sent successfully",
+                data={
+                    "total_logs_updated": sent_count,
+                    "notification_summary": {
+                        "total_parents": notification_result.get('total_parents', 0),
+                        "success_count": notification_result.get('success_count', 0),
+                        "failed_count": notification_result.get('failed_count', 0)
+                    }
+                }
+            )
+        
+        except Exception as e:
+            print(f"❌ [CONTACT_LOG] Error sending notifications: {str(e)}")
+            frappe.logger().error(f"Contact Log Notification Error: {str(e)}")
+            
+            # Still return success since logs were updated, just notification failed
+            return success_response(
+                message="Contact logs updated but notification sending failed",
+                data={
+                    "total_logs_updated": sent_count,
+                    "notification_error": str(e)
+                }
+            )
+        
     except Exception as e:
-        frappe.db.rollback()
-        error_msg = str(e)[:500]  # Truncate to avoid Error Log title length issues
-        print(f"⚠️ send_contact_log error: {error_msg}")
+        print(f"❌ [CONTACT_LOG] Error: {str(e)}")
+        frappe.logger().error(f"Send Contact Log Error: {str(e)}")
         return error_response(
-            message=f"Failed to send contact log: {error_msg}", 
+            message=f"Failed to send contact logs: {str(e)}",
             code="SEND_CONTACT_LOG_ERROR"
         )
 

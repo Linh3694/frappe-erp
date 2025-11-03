@@ -626,15 +626,74 @@ def send_announcement():
                 {"status": ["Only draft announcements can be sent"]}
             )
 
-        # Update status to sent
-        announcement.status = "sent"
-        announcement.sent_at = frappe.utils.now()
-        announcement.sent_by = frappe.session.user
-        announcement.save()
+        # Parse recipients
+        recipients = []
+        if announcement.recipients:
+            try:
+                recipients = json.loads(announcement.recipients)
+            except (json.JSONDecodeError, TypeError):
+                recipients = []
 
-        return success_response(
-            message="Announcement sent successfully"
-        )
+        if not recipients:
+            return validation_error_response(
+                "No recipients to send to",
+                {"recipients": ["No recipients to send to"]}
+            )
+
+        # Use unified notification handler to send notifications
+        from erp.utils.notification_handler import send_bulk_parent_notifications
+
+        try:
+            notification_result = send_bulk_parent_notifications(
+                recipient_type="announcement",
+                recipients_data={
+                    "student_ids": [],  # Will be resolved in handler
+                    "recipients": recipients,  # Raw recipient selection
+                    "announcement_id": announcement.name
+                },
+                title=announcement.title_vn or announcement.title_en,
+                body=announcement.content_vn[:100] if announcement.content_vn else (announcement.content_en[:100] if announcement.content_en else ""),
+                icon="/icon.png",
+                data={
+                    "type": "announcement",
+                    "announcement_id": announcement.name,
+                    "title_en": announcement.title_en,
+                    "title_vn": announcement.title_vn,
+                    "url": f"/announcement/{announcement.name}"
+                }
+            )
+
+            frappe.logger().info(f"📢 Announcement notification result: {notification_result}")
+
+            # Update status to sent
+            announcement.status = "sent"
+            announcement.sent_at = frappe.utils.now()
+            announcement.sent_by = frappe.session.user
+            announcement.save()
+
+            frappe.logger().info(f"✅ Announcement {announcement_id} sent successfully to {notification_result.get('total_parents', 0)} parents")
+
+            return success_response(
+                message="Announcement sent successfully",
+                data={
+                    "announcement_id": announcement.name,
+                    "status": announcement.status,
+                    "sent_at": announcement.sent_at,
+                    "sent_by": announcement.sent_by,
+                    "notification_summary": {
+                        "total_parents": notification_result.get("total_parents", 0),
+                        "success_count": notification_result.get("success_count", 0),
+                        "failed_count": notification_result.get("failed_count", 0)
+                    }
+                }
+            )
+
+        except Exception as e:
+            frappe.logger().error(f"❌ Error sending notifications: {str(e)}")
+            return error_response(
+                message=f"Failed to send notifications: {str(e)}",
+                code="NOTIFICATION_ERROR"
+            )
 
     except frappe.DoesNotExistError:
         return not_found_response("Announcement not found")
