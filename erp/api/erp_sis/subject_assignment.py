@@ -1123,11 +1123,74 @@ def delete_subject_assignment(assignment_id=None):
         except frappe.DoesNotExistError:
             return not_found_response("Subject assignment not found")
         
+        # 🔧 BEFORE DELETE: Sync TKB to remove teacher from timetable rows
+        sync_summary = {}
+        try:
+            # Get all timetable instances for this class
+            instances = frappe.db.sql("""
+                SELECT name, class_id, start_date, end_date
+                FROM `tabSIS Timetable Instance`
+                WHERE campus_id = %s
+                  AND class_id = %s
+                  AND end_date >= %s
+            """, (campus_id, assignment_doc.class_id, frappe.utils.getdate()), as_dict=True)
+            
+            if instances:
+                # Get rows with this subject
+                instance_ids = [i.name for i in instances]
+                rows_to_update = frappe.db.sql("""
+                    SELECT name, teacher_1_id, teacher_2_id
+                    FROM `tabSIS Timetable Instance Row`
+                    WHERE parent IN ({})
+                      AND subject_id IN (
+                        SELECT name FROM `tabSIS Subject`
+                        WHERE actual_subject_id = %s AND campus_id = %s
+                      )
+                """.format(','.join(['%s'] * len(instance_ids))), 
+                tuple(instance_ids + [assignment_doc.actual_subject_id, campus_id]), as_dict=True)
+                
+                updated_count = 0
+                for row in rows_to_update:
+                    # Remove teacher from this row
+                    if row.teacher_1_id == assignment_doc.teacher_id:
+                        frappe.db.set_value(
+                            "SIS Timetable Instance Row",
+                            row.name,
+                            "teacher_1_id",
+                            None,
+                            update_modified=False
+                        )
+                        updated_count += 1
+                    elif row.teacher_2_id == assignment_doc.teacher_id:
+                        frappe.db.set_value(
+                            "SIS Timetable Instance Row",
+                            row.name,
+                            "teacher_2_id",
+                            None,
+                            update_modified=False
+                        )
+                        updated_count += 1
+                
+                frappe.db.commit()
+                sync_summary = {
+                    "rows_updated": updated_count,
+                    "instances_checked": len(instances),
+                    "message": f"Removed teacher from {updated_count} timetable rows"
+                }
+                frappe.logger().info(f"DELETE SYNC - Updated {updated_count} timetable rows for deleted assignment {assignment_id}")
+        except Exception as sync_error:
+            frappe.logger().error(f"DELETE SYNC - Failed to sync timetable: {str(sync_error)}")
+            # Continue with deletion even if sync fails
+        
         # Delete the document
         frappe.delete_doc("SIS Subject Assignment", assignment_id)
         frappe.db.commit()
         
-        return success_response(message="Subject assignment deleted successfully")
+        message = "Subject assignment deleted successfully"
+        if sync_summary:
+            message += f". Timetable updated: {sync_summary.get('rows_updated', 0)} rows"
+        
+        return success_response({"sync_summary": sync_summary}, message=message)
         
     except Exception as e:
         frappe.log_error(f"Error deleting subject assignment {assignment_id}: {str(e)}")
