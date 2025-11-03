@@ -2206,14 +2206,15 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     frappe.logger().info(f"🔍 SYNC DEBUG - Querying rows: {len(instance_ids)} instances, {len(subject_ids)} subjects")
     frappe.logger().info(f"  - subject_ids (SIS Subject): {subject_ids}")
     
-    # Query all rows for affected instances and subjects
+    # Query all rows for affected instances and subjects (with date field)
     all_rows = frappe.db.sql("""
         SELECT 
             r.name,
             r.parent,
             r.subject_id,
             r.teacher_1_id,
-            r.teacher_2_id
+            r.teacher_2_id,
+            r.date
         FROM `tabSIS Timetable Instance Row` r
         WHERE r.parent IN ({})
           AND r.subject_id IN ({})
@@ -2311,8 +2312,9 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             continue
         
         instance_class_id = instance_info.class_id
+        row_date = row.get("date")  # ✅ Get actual date of this row
         
-        # ✅ FIX: Use pre-computed instance-level decision
+        # Get assignment info
         assignment_key = (actual_subject, instance_class_id)
         assignment_info = teacher_assignment_map.get(assignment_key)
         
@@ -2348,12 +2350,34 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                 skipped_rows.append(row.name)
             continue
         
-        # ✅ FIX: Use pre-computed instance-level decision
-        should_be_assigned = instances_to_sync.get(row.parent, {}).get(assignment_key, False)
+        # ✅ FIX: Use row date for precise filtering
+        should_be_assigned = False
+        
+        if assignment_info:
+            application_type = assignment_info["application_type"]
+            assignment_start = assignment_info["start_date"]
+            assignment_end = assignment_info["end_date"]
+            
+            if application_type == "full_year":
+                should_be_assigned = True
+            elif application_type == "from_date" and assignment_start:
+                if row_date:
+                    # ✅ Compare row's actual date with assignment dates
+                    if row_date >= assignment_start:
+                        if assignment_end:
+                            should_be_assigned = row_date <= assignment_end
+                        else:
+                            should_be_assigned = True
+                else:
+                    # Fallback to instance-level check if date is missing
+                    should_be_assigned = instances_to_sync.get(row.parent, {}).get(assignment_key, False)
         
         # ✅ DEBUG
         if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
-            debug_info.append(f"🔍 Row {row.name}: should_be_assigned={should_be_assigned} (from instance-level check)")
+            if row_date:
+                debug_info.append(f"📅 Row {row.name}: date={row_date}, should_be_assigned={should_be_assigned}")
+            else:
+                debug_info.append(f"⚠️ Row {row.name}: NO DATE, using instance-level check={should_be_assigned}")
         
         is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
         
