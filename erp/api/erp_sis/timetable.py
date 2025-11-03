@@ -727,6 +727,29 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
 
 
 def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
+    """
+    Build timetable entries from instance rows.
+    
+    🔧 NEW: Supports date-specific override rows (feature flag controlled)
+    If frappe.conf.use_date_override_logic = True:
+      - Date-specific rows (date != NULL) take precedence
+      - Pattern rows (date == NULL) fill remaining slots
+    Otherwise: Uses legacy logic (all rows treated as patterns)
+    """
+    # Feature flag check
+    use_date_override = frappe.conf.get("use_date_override_logic", False)
+    
+    if use_date_override:
+        return _build_entries_with_date_precedence(rows, week_start)
+    else:
+        return _build_entries_legacy(rows, week_start)
+
+
+def _build_entries_legacy(rows: list[dict], week_start: datetime) -> list[dict]:
+    """
+    Legacy logic: All rows treated as patterns, date calculated from day_of_week.
+    This is the SAFE default behavior.
+    """
     # Load timetable columns map for period info
     column_ids = list({r.get("timetable_column_id") for r in rows if r.get("timetable_column_id")})
     columns_map = {}
@@ -758,6 +781,114 @@ def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
             "room_name": r.get("room_name"),
             "room_type": r.get("room_type"),
         })
+    return result
+
+
+def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) -> list[dict]:
+    """
+    🎯 NEW LOGIC: Date-specific override rows take precedence over pattern rows.
+    
+    Strategy:
+    1. Separate rows into date-specific overrides vs patterns
+    2. Build entries from patterns for all days
+    3. Override with date-specific rows where they exist
+    
+    This ensures:
+    - Date-range assignments work correctly
+    - Pattern rows remain as templates
+    - No data duplication
+    """
+    # Load timetable columns map for period info
+    column_ids = list({r.get("timetable_column_id") for r in rows if r.get("timetable_column_id")})
+    columns_map = {}
+    if column_ids:
+        for col in frappe.get_all(
+            "SIS Timetable Column",
+            fields=["name", "period_priority", "period_name", "start_time", "end_time"],
+            filters={"name": ["in", column_ids]},
+        ):
+            columns_map[col.name] = col
+    
+    # Separate pattern rows vs date-specific override rows
+    pattern_rows = []
+    override_rows = []
+    
+    for r in rows:
+        if r.get("date"):
+            # Date-specific override
+            override_rows.append(r)
+        else:
+            # Pattern row (date is NULL)
+            pattern_rows.append(r)
+    
+    frappe.logger().info(f"📊 _build_entries: {len(pattern_rows)} pattern rows, {len(override_rows)} override rows")
+    
+    # Build override map: (date_str, column_id, day_of_week) → row
+    # Include day_of_week to handle multiple subjects in same period
+    override_map = {}
+    for r in override_rows:
+        date_str = r.get("date") if isinstance(r.get("date"), str) else r.get("date").strftime("%Y-%m-%d")
+        key = (date_str, r.get("timetable_column_id"), r.get("day_of_week"))
+        override_map[key] = r
+    
+    result: list[dict] = []
+    
+    # Build from pattern rows first
+    for r in pattern_rows:
+        idx = _day_of_week_to_index(r.get("day_of_week"))
+        if idx < 0:
+            continue
+        
+        d = _add_days(week_start, idx)
+        date_str = d.strftime("%Y-%m-%d")
+        key = (date_str, r.get("timetable_column_id"), r.get("day_of_week"))
+        
+        # Only use pattern if no override exists for this date/period/day
+        if key not in override_map:
+            col = columns_map.get(r.get("timetable_column_id")) or {}
+            result.append({
+                "name": r.get("name"),
+                "date": date_str,
+                "day_of_week": r.get("day_of_week"),
+                "timetable_column_id": r.get("timetable_column_id"),
+                "period_priority": col.get("period_priority"),
+                "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
+                "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
+                "class_id": r.get("class_id"),
+                "room_id": r.get("room_id"),
+                "room_name": r.get("room_name"),
+                "room_type": r.get("room_type"),
+                "is_pattern": True  # Mark as pattern for debugging
+            })
+    
+    # Add date-specific overrides (these take precedence)
+    week_end = _add_days(week_start, 6)
+    for r in override_rows:
+        row_date = r.get("date")
+        if isinstance(row_date, str):
+            from datetime import datetime
+            row_date = datetime.strptime(row_date, "%Y-%m-%d")
+        
+        # Only include overrides within this week
+        if week_start <= row_date <= week_end:
+            col = columns_map.get(r.get("timetable_column_id")) or {}
+            result.append({
+                "name": r.get("name"),
+                "date": row_date.strftime("%Y-%m-%d"),
+                "day_of_week": r.get("day_of_week"),
+                "timetable_column_id": r.get("timetable_column_id"),
+                "period_priority": col.get("period_priority"),
+                "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
+                "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
+                "class_id": r.get("class_id"),
+                "room_id": r.get("room_id"),
+                "room_name": r.get("room_name"),
+                "room_type": r.get("room_type"),
+                "is_override": True  # Mark as override for debugging
+            })
+    
+    frappe.logger().info(f"✅ _build_entries: Built {len(result)} entries ({len([e for e in result if e.get('is_pattern')])} from patterns, {len([e for e in result if e.get('is_override')])} overrides)")
+    
     return result
 
 
@@ -1137,6 +1268,7 @@ def get_class_week():
                     "name",
                     "parent",
                     "day_of_week",
+                    "date",  # ✅ ADD: Support date-specific override rows
                     "timetable_column_id",
                     "subject_id",
                     "teacher_1_id",
@@ -1153,6 +1285,7 @@ def get_class_week():
                         "name",
                         "parent_timetable_instance",
                         "day_of_week",
+                        "date",  # ✅ ADD: Support date-specific override rows
                         "timetable_column_id",
                         "subject_id",
                         "teacher_1_id",
@@ -1169,7 +1302,7 @@ def get_class_week():
             if not rows:
                 placeholders = ",".join(["%s"] * len(instance_ids))
                 sql = f"""
-                    SELECT name, parent_timetable_instance, day_of_week, timetable_column_id, subject_id, teacher_1_id, teacher_2_id
+                    SELECT name, parent_timetable_instance, day_of_week, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id
                     FROM `tabSIS Timetable Instance Row`
                     WHERE parent_timetable_instance IN ({placeholders})
                 """

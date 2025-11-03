@@ -2139,6 +2139,140 @@ def batch_update_teacher_assignments():
         return error_response(str(e))
 
 
+def _create_date_override_row(instance_id, pattern_row, specific_date, teacher_id, campus_id):
+    """
+    🎯 Create a date-specific override row from a pattern row.
+    
+    Args:
+        instance_id: Parent timetable instance
+        pattern_row: Source pattern row (date=NULL)
+        specific_date: Specific date for this override
+        teacher_id: Teacher to assign
+        campus_id: Campus ID
+    
+    Returns:
+        Created row name or None if failed
+    """
+    try:
+        # Clone pattern row data
+        override_doc = frappe.get_doc({
+            "doctype": "SIS Timetable Instance Row",
+            "parent": instance_id,
+            "parenttype": "SIS Timetable Instance",
+            "parentfield": "weekly_pattern",
+            "day_of_week": pattern_row.day_of_week,
+            "date": specific_date,  # ✅ KEY: Specific date
+            "timetable_column_id": pattern_row.timetable_column_id,
+            "period_priority": pattern_row.get("period_priority"),
+            "period_name": pattern_row.get("period_name"),
+            "subject_id": pattern_row.subject_id,
+            "room_id": pattern_row.get("room_id"),
+            # Assign teacher
+            "teacher_1_id": pattern_row.teacher_1_id or teacher_id,
+            "teacher_2_id": teacher_id if pattern_row.teacher_1_id else pattern_row.get("teacher_2_id")
+        })
+        
+        override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+        frappe.logger().info(f"✅ Created override row {override_doc.name} for date {specific_date}")
+        return override_doc.name
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ Failed to create override row for date {specific_date}: {str(e)}")
+        return None
+
+
+def _calculate_dates_in_range(start_date, end_date, day_of_week, instance_start, instance_end):
+    """
+    Calculate all dates matching day_of_week within the assignment range.
+    
+    Args:
+        start_date: Assignment start date
+        end_date: Assignment end date (None = no end)
+        day_of_week: "mon", "tue", etc
+        instance_start: Instance start date
+        instance_end: Instance end date
+    
+    Returns:
+        List of date objects
+    """
+    from datetime import timedelta
+    
+    day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+    target_weekday = day_map.get(day_of_week)
+    
+    if target_weekday is None:
+        return []
+    
+    # Find first occurrence of this weekday in instance
+    current_date = instance_start
+    current_weekday = current_date.weekday()
+    days_ahead = target_weekday - current_weekday
+    if days_ahead < 0:
+        days_ahead += 7
+    first_occurrence = current_date + timedelta(days=days_ahead)
+    
+    # Collect all dates in range
+    dates = []
+    check_date = first_occurrence
+    
+    while check_date <= instance_end:
+        # Check if within assignment range
+        if check_date >= start_date:
+            if end_date:
+                if check_date <= end_date:
+                    dates.append(check_date)
+            else:
+                dates.append(check_date)
+        
+        check_date += timedelta(days=7)  # Next week
+    
+    return dates
+
+
+def _delete_teacher_override_rows(teacher_id, subject_ids, class_ids, campus_id):
+    """
+    Delete date-specific override rows for a teacher's assignments.
+    
+    This is called when:
+    1. Assignment is deleted
+    2. Assignment date range is changed (will recreate with new dates)
+    """
+    try:
+        # Get all instances for affected classes
+        instances = frappe.get_all(
+            "SIS Timetable Instance",
+            fields=["name"],
+            filters={
+                "campus_id": campus_id,
+                "class_id": ["in", class_ids]
+            }
+        )
+        
+        if not instances:
+            return 0
+        
+        instance_ids = [i.name for i in instances]
+        
+        # Delete override rows (date IS NOT NULL) for this teacher
+        deleted_count = frappe.db.sql("""
+            DELETE FROM `tabSIS Timetable Instance Row`
+            WHERE date IS NOT NULL
+              AND parent IN ({})
+              AND subject_id IN ({})
+              AND (teacher_1_id = %s OR teacher_2_id = %s)
+        """.format(
+            ','.join(['%s'] * len(instance_ids)),
+            ','.join(['%s'] * len(subject_ids))
+        ), tuple(instance_ids + subject_ids + [teacher_id, teacher_id]))
+        
+        frappe.logger().info(f"🗑️ Deleted {deleted_count} override rows for teacher {teacher_id}")
+        return deleted_count
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ Error deleting override rows: {str(e)}")
+        return 0
+
+
 def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjects, campus_id):
     """
     🎯 SMART SYNC: Only sync affected instances, batch operations
@@ -2355,6 +2489,90 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     frappe.logger().info(f"🔄 Re-queried {len(all_rows_refreshed)} rows for PASS 2")
     
     # ✅ PASS 2: Add/update teachers (handle creates/updates)
+    # Feature flag: use override rows OR update pattern rows
+    use_date_override = frappe.conf.get("use_date_override_logic", False)
+    
+    if use_date_override:
+        # 🎯 NEW APPROACH: Create date-specific override rows
+        frappe.logger().info(f"🆕 PASS 2 (Override Mode): Creating date-specific rows")
+        
+        # For each assignment, create override rows for each date in range
+        for assignment_key, assignment_info in teacher_assignment_map.items():
+            actual_subject, class_id = assignment_key
+            application_type = assignment_info["application_type"]
+            assignment_start = assignment_info["start_date"]
+            assignment_end = assignment_info["end_date"]
+            
+            # Skip full_year assignments (they use pattern rows)
+            if application_type != "from_date" or not assignment_start:
+                continue
+            
+            # Get instance for this class
+            instance = next((i for i in instances if i.class_id == class_id), None)
+            if not instance:
+                continue
+            
+            # Get pattern rows for this subject/class (date=NULL)
+            pattern_rows = [r for r in all_rows_refreshed 
+                          if r.subject_id in subject_map.keys()
+                          and subject_map[r.subject_id] == actual_subject
+                          and r.parent == instance.name
+                          and not r.get("date")]  # Pattern rows only
+            
+            frappe.logger().info(f"📋 Found {len(pattern_rows)} pattern rows for {actual_subject} in {class_id}")
+            
+            # For each pattern row, create override rows for dates in range
+            for pattern_row in pattern_rows:
+                # Calculate dates in range
+                dates = _calculate_dates_in_range(
+                    assignment_start,
+                    assignment_end,
+                    pattern_row.day_of_week,
+                    instance.start_date,
+                    instance.end_date
+                )
+                
+                frappe.logger().info(f"📅 Creating {len(dates)} override rows for {pattern_row.day_of_week} periods")
+                
+                # Create override row for each date
+                for date in dates:
+                    override_name = _create_date_override_row(
+                        instance.name,
+                        pattern_row,
+                        date,
+                        teacher_id,
+                        campus_id
+                    )
+                    if override_name:
+                        updated_rows.append(override_name)
+        
+        frappe.logger().info(f"✅ PASS 2 (Override Mode): Created {len([r for r in updated_rows if r not in all_rows])} override rows")
+    
+    else:
+        # 🔧 LEGACY APPROACH: Update pattern rows directly
+        frappe.logger().info(f"🔄 PASS 2 (Legacy Mode): Updating pattern rows")
+        _sync_pass2_legacy(all_rows_refreshed, instances, subject_map, affected_subjects, 
+                          teacher_assignment_map, teacher_id, updated_rows, skipped_rows, debug_info)
+    
+    frappe.db.commit()
+    
+    frappe.logger().info(f"BATCH SYNC - Teacher {teacher_id}: Updated {len(updated_rows)} rows in {len(instances)} instances")
+    
+    return {
+        "rows_updated": len(updated_rows),
+        "rows_skipped": len(skipped_rows),
+        "instances_checked": len(instances),
+        "message": f"Synced {len(updated_rows)} timetable rows across {len(instances)} instances",
+        "debug_info": debug_info  # ✅ Return debug info
+    }
+
+
+def _sync_pass2_legacy(all_rows_refreshed, instances, subject_map, affected_subjects,
+                      teacher_assignment_map, teacher_id, updated_rows, skipped_rows, debug_info):
+    """
+    🔧 LEGACY PASS 2: Update pattern rows directly (old logic).
+    Kept for backward compatibility when feature flag is OFF.
+    """
     for row in all_rows_refreshed:
         actual_subject = subject_map.get(row.subject_id)
         
@@ -2440,8 +2658,8 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                         if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
                             debug_info.append(f"🔍 Row {row.name}: Calculated dates in range [{assignment_start}, {assignment_end or 'no-end'}]: {dates_in_range}")
                 else:
-                    # Fallback to instance-level check
-                    should_be_assigned = instances_to_sync.get(row.parent, {}).get(assignment_key, False)
+                    # No row date and no day_of_week - skip
+                    should_be_assigned = False
         
         # ✅ DEBUG
         if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
@@ -2504,18 +2722,6 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             # ✅ DEBUG: Track why skipped
             if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093', 'SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
                 debug_info.append(f"⏭️ SKIPPED Row {row.name}: needs_update={needs_update}, should_be={should_be_assigned}, is_assigned={is_assigned}")
-    
-    frappe.db.commit()
-    
-    frappe.logger().info(f"BATCH SYNC - Teacher {teacher_id}: Updated {len(updated_rows)} rows in {len(instances)} instances")
-    
-    return {
-        "rows_updated": len(updated_rows),
-        "rows_skipped": len(skipped_rows),
-        "instances_checked": len(instances),
-        "message": f"Synced {len(updated_rows)} timetable rows across {len(instances)} instances",
-        "debug_info": debug_info  # ✅ Return debug info
-    }
 
 
 def _sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: list, campus_id: str, assignment_start_date=None, assignment_end_date=None) -> dict:
