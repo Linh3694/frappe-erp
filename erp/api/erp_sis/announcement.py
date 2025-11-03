@@ -294,7 +294,8 @@ def create_announcement():
             "content_vn": content_vn,
             "recipients": json.dumps(recipients_data),
             "recipient_type": data.get("recipient_type", "specific"),
-            "status": data.get("status", "draft")
+            "status": data.get("status", "draft"),
+            "sent_by": frappe.session.user  # Always set sent_by to current user
         })
 
         announcement.insert()
@@ -302,7 +303,7 @@ def create_announcement():
         # Get the created announcement data
         created_announcement = frappe.get_doc("SIS Announcement", announcement.name)
 
-        # If status is "sent", send notifications immediately
+        # If status is "sent", send notifications immediately and set sent_at
         if created_announcement.status == "sent":
             try:
                 from erp.utils.notification_handler import send_bulk_parent_notifications
@@ -328,7 +329,6 @@ def create_announcement():
                 
                 # Update with send info
                 created_announcement.sent_at = frappe.utils.now()
-                created_announcement.sent_by = frappe.session.user
                 created_announcement.sent_count = notification_result.get("total_parents", 0)
                 created_announcement.save()
                 
@@ -711,7 +711,6 @@ def send_announcement():
             # Update status to sent and store sent count
             announcement.status = "sent"
             announcement.sent_at = frappe.utils.now()
-            announcement.sent_by = frappe.session.user
             announcement.sent_count = notification_result.get("total_parents", 0)
             announcement.save()
 
