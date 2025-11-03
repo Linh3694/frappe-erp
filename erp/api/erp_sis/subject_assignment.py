@@ -2300,11 +2300,62 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             if should_sync_instance:
                 debug_info.append(f"✅ Instance {instance_id} ({instance_start} to {instance_end}): WILL sync {assignment_key}")
     
-    # OPTIMIZATION 5: Batch update (minimize DB calls)
+    # OPTIMIZATION 5: Two-pass update to handle delete-then-create properly
+    # Pass 1: Remove teachers from rows where assignment no longer exists
+    # Pass 2: Add teachers to rows where assignment now exists
     updated_rows = []
     skipped_rows = []
     
+    # ✅ PASS 1: Remove teachers first (handle deletions)
     for row in all_rows:
+        actual_subject = subject_map.get(row.subject_id)
+        if not actual_subject or actual_subject not in affected_subjects:
+            continue
+        
+        instance_info = next((i for i in instances if i.name == row.parent), None)
+        if not instance_info:
+            continue
+        
+        instance_class_id = instance_info.class_id
+        assignment_key = (actual_subject, instance_class_id)
+        assignment_info = teacher_assignment_map.get(assignment_key)
+        
+        # If no assignment exists, remove teacher if present
+        if not assignment_info:
+            is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
+            if is_assigned:
+                if row.teacher_1_id == teacher_id:
+                    frappe.db.set_value("SIS Timetable Instance Row", row.name, "teacher_1_id", None, update_modified=False)
+                    updated_rows.append(row.name)
+                    frappe.logger().info(f"🗑️ PASS1 REMOVED - Row {row.name}: Removed {teacher_id} from teacher_1_id (assignment deleted)")
+                if row.teacher_2_id == teacher_id:
+                    frappe.db.set_value("SIS Timetable Instance Row", row.name, "teacher_2_id", None, update_modified=False)
+                    updated_rows.append(row.name)
+                    frappe.logger().info(f"🗑️ PASS1 REMOVED - Row {row.name}: Removed {teacher_id} from teacher_2_id (assignment deleted)")
+    
+    frappe.db.commit()
+    frappe.logger().info(f"🗑️ PASS 1 Complete: Removed teacher from {len(updated_rows)} rows")
+    
+    # ✅ Re-query rows to get fresh data after PASS 1 deletions
+    all_rows_refreshed = frappe.db.sql("""
+        SELECT 
+            r.name,
+            r.parent,
+            r.subject_id,
+            r.teacher_1_id,
+            r.teacher_2_id,
+            r.date,
+            r.day_of_week
+        FROM `tabSIS Timetable Instance Row` r
+        WHERE r.parent IN ({})
+          AND r.subject_id IN ({})
+    """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))),
+    tuple(instance_ids + subject_ids), as_dict=True)
+    
+    frappe.logger().info(f"🔄 Re-queried {len(all_rows_refreshed)} rows for PASS 2")
+    
+    # ✅ PASS 2: Add/update teachers (handle creates/updates)
+    for row in all_rows_refreshed:
         actual_subject = subject_map.get(row.subject_id)
         
         if not actual_subject:
@@ -2333,36 +2384,9 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         assignment_key = (actual_subject, instance_class_id)
         assignment_info = teacher_assignment_map.get(assignment_key)
         
+        # ✅ PASS 2: Skip if no assignment (already handled in PASS 1)
         if not assignment_info:
-            # 🔧 FIX: If assignment doesn't exist (was deleted), remove teacher from this row
-            frappe.logger().warning(f"⚠️ SYNC DEBUG - Row {row.name}: No assignment found for key {assignment_key} - WILL REMOVE TEACHER")
-            frappe.logger().warning(f"  - Available keys: {list(teacher_assignment_map.keys())}")
-            
-            is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
-            if is_assigned:
-                # Remove teacher from this row since assignment no longer exists
-                if row.teacher_1_id == teacher_id:
-                    frappe.db.set_value(
-                        "SIS Timetable Instance Row",
-                        row.name,
-                        "teacher_1_id",
-                        None,
-                        update_modified=False
-                    )
-                    updated_rows.append(row.name)
-                    frappe.logger().info(f"✅ REMOVED - Row {row.name}: Removed {teacher_id} from teacher_1_id (assignment deleted)")
-                elif row.teacher_2_id == teacher_id:
-                    frappe.db.set_value(
-                        "SIS Timetable Instance Row",
-                        row.name,
-                        "teacher_2_id",
-                        None,
-                        update_modified=False
-                    )
-                    updated_rows.append(row.name)
-                    frappe.logger().info(f"✅ REMOVED - Row {row.name}: Removed {teacher_id} from teacher_2_id (assignment deleted)")
-            else:
-                skipped_rows.append(row.name)
+            skipped_rows.append(row.name)
             continue
         
         # ✅ FIX: Calculate dates on-the-fly from pattern
@@ -2425,6 +2449,10 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         
         is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
         
+        # ✅ DEBUG: Log current state for specific rows
+        if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
+            debug_info.append(f"🔍 Row {row.name} STATE: teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}, is_assigned={is_assigned}, target_teacher={teacher_id}")
+        
         needs_update = False
         update_field = None
         new_value = None
@@ -2441,6 +2469,8 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                 new_value = teacher_id
             else:
                 # Both slots full - skip (don't overwrite other teachers)
+                if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
+                    debug_info.append(f"⚠️ Row {row.name} SKIP REASON: Both slots full - teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}")
                 skipped_rows.append(row.name)
                 continue
         elif not should_be_assigned and is_assigned:
@@ -2466,13 +2496,13 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             updated_rows.append(row.name)
             
             # ✅ DEBUG
-            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093', 'SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
                 debug_info.append(f"✅ UPDATED Row {row.name}: {update_field} = {new_value}")
         else:
             skipped_rows.append(row.name)
             
             # ✅ DEBUG: Track why skipped
-            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093', 'SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
                 debug_info.append(f"⏭️ SKIPPED Row {row.name}: needs_update={needs_update}, should_be={should_be_assigned}, is_assigned={is_assigned}")
     
     frappe.db.commit()
