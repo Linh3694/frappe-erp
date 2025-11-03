@@ -2207,7 +2207,7 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     frappe.logger().info(f"🔍 SYNC DEBUG - Querying rows: {len(instance_ids)} instances, {len(subject_ids)} subjects")
     frappe.logger().info(f"  - subject_ids (SIS Subject): {subject_ids}")
     
-    # Query all rows for affected instances and subjects (with date field)
+    # Query all rows for affected instances and subjects (with date and day_of_week)
     all_rows = frappe.db.sql("""
         SELECT 
             r.name,
@@ -2215,7 +2215,8 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             r.subject_id,
             r.teacher_1_id,
             r.teacher_2_id,
-            r.date
+            r.date,
+            r.day_of_week
         FROM `tabSIS Timetable Instance Row` r
         WHERE r.parent IN ({})
           AND r.subject_id IN ({})
@@ -2389,16 +2390,21 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                         
                         # Check if ANY occurrence falls within assignment range
                         check_date = first_occurrence
+                        dates_in_range = []
                         while check_date <= instance_end_date:
                             if check_date >= assignment_start:
                                 if assignment_end:
                                     if check_date <= assignment_end:
+                                        dates_in_range.append(str(check_date))
                                         should_be_assigned = True
-                                        break
                                 else:
+                                    dates_in_range.append(str(check_date))
                                     should_be_assigned = True
-                                    break
                             check_date += timedelta(days=7)  # Next week
+                        
+                        # ✅ DEBUG: Show which dates matched
+                        if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-3267862', 'SIS-TIMETABLE-INSTANCE-ROW-3267863']:
+                            debug_info.append(f"🔍 Row {row.name}: Calculated dates in range [{assignment_start}, {assignment_end or 'no-end'}]: {dates_in_range}")
                 else:
                     # Fallback to instance-level check
                     should_be_assigned = instances_to_sync.get(row.parent, {}).get(assignment_key, False)
