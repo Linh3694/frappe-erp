@@ -2207,6 +2207,24 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     frappe.logger().info(f"🔍 SYNC DEBUG - Querying rows: {len(instance_ids)} instances, {len(subject_ids)} subjects")
     frappe.logger().info(f"  - subject_ids (SIS Subject): {subject_ids}")
     
+    # 🔧 FIX: First, clear teacher from ALL rows of affected subject/class (including future instances)
+    # This ensures old assignments don't persist in instances outside the new date range
+    for class_id in affected_classes:
+        for subject_id in subject_ids:
+            frappe.db.sql("""
+                UPDATE `tabSIS Timetable Instance Row` r
+                INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
+                SET 
+                    r.teacher_1_id = CASE WHEN r.teacher_1_id = %s THEN NULL ELSE r.teacher_1_id END,
+                    r.teacher_2_id = CASE WHEN r.teacher_2_id = %s THEN NULL ELSE r.teacher_2_id END
+                WHERE i.class_id = %s
+                  AND r.subject_id = %s
+                  AND (r.teacher_1_id = %s OR r.teacher_2_id = %s)
+            """, (teacher_id, teacher_id, class_id, subject_id, teacher_id, teacher_id))
+    
+    frappe.db.commit()
+    debug_info.append(f"🧹 Cleared teacher {teacher_id} from ALL rows of affected subjects/classes")
+    
     # Query all rows for affected instances and subjects (with date and day_of_week)
     all_rows = frappe.db.sql("""
         SELECT 
