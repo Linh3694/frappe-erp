@@ -2183,7 +2183,7 @@ def _create_date_override_row(instance_id, pattern_row, specific_date, teacher_i
     Args:
         instance_id: Parent timetable instance
         pattern_row: Source pattern row (date=NULL)
-        specific_date: Specific date for this override
+        specific_date: Specific date for this override (date or datetime)
         teacher_id: Teacher to assign
         campus_id: Campus ID
     
@@ -2191,6 +2191,10 @@ def _create_date_override_row(instance_id, pattern_row, specific_date, teacher_i
         Created row name or None if failed
     """
     try:
+        # Ensure specific_date is a date object (not datetime)
+        if hasattr(specific_date, 'date'):
+            specific_date = specific_date.date()
+        
         # Clone pattern row data
         override_doc = frappe.get_doc({
             "doctype": "SIS Timetable Instance Row",

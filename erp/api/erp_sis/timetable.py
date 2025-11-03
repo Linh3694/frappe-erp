@@ -819,7 +819,13 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
     # Include day_of_week to handle multiple subjects in same period
     override_map = {}
     for r in override_rows:
-        date_str = r.get("date") if isinstance(r.get("date"), str) else r.get("date").strftime("%Y-%m-%d")
+        row_date = r.get("date")
+        if isinstance(row_date, str):
+            date_str = row_date
+        elif hasattr(row_date, 'strftime'):
+            date_str = row_date.strftime("%Y-%m-%d")
+        else:
+            continue  # Skip invalid dates
         key = (date_str, r.get("timetable_column_id"), r.get("day_of_week"))
         override_map[key] = r
     
@@ -859,10 +865,18 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
         row_date = r.get("date")
         if isinstance(row_date, str):
             from datetime import datetime
-            row_date = datetime.strptime(row_date, "%Y-%m-%d")
+            row_date = datetime.strptime(row_date, "%Y-%m-%d").date()
+        
+        # Convert datetime to date for comparison
+        if hasattr(row_date, 'date'):
+            row_date = row_date.date()
+        
+        # Convert week_start/week_end to date for comparison
+        week_start_date = week_start.date() if hasattr(week_start, 'date') else week_start
+        week_end_date = week_end.date() if hasattr(week_end, 'date') else week_end
         
         # Only include overrides within this week
-        if week_start <= row_date <= week_end:
+        if week_start_date <= row_date <= week_end_date:
             col = columns_map.get(r.get("timetable_column_id")) or {}
             result.append({
                 "name": r.get("name"),

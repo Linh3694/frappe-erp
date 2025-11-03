@@ -1864,8 +1864,19 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                 specific_date = week_start + timedelta(days=day_num)
                 
                 # ✅ Skip dates that have override rows (precedence logic)
+                # Helper to safely compare dates
+                def _date_equals(d1, d2):
+                    if d1 is None or d2 is None:
+                        return False
+                    # Convert both to date objects
+                    if hasattr(d1, 'date'):
+                        d1 = d1.date()
+                    if hasattr(d2, 'date'):
+                        d2 = d2.date()
+                    return d1 == d2
+                
                 has_override = any(
-                    o.get("date") == specific_date and 
+                    _date_equals(o.get("date"), specific_date) and 
                     o.timetable_column_id == row.timetable_column_id and
                     o.day_of_week == normalized_day
                     for o in override_rows
@@ -1994,6 +2005,9 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                 if isinstance(specific_date, str):
                     from datetime import datetime
                     specific_date = datetime.strptime(specific_date, "%Y-%m-%d").date()
+                elif hasattr(specific_date, 'date'):
+                    # Convert datetime to date
+                    specific_date = specific_date.date()
                 
                 # Create teacher timetable entries
                 teachers = []
