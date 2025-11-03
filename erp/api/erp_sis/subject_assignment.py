@@ -604,18 +604,21 @@ def create_subject_assignment():
                 # 🔧 FIX: Sync Teacher Timetable (materialized view) after Instance Row sync
                 if sync_summary.get("rows_updated", 0) > 0:
                     try:
-                        # Get start_date from first assignment for Teacher Timetable sync
+                        # ✅ FIX: Get start_date AND end_date from first assignment for Teacher Timetable sync
                         first_assignment_start_date = None
+                        first_assignment_end_date = None
                         if created_names:
                             first_assignment = frappe.get_doc("SIS Subject Assignment", created_names[0])
                             first_assignment_start_date = getattr(first_assignment, 'start_date', None)
+                            first_assignment_end_date = getattr(first_assignment, 'end_date', None)
                         
-                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Starting for teacher {teacher_id}, {len(affected_classes)} classes, start_date: {first_assignment_start_date}")
+                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Starting for teacher {teacher_id}, {len(affected_classes)} classes, start_date: {first_assignment_start_date}, end_date: {first_assignment_end_date}")
                         teacher_sync_result = _sync_teacher_timetable_after_assignment(
                             teacher_id=teacher_id,
                             affected_classes=list(affected_classes),
                             campus_id=campus_id,
-                            assignment_start_date=first_assignment_start_date  # ✅ Pass start_date
+                            assignment_start_date=first_assignment_start_date,
+                            assignment_end_date=first_assignment_end_date  # ✅ Pass end_date
                         )
                         teacher_timetable_sync_summary = teacher_sync_result
                         frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Completed: {teacher_sync_result}")
@@ -996,13 +999,16 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                 # 🔧 FIX: Also sync Teacher Timetable (materialized view) after Instance Row sync
                 if sync_result and sync_result.get('summary', {}).get('rows_updated', 0) > 0:
                     try:
-                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Starting for updated assignment, start_date: {getattr(assignment_doc, 'start_date', None)}")
+                        assignment_start = getattr(assignment_doc, 'start_date', None)
+                        assignment_end = getattr(assignment_doc, 'end_date', None)
+                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Starting for updated assignment, start_date: {assignment_start}, end_date: {assignment_end}")
                         affected_classes = [assignment_doc.class_id] if assignment_doc.class_id else []
                         teacher_sync_result = _sync_teacher_timetable_after_assignment(
                             teacher_id=teacher_id or assignment_doc.teacher_id,
                             affected_classes=affected_classes,
                             campus_id=campus_id,
-                            assignment_start_date=getattr(assignment_doc, 'start_date', None)  # ✅ Pass start_date
+                            assignment_start_date=assignment_start,
+                            assignment_end_date=assignment_end  # ✅ Pass end_date
                         )
                         debug_info['teacher_timetable_sync'] = teacher_sync_result
                         frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Completed: {teacher_sync_result}")
@@ -2207,23 +2213,8 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     frappe.logger().info(f"🔍 SYNC DEBUG - Querying rows: {len(instance_ids)} instances, {len(subject_ids)} subjects")
     frappe.logger().info(f"  - subject_ids (SIS Subject): {subject_ids}")
     
-    # 🔧 FIX: First, clear teacher from ALL rows of affected subject/class (including future instances)
-    # This ensures old assignments don't persist in instances outside the new date range
-    for class_id in affected_classes:
-        for subject_id in subject_ids:
-            frappe.db.sql("""
-                UPDATE `tabSIS Timetable Instance Row` r
-                INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
-                SET 
-                    r.teacher_1_id = CASE WHEN r.teacher_1_id = %s THEN NULL ELSE r.teacher_1_id END,
-                    r.teacher_2_id = CASE WHEN r.teacher_2_id = %s THEN NULL ELSE r.teacher_2_id END
-                WHERE i.class_id = %s
-                  AND r.subject_id = %s
-                  AND (r.teacher_1_id = %s OR r.teacher_2_id = %s)
-            """, (teacher_id, teacher_id, class_id, subject_id, teacher_id, teacher_id))
-    
-    frappe.db.commit()
-    debug_info.append(f"🧹 Cleared teacher {teacher_id} from ALL rows of affected subjects/classes")
+    # ✅ REMOVED: Don't clear ALL rows - we'll handle clearing per-row based on date logic below
+    # This prevents accidentally removing teachers from valid date ranges
     
     # Query all rows for affected instances and subjects (with date and day_of_week)
     all_rows = frappe.db.sql("""
@@ -2497,7 +2488,7 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     }
 
 
-def _sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: list, campus_id: str, assignment_start_date=None) -> dict:
+def _sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: list, campus_id: str, assignment_start_date=None, assignment_end_date=None) -> dict:
     """
     🔧 FIX: Sync Teacher Timetable (materialized view) after Subject Assignment sync
     
@@ -2508,6 +2499,7 @@ def _sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: 
         affected_classes: List of class IDs affected
         campus_id: Campus ID
         assignment_start_date: Date from which assignment applies (None = all dates)
+        assignment_end_date: Date until which assignment applies (None = no end date)
     """
     from datetime import datetime, timedelta
     
@@ -2516,15 +2508,22 @@ def _sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: 
     error_count = 0
     
     try:
-        frappe.logger().info(f"🔍 TEACHER TIMETABLE SYNC - Processing teacher {teacher_id}, classes: {affected_classes}, start_date: {assignment_start_date}")
+        frappe.logger().info(f"🔍 TEACHER TIMETABLE SYNC - Processing teacher {teacher_id}, classes: {affected_classes}, start_date: {assignment_start_date}, end_date: {assignment_end_date}")
         
         # Determine sync start date
         today = frappe.utils.getdate()
         sync_start_date = assignment_start_date if assignment_start_date else today
         
+        # Determine sync end date
+        sync_end_date = assignment_end_date if assignment_end_date else None
+        
         # Ensure sync_start_date is a date object
         if isinstance(sync_start_date, str):
             sync_start_date = frappe.utils.getdate(sync_start_date)
+        
+        # Ensure sync_end_date is a date object (if provided)
+        if sync_end_date and isinstance(sync_end_date, str):
+            sync_end_date = frappe.utils.getdate(sync_end_date)
         
         # Get all active timetable instances for affected classes
         instances = frappe.db.sql("""
@@ -2600,8 +2599,12 @@ def _sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: 
                             day_offset = day_map[day_of_week]
                             entry_date = current_week_start + timedelta(days=day_offset)
                             
-                            # Skip if entry_date is before sync_start_date or after instance end_date
+                            # ✅ FIX: Skip if entry_date is outside assignment date range
                             if entry_date < sync_start_date or entry_date > end_date:
+                                continue
+                            
+                            # ✅ FIX: Also check assignment end_date if specified
+                            if sync_end_date and entry_date > sync_end_date:
                                 continue
                             
                             # Check if entry already exists
