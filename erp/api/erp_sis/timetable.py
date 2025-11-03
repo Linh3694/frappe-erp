@@ -730,19 +730,11 @@ def _build_entries(rows: list[dict], week_start: datetime) -> list[dict]:
     """
     Build timetable entries from instance rows.
     
-    🔧 NEW: Supports date-specific override rows (feature flag controlled)
-    If frappe.conf.use_date_override_logic = True:
-      - Date-specific rows (date != NULL) take precedence
-      - Pattern rows (date == NULL) fill remaining slots
-    Otherwise: Uses legacy logic (all rows treated as patterns)
+    🎯 Date-specific override rows take precedence over pattern rows.
+    - Date-specific rows (date != NULL) override pattern rows for specific dates
+    - Pattern rows (date == NULL) fill remaining slots
     """
-    # Feature flag check
-    use_date_override = frappe.conf.get("use_date_override_logic", False)
-    
-    if use_date_override:
-        return _build_entries_with_date_precedence(rows, week_start)
-    else:
-        return _build_entries_legacy(rows, week_start)
+    return _build_entries_with_date_precedence(rows, week_start)
 
 
 def _build_entries_legacy(rows: list[dict], week_start: datetime) -> list[dict]:

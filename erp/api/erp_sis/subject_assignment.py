@@ -970,29 +970,26 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
             # Store old teacher for bulk timetable update
             old_teacher_id = frappe.db.get_value("SIS Subject Assignment", assignment_id, "teacher_id")
             
-            # 🎯 NEW: Delete old override rows if feature flag is ON and assignment changed
-            # This ensures clean slate for recreating with new date range
-            use_date_override = frappe.conf.get("use_date_override_logic", False)
-            if use_date_override:
-                try:
-                    # Get actual_subject_id mapping to subject_ids
-                    subject_mapping = frappe.db.sql("""
-                        SELECT name FROM `tabSIS Subject`
-                        WHERE actual_subject_id = %s AND campus_id = %s
-                    """, (assignment_doc.actual_subject_id, campus_id), as_dict=True)
-                    
-                    if subject_mapping:
-                        subject_ids = [s.name for s in subject_mapping]
-                        override_deleted = _delete_teacher_override_rows(
-                            old_teacher_id,
-                            subject_ids,
-                            [assignment_doc.class_id],
-                            campus_id
-                        )
-                        frappe.logger().info(f"UPDATE SYNC - Deleted {override_deleted} old override rows before update")
-                        debug_info['override_rows_deleted'] = override_deleted
-                except Exception as override_del_error:
-                    frappe.logger().error(f"UPDATE SYNC - Failed to delete old override rows: {str(override_del_error)}")
+            # 🎯 Delete old override rows to ensure clean slate for recreating with new date range
+            try:
+                # Get actual_subject_id mapping to subject_ids
+                subject_mapping = frappe.db.sql("""
+                    SELECT name FROM `tabSIS Subject`
+                    WHERE actual_subject_id = %s AND campus_id = %s
+                """, (assignment_doc.actual_subject_id, campus_id), as_dict=True)
+                
+                if subject_mapping:
+                    subject_ids = [s.name for s in subject_mapping]
+                    override_deleted = _delete_teacher_override_rows(
+                        old_teacher_id,
+                        subject_ids,
+                        [assignment_doc.class_id],
+                        campus_id
+                    )
+                    frappe.logger().info(f"UPDATE SYNC - Deleted {override_deleted} old override rows before update")
+                    debug_info['override_rows_deleted'] = override_deleted
+            except Exception as override_del_error:
+                frappe.logger().error(f"UPDATE SYNC - Failed to delete old override rows: {str(override_del_error)}")
             
             assignment_doc.save()
             frappe.db.commit()
@@ -1253,21 +1250,19 @@ def delete_subject_assignment(assignment_id=None):
                 
                 frappe.db.commit()
                 
-                # 🎯 NEW: Delete override rows if feature flag is ON
+                # 🎯 Delete override rows for this assignment
                 override_deleted = 0
-                use_date_override = frappe.conf.get("use_date_override_logic", False)
-                if use_date_override:
-                    try:
-                        frappe.logger().info(f"DELETE SYNC - Deleting override rows for teacher {assignment_doc.teacher_id}")
-                        override_deleted = _delete_teacher_override_rows(
-                            assignment_doc.teacher_id,
-                            subject_ids,
-                            [assignment_doc.class_id],
-                            campus_id
-                        )
-                        frappe.logger().info(f"DELETE SYNC - Deleted {override_deleted} override rows")
-                    except Exception as override_error:
-                        frappe.logger().error(f"DELETE SYNC - Failed to delete override rows: {str(override_error)}")
+                try:
+                    frappe.logger().info(f"DELETE SYNC - Deleting override rows for teacher {assignment_doc.teacher_id}")
+                    override_deleted = _delete_teacher_override_rows(
+                        assignment_doc.teacher_id,
+                        subject_ids,
+                        [assignment_doc.class_id],
+                        campus_id
+                    )
+                    frappe.logger().info(f"DELETE SYNC - Deleted {override_deleted} override rows")
+                except Exception as override_error:
+                    frappe.logger().error(f"DELETE SYNC - Failed to delete override rows: {str(override_error)}")
                 
                 sync_summary = {
                     "rows_updated": updated_count,
@@ -2530,71 +2525,60 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     
     frappe.logger().info(f"🔄 Re-queried {len(all_rows_refreshed)} rows for PASS 2")
     
-    # ✅ PASS 2: Add/update teachers (handle creates/updates)
-    # Feature flag: use override rows OR update pattern rows
-    use_date_override = frappe.conf.get("use_date_override_logic", False)
+    # ✅ PASS 2: Create date-specific override rows for date-range assignments
+    frappe.logger().info(f"🆕 PASS 2: Creating date-specific override rows")
     
-    if use_date_override:
-        # 🎯 NEW APPROACH: Create date-specific override rows
-        frappe.logger().info(f"🆕 PASS 2 (Override Mode): Creating date-specific rows")
+    # For each assignment, create override rows for each date in range
+    for assignment_key, assignment_info in teacher_assignment_map.items():
+        actual_subject, class_id = assignment_key
+        application_type = assignment_info["application_type"]
+        assignment_start = assignment_info["start_date"]
+        assignment_end = assignment_info["end_date"]
         
-        # For each assignment, create override rows for each date in range
-        for assignment_key, assignment_info in teacher_assignment_map.items():
-            actual_subject, class_id = assignment_key
-            application_type = assignment_info["application_type"]
-            assignment_start = assignment_info["start_date"]
-            assignment_end = assignment_info["end_date"]
+        # Skip full_year assignments (they use pattern rows)
+        if application_type != "from_date" or not assignment_start:
+            continue
+        
+        # Get instance for this class
+        instance = next((i for i in instances if i.class_id == class_id), None)
+        if not instance:
+            continue
+        
+        # Get pattern rows for this subject/class (date=NULL)
+        pattern_rows = [r for r in all_rows_refreshed 
+                      if r.subject_id in subject_map.keys()
+                      and subject_map[r.subject_id] == actual_subject
+                      and r.parent == instance.name
+                      and not r.get("date")]  # Pattern rows only
+        
+        frappe.logger().info(f"📋 Found {len(pattern_rows)} pattern rows for {actual_subject} in {class_id}")
+        
+        # For each pattern row, create override rows for dates in range
+        for pattern_row in pattern_rows:
+            # Calculate dates in range
+            dates = _calculate_dates_in_range(
+                assignment_start,
+                assignment_end,
+                pattern_row.day_of_week,
+                instance.start_date,
+                instance.end_date
+            )
             
-            # Skip full_year assignments (they use pattern rows)
-            if application_type != "from_date" or not assignment_start:
-                continue
+            frappe.logger().info(f"📅 Creating {len(dates)} override rows for {pattern_row.day_of_week} periods")
             
-            # Get instance for this class
-            instance = next((i for i in instances if i.class_id == class_id), None)
-            if not instance:
-                continue
-            
-            # Get pattern rows for this subject/class (date=NULL)
-            pattern_rows = [r for r in all_rows_refreshed 
-                          if r.subject_id in subject_map.keys()
-                          and subject_map[r.subject_id] == actual_subject
-                          and r.parent == instance.name
-                          and not r.get("date")]  # Pattern rows only
-            
-            frappe.logger().info(f"📋 Found {len(pattern_rows)} pattern rows for {actual_subject} in {class_id}")
-            
-            # For each pattern row, create override rows for dates in range
-            for pattern_row in pattern_rows:
-                # Calculate dates in range
-                dates = _calculate_dates_in_range(
-                    assignment_start,
-                    assignment_end,
-                    pattern_row.day_of_week,
-                    instance.start_date,
-                    instance.end_date
+            # Create override row for each date
+            for date in dates:
+                override_name = _create_date_override_row(
+                    instance.name,
+                    pattern_row,
+                    date,
+                    teacher_id,
+                    campus_id
                 )
-                
-                frappe.logger().info(f"📅 Creating {len(dates)} override rows for {pattern_row.day_of_week} periods")
-                
-                # Create override row for each date
-                for date in dates:
-                    override_name = _create_date_override_row(
-                        instance.name,
-                        pattern_row,
-                        date,
-                        teacher_id,
-                        campus_id
-                    )
-                    if override_name:
-                        updated_rows.append(override_name)
-        
-        frappe.logger().info(f"✅ PASS 2 (Override Mode): Created {len([r for r in updated_rows if r not in all_rows])} override rows")
+                if override_name:
+                    updated_rows.append(override_name)
     
-    else:
-        # 🔧 LEGACY APPROACH: Update pattern rows directly
-        frappe.logger().info(f"🔄 PASS 2 (Legacy Mode): Updating pattern rows")
-        _sync_pass2_legacy(all_rows_refreshed, instances, subject_map, affected_subjects, 
-                          teacher_assignment_map, teacher_id, updated_rows, skipped_rows, debug_info)
+    frappe.logger().info(f"✅ PASS 2: Created {len(updated_rows)} override rows")
     
     frappe.db.commit()
     

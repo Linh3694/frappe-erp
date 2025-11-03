@@ -1818,10 +1818,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         except Exception as load_error:
             logs.append(f"⚠️  Error loading existing student entries: {str(load_error)}")
         
-        # 🎯 NEW: Feature flag for override row handling
-        use_date_override = frappe.conf.get("use_date_override_logic", False)
-        
-        # Separate pattern vs override rows
+        # 🎯 Separate pattern vs override rows
         pattern_rows = []
         override_rows = []
         
@@ -1866,17 +1863,15 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             for week_start in all_weeks:
                 specific_date = week_start + timedelta(days=day_num)
                 
-                # ✅ NEW: If using override logic, skip dates that have override rows
-                if use_date_override:
-                    # Check if there's an override row for this date/column
-                    has_override = any(
-                        o.get("date") == specific_date and 
-                        o.timetable_column_id == row.timetable_column_id and
-                        o.day_of_week == normalized_day
-                        for o in override_rows
-                    )
-                    if has_override:
-                        continue  # Skip, will be handled by override row
+                # ✅ Skip dates that have override rows (precedence logic)
+                has_override = any(
+                    o.get("date") == specific_date and 
+                    o.timetable_column_id == row.timetable_column_id and
+                    o.day_of_week == normalized_day
+                    for o in override_rows
+                )
+                if has_override:
+                    continue  # Skip, will be handled by override row
                 
                 # Skip if date is outside the timetable period
                 if specific_date < start_dt or specific_date > end_dt:
@@ -1969,8 +1964,8 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
                         continue
         
-        # 🎯 NEW: Process override rows (date-specific)
-        if use_date_override and override_rows:
+        # 🎯 Process override rows (date-specific)
+        if override_rows:
             logs.append(f"📅 [sync_materialized_views] Processing {len(override_rows)} override rows")
             
             for row in override_rows:
