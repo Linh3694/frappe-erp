@@ -1156,6 +1156,8 @@ def delete_subject_assignment(assignment_id=None):
         # 🔧 BEFORE DELETE: Sync TKB to remove teacher from timetable rows
         sync_summary = {}
         try:
+            frappe.logger().info(f"DELETE SYNC - Starting for assignment: teacher={assignment_doc.teacher_id}, class={assignment_doc.class_id}, actual_subject={assignment_doc.actual_subject_id}")
+            
             # Get all timetable instances for this class
             instances = frappe.db.sql("""
                 SELECT name, class_id, start_date, end_date
@@ -1165,24 +1167,40 @@ def delete_subject_assignment(assignment_id=None):
                   AND end_date >= %s
             """, (campus_id, assignment_doc.class_id, frappe.utils.getdate()), as_dict=True)
             
+            frappe.logger().info(f"DELETE SYNC - Found {len(instances)} timetable instances for class {assignment_doc.class_id}")
+            
             if instances:
-                # Get rows with this subject
+                # First find the SIS Subject that corresponds to this actual_subject_id
+                subject_mapping = frappe.db.sql("""
+                    SELECT name FROM `tabSIS Subject`
+                    WHERE actual_subject_id = %s AND campus_id = %s
+                """, (assignment_doc.actual_subject_id, campus_id), as_dict=True)
+                
+                frappe.logger().info(f"DELETE SYNC - Subject mapping for actual_subject {assignment_doc.actual_subject_id}: {[s.name for s in subject_mapping]}")
+                
+                if not subject_mapping:
+                    frappe.logger().warning(f"DELETE SYNC - No SIS Subject found for actual_subject_id {assignment_doc.actual_subject_id}")
+                    return success_response({"sync_summary": {"rows_updated": 0, "message": "No matching SIS Subject found"}}, message="Subject assignment deleted successfully")
+                
+                subject_ids = [s.name for s in subject_mapping]
                 instance_ids = [i.name for i in instances]
+                
+                # Get rows with this subject
                 rows_to_update = frappe.db.sql("""
                     SELECT name, teacher_1_id, teacher_2_id
                     FROM `tabSIS Timetable Instance Row`
                     WHERE parent IN ({})
-                      AND subject_id IN (
-                        SELECT name FROM `tabSIS Subject`
-                        WHERE actual_subject_id = %s AND campus_id = %s
-                      )
-                """.format(','.join(['%s'] * len(instance_ids))), 
-                tuple(instance_ids + [assignment_doc.actual_subject_id, campus_id]), as_dict=True)
+                      AND subject_id IN ({})
+                """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))), 
+                tuple(instance_ids + subject_ids), as_dict=True)
+                
+                frappe.logger().info(f"DELETE SYNC - Found {len(rows_to_update)} timetable rows to check")
                 
                 updated_count = 0
                 for row in rows_to_update:
                     # Remove teacher from this row
                     if row.teacher_1_id == assignment_doc.teacher_id:
+                        frappe.logger().info(f"DELETE SYNC - Removing {assignment_doc.teacher_id} from teacher_1_id of row {row.name}")
                         frappe.db.set_value(
                             "SIS Timetable Instance Row",
                             row.name,
@@ -1192,6 +1210,7 @@ def delete_subject_assignment(assignment_id=None):
                         )
                         updated_count += 1
                     elif row.teacher_2_id == assignment_doc.teacher_id:
+                        frappe.logger().info(f"DELETE SYNC - Removing {assignment_doc.teacher_id} from teacher_2_id of row {row.name}")
                         frappe.db.set_value(
                             "SIS Timetable Instance Row",
                             row.name,
@@ -1207,9 +1226,12 @@ def delete_subject_assignment(assignment_id=None):
                     "instances_checked": len(instances),
                     "message": f"Removed teacher from {updated_count} timetable rows"
                 }
-                frappe.logger().info(f"DELETE SYNC - Updated {updated_count} timetable rows for deleted assignment {assignment_id}")
+                frappe.logger().info(f"DELETE SYNC - Completed: {updated_count} rows updated")
+            else:
+                frappe.logger().info(f"DELETE SYNC - No active instances found for class {assignment_doc.class_id}")
         except Exception as sync_error:
-            frappe.logger().error(f"DELETE SYNC - Failed to sync timetable: {str(sync_error)}")
+            frappe.logger().error(f"DELETE SYNC - Failed: {str(sync_error)}")
+            frappe.log_error(f"DELETE SYNC Error: {str(sync_error)}")
             # Continue with deletion even if sync fails
         
         # Delete the document
@@ -2241,9 +2263,35 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         assignment_info = teacher_assignment_map.get(assignment_key)
         
         if not assignment_info:
-            frappe.logger().warning(f"⚠️ SYNC DEBUG - Row {row.name}: No assignment found for key {assignment_key}")
+            # 🔧 FIX: If assignment doesn't exist (was deleted), remove teacher from this row
+            frappe.logger().warning(f"⚠️ SYNC DEBUG - Row {row.name}: No assignment found for key {assignment_key} - WILL REMOVE TEACHER")
             frappe.logger().warning(f"  - Available keys: {list(teacher_assignment_map.keys())}")
-            skipped_rows.append(row.name)
+            
+            is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
+            if is_assigned:
+                # Remove teacher from this row since assignment no longer exists
+                if row.teacher_1_id == teacher_id:
+                    frappe.db.set_value(
+                        "SIS Timetable Instance Row",
+                        row.name,
+                        "teacher_1_id",
+                        None,
+                        update_modified=False
+                    )
+                    updated_rows.append(row.name)
+                    frappe.logger().info(f"✅ REMOVED - Row {row.name}: Removed {teacher_id} from teacher_1_id (assignment deleted)")
+                elif row.teacher_2_id == teacher_id:
+                    frappe.db.set_value(
+                        "SIS Timetable Instance Row",
+                        row.name,
+                        "teacher_2_id",
+                        None,
+                        update_modified=False
+                    )
+                    updated_rows.append(row.name)
+                    frappe.logger().info(f"✅ REMOVED - Row {row.name}: Removed {teacher_id} from teacher_2_id (assignment deleted)")
+            else:
+                skipped_rows.append(row.name)
             continue
         
         # Determine if teacher should be assigned to this row based on dates
