@@ -2195,22 +2195,27 @@ def _create_date_override_row(instance_id, pattern_row, specific_date, teacher_i
         if hasattr(specific_date, 'date'):
             specific_date = specific_date.date()
         
+        # Get data from pattern_row (should already have all fields from query)
+        period_priority = pattern_row.get("period_priority")
+        period_name = pattern_row.get("period_name")
+        timetable_column_id = pattern_row.get("timetable_column_id")
+        
         # Clone pattern row data
         override_doc = frappe.get_doc({
             "doctype": "SIS Timetable Instance Row",
             "parent": instance_id,
             "parenttype": "SIS Timetable Instance",
             "parentfield": "weekly_pattern",
-            "day_of_week": pattern_row.day_of_week,
+            "day_of_week": pattern_row.get("day_of_week"),
             "date": specific_date,  # ✅ KEY: Specific date
-            "timetable_column_id": pattern_row.timetable_column_id,
-            "period_priority": pattern_row.get("period_priority"),
-            "period_name": pattern_row.get("period_name"),
-            "subject_id": pattern_row.subject_id,
+            "timetable_column_id": timetable_column_id,
+            "period_priority": period_priority,
+            "period_name": period_name,
+            "subject_id": pattern_row.get("subject_id"),
             "room_id": pattern_row.get("room_id"),
             # Assign teacher
-            "teacher_1_id": pattern_row.teacher_1_id or teacher_id,
-            "teacher_2_id": teacher_id if pattern_row.teacher_1_id else pattern_row.get("teacher_2_id")
+            "teacher_1_id": pattern_row.get("teacher_1_id") or teacher_id,
+            "teacher_2_id": teacher_id if pattern_row.get("teacher_1_id") else pattern_row.get("teacher_2_id")
         })
         
         override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
@@ -2400,7 +2405,11 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             r.teacher_1_id,
             r.teacher_2_id,
             r.date,
-            r.day_of_week
+            r.day_of_week,
+            r.timetable_column_id,
+            r.period_priority,
+            r.period_name,
+            r.room_id
         FROM `tabSIS Timetable Instance Row` r
         WHERE r.parent IN ({})
           AND r.subject_id IN ({})
@@ -2520,7 +2529,11 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             r.teacher_1_id,
             r.teacher_2_id,
             r.date,
-            r.day_of_week
+            r.day_of_week,
+            r.timetable_column_id,
+            r.period_priority,
+            r.period_name,
+            r.room_id
         FROM `tabSIS Timetable Instance Row` r
         WHERE r.parent IN ({})
           AND r.subject_id IN ({})
