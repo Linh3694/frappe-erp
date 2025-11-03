@@ -2139,8 +2139,15 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     
     Performance: ~200ms for 50 instances vs ~5000ms before
     """
+    debug_info = []  # ✅ DEBUG: Collect debug info
+    
     if not affected_classes or not affected_subjects:
-        return {"rows_updated": 0, "rows_skipped": 0, "instances_checked": 0}
+        return {
+            "rows_updated": 0, 
+            "rows_skipped": 0, 
+            "instances_checked": 0,
+            "debug_info": debug_info
+        }
     
     today = frappe.utils.getdate()
     
@@ -2156,11 +2163,13 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     tuple([campus_id] + affected_classes + [today]), as_dict=True)
     
     if not instances:
+        debug_info.append("❌ No active timetable instances found")
         return {
             "rows_updated": 0, 
             "rows_skipped": 0, 
             "instances_checked": 0, 
-            "message": "No active timetable instances found"
+            "message": "No active timetable instances found",
+            "debug_info": debug_info
         }
     
     # OPTIMIZATION 2: Pre-fetch subject mapping (single query)
@@ -2182,11 +2191,13 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     
     if not subject_map:
         frappe.logger().error(f"❌ SYNC DEBUG - No subject mapping found! affected_subjects={affected_subjects}, campus={campus_id}")
+        debug_info.append(f"❌ No subject mapping: affected_subjects={affected_subjects}")
         return {
             "rows_updated": 0, 
             "rows_skipped": 0, 
             "instances_checked": len(instances), 
-            "message": "No matching subjects in timetable"
+            "message": "No matching subjects in timetable",
+            "debug_info": debug_info
         }
     
     # OPTIMIZATION 3: Batch get all rows (single query)
@@ -2282,6 +2293,10 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                 days_ahead += 7
             row_actual_date = instance_start_date + timedelta(days=days_ahead)
             frappe.logger().info(f"🔍 Row {row.name}: Calculated date = {row_actual_date} (day_of_week={row_day_of_week}, instance_start={instance_start_date})")
+            
+            # ✅ DEBUG: Add to debug info for important rows
+            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+                debug_info.append(f"📅 Row {row.name}: calculated_date={row_actual_date}, day={row_day_of_week}")
         
         # Check if assignment exists and get date info
         assignment_key = (actual_subject, instance_class_id)
@@ -2330,6 +2345,11 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                 # Apply to all timetable instances
                 should_be_assigned = True
                 frappe.logger().info(f"🔍 Row {row.name}: full_year assignment -> should_be_assigned = True")
+                
+                # ✅ DEBUG: Add to debug info
+                if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+                    debug_info.append(f"✅ Row {row.name}: full_year -> should_be_assigned=True")
+                    
             elif application_type == "from_date" and assignment_start_date:
                 # ✅ FIX: Compare with actual row date, not instance start date
                 if row_actual_date:
@@ -2338,15 +2358,31 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                         if assignment_end_date:
                             should_be_assigned = row_actual_date <= assignment_end_date
                             frappe.logger().info(f"🔍 Row {row.name}: date {row_actual_date} in range [{assignment_start_date}, {assignment_end_date}] -> should_be_assigned = {should_be_assigned}")
+                            
+                            # ✅ DEBUG
+                            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+                                debug_info.append(f"✅ Row {row.name}: {row_actual_date} in [{assignment_start_date}, {assignment_end_date}] -> {should_be_assigned}")
                         else:
                             should_be_assigned = True
                             frappe.logger().info(f"🔍 Row {row.name}: date {row_actual_date} >= {assignment_start_date} (no end date) -> should_be_assigned = True")
+                            
+                            # ✅ DEBUG
+                            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+                                debug_info.append(f"✅ Row {row.name}: {row_actual_date} >= {assignment_start_date} -> True")
                     else:
                         should_be_assigned = False
                         frappe.logger().info(f"🔍 Row {row.name}: date {row_actual_date} < assignment start {assignment_start_date} -> should_be_assigned = False")
+                        
+                        # ✅ DEBUG
+                        if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+                            debug_info.append(f"❌ Row {row.name}: {row_actual_date} < {assignment_start_date} -> False")
                 else:
                     should_be_assigned = False
                     frappe.logger().info(f"🔍 Row {row.name}: Could not calculate row_actual_date -> should_be_assigned = False")
+                    
+                    # ✅ DEBUG
+                    if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+                        debug_info.append(f"❌ Row {row.name}: No row_actual_date calculated")
         
         is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
         
@@ -2389,8 +2425,16 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                 update_modified=False
             )
             updated_rows.append(row.name)
+            
+            # ✅ DEBUG
+            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+                debug_info.append(f"✅ UPDATED Row {row.name}: {update_field} = {new_value}")
         else:
             skipped_rows.append(row.name)
+            
+            # ✅ DEBUG: Track why skipped
+            if row.name in ['SIS-TIMETABLE-INSTANCE-ROW-2362092', 'SIS-TIMETABLE-INSTANCE-ROW-2362093']:
+                debug_info.append(f"⏭️ SKIPPED Row {row.name}: needs_update={needs_update}, should_be={should_be_assigned}, is_assigned={is_assigned}")
     
     frappe.db.commit()
     
@@ -2400,7 +2444,8 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         "rows_updated": len(updated_rows),
         "rows_skipped": len(skipped_rows),
         "instances_checked": len(instances),
-        "message": f"Synced {len(updated_rows)} timetable rows across {len(instances)} instances"
+        "message": f"Synced {len(updated_rows)} timetable rows across {len(instances)} instances",
+        "debug_info": debug_info  # ✅ Return debug info
     }
 
 
