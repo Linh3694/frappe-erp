@@ -1710,7 +1710,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             instance_rows = frappe.get_all(
                 "SIS Timetable Instance Row",
                 fields=[
-                    "name", "parent", "day_of_week", "timetable_column_id",
+                    "name", "parent", "day_of_week", "date", "timetable_column_id",
                     "subject_id", "teacher_1_id", "teacher_2_id", "room_id"
                 ],
                 filters={"parent": instance_id}
@@ -1724,7 +1724,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                 instance_rows = frappe.get_all(
                     "SIS Timetable Instance Row",
                     fields=[
-                        "name", "parent_timetable_instance", "day_of_week", "timetable_column_id",
+                        "name", "parent_timetable_instance", "day_of_week", "date", "timetable_column_id",
                         "subject_id", "teacher_1_id", "teacher_2_id", "room_id"
                     ],
                     filters={"parent_timetable_instance": instance_id}
@@ -1818,7 +1818,23 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         except Exception as load_error:
             logs.append(f"⚠️  Error loading existing student entries: {str(load_error)}")
         
+        # 🎯 NEW: Feature flag for override row handling
+        use_date_override = frappe.conf.get("use_date_override_logic", False)
+        
+        # Separate pattern vs override rows
+        pattern_rows = []
+        override_rows = []
+        
         for row in instance_rows:
+            if row.get("date"):
+                override_rows.append(row)
+            else:
+                pattern_rows.append(row)
+        
+        logs.append(f"📊 [sync_materialized_views] {len(pattern_rows)} pattern rows, {len(override_rows)} override rows")
+        
+        # Process pattern rows (generate for all weeks)
+        for row in pattern_rows:
             # Normalize and validate day_of_week first
             original_day = str(row.day_of_week or "").strip().lower()
             
@@ -1849,6 +1865,18 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             # 3. Create Teacher Timetable entries for ALL weeks in the timetable period
             for week_start in all_weeks:
                 specific_date = week_start + timedelta(days=day_num)
+                
+                # ✅ NEW: If using override logic, skip dates that have override rows
+                if use_date_override:
+                    # Check if there's an override row for this date/column
+                    has_override = any(
+                        o.get("date") == specific_date and 
+                        o.timetable_column_id == row.timetable_column_id and
+                        o.day_of_week == normalized_day
+                        for o in override_rows
+                    )
+                    if has_override:
+                        continue  # Skip, will be handled by override row
                 
                 # Skip if date is outside the timetable period
                 if specific_date < start_dt or specific_date > end_dt:
@@ -1940,6 +1968,93 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     except Exception as st_error:
                         logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
                         continue
+        
+        # 🎯 NEW: Process override rows (date-specific)
+        if use_date_override and override_rows:
+            logs.append(f"📅 [sync_materialized_views] Processing {len(override_rows)} override rows")
+            
+            for row in override_rows:
+                # Normalize day_of_week
+                original_day = str(row.day_of_week or "").strip().lower()
+                day_map = {
+                    "monday": "mon", "tuesday": "tue", "wednesday": "wed", "thursday": "thu",
+                    "friday": "fri", "saturday": "sat", "sunday": "sun",
+                    "thứ 2": "mon", "thu 2": "mon", "thứ 3": "tue", "thu 3": "tue",
+                    "thứ 4": "wed", "thu 4": "wed", "thứ 5": "thu", "thu 5": "thu", 
+                    "thứ 6": "fri", "thu 6": "fri", "thứ 7": "sat", "thu 7": "sat",
+                    "chủ nhật": "sun", "cn": "sun"
+                }
+                normalized_day = day_map.get(original_day, original_day)
+                
+                valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+                if normalized_day not in valid_days:
+                    continue
+                
+                # Use the specific date from the override row
+                specific_date = row.get("date")
+                if not specific_date:
+                    continue
+                
+                # Convert to date object if string
+                if isinstance(specific_date, str):
+                    from datetime import datetime
+                    specific_date = datetime.strptime(specific_date, "%Y-%m-%d").date()
+                
+                # Create teacher timetable entries
+                teachers = []
+                if row.teacher_1_id:
+                    teachers.append(row.teacher_1_id)
+                if row.teacher_2_id:
+                    teachers.append(row.teacher_2_id)
+                
+                for teacher_id in teachers:
+                    try:
+                        teacher_key = f"{teacher_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
+                        
+                        if teacher_key not in existing_teacher_entries:
+                            teacher_timetable = frappe.get_doc({
+                                "doctype": "SIS Teacher Timetable",
+                                "teacher_id": teacher_id,
+                                "class_id": class_id,
+                                "day_of_week": normalized_day,
+                                "timetable_column_id": row.timetable_column_id,
+                                "subject_id": row.subject_id,
+                                "room_id": row.room_id,
+                                "date": specific_date,
+                                "timetable_instance_id": instance_id
+                            })
+                            teacher_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
+                            existing_teacher_entries.add(teacher_key)
+                            teacher_timetable_count += 1
+                    except Exception as t_error:
+                        logs.append(f"Error creating teacher timetable (override): {str(t_error)}")
+                        continue
+                
+                # Create student timetable entries
+                for student_id in students_in_class:
+                    try:
+                        student_key = f"{student_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
+                        
+                        if student_key not in existing_student_entries:
+                            student_timetable = frappe.get_doc({
+                                "doctype": "SIS Student Timetable",
+                                "student_id": student_id,
+                                "class_id": class_id,
+                                "day_of_week": normalized_day,
+                                "timetable_column_id": row.timetable_column_id,
+                                "subject_id": row.subject_id,
+                                "room_id": row.room_id,
+                                "date": specific_date,
+                                "timetable_instance_id": instance_id
+                            })
+                            student_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
+                            existing_student_entries.add(student_key)
+                            student_timetable_count += 1
+                    except Exception as s_error:
+                        logs.append(f"Error creating student timetable (override): {str(s_error)}")
+                        continue
+            
+            logs.append(f"✅ [sync_materialized_views] Processed override rows")
         
         logs.append(f"Successfully synced materialized views: {teacher_timetable_count} teacher entries, {student_timetable_count} student entries")
         

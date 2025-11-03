@@ -970,6 +970,30 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
             # Store old teacher for bulk timetable update
             old_teacher_id = frappe.db.get_value("SIS Subject Assignment", assignment_id, "teacher_id")
             
+            # 🎯 NEW: Delete old override rows if feature flag is ON and assignment changed
+            # This ensures clean slate for recreating with new date range
+            use_date_override = frappe.conf.get("use_date_override_logic", False)
+            if use_date_override:
+                try:
+                    # Get actual_subject_id mapping to subject_ids
+                    subject_mapping = frappe.db.sql("""
+                        SELECT name FROM `tabSIS Subject`
+                        WHERE actual_subject_id = %s AND campus_id = %s
+                    """, (assignment_doc.actual_subject_id, campus_id), as_dict=True)
+                    
+                    if subject_mapping:
+                        subject_ids = [s.name for s in subject_mapping]
+                        override_deleted = _delete_teacher_override_rows(
+                            old_teacher_id,
+                            subject_ids,
+                            [assignment_doc.class_id],
+                            campus_id
+                        )
+                        frappe.logger().info(f"UPDATE SYNC - Deleted {override_deleted} old override rows before update")
+                        debug_info['override_rows_deleted'] = override_deleted
+                except Exception as override_del_error:
+                    frappe.logger().error(f"UPDATE SYNC - Failed to delete old override rows: {str(override_del_error)}")
+            
             assignment_doc.save()
             frappe.db.commit()
             frappe.logger().info(f"UPDATE DEBUG - Successfully saved assignment: {assignment_doc.name}")
@@ -1228,12 +1252,30 @@ def delete_subject_assignment(assignment_id=None):
                         updated_count += 1
                 
                 frappe.db.commit()
+                
+                # 🎯 NEW: Delete override rows if feature flag is ON
+                override_deleted = 0
+                use_date_override = frappe.conf.get("use_date_override_logic", False)
+                if use_date_override:
+                    try:
+                        frappe.logger().info(f"DELETE SYNC - Deleting override rows for teacher {assignment_doc.teacher_id}")
+                        override_deleted = _delete_teacher_override_rows(
+                            assignment_doc.teacher_id,
+                            subject_ids,
+                            [assignment_doc.class_id],
+                            campus_id
+                        )
+                        frappe.logger().info(f"DELETE SYNC - Deleted {override_deleted} override rows")
+                    except Exception as override_error:
+                        frappe.logger().error(f"DELETE SYNC - Failed to delete override rows: {str(override_error)}")
+                
                 sync_summary = {
                     "rows_updated": updated_count,
+                    "override_rows_deleted": override_deleted,
                     "instances_checked": len(instances),
-                    "message": f"Removed teacher from {updated_count} timetable rows"
+                    "message": f"Removed teacher from {updated_count} timetable rows" + (f", deleted {override_deleted} override rows" if override_deleted > 0 else "")
                 }
-                frappe.logger().info(f"DELETE SYNC - Completed: {updated_count} rows updated")
+                frappe.logger().info(f"DELETE SYNC - Completed: {updated_count} rows updated, {override_deleted} override rows deleted")
             else:
                 frappe.logger().info(f"DELETE SYNC - No active instances found for class {assignment_doc.class_id}")
         except Exception as sync_error:
