@@ -2195,16 +2195,21 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     frappe.logger().info(f"🔍 SYNC DEBUG - Querying rows: {len(instance_ids)} instances, {len(subject_ids)} subjects")
     frappe.logger().info(f"  - subject_ids (SIS Subject): {subject_ids}")
     
+    # ✅ FIX: Get day_of_week and instance dates to calculate actual row date
     all_rows = frappe.db.sql("""
         SELECT 
-            name,
-            parent,
-            subject_id,
-            teacher_1_id,
-            teacher_2_id
-        FROM `tabSIS Timetable Instance Row`
-        WHERE parent IN ({})
-          AND subject_id IN ({})
+            r.name,
+            r.parent,
+            r.subject_id,
+            r.teacher_1_id,
+            r.teacher_2_id,
+            r.day_of_week,
+            i.start_date as instance_start_date,
+            i.end_date as instance_end_date
+        FROM `tabSIS Timetable Instance Row` r
+        INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
+        WHERE r.parent IN ({})
+          AND r.subject_id IN ({})
     """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))),
     tuple(instance_ids + subject_ids), as_dict=True)
     
@@ -2258,6 +2263,27 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         instance_class_id = instance_info.class_id
         instance_start_date = instance_info.start_date
         
+        # ✅ FIX: Calculate actual date for this row based on day_of_week
+        from datetime import timedelta
+        
+        day_of_week_map = {
+            "mon": 0, "tue": 1, "wed": 2, "thu": 3, 
+            "fri": 4, "sat": 5, "sun": 6
+        }
+        
+        row_day_of_week = row.get("day_of_week")
+        row_actual_date = None
+        
+        if instance_start_date and row_day_of_week:
+            # Find the first occurrence of this day_of_week in the instance period
+            target_day = day_of_week_map.get(row_day_of_week, 0)
+            current_day = instance_start_date.weekday()
+            days_ahead = target_day - current_day
+            if days_ahead < 0:
+                days_ahead += 7
+            row_actual_date = instance_start_date + timedelta(days=days_ahead)
+            frappe.logger().info(f"🔍 Row {row.name}: Calculated date = {row_actual_date} (day_of_week={row_day_of_week}, instance_start={instance_start_date})")
+        
         # Check if assignment exists and get date info
         assignment_key = (actual_subject, instance_class_id)
         assignment_info = teacher_assignment_map.get(assignment_key)
@@ -2304,16 +2330,24 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
             if application_type == "full_year":
                 # Apply to all timetable instances
                 should_be_assigned = True
+                frappe.logger().info(f"🔍 Row {row.name}: full_year assignment -> should_be_assigned = True")
             elif application_type == "from_date" and assignment_start_date:
-                # Only apply from assignment start date
-                if instance_start_date and instance_start_date >= assignment_start_date:
-                    # Check end date if provided
-                    if assignment_end_date:
-                        should_be_assigned = instance_start_date <= assignment_end_date
+                # ✅ FIX: Compare with actual row date, not instance start date
+                if row_actual_date:
+                    if row_actual_date >= assignment_start_date:
+                        # Check end date if provided
+                        if assignment_end_date:
+                            should_be_assigned = row_actual_date <= assignment_end_date
+                            frappe.logger().info(f"🔍 Row {row.name}: date {row_actual_date} in range [{assignment_start_date}, {assignment_end_date}] -> should_be_assigned = {should_be_assigned}")
+                        else:
+                            should_be_assigned = True
+                            frappe.logger().info(f"🔍 Row {row.name}: date {row_actual_date} >= {assignment_start_date} (no end date) -> should_be_assigned = True")
                     else:
-                        should_be_assigned = True
+                        should_be_assigned = False
+                        frappe.logger().info(f"🔍 Row {row.name}: date {row_actual_date} < assignment start {assignment_start_date} -> should_be_assigned = False")
                 else:
                     should_be_assigned = False
+                    frappe.logger().info(f"🔍 Row {row.name}: Could not calculate row_actual_date -> should_be_assigned = False")
         
         is_assigned = (row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id)
         
