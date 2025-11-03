@@ -74,7 +74,9 @@ def get_announcements():
                 "sent_by",
                 "campus_id",
                 "creation",
-                "modified"
+                "modified",
+                "sent_count",
+                "received_count"
             ],
             filters=filters,
             order_by="sent_at desc, modified desc" if status == "sent" else "modified desc",
@@ -99,6 +101,12 @@ def get_announcements():
                         frappe.logger().warning(f"Failed to parse recipients for {announcement['name']}")
             else:
                 announcement["recipients"] = []
+            
+            # Set default counts if not set
+            if not announcement.get("sent_count"):
+                announcement["sent_count"] = 0
+            if not announcement.get("received_count"):
+                announcement["received_count"] = 0
 
             # For the list view, create a title field (use Vietnamese if available)
             announcement["title"] = announcement.get("title_vn") or announcement.get("title_en", "")
@@ -665,10 +673,11 @@ def send_announcement():
 
             frappe.logger().info(f"📢 Announcement notification result: {notification_result}")
 
-            # Update status to sent
+            # Update status to sent and store sent count
             announcement.status = "sent"
             announcement.sent_at = frappe.utils.now()
             announcement.sent_by = frappe.session.user
+            announcement.sent_count = notification_result.get("total_parents", 0)
             announcement.save()
 
             frappe.logger().info(f"✅ Announcement {announcement_id} sent successfully to {notification_result.get('total_parents', 0)} parents")
@@ -680,6 +689,7 @@ def send_announcement():
                     "status": announcement.status,
                     "sent_at": announcement.sent_at,
                     "sent_by": announcement.sent_by,
+                    "sent_count": announcement.sent_count,
                     "notification_summary": {
                         "total_parents": notification_result.get("total_parents", 0),
                         "success_count": notification_result.get("success_count", 0),

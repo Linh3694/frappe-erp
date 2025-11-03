@@ -23,6 +23,8 @@
   "status",
   "sent_at",
   "sent_by",
+  "sent_count",
+  "received_count",
   "column_break_1",
   "recipient_type",
   "recipients",
@@ -83,6 +85,18 @@
    "fieldtype": "Link",
    "label": "Sent By",
    "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sent_count",
+   "fieldtype": "Int",
+   "label": "Sent Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "received_count",
+   "fieldtype": "Int",
+   "label": "Received Count",
    "read_only": 1
   },
   {
