@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
+from datetime import timedelta
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.api_response import (
     success_response,
@@ -2264,8 +2265,6 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         instance_start_date = instance_info.start_date
         
         # ✅ FIX: Calculate actual date for this row based on day_of_week
-        from datetime import timedelta
-        
         day_of_week_map = {
             "mon": 0, "tue": 1, "wed": 2, "thu": 3, 
             "fri": 4, "sat": 5, "sun": 6
