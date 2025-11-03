@@ -83,6 +83,78 @@
 
 ### 🏗️ Kiến trúc giải pháp
 
+### 🧩 Monitoring cho Redis/Valkey và Database Cluster
+
+Ngoài các service ứng dụng, hệ thống còn có **Redis/Valkey Sentinel cluster** và **MariaDB Replicaset**, đây là hai thành phần quan trọng cần monitoring chuyên sâu để đảm bảo tính sẵn sàng cao và tránh mất dữ liệu.
+
+#### **1. Redis / Valkey Sentinel**
+
+**Mục tiêu:**
+- Phát hiện sớm node fail hoặc mất quorum trong Sentinel.
+- Theo dõi replication lag, số lượng connected clients, keyspace hits/misses.
+- Cảnh báo khi Sentinel không đủ quorum hoặc có node không phản hồi.
+
+**Giải pháp:**
+- Cài đặt **Redis Exporter / Valkey Exporter** trên mỗi node Redis:
+  ```bash
+  docker run -d \
+    -p 9121:9121 \
+    --name redis_exporter \
+    oliver006/redis_exporter \
+    --redis.addr=redis://localhost:6379
+  ```
+- Prometheus sẽ scrape các metrics từ exporter trên từng node.
+- Thêm alert rule cho các tình huống sau:
+  - Sentinel quorum < 3.
+  - Replication lag > 5s.
+  - Node offline hoặc không phản hồi ping > 30s.
+  - Memory usage > 80% total.
+
+**Metrics chính cần theo dõi:**
+- `redis_connected_clients`
+- `redis_used_memory`
+- `redis_uptime_in_seconds`
+- `redis_keyspace_hits`, `redis_keyspace_misses`
+- `redis_replication_offset`
+- `redis_sentinel_masters`, `redis_sentinel_slaves`
+
+#### **2. MariaDB Replicaset**
+
+**Mục tiêu:**
+- Theo dõi tình trạng replication giữa master và replica.
+- Cảnh báo khi có lag, lỗi kết nối, hoặc replication dừng.
+- Giám sát hiệu năng query và connection pool.
+
+**Giải pháp:**
+- Cài đặt **MySQL Exporter** (Prometheus exporter chính thức):
+  ```bash
+  docker run -d \
+    -p 9104:9104 \
+    --name mysqld_exporter \
+    -e DATA_SOURCE_NAME="exporter:password@(localhost:3306)/" \
+    prom/mysqld-exporter
+  ```
+- Cấu hình Prometheus scrape các metrics này và dashboard qua Grafana template `MySQL Overview`.
+- Thêm alert rule cho các tình huống sau:
+  - Replication lag > 10s (`mysql_slave_relay_log_info_seconds_behind_master`).
+  - Replica bị lỗi hoặc dừng.
+  - Connection usage > 80%.
+  - Query time trung bình > 1s.
+
+**Metrics chính cần theo dõi:**
+- `mysql_global_status_threads_connected`
+- `mysql_global_status_threads_running`
+- `mysql_slave_status_seconds_behind_master`
+- `mysql_global_status_queries`
+- `mysql_global_status_slow_queries`
+
+---
+
+Ngoài ra, Redis/Valkey và MariaDB đều nên có dashboard riêng trong Grafana để:
+- Hiển thị topology (master/replica, sentinel node).
+- Có biểu đồ replication lag, CPU/memory per node.
+- Cảnh báo trạng thái failover hoặc mất kết nối.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Application Layer                        │
@@ -534,5 +606,3 @@ Triển khai hệ thống monitoring tập trung sẽ mang lại:
 - **Cost savings** với reduced downtime và improved performance
 
 **Recommended approach**: Start với Phase 1 foundation, measure impact, then expand to advanced features. Focus trên quick wins first (alerts, basic dashboards) trước khi implement complex features (tracing, ML).
-
-Bạn có cần clarification hoặc muốn focus vào implementation details cho component cụ thể nào không?
