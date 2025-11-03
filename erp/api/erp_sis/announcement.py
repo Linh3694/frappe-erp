@@ -17,6 +17,17 @@ from erp.utils.api_response import (
 )
 
 
+def _get_user_fullname(user_email: str) -> str:
+    """Get user's full name from email"""
+    if not user_email:
+        return ""
+    try:
+        user = frappe.get_doc("User", user_email)
+        return user.full_name or user_email
+    except Exception:
+        return user_email
+
+
 @frappe.whitelist(allow_guest=False)
 def get_announcements():
     """Get announcements with filtering"""
@@ -201,6 +212,7 @@ def get_announcement():
             "status": announcement.status,
             "sent_at": announcement.sent_at,
             "sent_by": announcement.sent_by,
+            "sent_by_fullname": _get_user_fullname(announcement.sent_by),
             "campus_id": announcement.campus_id,
             "created_at": announcement.creation,
             "created_by": announcement.owner,
@@ -356,6 +368,7 @@ def create_announcement():
             "status": created_announcement.status,
             "sent_at": created_announcement.sent_at,
             "sent_by": created_announcement.sent_by,
+            "sent_by_fullname": _get_user_fullname(created_announcement.sent_by),
             "campus_id": created_announcement.campus_id,
             "created_at": created_announcement.creation,
             "created_by": created_announcement.owner,
@@ -492,6 +505,7 @@ def update_announcement():
             "status": updated_announcement.status,
             "sent_at": updated_announcement.sent_at,
             "sent_by": updated_announcement.sent_by,
+            "sent_by_fullname": _get_user_fullname(updated_announcement.sent_by),
             "campus_id": updated_announcement.campus_id,
             "created_at": updated_announcement.creation,
             "created_by": updated_announcement.owner,
@@ -723,6 +737,7 @@ def send_announcement():
                     "status": announcement.status,
                     "sent_at": announcement.sent_at,
                     "sent_by": announcement.sent_by,
+                    "sent_by_fullname": _get_user_fullname(announcement.sent_by),
                     "sent_count": announcement.sent_count,
                     "notification_summary": {
                         "total_parents": notification_result.get("total_parents", 0),

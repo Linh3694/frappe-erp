@@ -38,7 +38,12 @@ def resolve_recipient_students(recipients_list: List[Dict]) -> List[str]:
             if not recipient_id or not recipient_type:
                 continue
             
-            if recipient_type == "stage":
+            if recipient_type == "school":
+                # School → All students in school
+                students = _get_all_students_in_school()
+                student_ids.update(students)
+            
+            elif recipient_type == "stage":
                 # Stage → All students in all grades/classes of this stage
                 students = _get_students_by_stage(recipient_id)
                 student_ids.update(students)
@@ -63,6 +68,22 @@ def resolve_recipient_students(recipients_list: List[Dict]) -> List[str]:
     except Exception as e:
         frappe.logger().error(f"Error resolving recipients: {str(e)}")
         raise
+
+
+def _get_all_students_in_school() -> List[str]:
+    """Get all students in the school from SIS Class Student"""
+    try:
+        # Get all unique students from SIS Class Student records
+        class_students = frappe.get_all("SIS Class Student",
+            fields=["student_id"],
+            pluck="student_id",
+            distinct=True
+        )
+        frappe.logger().info(f"📚 Found {len(class_students)} students in school")
+        return class_students
+    except Exception as e:
+        frappe.logger().warning(f"Error getting all students in school: {str(e)}")
+        return []
 
 
 def _get_students_by_stage(stage_id: str) -> List[str]:
