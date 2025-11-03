@@ -302,6 +302,41 @@ def create_announcement():
         # Get the created announcement data
         created_announcement = frappe.get_doc("SIS Announcement", announcement.name)
 
+        # If status is "sent", send notifications immediately
+        if created_announcement.status == "sent":
+            try:
+                from erp.utils.notification_handler import send_bulk_parent_notifications
+                
+                notification_result = send_bulk_parent_notifications(
+                    recipient_type="announcement",
+                    recipients_data={
+                        "student_ids": [],
+                        "recipients": recipients_data,
+                        "announcement_id": created_announcement.name
+                    },
+                    title=created_announcement.title_vn or created_announcement.title_en,
+                    body=created_announcement.content_vn[:100] if created_announcement.content_vn else (created_announcement.content_en[:100] if created_announcement.content_en else ""),
+                    icon="/icon.png",
+                    data={
+                        "type": "announcement",
+                        "announcement_id": created_announcement.name,
+                        "title_en": created_announcement.title_en,
+                        "title_vn": created_announcement.title_vn,
+                        "url": f"/announcement/{created_announcement.name}"
+                    }
+                )
+                
+                # Update with send info
+                created_announcement.sent_at = frappe.utils.now()
+                created_announcement.sent_by = frappe.session.user
+                created_announcement.sent_count = notification_result.get("total_parents", 0)
+                created_announcement.save()
+                
+                frappe.logger().info(f"✅ Announcement {created_announcement.name} sent to {notification_result.get('total_parents', 0)} parents on creation")
+            except Exception as e:
+                frappe.logger().error(f"❌ Error sending notifications on announcement creation: {str(e)}")
+                # Don't fail the creation, just log the error
+
         # Parse recipients
         recipients = []
         if created_announcement.recipients:
