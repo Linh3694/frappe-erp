@@ -119,6 +119,12 @@ def get_announcements():
             if not announcement.get("received_count"):
                 announcement["received_count"] = 0
 
+            # Add sent_by_fullname
+            if announcement.get("sent_by"):
+                announcement["sent_by_fullname"] = _get_user_fullname(announcement["sent_by"])
+            else:
+                announcement["sent_by_fullname"] = None
+
             # For the list view, create a title field (use Vietnamese if available)
             announcement["title"] = announcement.get("title_vn") or announcement.get("title_en", "")
             

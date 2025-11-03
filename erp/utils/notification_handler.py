@@ -31,9 +31,13 @@ def resolve_recipient_students(recipients_list: List[Dict]) -> List[str]:
     student_ids: Set[str] = set()
     
     try:
+        frappe.logger().info(f"🎯 Starting recipient resolution for {len(recipients_list)} recipients")
+        
         for recipient in recipients_list:
             recipient_id = recipient.get("id")
             recipient_type = recipient.get("type")
+            
+            frappe.logger().info(f"  Processing recipient: id={recipient_id}, type={recipient_type}")
             
             if not recipient_id or not recipient_type:
                 continue
@@ -41,26 +45,31 @@ def resolve_recipient_students(recipients_list: List[Dict]) -> List[str]:
             if recipient_type == "school":
                 # School → All students in school
                 students = _get_all_students_in_school()
+                frappe.logger().info(f"  🏫 School: found {len(students)} students")
                 student_ids.update(students)
             
             elif recipient_type == "stage":
                 # Stage → All students in all grades/classes of this stage
                 students = _get_students_by_stage(recipient_id)
+                frappe.logger().info(f"  📚 Stage {recipient_id}: found {len(students)} students")
                 student_ids.update(students)
             
             elif recipient_type == "grade":
                 # Grade → All students in all classes of this grade
                 students = _get_students_by_grade(recipient_id)
+                frappe.logger().info(f"  🎓 Grade {recipient_id}: found {len(students)} students")
                 student_ids.update(students)
             
             elif recipient_type == "class":
                 # Class → All students in this class
                 students = _get_students_by_class(recipient_id)
+                frappe.logger().info(f"  📖 Class {recipient_id}: found {len(students)} students")
                 student_ids.update(students)
             
             elif recipient_type == "student":
                 # Direct student
                 student_ids.add(recipient_id)
+                frappe.logger().info(f"  👤 Student {recipient_id}: added")
         
         frappe.logger().info(f"🎯 Resolved recipients: {len(recipients_list)} recipients → {len(student_ids)} unique students")
         return list(student_ids)
