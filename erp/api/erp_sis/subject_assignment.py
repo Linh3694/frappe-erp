@@ -905,6 +905,36 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
             updated_class_id = getattr(assignment_doc, 'class_id', 'NOT_SET')
             frappe.logger().info(f"UPDATE DEBUG - After setting, class_id is: {updated_class_id}")
             debug_info['updated_class_id'] = updated_class_id
+        
+        # 🔧 Update time application fields if provided
+        application_type = frappe.request.args.get('application_type') or frappe.form_dict.get('application_type')
+        start_date = frappe.request.args.get('start_date') or frappe.form_dict.get('start_date')
+        end_date = frappe.request.args.get('end_date') or frappe.form_dict.get('end_date')
+        
+        # Also try to get from JSON payload
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                application_type = json_data.get('application_type') or application_type
+                start_date = json_data.get('start_date') or start_date
+                end_date = json_data.get('end_date') or end_date
+            except:
+                pass
+        
+        if application_type and application_type != getattr(assignment_doc, 'application_type', 'full_year'):
+            assignment_doc.application_type = application_type
+            frappe.logger().info(f"UPDATE DEBUG - Updated application_type to: {application_type}")
+            debug_info['updated_application_type'] = application_type
+        
+        if start_date and start_date != getattr(assignment_doc, 'start_date', None):
+            assignment_doc.start_date = start_date
+            frappe.logger().info(f"UPDATE DEBUG - Updated start_date to: {start_date}")
+            debug_info['updated_start_date'] = start_date
+        
+        if end_date and end_date != getattr(assignment_doc, 'end_date', None):
+            assignment_doc.end_date = end_date
+            frappe.logger().info(f"UPDATE DEBUG - Updated end_date to: {end_date}")
+            debug_info['updated_end_date'] = end_date
 
         # Check for duplicate assignment after updates
         if teacher_id or actual_subject_id or class_id is not None:
@@ -2027,7 +2057,30 @@ def batch_update_teacher_assignments():
                         })
                         doc.insert(ignore_permissions=True)
                         created_count += 1
-                    # else: Existing assignment found, no update needed
+                    else:
+                        # 🔧 FIX: Check if application_type or dates are different - if so, UPDATE
+                        existing_doc = frappe.get_doc("SIS Subject Assignment", existing)
+                        old_application_type = getattr(existing_doc, 'application_type', 'full_year')
+                        old_start_date = getattr(existing_doc, 'start_date', None)
+                        old_end_date = getattr(existing_doc, 'end_date', None)
+                        
+                        is_modified = False
+                        if old_application_type != application_type:
+                            existing_doc.application_type = application_type
+                            is_modified = True
+                        
+                        if old_start_date != start_date:
+                            existing_doc.start_date = start_date
+                            is_modified = True
+                        
+                        if old_end_date != end_date:
+                            existing_doc.end_date = end_date
+                            is_modified = True
+                        
+                        if is_modified:
+                            existing_doc.save(ignore_permissions=True)
+                            frappe.logger().info(f"BATCH UPDATE - Updated assignment {existing}: application_type={application_type}, start_date={start_date}, end_date={end_date}")
+                            created_count += 1  # Count as "created/modified"
             
             frappe.db.commit()
             
