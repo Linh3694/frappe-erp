@@ -282,7 +282,8 @@ def get_announcements():
                                                 try:
                                                     grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
                                                     display_name_vn = grade_doc.title_vn or grade_doc.title_en or recipient_id
-                                                    display_name_en = grade_doc.title_en or recipient_id  # Don't fallback to title_vn for EN
+                                                    # For EN: try title_en first, then fallback to title_vn (since DB might not have title_en)
+                                                    display_name_en = grade_doc.title_en or display_name_vn or recipient_id
                                                 except Exception:
                                                     # Both failed, keep original
                                                     pass
