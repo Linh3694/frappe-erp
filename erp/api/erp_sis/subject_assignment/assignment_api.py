@@ -412,13 +412,53 @@ def create_subject_assignment():
 
         # Case 2: top-level classes + actual_subject_ids
         if not normalized_assignments and isinstance(classes, list) and classes and isinstance(actual_subject_ids, list) and actual_subject_ids:
+            app_type = frappe.request.args.get('application_type') or frappe.form_dict.get('application_type') or "full_year"
+            s_date = frappe.request.args.get('start_date') or frappe.form_dict.get('start_date')
+            e_date = frappe.request.args.get('end_date') or frappe.form_dict.get('end_date')
+            
+            # Also try to get from JSON payload
+            if frappe.request.data:
+                try:
+                    json_data = json.loads(frappe.request.data)
+                    app_type = json_data.get('application_type') or app_type
+                    s_date = json_data.get('start_date') or s_date
+                    e_date = json_data.get('end_date') or e_date
+                except:
+                    pass
+            
             for cid in classes:
-                normalized_assignments.append({"class_id": cid, "actual_subject_ids": actual_subject_ids})
+                normalized_assignments.append({
+                    "class_id": cid, 
+                    "actual_subject_ids": actual_subject_ids,
+                    "application_type": app_type,
+                    "start_date": s_date,
+                    "end_date": e_date
+                })
 
         # Case 3: legacy single/bulk for one class
         if not normalized_assignments:
+            app_type = frappe.request.args.get('application_type') or frappe.form_dict.get('application_type') or "full_year"
+            s_date = frappe.request.args.get('start_date') or frappe.form_dict.get('start_date')
+            e_date = frappe.request.args.get('end_date') or frappe.form_dict.get('end_date')
+            
+            # Also try to get from JSON payload
+            if frappe.request.data:
+                try:
+                    json_data = json.loads(frappe.request.data)
+                    app_type = json_data.get('application_type') or app_type
+                    s_date = json_data.get('start_date') or s_date
+                    e_date = json_data.get('end_date') or e_date
+                except:
+                    pass
+            
             effective_actual_subject_ids = actual_subject_ids if isinstance(actual_subject_ids, list) and actual_subject_ids else ([actual_subject_id] if actual_subject_id else [])
-            normalized_assignments.append({"class_id": class_id, "actual_subject_ids": effective_actual_subject_ids})
+            normalized_assignments.append({
+                "class_id": class_id, 
+                "actual_subject_ids": effective_actual_subject_ids,
+                "application_type": app_type,
+                "start_date": s_date,
+                "end_date": e_date
+            })
 
         # Validate classes belong to campus
         class_id_set = {na.get("class_id") for na in normalized_assignments if na.get("class_id")}
