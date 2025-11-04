@@ -333,28 +333,13 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                         })
 
             if instances_list:
-                # HYBRID APPROACH: Sync first 2 instances immediately, queue rest to background
-                immediate_instances = instances_list[:2]  # First 2 instances
-                background_instances = instances_list[2:]  # Remaining instances
+                # PROGRESSIVE SYNC: Sync instances one by one and track progress
+                debug_info.append(f"🔄 Starting progressive sync for {len(instances_list)} instances")
+                frappe.logger().info(f"✅ Starting progressive sync for {len(instances_list)} instances (PASS 2A)")
 
-                if immediate_instances:
-                    debug_info.append(f"🔄 Syncing materialized views immediately for {len(immediate_instances)} instances")
-                    frappe.logger().info(f"✅ Syncing materialized views immediately for {len(immediate_instances)} instances (PASS 2A)")
-
-                    sync_result = sync_materialized_views_immediately(immediate_instances, timeout_seconds=10)
-                    debug_info.extend(sync_result.get("debug_info", []))
-                    frappe.logger().info(f"✅ Immediate sync completed (PASS 2A): {sync_result.get('message', 'Unknown result')}")
-
-                if background_instances:
-                    # Queue remaining instances to background job immediately
-                    frappe.enqueue(
-                        "erp.api.erp_sis.subject_assignment.timetable_sync.sync_materialized_views_background",
-                        instances=background_instances,
-                        queue="long",
-                        timeout=600  # 10 minutes for background
-                    )
-                    debug_info.append(f"🔄 Queued {len(background_instances)} instances for background processing")
-                    frappe.logger().info(f"✅ Queued {len(background_instances)} instances for background processing")
+                sync_result = sync_materialized_views_with_progress(instances_list)
+                debug_info.extend(sync_result.get("debug_info", []))
+                frappe.logger().info(f"✅ Progressive sync completed (PASS 2A): {sync_result.get('message', 'Unknown result')}")
         except Exception as sync_err:
             frappe.logger().error(f"❌ Failed to sync materialized views: {str(sync_err)}")
             debug_info.append(f"❌ Failed to sync materialized views: {str(sync_err)}")
@@ -502,28 +487,13 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                         })
 
             if instances_list:
-                # HYBRID APPROACH: Sync first 1 instance immediately, queue rest to background
-                immediate_instances = instances_list[:1]  # First 1 instance for from_date
-                background_instances = instances_list[1:]  # Remaining instances
+                # PROGRESSIVE SYNC: Sync instances one by one and track progress
+                debug_info.append(f"🔄 Starting progressive sync for {len(instances_list)} instances (from_date)")
+                frappe.logger().info(f"✅ Starting progressive sync for {len(instances_list)} instances (PASS 2B)")
 
-                if immediate_instances:
-                    debug_info.append(f"🔄 Syncing materialized views immediately for {len(immediate_instances)} instances (from_date)")
-                    frappe.logger().info(f"✅ Syncing materialized views immediately for {len(immediate_instances)} instances (PASS 2B)")
-
-                    sync_result = sync_materialized_views_immediately(immediate_instances, timeout_seconds=8)
-                    debug_info.extend(sync_result.get("debug_info", []))
-                    frappe.logger().info(f"✅ Immediate sync completed (PASS 2B): {sync_result.get('message', 'Unknown result')}")
-
-                if background_instances:
-                    # Queue remaining instances to background job immediately
-                    frappe.enqueue(
-                        "erp.api.erp_sis.subject_assignment.timetable_sync.sync_materialized_views_background",
-                        instances=background_instances,
-                        queue="long",
-                        timeout=600  # 10 minutes for background
-                    )
-                    debug_info.append(f"🔄 Queued {len(background_instances)} instances for background processing (from_date)")
-                    frappe.logger().info(f"✅ Queued {len(background_instances)} instances for background processing (PASS 2B)")
+                sync_result = sync_materialized_views_with_progress(instances_list)
+                debug_info.extend(sync_result.get("debug_info", []))
+                frappe.logger().info(f"✅ Progressive sync completed (PASS 2B): {sync_result.get('message', 'Unknown result')}")
         except Exception as sync_err:
             frappe.logger().error(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
             debug_info.append(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
@@ -541,61 +511,38 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     }
 
 
-def sync_materialized_views_immediately(instances, timeout_seconds=5):
+def sync_materialized_views_with_progress(instances):
     """
-    🔄 Sync materialized views immediately (synchronous) with timeout protection.
+    🔄 Sync materialized views progressively - one instance at a time with commits.
+
+    This approach prevents HTTP timeouts by committing after each instance and provides
+    detailed progress tracking for the frontend.
 
     Args:
         instances: List of dicts with instance_id, class_id, start_date, end_date, campus_id
-        timeout_seconds: Maximum time to wait before falling back to background job
 
     Returns:
-        dict: Sync result with debug info
+        dict: Sync result with debug info and progress
     """
-    import time
     from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
 
     debug_info = []
-    start_time = time.time()
+    total_teacher_count = 0
+    total_student_count = 0
 
     try:
-        sync_logs = []
-        total_teacher_count = 0
-        total_student_count = 0
-
-        debug_info.append(f"🔄 Starting immediate sync for {len(instances)} instances (timeout: {timeout_seconds}s)")
+        debug_info.append(f"🔄 Starting progressive sync for {len(instances)} instances")
 
         for i, instance_data in enumerate(instances):
-            # Check timeout before each instance
-            elapsed = time.time() - start_time
-            if elapsed > timeout_seconds:
-                remaining_instances = len(instances) - i
-                debug_info.append(f"⏰ Timeout reached after {elapsed:.1f}s, switching to background job for {remaining_instances} remaining instances")
+            instance_start_time = frappe.utils.now()
+            instance_id = instance_data["instance_id"]
 
-                # Queue remaining instances as background job
-                remaining_instances_list = instances[i:]
-                frappe.enqueue(
-                    "erp.api.erp_sis.subject_assignment.timetable_sync.sync_materialized_views_background",
-                    instances=remaining_instances_list,
-                    queue="long",
-                    timeout=600  # 10 minutes for background
-                )
-
-                message = f"Partial sync: {total_teacher_count}T/{total_student_count}S immediate, {remaining_instances} queued for background"
-                debug_info.append(f"✅ Partial immediate sync complete: {message}")
-                frappe.logger().info(f"✅ Partial immediate sync complete: {message}")
-
-                return {
-                    "success": True,
-                    "message": message,
-                    "teacher_count": total_teacher_count,
-                    "student_count": total_student_count,
-                    "partial": True,
-                    "remaining_queued": remaining_instances,
-                    "debug_info": debug_info
-                }
+            debug_info.append(f"📊 Processing instance {i+1}/{len(instances)}: {instance_id}")
+            frappe.logger().info(f"📊 Processing instance {i+1}/{len(instances)}: {instance_id}")
 
             try:
+                # Sync this instance
+                sync_logs = []
                 teacher_count, student_count = sync_materialized_views_for_instance(
                     instance_id=instance_data["instance_id"],
                     class_id=instance_data["class_id"],
@@ -604,36 +551,55 @@ def sync_materialized_views_immediately(instances, timeout_seconds=5):
                     campus_id=instance_data["campus_id"],
                     logs=sync_logs
                 )
+
+                # Commit immediately after each instance to prevent timeouts
+                frappe.db.commit()
+
                 total_teacher_count += teacher_count
                 total_student_count += student_count
-                debug_info.append(f"✅ Sync completed for {instance_data['instance_id']}: {teacher_count}T/{student_count}S")
-                frappe.logger().info(f"✅ Immediate sync completed for {instance_data['instance_id']}: {teacher_count}T/{student_count}S")
+
+                instance_end_time = frappe.utils.now()
+                duration = (frappe.utils.get_datetime(instance_end_time) - frappe.utils.get_datetime(instance_start_time)).total_seconds()
+
+                success_msg = f"✅ Instance {instance_id}: {teacher_count}T/{student_count}S ({duration:.1f}s)"
+                debug_info.append(success_msg)
+                frappe.logger().info(success_msg)
+
+                # Add key sync logs for debugging
+                for log in sync_logs[-5:]:  # Last 5 logs
+                    if any(keyword in log for keyword in ["DEBUG", "assignment", "No assignment", "HAS assignment", "Row:"]):
+                        debug_info.append(f"📝 {log}")
+
             except Exception as e:
-                error_msg = f"❌ Sync failed for {instance_data['instance_id']}: {str(e)}"
+                error_msg = f"❌ Failed instance {instance_id}: {str(e)}"
                 debug_info.append(error_msg)
                 frappe.logger().error(error_msg)
+                # Continue with next instance instead of failing completely
 
-        message = f"Synced {total_teacher_count} teacher records, {total_student_count} student records across {len(instances)} instances"
-        debug_info.append(f"✅ Immediate sync complete: {message}")
-        frappe.logger().info(f"✅ Immediate sync complete: {message}")
+        message = f"Progressively synced {total_teacher_count} teacher records, {total_student_count} student records across {len(instances)} instances"
+        debug_info.append(f"🎉 Progressive sync complete: {message}")
+        frappe.logger().info(f"🎉 Progressive sync complete: {message}")
 
         return {
             "success": True,
             "message": message,
             "teacher_count": total_teacher_count,
             "student_count": total_student_count,
-            "partial": False,
+            "instances_processed": len(instances),
             "debug_info": debug_info
         }
 
     except Exception as e:
-        error_msg = f"❌ Immediate materialized view sync failed: {str(e)}"
+        error_msg = f"❌ Progressive materialized view sync failed: {str(e)}"
         frappe.logger().error(error_msg)
         debug_info.append(error_msg)
 
         return {
             "success": False,
             "message": error_msg,
+            "teacher_count": total_teacher_count,
+            "student_count": total_student_count,
+            "instances_processed": len(instances),
             "debug_info": debug_info
         }
 
@@ -645,6 +611,8 @@ def sync_materialized_views_background(instances):
     Args:
         instances: List of dicts with instance_id, class_id, start_date, end_date, campus_id
     """
+    frappe.logger().info(f"🚀 BACKGROUND JOB STARTED: Processing {len(instances)} instances")
+
     from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
 
     try:
@@ -652,7 +620,8 @@ def sync_materialized_views_background(instances):
         total_teacher_count = 0
         total_student_count = 0
 
-        for instance_data in instances:
+        for i, instance_data in enumerate(instances):
+            frappe.logger().info(f"🔄 Background processing instance {i+1}/{len(instances)}: {instance_data['instance_id']}")
             try:
                 teacher_count, student_count = sync_materialized_views_for_instance(
                     instance_id=instance_data["instance_id"],
@@ -665,6 +634,11 @@ def sync_materialized_views_background(instances):
                 total_teacher_count += teacher_count
                 total_student_count += student_count
                 frappe.logger().info(f"✅ Background sync completed for {instance_data['instance_id']}: {teacher_count}T/{student_count}S")
+
+                # Log sync logs for debugging
+                for log in sync_logs[-10:]:  # Last 10 logs
+                    frappe.logger().info(f"📝 Sync log: {log}")
+
             except Exception as e:
                 frappe.logger().error(f"❌ Background sync failed for {instance_data['instance_id']}: {str(e)}")
 
