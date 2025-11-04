@@ -1961,9 +1961,12 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         # Check if entry already exists (in-memory check)
                         teacher_key = f"{teacher_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
 
-                        if teacher_key not in existing_teacher_entries:
+                        if teacher_key in existing_teacher_entries:
+                            logs.append(f"⏭️ [sync] Teacher timetable entry already exists for {teacher_id} on {specific_date} - skipping")
+                        else:
                             # Create teacher timetable with error handling
                             try:
+                                logs.append(f"🆕 [sync] Creating teacher timetable for {teacher_id} on {specific_date}, day={normalized_day}, column={row.timetable_column_id}")
                                 teacher_timetable = frappe.get_doc({
                                     "doctype": "SIS Teacher Timetable",
                                     "teacher_id": teacher_id,
@@ -1979,12 +1982,13 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                 teacher_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
                                 teacher_timetable_count += 1
                                 existing_teacher_entries.add(teacher_key)  # Add to cache
+                                logs.append(f"✅ [sync] Successfully created teacher timetable entry for {teacher_id}")
                                 
                             except frappe.DoesNotExistError:
-                                logs.append(f"Error creating teacher timetable for {teacher_id}: Tài liệu SIS Teacher không tìm thấy")
+                                logs.append(f"❌ [sync] Error creating teacher timetable for {teacher_id}: Tài liệu SIS Teacher không tìm thấy")
                                 continue
                             except Exception as insert_error:
-                                logs.append(f"Error creating teacher timetable for {teacher_id}: {str(insert_error)}")
+                                logs.append(f"❌ [sync] Error creating teacher timetable for {teacher_id}: {str(insert_error)}")
                                 continue
                             
                     except Exception as te_error:
