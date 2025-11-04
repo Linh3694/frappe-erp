@@ -337,7 +337,7 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                 debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances (with timeout protection)")
                 frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances (PASS 2A)")
 
-                sync_result = sync_materialized_views_immediately(instances_list, timeout_seconds=5)
+                sync_result = sync_materialized_views_immediately(instances_list, timeout_seconds=15)
                 debug_info.extend(sync_result.get("debug_info", []))
                 frappe.logger().info(f"✅ Immediate sync completed (PASS 2A): {sync_result.get('message', 'Unknown result')}")
 
@@ -495,7 +495,7 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                 debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances (from_date, with timeout protection)")
                 frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances (PASS 2B)")
 
-                sync_result = sync_materialized_views_immediately(instances_list, timeout_seconds=5)
+                sync_result = sync_materialized_views_immediately(instances_list, timeout_seconds=15)
                 debug_info.extend(sync_result.get("debug_info", []))
                 frappe.logger().info(f"✅ Immediate sync completed (PASS 2B): {sync_result.get('message', 'Unknown result')}")
 
