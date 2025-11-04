@@ -294,7 +294,8 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                     """, (teacher_id, pattern_row.name))
                     updated_rows.append(pattern_row.name)
                     pass2a_updated += 1
-                    frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_1_id = {teacher_id}")
+                    frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_1_id = {teacher_id} (subject={pattern_row.subject_id})")
+                    debug_info.append(f"✅ PASS 2A: Updated row {pattern_row.name}: teacher_1_id = {teacher_id}")
                 elif not teacher_2:
                     frappe.db.sql("""
                         UPDATE `tabSIS Timetable Instance Row`
@@ -303,9 +304,11 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                     """, (teacher_id, pattern_row.name))
                     updated_rows.append(pattern_row.name)
                     pass2a_updated += 1
-                    frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_2_id = {teacher_id}")
+                    frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_2_id = {teacher_id} (subject={pattern_row.subject_id})")
+                    debug_info.append(f"✅ PASS 2A: Updated row {pattern_row.name}: teacher_2_id = {teacher_id}")
                 else:
-                    frappe.logger().info(f"⏭️ SKIP pattern row {pattern_row.name}: both teacher slots full")
+                    frappe.logger().info(f"⏭️ SKIP pattern row {pattern_row.name}: both teacher slots full (teacher_1={teacher_1}, teacher_2={teacher_2})")
+                    debug_info.append(f"⏭️ PASS 2A: Skipped row {pattern_row.name}: both slots full")
                     skipped_rows.append(pattern_row.name)
             except Exception as e:
                 frappe.logger().error(f"❌ Failed to update pattern row {pattern_row.name}: {str(e)}")
@@ -314,6 +317,16 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     frappe.db.commit()
     frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} rows")
     debug_info.append(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} pattern rows")
+    
+    # 🔍 DEBUG: Verify updated rows after commit
+    if pass2a_updated > 0:
+        frappe.logger().info(f"🔍 DEBUG: Verifying {len(updated_rows)} updated rows after PASS 2A")
+        for row_name in updated_rows[:5]:  # Check first 5
+            row_data = frappe.db.get_value("SIS Timetable Instance Row", row_name, 
+                ["teacher_1_id", "teacher_2_id", "subject_id", "day_of_week"], as_dict=True)
+            if row_data:
+                frappe.logger().info(f"  - Row {row_name}: teacher_1={row_data.teacher_1_id}, teacher_2={row_data.teacher_2_id}, subject={row_data.subject_id}, day={row_data.day_of_week}")
+                debug_info.append(f"🔍 PASS 2A: Verified row {row_name}: teacher_1={row_data.teacher_1_id}, teacher_2={row_data.teacher_2_id}")
     
     # 🔄 Sync materialized views immediately (synchronous) - PASS 2A
     if pass2a_updated > 0:
