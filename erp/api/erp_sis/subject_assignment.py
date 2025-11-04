@@ -967,29 +967,40 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
         frappe.logger().info(f"UPDATE DEBUG - Saving assignment with final values: teacher={assignment_doc.teacher_id}, actual_subject={assignment_doc.actual_subject_id}, class={getattr(assignment_doc, 'class_id', None)}")
 
         try:
-            # Store old teacher for bulk timetable update
+            # Store old teacher and application_type for bulk timetable update
             old_teacher_id = frappe.db.get_value("SIS Subject Assignment", assignment_id, "teacher_id")
+            old_application_type = frappe.db.get_value("SIS Subject Assignment", assignment_id, "application_type")
+            new_application_type = assignment_doc.application_type or "full_year"
             
-            # 🎯 Delete old override rows to ensure clean slate for recreating with new date range
-            try:
-                # Get actual_subject_id mapping to subject_ids
-                subject_mapping = frappe.db.sql("""
-                    SELECT name FROM `tabSIS Subject`
-                    WHERE actual_subject_id = %s AND campus_id = %s
-                """, (assignment_doc.actual_subject_id, campus_id), as_dict=True)
-                
-                if subject_mapping:
-                    subject_ids = [s.name for s in subject_mapping]
-                    override_deleted = _delete_teacher_override_rows(
-                        old_teacher_id,
-                        subject_ids,
-                        [assignment_doc.class_id],
-                        campus_id
-                    )
-                    frappe.logger().info(f"UPDATE SYNC - Deleted {override_deleted} old override rows before update")
-                    debug_info['override_rows_deleted'] = override_deleted
-            except Exception as override_del_error:
-                frappe.logger().error(f"UPDATE SYNC - Failed to delete old override rows: {str(override_del_error)}")
+            frappe.logger().info(f"UPDATE SYNC - application_type: {old_application_type} → {new_application_type}")
+            
+            # 🎯 Delete old override rows to ensure clean slate
+            # Delete if: teacher changed OR application_type changed to full_year
+            should_delete_overrides = (
+                old_teacher_id != teacher_id or 
+                (old_application_type == "from_date" and new_application_type == "full_year")
+            )
+            
+            if should_delete_overrides:
+                try:
+                    # Get actual_subject_id mapping to subject_ids
+                    subject_mapping = frappe.db.sql("""
+                        SELECT name FROM `tabSIS Subject`
+                        WHERE actual_subject_id = %s AND campus_id = %s
+                    """, (assignment_doc.actual_subject_id, campus_id), as_dict=True)
+                    
+                    if subject_mapping:
+                        subject_ids = [s.name for s in subject_mapping]
+                        override_deleted = _delete_teacher_override_rows(
+                            teacher_id or assignment_doc.teacher_id,  # Use current teacher (not old)
+                            subject_ids,
+                            [assignment_doc.class_id],
+                            campus_id
+                        )
+                        frappe.logger().info(f"UPDATE SYNC - Deleted {override_deleted} old override rows before update (reason: teacher_changed={old_teacher_id != teacher_id}, type_changed={old_application_type != new_application_type})")
+                        debug_info['override_rows_deleted'] = override_deleted
+                except Exception as override_del_error:
+                    frappe.logger().error(f"UPDATE SYNC - Failed to delete old override rows: {str(override_del_error)}")
             
             assignment_doc.save()
             frappe.db.commit()
