@@ -2141,23 +2141,72 @@ def batch_update_teacher_assignments():
                         old_start_date = getattr(existing_doc, 'start_date', None)
                         old_end_date = getattr(existing_doc, 'end_date', None)
                         
+                        frappe.logger().info(f"BATCH UPDATE CHECK - Assignment {existing}:")
+                        frappe.logger().info(f"  OLD: type={old_application_type}, start={old_start_date}, end={old_end_date}")
+                        frappe.logger().info(f"  NEW: type={application_type}, start={start_date}, end={end_date}")
+                        
+                        # Convert dates for comparison
+                        def normalize_date(d):
+                            if d is None or d == '':
+                                return None
+                            if isinstance(d, str):
+                                from datetime import datetime
+                                try:
+                                    return datetime.strptime(d, '%Y-%m-%d').date()
+                                except:
+                                    return None
+                            if hasattr(d, 'date'):
+                                return d.date()
+                            return d
+                        
+                        old_start_normalized = normalize_date(old_start_date)
+                        old_end_normalized = normalize_date(old_end_date)
+                        new_start_normalized = normalize_date(start_date)
+                        new_end_normalized = normalize_date(end_date)
+                        
                         is_modified = False
                         if old_application_type != application_type:
+                            frappe.logger().info(f"  ✅ application_type changed")
                             existing_doc.application_type = application_type
                             is_modified = True
                         
-                        if old_start_date != start_date:
+                        if old_start_normalized != new_start_normalized:
+                            frappe.logger().info(f"  ✅ start_date changed: {old_start_normalized} → {new_start_normalized}")
                             existing_doc.start_date = start_date
                             is_modified = True
                         
-                        if old_end_date != end_date:
+                        if old_end_normalized != new_end_normalized:
+                            frappe.logger().info(f"  ✅ end_date changed: {old_end_normalized} → {new_end_normalized}")
                             existing_doc.end_date = end_date
                             is_modified = True
                         
                         if is_modified:
+                            # 🎯 IMPORTANT: Delete override rows before saving if changing to full_year
+                            if old_application_type == "from_date" and application_type == "full_year":
+                                frappe.logger().info(f"  🗑️ Deleting override rows (from_date → full_year)")
+                                try:
+                                    subject_mapping = frappe.db.sql("""
+                                        SELECT name FROM `tabSIS Subject`
+                                        WHERE actual_subject_id = %s AND campus_id = %s
+                                    """, (subject_id, campus_id), as_dict=True)
+                                    
+                                    if subject_mapping:
+                                        subj_ids = [s.name for s in subject_mapping]
+                                        override_deleted = _delete_teacher_override_rows(
+                                            teacher_id,
+                                            subj_ids,
+                                            [class_id],
+                                            campus_id
+                                        )
+                                        frappe.logger().info(f"  🗑️ Deleted {override_deleted} override rows")
+                                except Exception as del_err:
+                                    frappe.logger().error(f"  ❌ Failed to delete override rows: {str(del_err)}")
+                            
                             existing_doc.save(ignore_permissions=True)
-                            frappe.logger().info(f"BATCH UPDATE - Updated assignment {existing}: application_type={application_type}, start_date={start_date}, end_date={end_date}")
+                            frappe.logger().info(f"BATCH UPDATE - ✅ Updated assignment {existing}")
                             created_count += 1  # Count as "created/modified"
+                        else:
+                            frappe.logger().info(f"  ⏭️ No changes detected")
             
             frappe.db.commit()
             
