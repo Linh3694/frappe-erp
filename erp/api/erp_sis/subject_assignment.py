@@ -2604,12 +2604,16 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     
     # ✅ PASS 2A: Update pattern rows for full_year assignments
     frappe.logger().info(f"🆕 PASS 2A: Updating pattern rows for full_year assignments")
+    debug_info.append(f"🆕 PASS 2A: Updating pattern rows for full_year assignments")
+    debug_info.append(f"🔍 PASS 2A: teacher_assignment_map = {teacher_assignment_map}")
+    debug_info.append(f"🔍 PASS 2A: all_rows_refreshed count = {len(all_rows_refreshed)}")
     frappe.logger().info(f"🔍 PASS 2A: teacher_assignment_map = {teacher_assignment_map}")
     frappe.logger().info(f"🔍 PASS 2A: all_rows_refreshed count = {len(all_rows_refreshed)}")
     frappe.logger().info(f"🔍 PASS 2A: subject_map = {subject_map}")
     frappe.logger().info(f"🔍 PASS 2A: instances = {[(i.name, i.class_id) for i in instances]}")
     
     full_year_count = 0
+    pass2a_updated = 0
     for assignment_key, assignment_info in teacher_assignment_map.items():
         actual_subject, class_id = assignment_key
         application_type = assignment_info["application_type"]
@@ -2617,15 +2621,18 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         # Only process full_year assignments
         if application_type != "full_year":
             frappe.logger().info(f"⏭️ PASS 2A: Skipping {assignment_key} - type={application_type}")
+            debug_info.append(f"⏭️ PASS 2A: Skipping {assignment_key} - type={application_type}")
             continue
         
         full_year_count += 1
         frappe.logger().info(f"✅ PASS 2A: Processing full_year assignment {assignment_key}")
+        debug_info.append(f"✅ PASS 2A: Processing full_year assignment {assignment_key}")
         
         # Get instance for this class
         instance = next((i for i in instances if i.class_id == class_id), None)
         if not instance:
             frappe.logger().info(f"❌ PASS 2A: No instance found for class {class_id}")
+            debug_info.append(f"❌ PASS 2A: No instance found for class {class_id}")
             continue
         
         frappe.logger().info(f"✅ PASS 2A: Found instance {instance.name} for class {class_id}")
@@ -2638,6 +2645,7 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                       and not r.get("date")]  # Pattern rows only
         
         frappe.logger().info(f"📋 PASS 2A: Found {len(pattern_rows)} pattern rows for {actual_subject} in {class_id} (full_year)")
+        debug_info.append(f"📋 PASS 2A: Found {len(pattern_rows)} pattern rows for {actual_subject} in {class_id}")
         
         # Debug: Show all rows for this instance
         all_instance_rows = [r for r in all_rows_refreshed if r.parent == instance.name]
@@ -2665,7 +2673,9 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                         WHERE name = %s
                     """, (teacher_id, pattern_row.name))
                     updated_rows.append(pattern_row.name)
+                    pass2a_updated += 1
                     frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_1_id = {teacher_id}")
+                    debug_info.append(f"✅ PASS 2A: Updated {pattern_row.name} teacher_1_id")
                 elif not teacher_2:
                     frappe.db.sql("""
                         UPDATE `tabSIS Timetable Instance Row`
@@ -2673,9 +2683,12 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                         WHERE name = %s
                     """, (teacher_id, pattern_row.name))
                     updated_rows.append(pattern_row.name)
+                    pass2a_updated += 1
                     frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_2_id = {teacher_id}")
+                    debug_info.append(f"✅ PASS 2A: Updated {pattern_row.name} teacher_2_id")
                 else:
                     frappe.logger().info(f"⏭️ SKIP pattern row {pattern_row.name}: both teacher slots full (teacher_1={teacher_1}, teacher_2={teacher_2})")
+                    debug_info.append(f"⏭️ PASS 2A: SKIP {pattern_row.name} - both slots full")
                     skipped_rows.append(pattern_row.name)
             except Exception as e:
                 frappe.logger().error(f"❌ Failed to update pattern row {pattern_row.name}: {str(e)}")
@@ -2683,7 +2696,8 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     
     # Commit after PASS 2A
     frappe.db.commit()
-    frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {len([r for r in updated_rows if 'TIMETABLE-INSTANCE-ROW' in r])} rows")
+    frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} rows")
+    debug_info.append(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} pattern rows")
     
     # ✅ PASS 2B: Create date-specific override rows for date-range assignments
     frappe.logger().info(f"🆕 PASS 2B: Creating date-specific override rows")
