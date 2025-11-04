@@ -36,6 +36,28 @@ def create_date_override_row(instance_id, pattern_row, specific_date, teacher_id
         period_name = pattern_row.get("period_name")
         timetable_column_id = pattern_row.get("timetable_column_id")
         
+        # Determine teacher assignment
+        pattern_teacher_1 = pattern_row.get("teacher_1_id")
+        pattern_teacher_2 = pattern_row.get("teacher_2_id")
+        
+        # Assign new teacher to appropriate slot
+        if not pattern_teacher_1:
+            # Slot 1 is free, assign new teacher there
+            override_teacher_1 = teacher_id
+            override_teacher_2 = pattern_teacher_2
+        elif not pattern_teacher_2:
+            # Slot 1 is taken but slot 2 is free, assign new teacher to slot 2
+            override_teacher_1 = pattern_teacher_1
+            override_teacher_2 = teacher_id
+        else:
+            # Both slots taken, but still assign to slot 1 (override pattern assignment)
+            override_teacher_1 = teacher_id
+            override_teacher_2 = pattern_teacher_2
+        
+        import frappe
+        frappe.logger().info(f"📝 CREATE OVERRIDE ROW - date={specific_date}, pattern_teacher_1={pattern_teacher_1}, pattern_teacher_2={pattern_teacher_2}")
+        frappe.logger().info(f"                       override_teacher_1={override_teacher_1}, override_teacher_2={override_teacher_2}")
+        
         # Clone pattern row data
         override_doc = frappe.get_doc({
             "doctype": "SIS Timetable Instance Row",
@@ -49,13 +71,13 @@ def create_date_override_row(instance_id, pattern_row, specific_date, teacher_id
             "period_name": period_name,
             "subject_id": pattern_row.get("subject_id"),
             "room_id": pattern_row.get("room_id"),
-            # Assign teacher
-            "teacher_1_id": pattern_row.get("teacher_1_id") or teacher_id,
-            "teacher_2_id": teacher_id if pattern_row.get("teacher_1_id") else pattern_row.get("teacher_2_id")
+            # Assign teachers
+            "teacher_1_id": override_teacher_1,
+            "teacher_2_id": override_teacher_2
         })
         
         override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
-        frappe.logger().info(f"✅ Created override row {override_doc.name} for date {specific_date}")
+        frappe.logger().info(f"✅ Created override row {override_doc.name} for date {specific_date} with teacher_1={override_teacher_1}, teacher_2={override_teacher_2}")
         return override_doc.name
         
     except Exception as e:
@@ -136,7 +158,7 @@ def delete_teacher_override_rows(teacher_id, subject_ids, class_ids, campus_id):
     
     Args:
         teacher_id: Teacher ID
-        subject_ids: List of subject IDs
+        subject_ids: List of SIS Subject IDs (not Actual Subject IDs)
         class_ids: List of class IDs
         campus_id: Campus ID
         
@@ -155,12 +177,19 @@ def delete_teacher_override_rows(teacher_id, subject_ids, class_ids, campus_id):
         )
         
         if not instances:
+            frappe.logger().info(f"🗑️ DELETE OVERRIDE ROWS - No instances found for classes {class_ids}")
             return 0
         
         instance_ids = [i.name for i in instances]
         
-        # Delete override rows (date IS NOT NULL) for this teacher
-        deleted_count = frappe.db.sql("""
+        frappe.logger().info(f"🗑️ DELETE OVERRIDE ROWS - Found {len(instances)} instances")
+        frappe.logger().info(f"   - instance_ids: {instance_ids}")
+        frappe.logger().info(f"   - subject_ids: {subject_ids}")
+        frappe.logger().info(f"   - teacher_id: {teacher_id}")
+        
+        # Delete override rows (date IS NOT NULL) for this teacher and subject
+        # Method 1: Delete rows where teacher is assigned (teacher_1_id or teacher_2_id)
+        deleted_count_by_teacher = frappe.db.sql("""
             DELETE FROM `tabSIS Timetable Instance Row`
             WHERE date IS NOT NULL
               AND parent IN ({})
@@ -171,8 +200,27 @@ def delete_teacher_override_rows(teacher_id, subject_ids, class_ids, campus_id):
             ','.join(['%s'] * len(subject_ids))
         ), tuple(instance_ids + subject_ids + [teacher_id, teacher_id]))
         
-        frappe.logger().info(f"🗑️ Deleted {deleted_count} override rows for teacher {teacher_id}")
-        return deleted_count
+        frappe.logger().info(f"🗑️ DELETE OVERRIDE ROWS - Deleted {deleted_count_by_teacher} rows with teacher assignment")
+        
+        # Method 2: Also delete orphaned override rows (date IS NOT NULL) with no teacher
+        # This handles override rows created but not properly assigned
+        deleted_count_orphaned = frappe.db.sql("""
+            DELETE FROM `tabSIS Timetable Instance Row`
+            WHERE date IS NOT NULL
+              AND parent IN ({})
+              AND subject_id IN ({})
+              AND teacher_1_id IS NULL
+              AND teacher_2_id IS NULL
+        """.format(
+            ','.join(['%s'] * len(instance_ids)),
+            ','.join(['%s'] * len(subject_ids))
+        ), tuple(instance_ids + subject_ids))
+        
+        frappe.logger().info(f"🗑️ DELETE OVERRIDE ROWS - Deleted {deleted_count_orphaned} orphaned override rows (no teacher)")
+        
+        total_deleted = deleted_count_by_teacher + deleted_count_orphaned
+        frappe.logger().info(f"✅ Total override rows deleted: {total_deleted}")
+        return total_deleted
         
     except Exception as e:
         frappe.logger().error(f"❌ Error deleting override rows: {str(e)}")
