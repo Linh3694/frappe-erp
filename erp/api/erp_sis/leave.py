@@ -434,3 +434,117 @@ def get_leave_request_attachments():
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "ERP SIS Get Leave Request Attachments Error")
         return error_response(f"Lỗi khi lấy file đính kèm: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def create_leave_request():
+    """
+    Create leave request for a student (admin/teacher view)
+    
+    POST body:
+    {
+        "student_id": "STU-001",
+        "reason": "sick_child",
+        "other_reason": "",  # Required if reason is "other"
+        "start_date": "2025-11-06",
+        "end_date": "2025-11-07",
+        "description": "Optional description"
+    }
+    """
+    try:
+        # Parse request body
+        data = json.loads(frappe.request.data.decode('utf-8'))
+        
+        student_id = data.get('student_id')
+        reason = data.get('reason')
+        other_reason = data.get('other_reason', '')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        description = data.get('description', '')
+        
+        # Validate required fields
+        if not student_id:
+            return validation_error_response("Thiếu tham số", {
+                "student_id": ["Student ID là bắt buộc"]
+            })
+        
+        if not reason:
+            return validation_error_response("Thiếu tham số", {
+                "reason": ["Lý do nghỉ là bắt buộc"]
+            })
+        
+        if not start_date or not end_date:
+            return validation_error_response("Thiếu tham số", {
+                "start_date": ["Ngày bắt đầu là bắt buộc"] if not start_date else [],
+                "end_date": ["Ngày kết thúc là bắt buộc"] if not end_date else []
+            })
+        
+        # Validate reason
+        valid_reasons = ['sick_child', 'family_matters', 'other']
+        if reason not in valid_reasons:
+            return validation_error_response("Lý do không hợp lệ", {
+                "reason": ["Lý do phải là một trong: sick_child, family_matters, other"]
+            })
+        
+        # Validate other_reason if reason is 'other'
+        if reason == 'other' and not other_reason.strip():
+            return validation_error_response("Vui lòng nhập lý do khác", {
+                "other_reason": ["Vui lòng nhập lý do cụ thể khi chọn 'Lý do khác'"]
+            })
+        
+        # Get student info
+        try:
+            student = frappe.get_doc("CRM Student", student_id)
+        except frappe.DoesNotExistError:
+            return not_found_response("Không tìm thấy học sinh")
+        
+        # Get campus from student
+        campus_id = student.campus_id
+        if not campus_id:
+            return error_response("Học sinh chưa có trường học")
+        
+        # Check campus permissions
+        user_campus = get_current_campus_from_context()
+        if campus_id != user_campus:
+            return forbidden_response("Bạn không có quyền tạo đơn nghỉ phép cho học sinh này")
+        
+        # Get parent_id from student (get first parent from family relationship)
+        family_relationships = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"student": student_id},
+            fields=["parent"],
+            limit=1
+        )
+        
+        if not family_relationships:
+            return error_response("Học sinh chưa có phụ huynh được liên kết")
+        
+        parent_id = family_relationships[0].parent
+        
+        # Create leave request
+        leave_request = frappe.get_doc({
+            "doctype": "SIS Student Leave Request",
+            "student_id": student_id,
+            "parent_id": parent_id,
+            "campus_id": campus_id,
+            "reason": reason,
+            "other_reason": other_reason,
+            "start_date": start_date,
+            "end_date": end_date,
+            "description": description,
+            "submitted_at": datetime.now()
+        })
+        
+        leave_request.insert(ignore_permissions=True)
+        leave_request.save()
+        
+        return success_response({
+            "id": leave_request.name,
+            "student_id": leave_request.student_id,
+            "student_name": leave_request.student_name,
+            "message": "Đã tạo đơn nghỉ phép thành công"
+        })
+        
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "ERP SIS Create Leave Request Error")
+        return error_response(f"Lỗi khi tạo đơn nghỉ phép: {str(e)}")
