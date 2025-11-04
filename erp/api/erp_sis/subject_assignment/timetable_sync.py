@@ -333,13 +333,17 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                         })
 
             if instances_list:
-                # Sync immediately instead of queuing background job
-                debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances")
-                frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances")
+                # Sync immediately with timeout protection
+                debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances (with timeout protection)")
+                frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances (PASS 2A)")
 
-                sync_result = sync_materialized_views_immediately(instances_list)
+                sync_result = sync_materialized_views_immediately(instances_list, timeout_seconds=5)
                 debug_info.extend(sync_result.get("debug_info", []))
-                frappe.logger().info(f"✅ Immediate sync completed: {sync_result.get('message', 'Unknown result')}")
+                frappe.logger().info(f"✅ Immediate sync completed (PASS 2A): {sync_result.get('message', 'Unknown result')}")
+
+                # Log if partial sync occurred
+                if sync_result.get("partial"):
+                    debug_info.append(f"⚠️ Partial sync: {sync_result.get('remaining_queued', 0)} instances queued for background processing")
         except Exception as sync_err:
             frappe.logger().error(f"❌ Failed to sync materialized views: {str(sync_err)}")
             debug_info.append(f"❌ Failed to sync materialized views: {str(sync_err)}")
@@ -511,27 +515,60 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     }
 
 
-def sync_materialized_views_immediately(instances):
+def sync_materialized_views_immediately(instances, timeout_seconds=5):
     """
-    🔄 Sync materialized views immediately (synchronous).
+    🔄 Sync materialized views immediately (synchronous) with timeout protection.
 
     Args:
         instances: List of dicts with instance_id, class_id, start_date, end_date, campus_id
+        timeout_seconds: Maximum time to wait before falling back to background job
 
     Returns:
         dict: Sync result with debug info
     """
+    import time
     from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
 
     debug_info = []
+    start_time = time.time()
+
     try:
         sync_logs = []
         total_teacher_count = 0
         total_student_count = 0
 
-        debug_info.append(f"🔄 Starting immediate sync for {len(instances)} instances")
+        debug_info.append(f"🔄 Starting immediate sync for {len(instances)} instances (timeout: {timeout_seconds}s)")
 
-        for instance_data in instances:
+        for i, instance_data in enumerate(instances):
+            # Check timeout before each instance
+            elapsed = time.time() - start_time
+            if elapsed > timeout_seconds:
+                remaining_instances = len(instances) - i
+                debug_info.append(f"⏰ Timeout reached after {elapsed:.1f}s, switching to background job for {remaining_instances} remaining instances")
+
+                # Queue remaining instances as background job
+                remaining_instances_list = instances[i:]
+                frappe.enqueue(
+                    "erp.api.erp_sis.subject_assignment.timetable_sync.sync_materialized_views_background",
+                    instances=remaining_instances_list,
+                    queue="long",
+                    timeout=600  # 10 minutes for background
+                )
+
+                message = f"Partial sync: {total_teacher_count}T/{total_student_count}S immediate, {remaining_instances} queued for background"
+                debug_info.append(f"✅ Partial immediate sync complete: {message}")
+                frappe.logger().info(f"✅ Partial immediate sync complete: {message}")
+
+                return {
+                    "success": True,
+                    "message": message,
+                    "teacher_count": total_teacher_count,
+                    "student_count": total_student_count,
+                    "partial": True,
+                    "remaining_queued": remaining_instances,
+                    "debug_info": debug_info
+                }
+
             try:
                 teacher_count, student_count = sync_materialized_views_for_instance(
                     instance_id=instance_data["instance_id"],
@@ -559,6 +596,7 @@ def sync_materialized_views_immediately(instances):
             "message": message,
             "teacher_count": total_teacher_count,
             "student_count": total_student_count,
+            "partial": False,
             "debug_info": debug_info
         }
 
