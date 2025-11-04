@@ -1757,6 +1757,15 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                 if subj.actual_subject_id:
                     subject_map[subj.name] = subj.actual_subject_id
             logs.append(f"✅ Built subject map: {len(subject_map)} mappings from {len(subject_ids_in_rows)} subjects")
+            
+            # 🔍 DEBUG: Log subject map for troubleshooting
+            if len(subject_map) < len(subject_ids_in_rows):
+                missing_subjects = set(subject_ids_in_rows) - set(subject_map.keys())
+                logs.append(f"⚠️ [DEBUG] Subjects without mapping: {list(missing_subjects)}")
+            
+            # Log first few mappings
+            for i, (sis_subj_id, actual_subj_id) in enumerate(list(subject_map.items())[:5]):
+                logs.append(f"  - {sis_subj_id} → {actual_subj_id}")
 
         # DEBUG: Log first few instance rows with teachers
         for i, row in enumerate(instance_rows[:10]):  # Show first 10 rows
