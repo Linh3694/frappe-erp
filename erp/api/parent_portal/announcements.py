@@ -180,6 +180,9 @@ def get_announcements():
             except Exception as e:
                 frappe.logger().error(f"Parent portal - Error getting student grade/class: {str(e)}")
 
+        # ⭐ DEBUG LOG
+        frappe.logger().info(f"Parent portal - student_id={student_id}, student_grade_name={student_grade_name}, student_class_name={student_class_name}")
+
         # Process announcements to add additional information
         processed_announcements = []
         for announcement in announcements:
