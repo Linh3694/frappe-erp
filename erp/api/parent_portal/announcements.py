@@ -300,6 +300,12 @@ def get_announcements():
                     "limit": limit,
                     "total": total_count,
                     "pages": total_pages
+                },
+                "debug": {
+                    "student_id": student_id,
+                    "student_grade_name": student_grade_name,
+                    "student_class_name": student_class_name,
+                    "processed_count": len(processed_announcements)
                 }
             }
         )
