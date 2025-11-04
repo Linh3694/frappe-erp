@@ -260,11 +260,12 @@ def get_announcements():
                 except Exception as e:
                     frappe.logger().error(f"Parent portal - Error processing recipients for announcement {announcement.name}: {str(e)}")
 
-            # ⭐ FIX: If student_id is provided, skip announcement if no relevant tags
-            if student_id and not relevant_tags:
-                frappe.logger().debug(f"Parent portal - Skipping announcement {announcement.name} (no relevant tags for student {student_id})")
-                continue
-
+            # Note: Always return announcement with relevant_tags (even if empty)
+            # Frontend will handle filtering based on student_id
+            
+            # ⭐ DEBUG LOG - per announcement
+            frappe.logger().info(f"Parent portal - Announcement {announcement.name}: recipients={json.dumps(announcement.recipients)}, relevant_tags_count={len(relevant_tags)}")
+            
             processed_announcement = {
                 "name": announcement.name,
                 "campus_id": announcement.campus_id,
@@ -292,6 +293,24 @@ def get_announcements():
 
         frappe.logger().info(f"Parent portal - Retrieved {len(processed_announcements)} announcements out of {total_count} total")
 
+        # ⭐ Build debug info for all announcements
+        announcements_debug = []
+        for a in announcements:
+            tags = []
+            if a.recipients:
+                try:
+                    if isinstance(a.recipients, str):
+                        recipients = json.loads(a.recipients)
+                    else:
+                        recipients = a.recipients
+                    tags = [f"{r.get('type')}:{r.get('display_name')}" for r in recipients if isinstance(r, dict)]
+                except:
+                    pass
+            announcements_debug.append({
+                "name": a.name,
+                "recipients_raw": tags
+            })
+
         return list_response(
             data=processed_announcements,
             meta={
@@ -305,7 +324,8 @@ def get_announcements():
                     "student_id": student_id,
                     "student_grade_name": student_grade_name,
                     "student_class_name": student_class_name,
-                    "processed_count": len(processed_announcements)
+                    "processed_count": len(processed_announcements),
+                    "all_announcements": announcements_debug
                 }
             }
         )
