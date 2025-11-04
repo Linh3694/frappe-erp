@@ -322,6 +322,8 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     # This handles cases where user uploaded timetable multiple times
     cleanup_count = 0
     try:
+        frappe.logger().info(f"🧹 Starting cleanup for {len(instances)} instances")
+        debug_info.append(f"🧹 Starting cleanup for {len(instances)} instances")
         for instance in instances:
             # Get all pattern rows for this instance
             instance_pattern_rows = frappe.get_all(
@@ -332,6 +334,8 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                     "date": ["is", "not set"]  # Only pattern rows
                 }
             )
+            
+            frappe.logger().info(f"🧹 Instance {instance.name}: Found {len(instance_pattern_rows)} pattern rows")
             
             # Group by (subject_id, day_of_week, timetable_column_id)
             rows_by_key = {}
@@ -344,6 +348,8 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
             # For each group, keep only one row (prefer one with teacher)
             for key, rows in rows_by_key.items():
                 if len(rows) > 1:
+                    subject_id, day, column_id = key
+                    frappe.logger().info(f"🧹 Found {len(rows)} duplicate rows for subject={subject_id}, day={day}, column={column_id}")
                     # Sort: rows with teacher first, then by name (newer = higher number)
                     rows_sorted = sorted(rows, key=lambda r: (
                         not bool(r.teacher_1_id or r.teacher_2_id),  # False (has teacher) comes first
@@ -352,11 +358,13 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                     
                     # Keep the first one (best row), delete the rest
                     keep_row = rows_sorted[0]
+                    frappe.logger().info(f"🧹 Keeping row {keep_row.name} (teacher={keep_row.teacher_1_id or keep_row.teacher_2_id})")
                     for row_to_delete in rows_sorted[1:]:
                         try:
                             frappe.delete_doc("SIS Timetable Instance Row", row_to_delete.name, ignore_permissions=True, force=True)
                             cleanup_count += 1
                             frappe.logger().info(f"🧹 Cleaned up duplicate row {row_to_delete.name} (keeping {keep_row.name})")
+                            debug_info.append(f"🧹 Cleaned up duplicate row {row_to_delete.name} (keeping {keep_row.name})")
                         except Exception as del_err:
                             frappe.logger().warning(f"⚠️ Failed to delete duplicate row {row_to_delete.name}: {str(del_err)}")
         
@@ -364,9 +372,14 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
             frappe.db.commit()
             frappe.logger().info(f"🧹 Cleanup complete: Removed {cleanup_count} duplicate pattern rows")
             debug_info.append(f"🧹 Cleanup: Removed {cleanup_count} duplicate pattern rows")
+        else:
+            frappe.logger().info(f"🧹 Cleanup: No duplicate rows found")
+            debug_info.append(f"🧹 Cleanup: No duplicate rows found")
     except Exception as cleanup_error:
         frappe.logger().error(f"❌ Cleanup failed: {str(cleanup_error)}")
         debug_info.append(f"⚠️ Cleanup warning: {str(cleanup_error)}")
+        import traceback
+        frappe.logger().error(f"Cleanup error traceback: {traceback.format_exc()}")
     
     # 🔍 DEBUG: Verify updated rows after commit
     if pass2a_updated > 0:

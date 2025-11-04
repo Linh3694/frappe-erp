@@ -1882,6 +1882,18 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                 teachers_in_row.append(row.teacher_2_id)
             logs.append(f"📋 [DEBUG] Pattern row {i}: name={row.name}, subject={row.subject_id}, teachers={teachers_in_row}, day={row.day_of_week}, column={row.timetable_column_id}")
         
+        # 🔍 DEBUG: Specifically check for rows with SIS-SUBJECT-35402 (Toán)
+        math_rows = [r for r in pattern_rows if r.get("subject_id") == "SIS-SUBJECT-35402"]
+        if math_rows:
+            logs.append(f"🔍 [DEBUG] Found {len(math_rows)} pattern rows for SIS-SUBJECT-35402 (Toán)")
+            for r in math_rows:
+                teachers = []
+                if r.teacher_1_id:
+                    teachers.append(r.teacher_1_id)
+                if r.teacher_2_id:
+                    teachers.append(r.teacher_2_id)
+                logs.append(f"  - Row {r.name}: teachers={teachers}, day={r.day_of_week}, column={r.timetable_column_id}")
+        
         # Process pattern rows (generate for all weeks)
         for row in pattern_rows:
             # Normalize and validate day_of_week first
