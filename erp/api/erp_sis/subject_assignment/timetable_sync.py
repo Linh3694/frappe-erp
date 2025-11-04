@@ -555,9 +555,12 @@ def sync_materialized_views_immediately(instances):
                 debug_info.append(success_msg)
                 frappe.logger().info(success_msg)
 
-                # Add key sync logs for debugging
-                for log in sync_logs[-5:]:  # Last 5 logs
-                    if any(keyword in log for keyword in ["DEBUG", "assignment", "No assignment", "HAS assignment", "Row:"]):
+                # Add key sync logs for debugging - show more logs and include new keywords
+                for log in sync_logs[-20:]:  # Last 20 logs for better debugging
+                    if any(keyword in log for keyword in [
+                        "DEBUG", "assignment", "No assignment", "HAS assignment", "Row:",
+                        "⏭️", "🆕", "✅", "❌", "Creating", "already exists", "Successfully created"
+                    ]):
                         debug_info.append(f"📝 {log}")
 
             except Exception as e:
