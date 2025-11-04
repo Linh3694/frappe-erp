@@ -278,8 +278,12 @@ def get_announcements():
                 except Exception as e:
                     frappe.logger().error(f"Parent portal - Error processing recipients for announcement {announcement.name}: {str(e)}")
 
-            # Note: Always return announcement with relevant_tags (even if empty)
-            # Frontend will handle filtering based on student_id
+            # ⭐ FILTER: If student_id is provided, skip announcements with no relevant tags
+            if student_id and not relevant_tags:
+                frappe.logger().debug(f"Parent portal - Skipping announcement {announcement.name} (no match for student {student_id})")
+                continue
+
+            # Note: Always return announcement with relevant_tags (even if empty when no student_id provided)
             
             # ⭐ DEBUG LOG - per announcement
             frappe.logger().info(f"Parent portal - Announcement {announcement.name}: recipients={json.dumps(announcement.recipients)}, relevant_tags_count={len(relevant_tags)}")
