@@ -372,6 +372,10 @@ def create_subject_assignment():
         classes = data.get("classes") or []
         
         frappe.logger().info(f"CREATE DEBUG - Parsed values: teacher_id={teacher_id}, assignments={len(assignments)}")
+        frappe.logger().info(f"CREATE DEBUG - Top-level params: application_type={data.get('application_type')}, start_date={data.get('start_date')}, end_date={data.get('end_date')}")
+        
+        if assignments:
+            frappe.logger().info(f"CREATE DEBUG - First assignment: {assignments[0] if len(assignments) > 0 else 'N/A'}")
         
         # Input validation
         if not teacher_id:
@@ -556,7 +560,17 @@ def create_subject_assignment():
                     "start_date": start_date,
                     "end_date": end_date
                 })
+                
+                frappe.logger().info(f"🎯 CREATE - Creating assignment: teacher={teacher_id}, subject={sid}, class={cid}")
+                frappe.logger().info(f"           application_type={application_type}, start_date={start_date}, end_date={end_date}")
+                
                 assignment_doc.insert()
+                
+                # Verify after insert
+                created_doc = frappe.get_doc("SIS Subject Assignment", assignment_doc.name)
+                frappe.logger().info(f"✅ VERIFY - Created assignment {created_doc.name}")
+                frappe.logger().info(f"           application_type={created_doc.application_type}, start_date={created_doc.start_date}, end_date={created_doc.end_date}")
+                
                 created_names.append(assignment_doc.name)
                 
                 # Track for batch sync
