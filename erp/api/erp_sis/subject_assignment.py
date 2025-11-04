@@ -2772,6 +2772,25 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     
     frappe.logger().info(f"✅ PASS 2B Complete: Created override rows for from_date assignments")
     
+    # 🔄 Sync materialized views after PASS 2B creates override rows
+    pass2b_created = len([r for r in updated_rows if r not in [p.name for p in all_rows_refreshed]])
+    if pass2b_created > 0:
+        try:
+            from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
+            instances_synced = set()
+            for assignment_key, assignment_info in teacher_assignment_map.items():
+                if assignment_info["application_type"] == "from_date":
+                    actual_subject, class_id = assignment_key
+                    instance = next((i for i in instances if i.class_id == class_id), None)
+                    if instance and instance.name not in instances_synced:
+                        sync_materialized_views_for_instance(instance.name)
+                        instances_synced.add(instance.name)
+                        debug_info.append(f"🔄 Synced materialized views for {instance.name} (from_date)")
+            frappe.logger().info(f"✅ Synced materialized views for {len(instances_synced)} instances (PASS 2B)")
+        except Exception as sync_err:
+            frappe.logger().error(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
+            debug_info.append(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
+    
     frappe.db.commit()
     
     frappe.logger().info(f"BATCH SYNC - Teacher {teacher_id}: Updated {len(updated_rows)} rows in {len(instances)} instances")
