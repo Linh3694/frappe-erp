@@ -1756,6 +1756,10 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         )
         student_ids = [s.student_id for s in students_in_class if s.student_id]
         logs.append(f"Found {len(student_ids)} CRM students in class {class_id}")
+
+        if not student_ids:
+            logs.append(f"⚠️ [sync] No students found in class {class_id} - student timetable entries will not be created")
+            # Continue anyway for teacher entries
         
         # Generate dates for the timetable period (simplified - use week dates)
         from datetime import datetime, timedelta
@@ -1907,6 +1911,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                             continue
 
                         # 🔍 CRITICAL: Check if teacher has assignment for this subject and class
+                        # First try with exact match
                         has_assignment = frappe.db.exists("SIS Subject Assignment", {
                             "teacher_id": teacher_id,
                             "class_id": class_id,
@@ -1915,6 +1920,24 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         })
 
                         if not has_assignment:
+                            # Try with subject_id instead of actual_subject_id
+                            has_assignment = frappe.db.exists("SIS Subject Assignment", {
+                                "teacher_id": teacher_id,
+                                "class_id": class_id,
+                                "subject_id": row.subject_id,
+                                "docstatus": 1
+                            })
+
+                        if not has_assignment:
+                            # Debug: Check what assignments exist for this teacher
+                            teacher_assignments = frappe.get_all("SIS Subject Assignment",
+                                filters={"teacher_id": teacher_id, "docstatus": 1},
+                                fields=["name", "class_id", "subject_id", "actual_subject_id"]
+                            )
+                            logs.append(f"🔍 [DEBUG] Teacher {teacher_id} assignments: {len(teacher_assignments)} found")
+                            for assignment in teacher_assignments[:3]:  # Show first 3
+                                logs.append(f"  - Assignment: class={assignment.class_id}, subject={assignment.subject_id}, actual_subject={assignment.actual_subject_id}")
+
                             logs.append(f"⚠️ [sync] Teacher {teacher_id} has NO assignment for subject {row.subject_id} in class {class_id} - skipping")
                             continue
 
