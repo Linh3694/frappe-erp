@@ -326,7 +326,8 @@ def get_announcements():
                     pass
             announcements_debug.append({
                 "name": a.name,
-                "recipients_raw": tags
+                "recipients_raw": tags,
+                "recipients_full": recipients if isinstance(recipients, list) else []
             })
 
         return list_response(
