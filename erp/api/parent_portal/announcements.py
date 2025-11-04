@@ -230,11 +230,29 @@ def get_announcements():
                                 is_relevant = False
 
                                 if recipient_type == 'grade' and student_grade_name:
+                                    # For grade, try to resolve the grade name from the ID
+                                    grade_name_from_db = recipient_name
+                                    try:
+                                        if recipient_name:
+                                            grade_doc = frappe.get_doc("SIS Education Grade", recipient_name)
+                                            grade_name_from_db = grade_doc.title_en or grade_doc.title_vn or recipient_name
+                                    except:
+                                        pass
                                     # Check if student's grade matches this recipient
-                                    is_relevant = recipient_name == student_grade_name or recipient_display_name == student_grade_name
+                                    is_relevant = grade_name_from_db == student_grade_name or recipient_display_name == student_grade_name
+                                    
                                 elif recipient_type == 'class' and student_class_name:
+                                    # For class, try to resolve the class name from the ID
+                                    class_name_from_db = recipient_name
+                                    try:
+                                        if recipient_name:
+                                            class_doc = frappe.get_doc("SIS Class", recipient_name)
+                                            class_name_from_db = class_doc.title or recipient_name
+                                    except:
+                                        pass
                                     # Check if student's class matches this recipient
-                                    is_relevant = recipient_name == student_class_name or recipient_display_name == student_class_name
+                                    is_relevant = class_name_from_db == student_class_name or recipient_display_name == student_class_name
+                                    
                                 elif recipient_type == 'school':
                                     # School-wide announcements are relevant to all students
                                     is_relevant = True
