@@ -1740,6 +1740,20 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             
         logs.append(f"📊 [sync_materialized_views] Processing {len(instance_rows)} instance rows")
 
+        # 🔍 CRITICAL: Build subject map (SIS Subject ID → Actual Subject ID) for assignment lookup
+        subject_ids_in_rows = [row.subject_id for row in instance_rows if row.subject_id]
+        subject_map = {}
+        if subject_ids_in_rows:
+            sis_subjects = frappe.get_all(
+                "SIS Subject",
+                fields=["name", "actual_subject_id"],
+                filters={"name": ["in", subject_ids_in_rows], "campus_id": campus_id}
+            )
+            for subj in sis_subjects:
+                if subj.actual_subject_id:
+                    subject_map[subj.name] = subj.actual_subject_id
+            logs.append(f"✅ Built subject map: {len(subject_map)} mappings from {len(subject_ids_in_rows)} subjects")
+
         # DEBUG: Log first few instance rows
         for i, row in enumerate(instance_rows[:3]):
             logs.append(f"🔍 [DEBUG] Row {i}: subject_id={row.subject_id}, teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}, column={row.timetable_column_id}")
@@ -1910,23 +1924,22 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         if not teacher_id:
                             continue
 
-                        # 🔍 CRITICAL: Check if teacher has assignment for this subject and class
-                        # First try with exact match
+                        # 🔍 CRITICAL: Map SIS Subject ID to Actual Subject ID before checking assignment
+                        # row.subject_id is SIS Subject ID (e.g., SIS-SUBJECT-35404)
+                        # Assignment stores actual_subject_id (e.g., SIS_ACTUAL_SUBJECT-35388)
+                        actual_subject_id = subject_map.get(row.subject_id)
+                        
+                        if not actual_subject_id:
+                            logs.append(f"⚠️ [sync] Subject {row.subject_id} not found in subject map - skipping")
+                            continue
+                        
+                        # Check if teacher has assignment for this actual_subject_id and class
                         has_assignment = frappe.db.exists("SIS Subject Assignment", {
                             "teacher_id": teacher_id,
                             "class_id": class_id,
-                            "actual_subject_id": row.subject_id,
+                            "actual_subject_id": actual_subject_id,
                             "docstatus": 1  # Only active assignments
                         })
-
-                        if not has_assignment:
-                            # Try with subject_id instead of actual_subject_id
-                            has_assignment = frappe.db.exists("SIS Subject Assignment", {
-                                "teacher_id": teacher_id,
-                                "class_id": class_id,
-                                "subject_id": row.subject_id,
-                                "docstatus": 1
-                            })
 
                         if not has_assignment:
                             # Debug: Check what assignments exist for this teacher
@@ -1977,14 +1990,18 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         continue
                         
                 # 4. Create Student Timetable entries for this specific date (only if teacher has assignment)
-                has_teacher_assignment = any(
-                    frappe.db.exists("SIS Subject Assignment", {
-                        "teacher_id": t,
-                        "class_id": class_id,
-                        "actual_subject_id": row.subject_id,
-                        "docstatus": 1
-                    }) for t in teachers if t
-                )
+                # Map SIS Subject ID to Actual Subject ID
+                actual_subject_id_for_student = subject_map.get(row.subject_id)
+                has_teacher_assignment = False
+                if actual_subject_id_for_student:
+                    has_teacher_assignment = any(
+                        frappe.db.exists("SIS Subject Assignment", {
+                            "teacher_id": t,
+                            "class_id": class_id,
+                            "actual_subject_id": actual_subject_id_for_student,
+                            "docstatus": 1
+                        }) for t in teachers if t
+                    )
 
                 if not has_teacher_assignment:
                     logs.append(f"⚠️ [sync] No teacher assignment for subject {row.subject_id} in class {class_id} - skipping student entries")
