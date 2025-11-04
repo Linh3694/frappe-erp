@@ -257,6 +257,11 @@ def get_announcements():
                 except Exception as e:
                     frappe.logger().error(f"Parent portal - Error processing recipients for announcement {announcement.name}: {str(e)}")
 
+            # ⭐ FIX: If student_id is provided, skip announcement if no relevant tags
+            if student_id and not relevant_tags:
+                frappe.logger().debug(f"Parent portal - Skipping announcement {announcement.name} (no relevant tags for student {student_id})")
+                continue
+
             processed_announcement = {
                 "name": announcement.name,
                 "campus_id": announcement.campus_id,
