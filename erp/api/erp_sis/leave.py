@@ -237,9 +237,10 @@ def batch_get_active_leaves():
     Get active leaves for students on a specific date
     Used by attendance view to show which students have approved leaves
     
-    POST body:
+    POST body (either class_id OR student_ids required):
     {
-        "class_id": "CLASS-001",
+        "class_id": "CLASS-001",  # Optional if student_ids provided
+        "student_ids": ["STU-001", "STU-002"],  # Optional if class_id provided
         "date": "2025-10-10"
     }
     
@@ -247,14 +248,14 @@ def batch_get_active_leaves():
     {
         "success": true,
         "data": {
-            "STU-001": {
+            "STU-001": [{
                 "leave_id": "SIS-LEAVE-00001",
                 "reason": "sick_child",
                 "reason_display": "Con ốm",
                 "start_date": "2025-10-09",
                 "end_date": "2025-10-11",
                 "total_days": 3
-            },
+            }, ...],
             ...
         }
     }
@@ -265,28 +266,44 @@ def batch_get_active_leaves():
         # Parse request body
         data = json.loads(frappe.request.data.decode('utf-8'))
         class_id = data.get('class_id')
+        student_ids = data.get('student_ids', [])
         date = data.get('date')
         
-        if not class_id or not date:
+        # Validate date is required
+        if not date:
             return validation_error_response("Thiếu tham số", {
-                "class_id": ["Class ID là bắt buộc"] if not class_id else [],
-                "date": ["Date là bắt buộc"] if not date else []
+                "date": ["Date là bắt buộc"]
             })
         
-        frappe.logger().info(f"📅 [Backend] Getting leaves for class {class_id} on {date}")
+        # Validate either class_id or student_ids is provided
+        if not class_id and (not student_ids or not isinstance(student_ids, list) or len(student_ids) == 0):
+            return validation_error_response("Thiếu tham số", {
+                "class_id": ["Class ID hoặc student_ids là bắt buộc"] if not class_id else [],
+                "student_ids": ["Class ID hoặc student_ids là bắt buộc"] if (not student_ids or not isinstance(student_ids, list) or len(student_ids) == 0) else []
+            })
         
-        # Get all students in the class
-        class_students = frappe.get_all(
-            "SIS Class Student",
-            filters={"class_id": class_id},
-            fields=["student_id"]
-        )
-        
-        student_ids = [cs.student_id for cs in class_students]
+        # If class_id provided, get students from class
+        if class_id:
+            frappe.logger().info(f"📅 [Backend] Getting leaves for class {class_id} on {date}")
+            
+            # Get all students in the class
+            class_students = frappe.get_all(
+                "SIS Class Student",
+                filters={"class_id": class_id},
+                fields=["student_id"]
+            )
+            
+            student_ids = [cs.student_id for cs in class_students]
+            
+            if not student_ids:
+                frappe.logger().info("⚠️ [Backend] No students in class")
+                return success_response(data={}, message="No students in class")
+        else:
+            frappe.logger().info(f"📅 [Backend] Getting leaves for {len(student_ids)} students on {date}")
         
         if not student_ids:
-            frappe.logger().info("⚠️ [Backend] No students in class")
-            return success_response(data={}, message="No students in class")
+            frappe.logger().info("⚠️ [Backend] No students provided")
+            return success_response(data={}, message="No students provided")
         
         # Get active leaves for these students on the specified date
         # Leave is active if: start_date <= date <= end_date
