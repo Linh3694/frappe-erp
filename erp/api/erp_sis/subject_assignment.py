@@ -2704,14 +2704,22 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         try:
             from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
             instances_synced = set()
+            sync_logs = []
             for assignment_key, assignment_info in teacher_assignment_map.items():
                 if assignment_info["application_type"] == "full_year":
                     actual_subject, class_id = assignment_key
                     instance = next((i for i in instances if i.class_id == class_id), None)
                     if instance and instance.name not in instances_synced:
-                        sync_materialized_views_for_instance(instance.name)
+                        teacher_count, student_count = sync_materialized_views_for_instance(
+                            instance_id=instance.name,
+                            class_id=instance.class_id,
+                            start_date=str(instance.start_date),
+                            end_date=str(instance.end_date),
+                            campus_id=campus_id,
+                            logs=sync_logs
+                        )
                         instances_synced.add(instance.name)
-                        debug_info.append(f"🔄 Synced materialized views for {instance.name}")
+                        debug_info.append(f"🔄 Synced views for {instance.name}: {teacher_count}T/{student_count}S")
             frappe.logger().info(f"✅ Synced materialized views for {len(instances_synced)} instances")
         except Exception as sync_err:
             frappe.logger().error(f"❌ Failed to sync materialized views: {str(sync_err)}")
@@ -2778,14 +2786,22 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         try:
             from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
             instances_synced = set()
+            sync_logs = []
             for assignment_key, assignment_info in teacher_assignment_map.items():
                 if assignment_info["application_type"] == "from_date":
                     actual_subject, class_id = assignment_key
                     instance = next((i for i in instances if i.class_id == class_id), None)
                     if instance and instance.name not in instances_synced:
-                        sync_materialized_views_for_instance(instance.name)
+                        teacher_count, student_count = sync_materialized_views_for_instance(
+                            instance_id=instance.name,
+                            class_id=instance.class_id,
+                            start_date=str(instance.start_date),
+                            end_date=str(instance.end_date),
+                            campus_id=campus_id,
+                            logs=sync_logs
+                        )
                         instances_synced.add(instance.name)
-                        debug_info.append(f"🔄 Synced materialized views for {instance.name} (from_date)")
+                        debug_info.append(f"🔄 Synced views for {instance.name} (from_date): {teacher_count}T/{student_count}S")
             frappe.logger().info(f"✅ Synced materialized views for {len(instances_synced)} instances (PASS 2B)")
         except Exception as sync_err:
             frappe.logger().error(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
