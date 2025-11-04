@@ -406,12 +406,16 @@ def create_subject_assignment():
         if isinstance(assignments, list) and assignments:
             for i, a in enumerate(assignments):
                 cid = a.get("class_id")
-                sids = a.get("actual_subject_ids") or ([] if a.get("actual_subject_id") is None else [a.get("actual_subject_id")])
+                # Support both "subject_ids" and "actual_subject_ids" field names
+                sids = a.get("actual_subject_ids") or a.get("subject_ids") or []
+                if isinstance(sids, str):
+                    sids = [sids]  # Convert single string to list
+                
                 application_type = a.get("application_type", "full_year")
                 start_date = a.get("start_date")
                 end_date = a.get("end_date")
                 
-                frappe.logger().info(f"CREATE DEBUG - Assignment {i}: class_id={cid}, actual_subject_ids={sids}, application_type={application_type}")
+                frappe.logger().info(f"CREATE DEBUG - Assignment {i}: class_id={cid}, subject_ids={sids}, application_type={application_type}")
                 if cid and sids:
                     normalized_assignments.append({
                         "class_id": cid, 
