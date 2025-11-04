@@ -2545,6 +2545,9 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     # ✅ PASS 2A: Update pattern rows for full_year assignments
     frappe.logger().info(f"🆕 PASS 2A: Updating pattern rows for full_year assignments")
     frappe.logger().info(f"🔍 PASS 2A: teacher_assignment_map = {teacher_assignment_map}")
+    frappe.logger().info(f"🔍 PASS 2A: all_rows_refreshed count = {len(all_rows_refreshed)}")
+    frappe.logger().info(f"🔍 PASS 2A: subject_map = {subject_map}")
+    frappe.logger().info(f"🔍 PASS 2A: instances = {[(i.name, i.class_id) for i in instances]}")
     
     full_year_count = 0
     for assignment_key, assignment_info in teacher_assignment_map.items():
@@ -2562,7 +2565,10 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         # Get instance for this class
         instance = next((i for i in instances if i.class_id == class_id), None)
         if not instance:
+            frappe.logger().info(f"❌ PASS 2A: No instance found for class {class_id}")
             continue
+        
+        frappe.logger().info(f"✅ PASS 2A: Found instance {instance.name} for class {class_id}")
         
         # Get pattern rows for this subject/class (date=NULL)
         pattern_rows = [r for r in all_rows_refreshed 
@@ -2571,7 +2577,15 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                       and r.parent == instance.name
                       and not r.get("date")]  # Pattern rows only
         
-        frappe.logger().info(f"📋 Updating {len(pattern_rows)} pattern rows for {actual_subject} in {class_id} (full_year)")
+        frappe.logger().info(f"📋 PASS 2A: Found {len(pattern_rows)} pattern rows for {actual_subject} in {class_id} (full_year)")
+        
+        # Debug: Show all rows for this instance
+        all_instance_rows = [r for r in all_rows_refreshed if r.parent == instance.name]
+        frappe.logger().info(f"🔍 PASS 2A: Total rows in instance: {len(all_instance_rows)}")
+        pattern_only = [r for r in all_instance_rows if not r.get("date")]
+        frappe.logger().info(f"🔍 PASS 2A: Pattern rows (date=NULL) in instance: {len(pattern_only)}")
+        subject_match = [r for r in pattern_only if r.subject_id in subject_map.keys()]
+        frappe.logger().info(f"🔍 PASS 2A: Pattern rows matching subject_map: {len(subject_match)}")
         
         # Update each pattern row
         for pattern_row in pattern_rows:
