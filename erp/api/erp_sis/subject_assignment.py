@@ -2699,6 +2699,24 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} rows")
     debug_info.append(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} pattern rows")
     
+    # 🔄 Sync materialized views after PASS 2A updates
+    if pass2a_updated > 0:
+        try:
+            from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
+            instances_synced = set()
+            for assignment_key, assignment_info in teacher_assignment_map.items():
+                if assignment_info["application_type"] == "full_year":
+                    actual_subject, class_id = assignment_key
+                    instance = next((i for i in instances if i.class_id == class_id), None)
+                    if instance and instance.name not in instances_synced:
+                        sync_materialized_views_for_instance(instance.name)
+                        instances_synced.add(instance.name)
+                        debug_info.append(f"🔄 Synced materialized views for {instance.name}")
+            frappe.logger().info(f"✅ Synced materialized views for {len(instances_synced)} instances")
+        except Exception as sync_err:
+            frappe.logger().error(f"❌ Failed to sync materialized views: {str(sync_err)}")
+            debug_info.append(f"❌ Failed to sync materialized views: {str(sync_err)}")
+    
     # ✅ PASS 2B: Create date-specific override rows for date-range assignments
     frappe.logger().info(f"🆕 PASS 2B: Creating date-specific override rows")
     
