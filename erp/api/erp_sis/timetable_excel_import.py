@@ -1934,24 +1934,26 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                             continue
                         
                         # Check if teacher has assignment for this actual_subject_id and class
+                        # Note: Don't filter by docstatus - assignments are created as draft (docstatus=0) by default
                         has_assignment = frappe.db.exists("SIS Subject Assignment", {
                             "teacher_id": teacher_id,
                             "class_id": class_id,
                             "actual_subject_id": actual_subject_id,
-                            "docstatus": 1  # Only active assignments
+                            "docstatus": ["!=", 2]  # Allow draft (0) and submitted (1), exclude cancelled (2)
                         })
 
                         if not has_assignment:
                             # Debug: Check what assignments exist for this teacher
                             teacher_assignments = frappe.get_all("SIS Subject Assignment",
-                                filters={"teacher_id": teacher_id, "docstatus": 1},
-                                fields=["name", "class_id", "subject_id", "actual_subject_id"]
+                                filters={"teacher_id": teacher_id, "docstatus": ["!=", 2]},  # Include draft and submitted
+                                fields=["name", "class_id", "subject_id", "actual_subject_id", "docstatus"]
                             )
                             logs.append(f"🔍 [DEBUG] Teacher {teacher_id} assignments: {len(teacher_assignments)} found")
                             for assignment in teacher_assignments[:3]:  # Show first 3
-                                logs.append(f"  - Assignment: class={assignment.class_id}, subject={assignment.subject_id}, actual_subject={assignment.actual_subject_id}")
+                                logs.append(f"  - Assignment: class={assignment.class_id}, subject={assignment.subject_id}, actual_subject={assignment.actual_subject_id}, docstatus={assignment.docstatus}")
 
-                            logs.append(f"⚠️ [sync] Teacher {teacher_id} has NO assignment for subject {row.subject_id} in class {class_id} - skipping")
+                            logs.append(f"🔍 [DEBUG] Looking for: actual_subject_id={actual_subject_id}, class_id={class_id}")
+                            logs.append(f"⚠️ [sync] Teacher {teacher_id} has NO assignment for subject {row.subject_id} (actual_subject={actual_subject_id}) in class {class_id} - skipping")
                             continue
 
                         logs.append(f"✅ [sync] Teacher {teacher_id} HAS assignment for subject {row.subject_id} in class {class_id}")
@@ -1999,7 +2001,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                             "teacher_id": t,
                             "class_id": class_id,
                             "actual_subject_id": actual_subject_id_for_student,
-                            "docstatus": 1
+                            "docstatus": ["!=", 2]  # Allow draft and submitted
                         }) for t in teachers if t
                     )
 
