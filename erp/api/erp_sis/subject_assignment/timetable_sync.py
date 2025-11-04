@@ -333,17 +333,28 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                         })
 
             if instances_list:
-                # Sync immediately with timeout protection
-                debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances (with timeout protection)")
-                frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances (PASS 2A)")
+                # HYBRID APPROACH: Sync first 2 instances immediately, queue rest to background
+                immediate_instances = instances_list[:2]  # First 2 instances
+                background_instances = instances_list[2:]  # Remaining instances
 
-                sync_result = sync_materialized_views_immediately(instances_list, timeout_seconds=15)
-                debug_info.extend(sync_result.get("debug_info", []))
-                frappe.logger().info(f"✅ Immediate sync completed (PASS 2A): {sync_result.get('message', 'Unknown result')}")
+                if immediate_instances:
+                    debug_info.append(f"🔄 Syncing materialized views immediately for {len(immediate_instances)} instances")
+                    frappe.logger().info(f"✅ Syncing materialized views immediately for {len(immediate_instances)} instances (PASS 2A)")
 
-                # Log if partial sync occurred
-                if sync_result.get("partial"):
-                    debug_info.append(f"⚠️ Partial sync: {sync_result.get('remaining_queued', 0)} instances queued for background processing")
+                    sync_result = sync_materialized_views_immediately(immediate_instances, timeout_seconds=10)
+                    debug_info.extend(sync_result.get("debug_info", []))
+                    frappe.logger().info(f"✅ Immediate sync completed (PASS 2A): {sync_result.get('message', 'Unknown result')}")
+
+                if background_instances:
+                    # Queue remaining instances to background job immediately
+                    frappe.enqueue(
+                        "erp.api.erp_sis.subject_assignment.timetable_sync.sync_materialized_views_background",
+                        instances=background_instances,
+                        queue="long",
+                        timeout=600  # 10 minutes for background
+                    )
+                    debug_info.append(f"🔄 Queued {len(background_instances)} instances for background processing")
+                    frappe.logger().info(f"✅ Queued {len(background_instances)} instances for background processing")
         except Exception as sync_err:
             frappe.logger().error(f"❌ Failed to sync materialized views: {str(sync_err)}")
             debug_info.append(f"❌ Failed to sync materialized views: {str(sync_err)}")
@@ -491,17 +502,28 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                         })
 
             if instances_list:
-                # Sync immediately with timeout protection
-                debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances (from_date, with timeout protection)")
-                frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances (PASS 2B)")
+                # HYBRID APPROACH: Sync first 1 instance immediately, queue rest to background
+                immediate_instances = instances_list[:1]  # First 1 instance for from_date
+                background_instances = instances_list[1:]  # Remaining instances
 
-                sync_result = sync_materialized_views_immediately(instances_list, timeout_seconds=15)
-                debug_info.extend(sync_result.get("debug_info", []))
-                frappe.logger().info(f"✅ Immediate sync completed (PASS 2B): {sync_result.get('message', 'Unknown result')}")
+                if immediate_instances:
+                    debug_info.append(f"🔄 Syncing materialized views immediately for {len(immediate_instances)} instances (from_date)")
+                    frappe.logger().info(f"✅ Syncing materialized views immediately for {len(immediate_instances)} instances (PASS 2B)")
 
-                # Log if partial sync occurred
-                if sync_result.get("partial"):
-                    debug_info.append(f"⚠️ Partial sync: {sync_result.get('remaining_queued', 0)} instances queued for background processing")
+                    sync_result = sync_materialized_views_immediately(immediate_instances, timeout_seconds=8)
+                    debug_info.extend(sync_result.get("debug_info", []))
+                    frappe.logger().info(f"✅ Immediate sync completed (PASS 2B): {sync_result.get('message', 'Unknown result')}")
+
+                if background_instances:
+                    # Queue remaining instances to background job immediately
+                    frappe.enqueue(
+                        "erp.api.erp_sis.subject_assignment.timetable_sync.sync_materialized_views_background",
+                        instances=background_instances,
+                        queue="long",
+                        timeout=600  # 10 minutes for background
+                    )
+                    debug_info.append(f"🔄 Queued {len(background_instances)} instances for background processing (from_date)")
+                    frappe.logger().info(f"✅ Queued {len(background_instances)} instances for background processing (PASS 2B)")
         except Exception as sync_err:
             frappe.logger().error(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
             debug_info.append(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
