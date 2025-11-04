@@ -1700,6 +1700,10 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
     Returns: (teacher_timetable_count, student_timetable_count)
     """
     try:
+        # 🔍 CRITICAL: Clear cache to ensure fresh data after PASS 2A updates
+        frappe.db.commit()  # Ensure all changes are committed
+        frappe.clear_cache()  # Clear cache to get fresh data
+        
         # 1. Get all rows for this instance
         logs.append(f"🔍 [sync_materialized_views] Querying instance rows for {instance_id}")
         
@@ -1754,9 +1758,14 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     subject_map[subj.name] = subj.actual_subject_id
             logs.append(f"✅ Built subject map: {len(subject_map)} mappings from {len(subject_ids_in_rows)} subjects")
 
-        # DEBUG: Log first few instance rows
-        for i, row in enumerate(instance_rows[:3]):
-            logs.append(f"🔍 [DEBUG] Row {i}: subject_id={row.subject_id}, teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}, column={row.timetable_column_id}")
+        # DEBUG: Log first few instance rows with teachers
+        for i, row in enumerate(instance_rows[:10]):  # Show first 10 rows
+            teachers_in_row = []
+            if row.teacher_1_id:
+                teachers_in_row.append(row.teacher_1_id)
+            if row.teacher_2_id:
+                teachers_in_row.append(row.teacher_2_id)
+            logs.append(f"🔍 [DEBUG] Row {i} ({row.name}): subject_id={row.subject_id}, teachers={teachers_in_row}, day={row.day_of_week}, column={row.timetable_column_id}")
 
         # 2. Generate Teacher Timetable entries
         teacher_timetable_count = 0

@@ -325,8 +325,10 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
             row_data = frappe.db.get_value("SIS Timetable Instance Row", row_name, 
                 ["teacher_1_id", "teacher_2_id", "subject_id", "day_of_week"], as_dict=True)
             if row_data:
-                frappe.logger().info(f"  - Row {row_name}: teacher_1={row_data.teacher_1_id}, teacher_2={row_data.teacher_2_id}, subject={row_data.subject_id}, day={row_data.day_of_week}")
-                debug_info.append(f"🔍 PASS 2A: Verified row {row_name}: teacher_1={row_data.teacher_1_id}, teacher_2={row_data.teacher_2_id}")
+                # Get actual_subject_id for this subject
+                actual_subject_for_row = subject_map.get(row_data.subject_id)
+                frappe.logger().info(f"  - Row {row_name}: teacher_1={row_data.teacher_1_id}, teacher_2={row_data.teacher_2_id}, subject={row_data.subject_id}, actual_subject={actual_subject_for_row}, day={row_data.day_of_week}")
+                debug_info.append(f"🔍 PASS 2A: Verified row {row_name}: teacher_1={row_data.teacher_1_id}, teacher_2={row_data.teacher_2_id}, subject={row_data.subject_id}, actual_subject={actual_subject_for_row}")
     
     # 🔄 Sync materialized views immediately (synchronous) - PASS 2A
     if pass2a_updated > 0:
