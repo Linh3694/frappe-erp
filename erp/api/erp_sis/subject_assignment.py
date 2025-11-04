@@ -2542,8 +2542,64 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
     
     frappe.logger().info(f"🔄 Re-queried {len(all_rows_refreshed)} rows for PASS 2")
     
-    # ✅ PASS 2: Create date-specific override rows for date-range assignments
-    frappe.logger().info(f"🆕 PASS 2: Creating date-specific override rows")
+    # ✅ PASS 2A: Update pattern rows for full_year assignments
+    frappe.logger().info(f"🆕 PASS 2A: Updating pattern rows for full_year assignments")
+    frappe.logger().info(f"🔍 PASS 2A: teacher_assignment_map = {teacher_assignment_map}")
+    
+    full_year_count = 0
+    for assignment_key, assignment_info in teacher_assignment_map.items():
+        actual_subject, class_id = assignment_key
+        application_type = assignment_info["application_type"]
+        
+        # Only process full_year assignments
+        if application_type != "full_year":
+            frappe.logger().info(f"⏭️ PASS 2A: Skipping {assignment_key} - type={application_type}")
+            continue
+        
+        full_year_count += 1
+        frappe.logger().info(f"✅ PASS 2A: Processing full_year assignment {assignment_key}")
+        
+        # Get instance for this class
+        instance = next((i for i in instances if i.class_id == class_id), None)
+        if not instance:
+            continue
+        
+        # Get pattern rows for this subject/class (date=NULL)
+        pattern_rows = [r for r in all_rows_refreshed 
+                      if r.subject_id in subject_map.keys()
+                      and subject_map[r.subject_id] == actual_subject
+                      and r.parent == instance.name
+                      and not r.get("date")]  # Pattern rows only
+        
+        frappe.logger().info(f"📋 Updating {len(pattern_rows)} pattern rows for {actual_subject} in {class_id} (full_year)")
+        
+        # Update each pattern row
+        for pattern_row in pattern_rows:
+            try:
+                row_doc = frappe.get_doc("SIS Timetable Instance Row", pattern_row.name)
+                
+                # Assign teacher (same logic as before)
+                if not row_doc.teacher_1_id:
+                    row_doc.teacher_1_id = teacher_id
+                    row_doc.save(ignore_permissions=True)
+                    updated_rows.append(pattern_row.name)
+                    frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_1_id = {teacher_id}")
+                elif not row_doc.teacher_2_id:
+                    row_doc.teacher_2_id = teacher_id
+                    row_doc.save(ignore_permissions=True)
+                    updated_rows.append(pattern_row.name)
+                    frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_2_id = {teacher_id}")
+                else:
+                    frappe.logger().info(f"⏭️ SKIP pattern row {pattern_row.name}: both teacher slots full")
+                    skipped_rows.append(pattern_row.name)
+            except Exception as e:
+                frappe.logger().error(f"❌ Failed to update pattern row {pattern_row.name}: {str(e)}")
+                skipped_rows.append(pattern_row.name)
+    
+    frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments")
+    
+    # ✅ PASS 2B: Create date-specific override rows for date-range assignments
+    frappe.logger().info(f"🆕 PASS 2B: Creating date-specific override rows")
     
     # For each assignment, create override rows for each date in range
     for assignment_key, assignment_info in teacher_assignment_map.items():
@@ -2552,7 +2608,7 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         assignment_start = assignment_info["start_date"]
         assignment_end = assignment_info["end_date"]
         
-        # Skip full_year assignments (they use pattern rows)
+        # Only process from_date assignments
         if application_type != "from_date" or not assignment_start:
             continue
         
@@ -2595,7 +2651,7 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                 if override_name:
                     updated_rows.append(override_name)
     
-    frappe.logger().info(f"✅ PASS 2: Created {len(updated_rows)} override rows")
+    frappe.logger().info(f"✅ PASS 2B Complete: Created override rows for from_date assignments")
     
     frappe.db.commit()
     
