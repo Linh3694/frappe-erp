@@ -1824,18 +1824,21 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         # OPTIMIZATION: Load all existing timetable entries into memory to avoid thousands of DB queries
         logs.append(f"🔍 Loading existing teacher timetable entries...")
         existing_teacher_entries = set()
+        existing_teacher_entry_names = {}  # Map key -> entry name for deletion
         try:
             teacher_entries = frappe.get_all(
                 "SIS Teacher Timetable",
-                fields=["teacher_id", "class_id", "day_of_week", "timetable_column_id", "date"],
+                fields=["name", "teacher_id", "class_id", "day_of_week", "timetable_column_id", "date", "subject_id"],
                 filters={
                     "class_id": class_id,
-                    "date": ["between", [start_dt, end_dt]]
+                    "date": ["between", [start_dt, end_dt]],
+                    "timetable_instance_id": instance_id
                 }
             )
             for entry in teacher_entries:
                 key = f"{entry.teacher_id}|{entry.class_id}|{entry.day_of_week}|{entry.timetable_column_id}|{entry.date}"
                 existing_teacher_entries.add(key)
+                existing_teacher_entry_names[key] = entry.name
             logs.append(f"✅ Loaded {len(existing_teacher_entries)} existing teacher entries")
         except Exception as load_error:
             logs.append(f"⚠️  Error loading existing teacher entries: {str(load_error)}")
@@ -1990,28 +1993,53 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
 
                         if teacher_key in existing_teacher_entries:
                             # Check if entry exists in DB and verify it's correct
-                            existing_entry = frappe.db.exists("SIS Teacher Timetable", {
-                                "teacher_id": teacher_id,
-                                "class_id": class_id,
-                                "day_of_week": normalized_day,
-                                "timetable_column_id": row.timetable_column_id,
-                                "date": specific_date
-                            })
-                            if existing_entry:
-                                # Verify subject_id matches
-                                existing_subject = frappe.db.get_value("SIS Teacher Timetable", existing_entry, "subject_id")
-                                if existing_subject == row.subject_id:
-                                    logs.append(f"⏭️ [sync] Teacher timetable entry already exists and correct for {teacher_id} on {specific_date} - skipping")
+                            existing_entry_name = existing_teacher_entry_names.get(teacher_key)
+                            if existing_entry_name:
+                                # Verify entry exists
+                                existing_entry = frappe.db.exists("SIS Teacher Timetable", existing_entry_name)
+                                if existing_entry:
+                                    existing_subject = frappe.db.get_value("SIS Teacher Timetable", existing_entry_name, "subject_id")
+                                    # 🔍 CRITICAL: Verify assignment still exists for this entry
+                                    existing_entry_actual_subject = subject_map.get(existing_subject)
+                                    if existing_entry_actual_subject:
+                                        has_assignment_for_existing = frappe.db.exists("SIS Subject Assignment", {
+                                            "teacher_id": teacher_id,
+                                            "class_id": class_id,
+                                            "actual_subject_id": existing_entry_actual_subject,
+                                            "docstatus": ["!=", 2]
+                                        })
+                                        if not has_assignment_for_existing:
+                                            # Assignment was deleted but entry still exists - delete orphaned entry
+                                            try:
+                                                frappe.delete_doc("SIS Teacher Timetable", existing_entry_name, ignore_permissions=True)
+                                                logs.append(f"🗑️ [sync] Deleted orphaned teacher timetable entry for {teacher_id} on {specific_date} (assignment deleted)")
+                                                existing_teacher_entries.discard(teacher_key)
+                                                del existing_teacher_entry_names[teacher_key]
+                                                # Fall through to create new entry
+                                            except Exception as del_error:
+                                                logs.append(f"❌ [sync] Failed to delete orphaned entry: {str(del_error)}")
+                                                continue
+                                    # Check if subject_id matches current row
+                                    if existing_subject == row.subject_id:
+                                        logs.append(f"⏭️ [sync] Teacher timetable entry already exists and correct for {teacher_id} on {specific_date} - skipping")
+                                        continue
+                                    else:
+                                        # Update subject_id if different
+                                        frappe.db.set_value("SIS Teacher Timetable", existing_entry_name, "subject_id", row.subject_id, update_modified=False)
+                                        logs.append(f"🔄 [sync] Updated teacher timetable entry for {teacher_id} on {specific_date}: subject {existing_subject} → {row.subject_id}")
+                                        teacher_timetable_count += 1
+                                        continue
                                 else:
-                                    # Update subject_id if different
-                                    frappe.db.set_value("SIS Teacher Timetable", existing_entry, "subject_id", row.subject_id, update_modified=False)
-                                    logs.append(f"🔄 [sync] Updated teacher timetable entry for {teacher_id} on {specific_date}: subject {existing_subject} → {row.subject_id}")
-                                    teacher_timetable_count += 1
+                                    # Entry in cache but not in DB - remove from cache and create
+                                    existing_teacher_entries.discard(teacher_key)
+                                    if teacher_key in existing_teacher_entry_names:
+                                        del existing_teacher_entry_names[teacher_key]
+                                    logs.append(f"⚠️ [sync] Entry in cache but not in DB for {teacher_id} on {specific_date} - will create")
                             else:
-                                # Entry in cache but not in DB - remove from cache and create
+                                # Entry in cache but no name mapping - remove from cache and create
                                 existing_teacher_entries.discard(teacher_key)
-                                logs.append(f"⚠️ [sync] Entry in cache but not in DB for {teacher_id} on {specific_date} - will create")
-                                # Fall through to create
+                                logs.append(f"⚠️ [sync] Entry in cache but no name mapping for {teacher_id} on {specific_date} - will create")
+                        
                         if teacher_key not in existing_teacher_entries:
                             # Create teacher timetable with error handling
                             try:
@@ -2031,6 +2059,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                 teacher_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
                                 teacher_timetable_count += 1
                                 existing_teacher_entries.add(teacher_key)  # Add to cache
+                                existing_teacher_entry_names[teacher_key] = teacher_timetable.name  # Store entry name
                                 logs.append(f"✅ [sync] Successfully created teacher timetable entry for {teacher_id}")
                                 
                             except frappe.DoesNotExistError:
