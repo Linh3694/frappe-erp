@@ -1860,6 +1860,15 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                 pattern_rows.append(row)
         
         logs.append(f"📊 [sync_materialized_views] {len(pattern_rows)} pattern rows, {len(override_rows)} override rows")
+
+        # 🔍 DEBUG: Log all pattern rows to see what we're processing
+        for i, row in enumerate(pattern_rows):
+            teachers_in_row = []
+            if row.teacher_1_id:
+                teachers_in_row.append(row.teacher_1_id)
+            if row.teacher_2_id:
+                teachers_in_row.append(row.teacher_2_id)
+            logs.append(f"📋 [DEBUG] Pattern row {i}: name={row.name}, subject={row.subject_id}, teachers={teachers_in_row}, day={row.day_of_week}, column={row.timetable_column_id}")
         
         # Process pattern rows (generate for all weeks)
         for row in pattern_rows:
@@ -1881,7 +1890,7 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             # Validate against allowed values
             valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
             if normalized_day not in valid_days:
-                logs.append(f"Skipping invalid day_of_week: '{original_day}' -> '{normalized_day}'")
+                logs.append(f"⚠️ [sync] Skipping invalid day_of_week: '{original_day}' -> '{normalized_day}' for row {row.name}, subject={row.subject_id}")
                 continue
                 
             # Calculate specific date for this day_of_week
