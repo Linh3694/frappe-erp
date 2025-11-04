@@ -18,7 +18,7 @@ from erp.utils.api_response import (
     not_found_response,
     forbidden_response
 )
-from .timetable_sync import batch_sync_timetable_optimized, sync_materialized_views_with_progress
+from .timetable_sync import batch_sync_timetable_optimized, sync_materialized_views_immediately
 from .date_override_handler import delete_teacher_override_rows
 
 
