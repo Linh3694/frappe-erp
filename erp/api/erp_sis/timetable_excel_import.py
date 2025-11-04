@@ -1739,7 +1739,11 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
             return 0, 0
             
         logs.append(f"📊 [sync_materialized_views] Processing {len(instance_rows)} instance rows")
-        
+
+        # DEBUG: Log first few instance rows
+        for i, row in enumerate(instance_rows[:3]):
+            logs.append(f"🔍 [DEBUG] Row {i}: subject_id={row.subject_id}, teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}, column={row.timetable_column_id}")
+
         # 2. Generate Teacher Timetable entries
         teacher_timetable_count = 0
         student_timetable_count = 0
