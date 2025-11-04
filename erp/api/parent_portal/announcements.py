@@ -272,19 +272,20 @@ def get_announcements():
                                         
                                         # Try to resolve from database if display_name is empty/null
                                         if recipient_type == 'grade' and (not recipient_display_name or recipient_display_name == recipient_id):
+                                            # Try Education Stage first (Tiểu Học, THCS, THPT)
                                             try:
-                                                # Try Education Stage first (Tiểu Học, THCS, THPT)
+                                                stage_doc = frappe.get_doc("SIS Education Stage", recipient_id)
+                                                display_name_vn = stage_doc.title_vn or stage_doc.title_en or recipient_id
+                                                display_name_en = stage_doc.title_en or stage_doc.title_vn or recipient_id
+                                            except Exception:
+                                                # Silently fail and try Education Grade
                                                 try:
-                                                    stage_doc = frappe.get_doc("SIS Education Stage", recipient_id)
-                                                    display_name_vn = stage_doc.title_vn or stage_doc.title_en or recipient_id
-                                                    display_name_en = stage_doc.title_en or stage_doc.title_vn or recipient_id
-                                                except:
-                                                    # Try Education Grade (Khối 1, Khối 2, etc.)
                                                     grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
                                                     display_name_vn = grade_doc.title_vn or grade_doc.title_en or recipient_id
-                                                    display_name_en = grade_doc.title_en or grade_doc.title_vn or recipient_id
-                                            except:
-                                                pass
+                                                    display_name_en = grade_doc.title_en or recipient_id  # Don't fallback to title_vn for EN
+                                                except Exception:
+                                                    # Both failed, keep original
+                                                    pass
                                         elif recipient_type == 'class' and (not recipient_display_name or recipient_display_name == recipient_id):
                                             try:
                                                 class_doc = frappe.get_doc("SIS Class", recipient_id)
