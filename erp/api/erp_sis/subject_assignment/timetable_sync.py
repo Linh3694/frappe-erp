@@ -347,9 +347,11 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     
     # ✅ PASS 2B: Create date-specific override rows for date-range assignments
     frappe.logger().info(f"🆕 PASS 2B: Creating date-specific override rows")
+    frappe.logger().info(f"🆕 PASS 2B: teacher_assignment_map has {len(teacher_assignment_map)} assignments")
     
     pass2b_created = 0
     pass2b_skipped = 0
+    pass2b_processed = 0
     
     for assignment_key, assignment_info in teacher_assignment_map.items():
         actual_subject, class_id = assignment_key
@@ -357,9 +359,22 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
         assignment_start = assignment_info["start_date"]
         assignment_end = assignment_info["end_date"]
         
+        frappe.logger().info(f"🆕 PASS 2B: Checking assignment {assignment_key}")
+        frappe.logger().info(f"   - application_type: {application_type}, start_date: {assignment_start}, end_date: {assignment_end}")
+        
         # Only process from_date assignments
-        if application_type != "from_date" or not assignment_start:
+        if application_type != "from_date":
+            frappe.logger().info(f"⏭️ PASS 2B: Skipping (not from_date, type={application_type})")
+            debug_info.append(f"⏭️ PASS 2B: Skipping {assignment_key} (type={application_type})")
             continue
+            
+        if not assignment_start:
+            frappe.logger().info(f"⏭️ PASS 2B: Skipping (no start_date)")
+            debug_info.append(f"⏭️ PASS 2B: Skipping {assignment_key} (no start_date)")
+            continue
+        
+        pass2b_processed += 1
+        frappe.logger().info(f"✅ PASS 2B: Will process from_date assignment {assignment_key}")
         
         # Ensure dates are date objects, not strings
         if isinstance(assignment_start, str):
@@ -375,18 +390,31 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
         instance = next((i for i in instances if i.class_id == class_id), None)
         if not instance:
             frappe.logger().info(f"❌ PASS 2B: No instance found for class {class_id}")
+            frappe.logger().info(f"   Available instances: {[i.class_id for i in instances]}")
             debug_info.append(f"❌ PASS 2B: No instance found for class {class_id}")
+            pass2b_skipped += 1
             continue
         
         # Get pattern rows for this subject/class (date=NULL)
         # FIX: Handle both None and empty string for date field
-        pattern_rows = [r for r in all_rows_refreshed 
-                      if r.subject_id in subject_map.keys()
-                      and subject_map[r.subject_id] == actual_subject
-                      and r.parent == instance.name
-                      and (r.get("date") is None or r.get("date") == "")]
+        all_rows_for_instance = [r for r in all_rows_refreshed if r.parent == instance.name]
+        frappe.logger().info(f"📋 PASS 2B: Found {len(all_rows_for_instance)} total rows in instance {instance.name}")
         
-        frappe.logger().info(f"📋 PASS 2B: Found {len(pattern_rows)} pattern rows for {actual_subject} in {class_id}")
+        rows_with_subject = [r for r in all_rows_for_instance if r.subject_id in subject_map.keys()]
+        frappe.logger().info(f"📋 PASS 2B: Found {len(rows_with_subject)} rows with subject in subject_map")
+        
+        rows_matching_subject = [r for r in rows_with_subject if subject_map[r.subject_id] == actual_subject]
+        frappe.logger().info(f"📋 PASS 2B: Found {len(rows_matching_subject)} rows matching actual_subject {actual_subject}")
+        
+        pattern_rows = [r for r in rows_matching_subject 
+                      if (r.get("date") is None or r.get("date") == "")]
+        
+        frappe.logger().info(f"📋 PASS 2B: Found {len(pattern_rows)} PATTERN rows (date=NULL)")
+        if len(rows_matching_subject) > 0 and len(pattern_rows) == 0:
+            frappe.logger().warning(f"⚠️ PASS 2B: Rows with subject found but no pattern rows! Check date field:")
+            for r in rows_matching_subject[:3]:
+                frappe.logger().warning(f"   - Row {r.name}: date={r.get('date')}, type={type(r.get('date'))}")
+        
         debug_info.append(f"📋 PASS 2B: Found {len(pattern_rows)} pattern rows for {actual_subject}")
         
         # For each pattern row, create override rows for dates in range
@@ -434,11 +462,13 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
             
             except Exception as e:
                 frappe.logger().error(f"❌ PASS 2B Error processing pattern row {pattern_row.name}: {str(e)}")
+                import traceback
+                frappe.logger().error(f"Traceback: {traceback.format_exc()}")
                 debug_info.append(f"❌ PASS 2B Error: {str(e)}")
                 pass2b_skipped += 1
     
-    frappe.logger().info(f"✅ PASS 2B Complete: Created {pass2b_created} override rows, skipped {pass2b_skipped}")
-    debug_info.append(f"✅ PASS 2B Complete: Created {pass2b_created} override rows")
+    frappe.logger().info(f"✅ PASS 2B Complete: Processed {pass2b_processed} from_date assignments, Created {pass2b_created} override rows, skipped {pass2b_skipped}")
+    debug_info.append(f"✅ PASS 2B Complete: Processed {pass2b_processed} from_date, Created {pass2b_created} override rows")
     
     # 🔄 Queue materialized views sync - PASS 2B
     if pass2b_created > 0:
