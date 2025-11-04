@@ -266,8 +266,25 @@ def get_announcements():
                                         display_name_vn = "Toàn trường"
                                         display_name_en = "All School"
                                     else:
-                                        display_name_vn = recipient_display_name
-                                        display_name_en = recipient_display_name
+                                        # For grade/class/student, resolve display name from database
+                                        display_name_vn = recipient_display_name or recipient_id
+                                        display_name_en = recipient_display_name or recipient_id
+                                        
+                                        # Try to resolve from database if display_name is empty/null
+                                        if recipient_type == 'grade' and (not recipient_display_name or recipient_display_name == recipient_id):
+                                            try:
+                                                grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
+                                                display_name_vn = grade_doc.title_vn or grade_doc.title_en or recipient_id
+                                                display_name_en = grade_doc.title_en or grade_doc.title_vn or recipient_id
+                                            except:
+                                                pass
+                                        elif recipient_type == 'class' and (not recipient_display_name or recipient_display_name == recipient_id):
+                                            try:
+                                                class_doc = frappe.get_doc("SIS Class", recipient_id)
+                                                display_name_vn = class_doc.title or recipient_id
+                                                display_name_en = class_doc.title or recipient_id
+                                            except:
+                                                pass
 
                                     relevant_tags.append({
                                         "type": recipient_type,
