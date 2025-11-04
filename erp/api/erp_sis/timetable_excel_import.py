@@ -1893,16 +1893,32 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     teachers.append(row.teacher_1_id)
                 if row.teacher_2_id:
                     teachers.append(row.teacher_2_id)
-                    
+
+                logs.append(f"🔍 [sync] Row: subject={row.subject_id}, teachers={teachers}, column={row.timetable_column_id}")
+
                 for teacher_id in teachers:
                     try:
                         # Validate teacher exists first
                         if not teacher_id:
                             continue
-                            
+
+                        # 🔍 CRITICAL: Check if teacher has assignment for this subject and class
+                        has_assignment = frappe.db.exists("SIS Subject Assignment", {
+                            "teacher_id": teacher_id,
+                            "class_id": class_id,
+                            "actual_subject_id": row.subject_id,
+                            "docstatus": 1  # Only active assignments
+                        })
+
+                        if not has_assignment:
+                            logs.append(f"⚠️ [sync] Teacher {teacher_id} has NO assignment for subject {row.subject_id} in class {class_id} - skipping")
+                            continue
+
+                        logs.append(f"✅ [sync] Teacher {teacher_id} HAS assignment for subject {row.subject_id} in class {class_id}")
+
                         # Check if entry already exists (in-memory check)
                         teacher_key = f"{teacher_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
-                        
+
                         if teacher_key not in existing_teacher_entries:
                             # Create teacher timetable with error handling
                             try:
@@ -1933,16 +1949,29 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         logs.append(f"Error creating teacher timetable for {teacher_id}: {str(te_error)}")
                         continue
                         
-                # 4. Create Student Timetable entries for this specific date
+                # 4. Create Student Timetable entries for this specific date (only if teacher has assignment)
+                has_teacher_assignment = any(
+                    frappe.db.exists("SIS Subject Assignment", {
+                        "teacher_id": t,
+                        "class_id": class_id,
+                        "actual_subject_id": row.subject_id,
+                        "docstatus": 1
+                    }) for t in teachers if t
+                )
+
+                if not has_teacher_assignment:
+                    logs.append(f"⚠️ [sync] No teacher assignment for subject {row.subject_id} in class {class_id} - skipping student entries")
+                    continue
+
                 for student_id in student_ids:
                     try:
                         # Validate student exists first
                         if not student_id:
                             continue
-                            
+
                         # Check if entry already exists (in-memory check)
                         student_key = f"{student_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
-                        
+
                         if student_key not in existing_student_entries:
                             # Create student timetable with error handling
                             try:
@@ -2009,17 +2038,28 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                     # Convert datetime to date
                     specific_date = specific_date.date()
                 
-                # Create teacher timetable entries
+                # Create teacher timetable entries (only if teacher has assignment)
                 teachers = []
                 if row.teacher_1_id:
                     teachers.append(row.teacher_1_id)
                 if row.teacher_2_id:
                     teachers.append(row.teacher_2_id)
-                
+
                 for teacher_id in teachers:
                     try:
+                        # Check if teacher has assignment for this subject and class
+                        has_assignment = frappe.db.exists("SIS Subject Assignment", {
+                            "teacher_id": teacher_id,
+                            "class_id": class_id,
+                            "actual_subject_id": row.subject_id,
+                            "docstatus": 1
+                        })
+
+                        if not has_assignment:
+                            continue  # Skip this teacher
+
                         teacher_key = f"{teacher_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
-                        
+
                         if teacher_key not in existing_teacher_entries:
                             teacher_timetable = frappe.get_doc({
                                 "doctype": "SIS Teacher Timetable",
@@ -2039,11 +2079,23 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         logs.append(f"Error creating teacher timetable (override): {str(t_error)}")
                         continue
                 
-                # Create student timetable entries
+                # Create student timetable entries (only if at least one teacher has assignment)
+                has_teacher_assignment = any(
+                    frappe.db.exists("SIS Subject Assignment", {
+                        "teacher_id": t,
+                        "class_id": class_id,
+                        "actual_subject_id": row.subject_id,
+                        "docstatus": 1
+                    }) for t in teachers if t
+                )
+
+                if not has_teacher_assignment:
+                    continue  # Skip creating student entries if no teacher assignment
+
                 for student_id in students_in_class:
                     try:
                         student_key = f"{student_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
-                        
+
                         if student_key not in existing_student_entries:
                             student_timetable = frappe.get_doc({
                                 "doctype": "SIS Student Timetable",
