@@ -223,31 +223,31 @@ def get_announcements():
                         for recipient in recipients:
                             if isinstance(recipient, dict):
                                 recipient_type = recipient.get('type')
-                                recipient_name = recipient.get('name', '')
-                                recipient_display_name = recipient.get('display_name', recipient_name)
+                                recipient_id = recipient.get('id', '')  # ← FIX: Use 'id' field
+                                recipient_display_name = recipient.get('display_name', recipient_id)
 
                                 # Check if this recipient is relevant to current student
                                 is_relevant = False
 
                                 if recipient_type == 'grade' and student_grade_name:
-                                    # For grade, try to resolve the grade name from the ID
-                                    grade_name_from_db = recipient_name
+                                    # For grade, resolve the grade name from the ID
+                                    grade_name_from_db = recipient_id
                                     try:
-                                        if recipient_name:
-                                            grade_doc = frappe.get_doc("SIS Education Grade", recipient_name)
-                                            grade_name_from_db = grade_doc.title_en or grade_doc.title_vn or recipient_name
+                                        if recipient_id and recipient_id != 'school':
+                                            grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
+                                            grade_name_from_db = grade_doc.title_en or grade_doc.title_vn or recipient_id
                                     except:
                                         pass
                                     # Check if student's grade matches this recipient
                                     is_relevant = grade_name_from_db == student_grade_name or recipient_display_name == student_grade_name
                                     
                                 elif recipient_type == 'class' and student_class_name:
-                                    # For class, try to resolve the class name from the ID
-                                    class_name_from_db = recipient_name
+                                    # For class, resolve the class name from the ID
+                                    class_name_from_db = recipient_id
                                     try:
-                                        if recipient_name:
-                                            class_doc = frappe.get_doc("SIS Class", recipient_name)
-                                            class_name_from_db = class_doc.title or recipient_name
+                                        if recipient_id and recipient_id != 'school':
+                                            class_doc = frappe.get_doc("SIS Class", recipient_id)
+                                            class_name_from_db = class_doc.title or recipient_id
                                     except:
                                         pass
                                     # Check if student's class matches this recipient
@@ -258,7 +258,7 @@ def get_announcements():
                                     is_relevant = True
                                 elif recipient_type == 'student':
                                     # Check if student is specifically targeted
-                                    is_relevant = recipient_name == student_id
+                                    is_relevant = recipient_id == student_id
 
                                 if is_relevant:
                                     # Handle special case for school-wide announcements
@@ -271,7 +271,7 @@ def get_announcements():
 
                                     relevant_tags.append({
                                         "type": recipient_type,
-                                        "name": recipient_name,
+                                        "name": recipient_id,
                                         "display_name": display_name_vn,
                                         "display_name_en": display_name_en
                                     })
