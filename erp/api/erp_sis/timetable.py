@@ -815,6 +815,33 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
     
     frappe.logger().info(f"📊 _build_entries: {len(pattern_rows)} pattern rows, {len(override_rows)} override rows")
     
+    # 🔍 CRITICAL: Deduplicate pattern rows - if multiple rows have same subject/day/column,
+    # prefer rows with teachers assigned
+    pattern_rows_deduped = {}
+    for r in pattern_rows:
+        key = (r.get("subject_id"), r.get("day_of_week"), r.get("timetable_column_id"))
+        has_teacher = bool(r.get("teacher_1_id") or r.get("teacher_2_id"))
+        
+        if key not in pattern_rows_deduped:
+            # First row with this key - use it
+            pattern_rows_deduped[key] = r
+        else:
+            # Check if existing row has teacher
+            existing = pattern_rows_deduped[key]
+            existing_has_teacher = bool(existing.get("teacher_1_id") or existing.get("teacher_2_id"))
+            
+            # Prefer row with teacher over row without teacher
+            if has_teacher and not existing_has_teacher:
+                pattern_rows_deduped[key] = r
+            # If both have teachers or both don't, keep the first one (or the one with more recent name)
+            elif has_teacher == existing_has_teacher:
+                # Keep the one with more recent name (higher number = newer)
+                if r.get("name", "") > existing.get("name", ""):
+                    pattern_rows_deduped[key] = r
+    
+    pattern_rows = list(pattern_rows_deduped.values())
+    frappe.logger().info(f"📊 _build_entries: After deduplication: {len(pattern_rows)} pattern rows")
+    
     # Build override map: (date_str, column_id, day_of_week) → row
     # Include day_of_week to handle multiple subjects in same period
     override_map = {}
@@ -1283,6 +1310,19 @@ def get_class_week():
                 filters=row_filters,
                 order_by="day_of_week asc",
             )
+            
+            # 🔍 DEBUG: Log rows for troubleshooting
+            frappe.logger().info(f"📊 get_class_week: Found {len(rows)} rows for class {class_id}")
+            if rows:
+                # Log rows with teacher assignments
+                rows_with_teachers = [r for r in rows if r.get("teacher_1_id") or r.get("teacher_2_id")]
+                frappe.logger().info(f"📊 get_class_week: {len(rows_with_teachers)} rows have teachers assigned")
+                # Log first few rows with subject SIS-SUBJECT-35402 (Toán)
+                math_rows = [r for r in rows if r.get("subject_id") == "SIS-SUBJECT-35402"]
+                if math_rows:
+                    frappe.logger().info(f"📊 get_class_week: Found {len(math_rows)} rows for subject SIS-SUBJECT-35402")
+                    for r in math_rows[:3]:
+                        frappe.logger().info(f"  - Row {r.name}: teacher_1={r.get('teacher_1_id')}, teacher_2={r.get('teacher_2_id')}, day={r.get('day_of_week')}")
             # Fallback: some rows may have been created via explicit link field
             if not rows:
                 alt_rows = frappe.get_all(
