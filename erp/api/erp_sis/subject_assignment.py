@@ -2576,27 +2576,32 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
         # Update each pattern row
         for pattern_row in pattern_rows:
             try:
-                row_doc = frappe.get_doc("SIS Timetable Instance Row", pattern_row.name)
+                # Use data from all_rows_refreshed (already has fresh data after PASS 1)
+                # pattern_row is already a dict from query
+                teacher_1 = pattern_row.get("teacher_1_id")
+                teacher_2 = pattern_row.get("teacher_2_id")
+                
+                frappe.logger().info(f"🔍 Pattern row {pattern_row.name}: teacher_1={teacher_1}, teacher_2={teacher_2}")
                 
                 # Assign teacher (same logic as before)
-                if not row_doc.teacher_1_id:
-                    row_doc.teacher_1_id = teacher_id
-                    row_doc.save(ignore_permissions=True)
+                if not teacher_1:
+                    frappe.db.set_value("SIS Timetable Instance Row", pattern_row.name, "teacher_1_id", teacher_id, update_modified=False)
                     updated_rows.append(pattern_row.name)
                     frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_1_id = {teacher_id}")
-                elif not row_doc.teacher_2_id:
-                    row_doc.teacher_2_id = teacher_id
-                    row_doc.save(ignore_permissions=True)
+                elif not teacher_2:
+                    frappe.db.set_value("SIS Timetable Instance Row", pattern_row.name, "teacher_2_id", teacher_id, update_modified=False)
                     updated_rows.append(pattern_row.name)
                     frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_2_id = {teacher_id}")
                 else:
-                    frappe.logger().info(f"⏭️ SKIP pattern row {pattern_row.name}: both teacher slots full")
+                    frappe.logger().info(f"⏭️ SKIP pattern row {pattern_row.name}: both teacher slots full (teacher_1={teacher_1}, teacher_2={teacher_2})")
                     skipped_rows.append(pattern_row.name)
             except Exception as e:
                 frappe.logger().error(f"❌ Failed to update pattern row {pattern_row.name}: {str(e)}")
                 skipped_rows.append(pattern_row.name)
     
-    frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments")
+    # Commit after PASS 2A
+    frappe.db.commit()
+    frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {len([r for r in updated_rows if 'TIMETABLE-INSTANCE-ROW' in r])} rows")
     
     # ✅ PASS 2B: Create date-specific override rows for date-range assignments
     frappe.logger().info(f"🆕 PASS 2B: Creating date-specific override rows")
