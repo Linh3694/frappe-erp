@@ -1989,8 +1989,30 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         teacher_key = f"{teacher_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
 
                         if teacher_key in existing_teacher_entries:
-                            logs.append(f"⏭️ [sync] Teacher timetable entry already exists for {teacher_id} on {specific_date} - skipping")
-                        else:
+                            # Check if entry exists in DB and verify it's correct
+                            existing_entry = frappe.db.exists("SIS Teacher Timetable", {
+                                "teacher_id": teacher_id,
+                                "class_id": class_id,
+                                "day_of_week": normalized_day,
+                                "timetable_column_id": row.timetable_column_id,
+                                "date": specific_date
+                            })
+                            if existing_entry:
+                                # Verify subject_id matches
+                                existing_subject = frappe.db.get_value("SIS Teacher Timetable", existing_entry, "subject_id")
+                                if existing_subject == row.subject_id:
+                                    logs.append(f"⏭️ [sync] Teacher timetable entry already exists and correct for {teacher_id} on {specific_date} - skipping")
+                                else:
+                                    # Update subject_id if different
+                                    frappe.db.set_value("SIS Teacher Timetable", existing_entry, "subject_id", row.subject_id, update_modified=False)
+                                    logs.append(f"🔄 [sync] Updated teacher timetable entry for {teacher_id} on {specific_date}: subject {existing_subject} → {row.subject_id}")
+                                    teacher_timetable_count += 1
+                            else:
+                                # Entry in cache but not in DB - remove from cache and create
+                                existing_teacher_entries.discard(teacher_key)
+                                logs.append(f"⚠️ [sync] Entry in cache but not in DB for {teacher_id} on {specific_date} - will create")
+                                # Fall through to create
+                        if teacher_key not in existing_teacher_entries:
                             # Create teacher timetable with error handling
                             try:
                                 logs.append(f"🆕 [sync] Creating teacher timetable for {teacher_id} on {specific_date}, day={normalized_day}, column={row.timetable_column_id}")
