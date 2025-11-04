@@ -79,12 +79,24 @@ def get_class_leave_requests(class_id=None):
             fields=[
                 "name", "student_name", "parent_name", "reason", "other_reason", "student_code",
                 "start_date", "end_date", "total_days", "description",
-                "submitted_at", "creation", "modified", "student_id", "parent_id"
+                "submitted_at", "creation", "modified", "student_id", "parent_id", "owner"
             ],
             order_by="creation desc",
             limit=limit,
             start=offset
         )
+
+        # Get creator names for all owners
+        owner_emails = list(set([req.get('owner') for req in leave_requests if req.get('owner')]))
+        owner_names_map = {}
+        if owner_emails:
+            users = frappe.get_all(
+                "User",
+                filters={"name": ["in", owner_emails]},
+                fields=["name", "full_name"]
+            )
+            for user in users:
+                owner_names_map[user.name] = user.full_name or user.name
 
         # Apply search filter client-side if search is provided
         if search:
@@ -93,10 +105,11 @@ def get_class_leave_requests(class_id=None):
                 if (search.lower() in (req.get('student_name') or '').lower() or
                     search.lower() in (req.get('student_code') or '').lower() or
                     search.lower() in (req.get('reason') or '').lower() or
-                    search.lower() in (req.get('parent_name') or '').lower())
+                    search.lower() in (req.get('parent_name') or '').lower() or
+                    search.lower() in (owner_names_map.get(req.get('owner'), '') or '').lower())
             ]
 
-        # Transform reason to Vietnamese for display
+        # Transform reason to Vietnamese for display and add creator name
         reason_mapping = {
             'sick_child': 'Con ốm',
             'family_matters': 'Gia đình có việc bận',
@@ -105,6 +118,8 @@ def get_class_leave_requests(class_id=None):
 
         for request in leave_requests:
             request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
+            # Add creator name (owner)
+            request['creator_name'] = owner_names_map.get(request.get('owner'), request.get('owner', ''))
 
         # Calculate pagination info
         total_pages = (total_count + limit - 1) // limit  # Ceiling division
