@@ -77,10 +77,18 @@ def calculate_dates_in_range(start_date, end_date, day_of_week, instance_start, 
     Returns:
         list: List of date objects
     """
+    import frappe
+    
     day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
     target_weekday = day_map.get(day_of_week)
     
     if target_weekday is None:
+        frappe.logger().error(f"❌ Invalid day_of_week: {day_of_week}")
+        return []
+    
+    # Validate inputs
+    if not start_date or not instance_start or not instance_end:
+        frappe.logger().error(f"❌ Missing required dates: start_date={start_date}, instance_start={instance_start}, instance_end={instance_end}")
         return []
     
     # Find first occurrence of this weekday in instance
@@ -90,6 +98,11 @@ def calculate_dates_in_range(start_date, end_date, day_of_week, instance_start, 
     if days_ahead < 0:
         days_ahead += 7
     first_occurrence = current_date + timedelta(days=days_ahead)
+    
+    frappe.logger().info(f"📅 DATE CALC: day_of_week={day_of_week}, target_weekday={target_weekday}, current_weekday={current_weekday}")
+    frappe.logger().info(f"📅 DATE CALC: First occurrence of {day_of_week}: {first_occurrence}")
+    frappe.logger().info(f"📅 DATE CALC: Assignment range: {start_date} to {end_date if end_date else 'no end'}")
+    frappe.logger().info(f"📅 DATE CALC: Instance range: {instance_start} to {instance_end}")
     
     # Collect all dates in range
     dates = []
@@ -105,6 +118,10 @@ def calculate_dates_in_range(start_date, end_date, day_of_week, instance_start, 
                 dates.append(check_date)
         
         check_date += timedelta(days=7)  # Next week
+    
+    frappe.logger().info(f"✅ DATE CALC: Calculated {len(dates)} dates for {day_of_week}")
+    if len(dates) > 0:
+        frappe.logger().info(f"   - First date: {dates[0]}, Last date: {dates[-1]}")
     
     return dates
 

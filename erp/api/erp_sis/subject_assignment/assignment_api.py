@@ -881,14 +881,28 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
         try:
             # Store old teacher and application_type for timetable update
             old_teacher_id = frappe.db.get_value("SIS Subject Assignment", assignment_id, "teacher_id")
-            old_application_type = frappe.db.get_value("SIS Subject Assignment", assignment_id, "application_type")
+            old_application_type = frappe.db.get_value("SIS Subject Assignment", assignment_id, "application_type") or "full_year"
+            old_start_date = frappe.db.get_value("SIS Subject Assignment", assignment_id, "start_date")
+            old_end_date = frappe.db.get_value("SIS Subject Assignment", assignment_id, "end_date")
+            
+            new_teacher_id = teacher_id or assignment_doc.teacher_id
             new_application_type = assignment_doc.application_type or "full_year"
+            new_start_date = assignment_doc.start_date
+            new_end_date = assignment_doc.end_date
             
             # Delete old override rows if needed
+            # Case 1: Teacher changed
+            # Case 2: Type changed from from_date to full_year
+            # Case 3: from_date assignment with changed dates
             should_delete_overrides = (
-                old_teacher_id != teacher_id or 
-                (old_application_type == "from_date" and new_application_type == "full_year")
+                old_teacher_id != new_teacher_id or 
+                (old_application_type == "from_date" and new_application_type == "full_year") or
+                (old_application_type == "from_date" and (old_start_date != new_start_date or old_end_date != new_end_date))
             )
+            
+            frappe.logger().info(f"UPDATE SYNC - Delete decision: old_teacher={old_teacher_id}, new_teacher={new_teacher_id}, old_type={old_application_type}, new_type={new_application_type}")
+            frappe.logger().info(f"              Old dates: {old_start_date} to {old_end_date}, New dates: {new_start_date} to {new_end_date}")
+            frappe.logger().info(f"              should_delete_overrides={should_delete_overrides}")
             
             if should_delete_overrides:
                 try:
@@ -900,12 +914,13 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                     if subject_mapping:
                         subject_ids = [s.name for s in subject_mapping]
                         override_deleted = delete_teacher_override_rows(
-                            teacher_id or assignment_doc.teacher_id,
+                            old_teacher_id,
                             subject_ids,
                             [assignment_doc.class_id],
                             campus_id
                         )
                         debug_info['override_rows_deleted'] = override_deleted
+                        frappe.logger().info(f"UPDATE SYNC - Deleted {override_deleted} old override rows")
                 except Exception as override_del_error:
                     frappe.logger().error(f"UPDATE SYNC - Failed to delete old override rows: {str(override_del_error)}")
             
@@ -919,9 +934,11 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                 sync_data = {
                     "assignment_id": assignment_doc.name,
                     "old_teacher_id": old_teacher_id,
-                    "new_teacher_id": teacher_id or assignment_doc.teacher_id,
+                    "new_teacher_id": new_teacher_id,
                     "class_id": assignment_doc.class_id,
-                    "actual_subject_id": assignment_doc.actual_subject_id
+                    "actual_subject_id": assignment_doc.actual_subject_id,
+                    "start_date": new_start_date,
+                    "end_date": new_end_date
                 }
                 
                 sync_result = sync_timetable_from_date(sync_data, assignment_doc.modified)
@@ -930,15 +947,13 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                 # Also sync Teacher Timetable
                 if sync_result and sync_result.get('summary', {}).get('rows_updated', 0) > 0:
                     try:
-                        assignment_start = getattr(assignment_doc, 'start_date', None)
-                        assignment_end = getattr(assignment_doc, 'end_date', None)
                         affected_classes = [assignment_doc.class_id] if assignment_doc.class_id else []
                         teacher_sync_result = sync_teacher_timetable_after_assignment(
-                            teacher_id=teacher_id or assignment_doc.teacher_id,
+                            teacher_id=new_teacher_id,
                             affected_classes=affected_classes,
                             campus_id=campus_id,
-                            assignment_start_date=assignment_start,
-                            assignment_end_date=assignment_end
+                            assignment_start_date=new_start_date,
+                            assignment_end_date=new_end_date
                         )
                         debug_info['teacher_timetable_sync'] = teacher_sync_result
                     except Exception as teacher_sync_error:
