@@ -2608,13 +2608,21 @@ def _batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subje
                 
                 frappe.logger().info(f"🔍 Pattern row {pattern_row.name}: teacher_1={teacher_1}, teacher_2={teacher_2}")
                 
-                # Assign teacher (same logic as before)
+                # Assign teacher using SQL (bypass validation for performance)
                 if not teacher_1:
-                    frappe.db.set_value("SIS Timetable Instance Row", pattern_row.name, "teacher_1_id", teacher_id, update_modified=False)
+                    frappe.db.sql("""
+                        UPDATE `tabSIS Timetable Instance Row`
+                        SET teacher_1_id = %s
+                        WHERE name = %s
+                    """, (teacher_id, pattern_row.name))
                     updated_rows.append(pattern_row.name)
                     frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_1_id = {teacher_id}")
                 elif not teacher_2:
-                    frappe.db.set_value("SIS Timetable Instance Row", pattern_row.name, "teacher_2_id", teacher_id, update_modified=False)
+                    frappe.db.sql("""
+                        UPDATE `tabSIS Timetable Instance Row`
+                        SET teacher_2_id = %s
+                        WHERE name = %s
+                    """, (teacher_id, pattern_row.name))
                     updated_rows.append(pattern_row.name)
                     frappe.logger().info(f"✅ UPDATED pattern row {pattern_row.name}: teacher_2_id = {teacher_id}")
                 else:
