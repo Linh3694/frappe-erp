@@ -491,13 +491,17 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                         })
 
             if instances_list:
-                # Sync immediately instead of queuing background job
-                debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances (from_date)")
+                # Sync immediately with timeout protection
+                debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances (from_date, with timeout protection)")
                 frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances (PASS 2B)")
 
-                sync_result = sync_materialized_views_immediately(instances_list)
+                sync_result = sync_materialized_views_immediately(instances_list, timeout_seconds=5)
                 debug_info.extend(sync_result.get("debug_info", []))
                 frappe.logger().info(f"✅ Immediate sync completed (PASS 2B): {sync_result.get('message', 'Unknown result')}")
+
+                # Log if partial sync occurred
+                if sync_result.get("partial"):
+                    debug_info.append(f"⚠️ Partial sync: {sync_result.get('remaining_queued', 0)} instances queued for background processing")
         except Exception as sync_err:
             frappe.logger().error(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
             debug_info.append(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
