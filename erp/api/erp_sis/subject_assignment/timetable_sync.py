@@ -318,6 +318,56 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} rows")
     debug_info.append(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} pattern rows")
     
+    # 🧹 CLEANUP: Remove duplicate pattern rows (same subject/day/column but different teachers or no teacher)
+    # This handles cases where user uploaded timetable multiple times
+    cleanup_count = 0
+    try:
+        for instance in instances:
+            # Get all pattern rows for this instance
+            instance_pattern_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=["name", "subject_id", "day_of_week", "timetable_column_id", "teacher_1_id", "teacher_2_id", "date"],
+                filters={
+                    "parent": instance.name,
+                    "date": ["is", "not set"]  # Only pattern rows
+                }
+            )
+            
+            # Group by (subject_id, day_of_week, timetable_column_id)
+            rows_by_key = {}
+            for row in instance_pattern_rows:
+                key = (row.subject_id, row.day_of_week, row.timetable_column_id)
+                if key not in rows_by_key:
+                    rows_by_key[key] = []
+                rows_by_key[key].append(row)
+            
+            # For each group, keep only one row (prefer one with teacher)
+            for key, rows in rows_by_key.items():
+                if len(rows) > 1:
+                    # Sort: rows with teacher first, then by name (newer = higher number)
+                    rows_sorted = sorted(rows, key=lambda r: (
+                        not bool(r.teacher_1_id or r.teacher_2_id),  # False (has teacher) comes first
+                        -int(r.name.split('-')[-1]) if '-' in r.name else 0  # Higher number = newer
+                    ))
+                    
+                    # Keep the first one (best row), delete the rest
+                    keep_row = rows_sorted[0]
+                    for row_to_delete in rows_sorted[1:]:
+                        try:
+                            frappe.delete_doc("SIS Timetable Instance Row", row_to_delete.name, ignore_permissions=True, force=True)
+                            cleanup_count += 1
+                            frappe.logger().info(f"🧹 Cleaned up duplicate row {row_to_delete.name} (keeping {keep_row.name})")
+                        except Exception as del_err:
+                            frappe.logger().warning(f"⚠️ Failed to delete duplicate row {row_to_delete.name}: {str(del_err)}")
+        
+        if cleanup_count > 0:
+            frappe.db.commit()
+            frappe.logger().info(f"🧹 Cleanup complete: Removed {cleanup_count} duplicate pattern rows")
+            debug_info.append(f"🧹 Cleanup: Removed {cleanup_count} duplicate pattern rows")
+    except Exception as cleanup_error:
+        frappe.logger().error(f"❌ Cleanup failed: {str(cleanup_error)}")
+        debug_info.append(f"⚠️ Cleanup warning: {str(cleanup_error)}")
+    
     # 🔍 DEBUG: Verify updated rows after commit
     if pass2a_updated > 0:
         frappe.logger().info(f"🔍 DEBUG: Verifying {len(updated_rows)} updated rows after PASS 2A")
