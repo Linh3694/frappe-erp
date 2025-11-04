@@ -315,7 +315,7 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     frappe.logger().info(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} rows")
     debug_info.append(f"✅ PASS 2A Complete: Processed {full_year_count} full_year assignments, updated {pass2a_updated} pattern rows")
     
-    # 🔄 Queue materialized views sync as background job (async) - PASS 2A
+    # 🔄 Sync materialized views immediately (synchronous) - PASS 2A
     if pass2a_updated > 0:
         try:
             instances_list = []
@@ -331,19 +331,18 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                             "end_date": str(instance.end_date),
                             "campus_id": campus_id
                         })
-            
+
             if instances_list:
-                frappe.enqueue(
-                    "erp.api.erp_sis.subject_assignment.timetable_sync.sync_materialized_views_background",
-                    instances=instances_list,
-                    queue="long",
-                    timeout=300
-                )
-                debug_info.append(f"🔄 Queued materialized view sync for {len(instances_list)} instances")
-                frappe.logger().info(f"✅ Queued materialized view sync for {len(instances_list)} instances")
+                # Sync immediately instead of queuing background job
+                debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances")
+                frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances")
+
+                sync_result = sync_materialized_views_immediately(instances_list)
+                debug_info.extend(sync_result.get("debug_info", []))
+                frappe.logger().info(f"✅ Immediate sync completed: {sync_result.get('message', 'Unknown result')}")
         except Exception as sync_err:
-            frappe.logger().error(f"❌ Failed to queue materialized view sync: {str(sync_err)}")
-            debug_info.append(f"❌ Failed to queue sync: {str(sync_err)}")
+            frappe.logger().error(f"❌ Failed to sync materialized views: {str(sync_err)}")
+            debug_info.append(f"❌ Failed to sync materialized views: {str(sync_err)}")
     
     # ✅ PASS 2B: Create date-specific override rows for date-range assignments
     frappe.logger().info(f"🆕 PASS 2B: Creating date-specific override rows")
@@ -470,7 +469,7 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     frappe.logger().info(f"✅ PASS 2B Complete: Processed {pass2b_processed} from_date assignments, Created {pass2b_created} override rows, skipped {pass2b_skipped}")
     debug_info.append(f"✅ PASS 2B Complete: Processed {pass2b_processed} from_date, Created {pass2b_created} override rows")
     
-    # 🔄 Queue materialized views sync - PASS 2B
+    # 🔄 Sync materialized views immediately - PASS 2B
     if pass2b_created > 0:
         try:
             instances_list = []
@@ -486,19 +485,18 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
                             "end_date": str(instance.end_date),
                             "campus_id": campus_id
                         })
-            
+
             if instances_list:
-                frappe.enqueue(
-                    "erp.api.erp_sis.subject_assignment.timetable_sync.sync_materialized_views_background",
-                    instances=instances_list,
-                    queue="long",
-                    timeout=300
-                )
-                debug_info.append(f"🔄 Queued materialized view sync for {len(instances_list)} instances (from_date)")
-                frappe.logger().info(f"✅ Queued materialized view sync for {len(instances_list)} instances (PASS 2B)")
+                # Sync immediately instead of queuing background job
+                debug_info.append(f"🔄 Syncing materialized views immediately for {len(instances_list)} instances (from_date)")
+                frappe.logger().info(f"✅ Syncing materialized views immediately for {len(instances_list)} instances (PASS 2B)")
+
+                sync_result = sync_materialized_views_immediately(instances_list)
+                debug_info.extend(sync_result.get("debug_info", []))
+                frappe.logger().info(f"✅ Immediate sync completed (PASS 2B): {sync_result.get('message', 'Unknown result')}")
         except Exception as sync_err:
-            frappe.logger().error(f"❌ Failed to queue materialized view sync (PASS 2B): {str(sync_err)}")
-            debug_info.append(f"❌ Failed to queue sync (PASS 2B): {str(sync_err)}")
+            frappe.logger().error(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
+            debug_info.append(f"❌ Failed to sync materialized views (PASS 2B): {str(sync_err)}")
     
     frappe.db.commit()
     
@@ -513,20 +511,83 @@ def batch_sync_timetable_optimized(teacher_id, affected_classes, affected_subjec
     }
 
 
-def sync_materialized_views_background(instances):
+def sync_materialized_views_immediately(instances):
     """
-    🔄 Background job to sync materialized views without blocking main request.
-    
+    🔄 Sync materialized views immediately (synchronous).
+
     Args:
         instances: List of dicts with instance_id, class_id, start_date, end_date, campus_id
+
+    Returns:
+        dict: Sync result with debug info
     """
     from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
-    
+
+    debug_info = []
     try:
         sync_logs = []
         total_teacher_count = 0
         total_student_count = 0
-        
+
+        debug_info.append(f"🔄 Starting immediate sync for {len(instances)} instances")
+
+        for instance_data in instances:
+            try:
+                teacher_count, student_count = sync_materialized_views_for_instance(
+                    instance_id=instance_data["instance_id"],
+                    class_id=instance_data["class_id"],
+                    start_date=instance_data["start_date"],
+                    end_date=instance_data["end_date"],
+                    campus_id=instance_data["campus_id"],
+                    logs=sync_logs
+                )
+                total_teacher_count += teacher_count
+                total_student_count += student_count
+                debug_info.append(f"✅ Sync completed for {instance_data['instance_id']}: {teacher_count}T/{student_count}S")
+                frappe.logger().info(f"✅ Immediate sync completed for {instance_data['instance_id']}: {teacher_count}T/{student_count}S")
+            except Exception as e:
+                error_msg = f"❌ Sync failed for {instance_data['instance_id']}: {str(e)}"
+                debug_info.append(error_msg)
+                frappe.logger().error(error_msg)
+
+        message = f"Synced {total_teacher_count} teacher records, {total_student_count} student records across {len(instances)} instances"
+        debug_info.append(f"✅ Immediate sync complete: {message}")
+        frappe.logger().info(f"✅ Immediate sync complete: {message}")
+
+        return {
+            "success": True,
+            "message": message,
+            "teacher_count": total_teacher_count,
+            "student_count": total_student_count,
+            "debug_info": debug_info
+        }
+
+    except Exception as e:
+        error_msg = f"❌ Immediate materialized view sync failed: {str(e)}"
+        frappe.logger().error(error_msg)
+        debug_info.append(error_msg)
+
+        return {
+            "success": False,
+            "message": error_msg,
+            "debug_info": debug_info
+        }
+
+
+def sync_materialized_views_background(instances):
+    """
+    🔄 Background job to sync materialized views without blocking main request.
+
+    Args:
+        instances: List of dicts with instance_id, class_id, start_date, end_date, campus_id
+    """
+    from erp.api.erp_sis.timetable_excel_import import sync_materialized_views_for_instance
+
+    try:
+        sync_logs = []
+        total_teacher_count = 0
+        total_student_count = 0
+
         for instance_data in instances:
             try:
                 teacher_count, student_count = sync_materialized_views_for_instance(
@@ -542,10 +603,10 @@ def sync_materialized_views_background(instances):
                 frappe.logger().info(f"✅ Background sync completed for {instance_data['instance_id']}: {teacher_count}T/{student_count}S")
             except Exception as e:
                 frappe.logger().error(f"❌ Background sync failed for {instance_data['instance_id']}: {str(e)}")
-        
+
         frappe.logger().info(f"✅ Background sync complete: {total_teacher_count} teacher records, {total_student_count} student records across {len(instances)} instances")
         frappe.db.commit()
-        
+
     except Exception as e:
         frappe.logger().error(f"❌ Background materialized view sync failed: {str(e)}")
         frappe.db.rollback()
