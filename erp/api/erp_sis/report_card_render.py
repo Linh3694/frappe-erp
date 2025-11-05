@@ -351,15 +351,22 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     if template_id:
         try:
             # Clear cache trước khi load để đảm bảo lấy dữ liệu mới nhất
+            # Đặc biệt quan trọng khi EditReportCard vừa cập nhật template
             frappe.db.commit()  # Commit để đảm bảo changes đã được lưu
             frappe.clear_cache(doctype="SIS Report Card Template")  # Clear cache cho doctype này
+            frappe.clear_cache(doctype="SIS Report Card Template", name=template_id)  # Clear cache cho template cụ thể
             template_doc = frappe.get_doc("SIS Report Card Template", template_id)
             template_doc.reload()  # Force reload để đảm bảo không dùng cache
             
-            # ✨ LOG để debug
+            # ✨ LOG để debug - kiểm tra số lượng subjects sau khi reload
             scores_count = len(template_doc.scores) if hasattr(template_doc, 'scores') and template_doc.scores else 0
             subjects_count = len(template_doc.subjects) if hasattr(template_doc, 'subjects') and template_doc.subjects else 0
             frappe.logger().info(f"[STANDARDIZE_TEMPLATE] Template {template_id} loaded: {scores_count} scores, {subjects_count} subjects")
+            
+            # ✨ LOG chi tiết các subject IDs để debug
+            if hasattr(template_doc, 'subjects') and template_doc.subjects:
+                subject_ids = [getattr(s, 'subject_id', None) for s in template_doc.subjects]
+                frappe.logger().info(f"[STANDARDIZE_TEMPLATE] Template {template_id} subject IDs: {subject_ids}")
         except Exception as e:
             frappe.logger().error(f"[STANDARDIZE_TEMPLATE] Error loading template {template_id}: {str(e)}")
             template_doc = None
@@ -435,7 +442,9 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                     template_subjects_list.append(subject_info)
                     template_subjects_map[subject_id] = subject_info
         
-        # ✨ Cũng load từ subjects config nếu có subject_eval_enabled (có thể cùng lúc với scores)
+        # ✨ Cũng load từ subjects config nếu có subject_eval_enabled (VN) hoặc intl_scoreboard_enabled (INTL)
+        # ✨ QUAN TRỌNG: Load tất cả subjects từ template.subjects để đảm bảo FinalView luôn phản ánh template hiện tại
+        # Khi EditReportCard thêm/xóa subjects, FinalView sẽ tự động cập nhật
         if hasattr(template_doc, 'subjects') and template_doc.subjects:
             for subject_cfg in template_doc.subjects:
                 subject_id = getattr(subject_cfg, 'subject_id', None)
