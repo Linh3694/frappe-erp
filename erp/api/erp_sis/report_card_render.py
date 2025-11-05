@@ -422,9 +422,9 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     # ✨ QUAN TRỌNG: Dùng list để giữ thứ tự từ template
     template_subjects_list = []  # List of {subject_id, title_vn, teacher_name} để giữ thứ tự
     template_subjects_map = {}  # {subject_id: {subject_id, title_vn, teacher_name}} để lookup nhanh
+    seen_subject_ids = set()  # Track subjects đã thêm để tránh duplicate (scope ngoài để dùng trong fallback)
     if template_doc:
         class_id = getattr(report, "class_id", "")
-        seen_subject_ids = set()  # Track subjects đã thêm để tránh duplicate
         
         # ✨ VN program có thể có cả scores và subjects config
         # Load từ scores config nếu có scores_enabled (giữ thứ tự)
@@ -462,6 +462,34 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     # ✨ QUAN TRỌNG: Chỉ hiển thị subjects từ template hiện tại, giữ thứ tự từ template
     # Subjects đã xóa khỏi template sẽ không được hiển thị trong FinalView
     subjects_to_process = template_subjects_list.copy()  # Giữ thứ tự từ template
+    
+    # ✨ FALLBACK: Nếu có subject_eval_enabled nhưng không có subjects trong template_subjects_list
+    # (có thể template chỉ có scores config mà không có subjects config cho subject_eval)
+    # Thì cần tạo subjects từ subject_eval data đã được filter theo template
+    # ✨ QUAN TRỌNG: Chỉ dùng fallback này khi subject_eval_enabled được bật
+    if template_doc:
+        subject_eval_enabled = bool(getattr(template_doc, "subject_eval_enabled", 0))
+        if subject_eval_enabled:
+            subject_eval_data_raw = data.get("subject_eval", {})
+            if isinstance(subject_eval_data_raw, dict) and subject_eval_data_raw:
+                class_id = getattr(report, "class_id", "")
+                # Tạo subjects từ subject_eval data (đã được filter theo template ở get_report_data)
+                # Chỉ thêm subjects chưa có trong template_subjects_list
+                for subject_id, subject_eval_data in subject_eval_data_raw.items():
+                    if not subject_id or not subject_id.startswith("SIS_ACTUAL_SUBJECT-"):
+                        continue
+                    # Kiểm tra xem subject đã có trong template_subjects_list chưa
+                    if subject_id in seen_subject_ids:
+                        continue
+                    teacher_names = _resolve_teacher_names(subject_id, class_id)
+                    subject_info = {
+                        "subject_id": subject_id,
+                        "title_vn": _resolve_actual_subject_title(subject_id) or subject_id,
+                        "teacher_name": teacher_names[0] if teacher_names else ""
+                    }
+                    subjects_to_process.append(subject_info)
+                    template_subjects_map[subject_id] = subject_info
+                    frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Fallback: Created subject from subject_eval: {subject_id}")
     
     # ✨ REMOVED: Logic giữ lại subjects đã xóa khỏi template
     # Vì khi template được edit (xóa subjects), FinalView phải phản ánh template hiện tại
