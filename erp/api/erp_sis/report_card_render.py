@@ -462,8 +462,9 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                     subjects_to_process.append(subject_info)
                     frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Added from subjects[{idx}]: {subject_id}")
     
-    # ✨ FALLBACK: Nếu không có template, load từ data (backward compatibility)
-    if not subjects_to_process:
+    # ✨ FALLBACK: CHỈ load từ data nếu KHÔNG CÓ TEMPLATE (backward compatibility)
+    # KHÔNG fallback nếu có template dù subjects_to_process rỗng (tránh hiển thị subjects đã xóa)
+    if not template_doc:
         class_id = getattr(report, "class_id", "")
         
         # Fallback từ scores data
