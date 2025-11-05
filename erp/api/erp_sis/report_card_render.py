@@ -397,8 +397,10 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     template_subjects_map = {}  # {subject_id: {subject_id, title_vn, teacher_name}}
     if template_doc:
         class_id = getattr(report, "class_id", "")
+        
+        # ✨ VN program có thể có cả scores và subjects config
+        # Load từ scores config nếu có scores_enabled
         if hasattr(template_doc, 'scores') and template_doc.scores:
-            # Load từ scores config (VN program)
             for score_cfg in template_doc.scores:
                 subject_id = getattr(score_cfg, 'subject_id', None)
                 if subject_id:
@@ -408,17 +410,20 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                         "title_vn": getattr(score_cfg, 'display_name', None) or _resolve_actual_subject_title(subject_id) or subject_id,
                         "teacher_name": teacher_names[0] if teacher_names else ""
                     }
-        elif hasattr(template_doc, 'subjects') and template_doc.subjects:
-            # Load từ subjects config (VN program với subject_eval hoặc INTL program)
+        
+        # ✨ Cũng load từ subjects config nếu có subject_eval_enabled (có thể cùng lúc với scores)
+        if hasattr(template_doc, 'subjects') and template_doc.subjects:
             for subject_cfg in template_doc.subjects:
                 subject_id = getattr(subject_cfg, 'subject_id', None)
                 if subject_id:
-                    teacher_names = _resolve_teacher_names(subject_id, class_id)
-                    template_subjects_map[subject_id] = {
-                        "subject_id": subject_id,
-                        "title_vn": _resolve_actual_subject_title(subject_id) or subject_id,
-                        "teacher_name": teacher_names[0] if teacher_names else ""
-                    }
+                    # Chỉ thêm nếu chưa có trong map (để tránh override display_name từ scores)
+                    if subject_id not in template_subjects_map:
+                        teacher_names = _resolve_teacher_names(subject_id, class_id)
+                        template_subjects_map[subject_id] = {
+                            "subject_id": subject_id,
+                            "title_vn": _resolve_actual_subject_title(subject_id) or subject_id,
+                            "teacher_name": teacher_names[0] if teacher_names else ""
+                        }
     
     # ✨ Merge: Ưu tiên subjects từ template, fallback về subjects_raw nếu không có trong template
     # Nhưng giữ lại dữ liệu đã nhập (scores, subject_eval) từ subjects_raw
@@ -613,6 +618,32 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                 }
             except Exception:
                 pass
+        else:
+            # ✨ Nếu subject không có trong scores_data, vẫn tạo scores structure với weight counts từ template
+            # Điều này đảm bảo frontend có đủ thông tin để hiển thị đúng số cột
+            if template_doc and hasattr(template_doc, 'scores') and template_doc.scores:
+                for score_cfg in template_doc.scores:
+                    cfg_subject_id = getattr(score_cfg, 'subject_id', None)
+                    if cfg_subject_id == subject_id:
+                        try:
+                            standardized_subject["scores"] = {
+                                "hs1_scores": [],
+                                "hs2_scores": [],
+                                "hs3_scores": [],
+                                "hs1_average": None,
+                                "hs2_average": None,
+                                "hs3_average": None,
+                                "final_average": None,
+                                "semester1_average": None,
+                                "year_average": None,
+                                "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
+                                "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
+                                "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1,
+                                "subject_type": getattr(score_cfg, "subject_type", "Môn tính điểm"),
+                            }
+                        except Exception:
+                            pass
+                        break
         
         # Load template configuration for this subject
         template_config = _get_template_config_for_subject(template_id, subject_id)
