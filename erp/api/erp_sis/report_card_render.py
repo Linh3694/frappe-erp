@@ -395,9 +395,15 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     }
     
     # === REPORT INFO ===
+    # ✨ CRITICAL: Ưu tiên title từ TEMPLATE (nếu có), không từ report cũ
+    # Vì khi user edit template title, report cũ vẫn giữ title cũ → Phải override
+    report_title = getattr(report, "title", "")
+    if template_doc and hasattr(template_doc, 'title'):
+        report_title = getattr(template_doc, 'title', report_title)
+    
     standardized["report"] = {
-        "title_vn": getattr(report, "title", ""),
-        "title_en": getattr(report, "title", "")  # Same for now, can enhance later
+        "title_vn": report_title,
+        "title_en": report_title  # Same for now, can enhance later
     }
 
     standardized["context"] = {
