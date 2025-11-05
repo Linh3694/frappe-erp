@@ -519,6 +519,23 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         subject_id = subject_info.get("subject_id", "")
         source = subject_info.get("source", "")
         
+        # ✨ CRITICAL: CHỈ add subject nếu nó thực sự có trong data structure tương ứng
+        # Với report mới tạo, data có subjects nhưng chỉ có structure rỗng → vẫn phải hiển thị
+        has_data_structure = False
+        if source == "scores":
+            has_data_structure = isinstance(scores_data, dict) and subject_id in scores_data
+        elif source == "subject_eval":
+            has_data_structure = isinstance(subject_eval_data_raw, dict) and subject_id in subject_eval_data_raw
+        else:
+            # Fallback: check cả 2
+            has_data_structure = (isinstance(scores_data, dict) and subject_id in scores_data) or \
+                                (isinstance(subject_eval_data_raw, dict) and subject_id in subject_eval_data_raw)
+        
+        # ✨ BỎ QUA subject nếu không có trong data structure (đã bị xóa khỏi template)
+        if not has_data_structure:
+            frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Skipping {subject_id} - not in data structure (source={source})")
+            continue
+        
         standardized_subject = {
             "subject_id": subject_id,
             "title_vn": subject_info.get("title_vn", ""),
