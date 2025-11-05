@@ -463,33 +463,30 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     # Subjects đã xóa khỏi template sẽ không được hiển thị trong FinalView
     subjects_to_process = template_subjects_list.copy()  # Giữ thứ tự từ template
     
-    # ✨ FALLBACK: Nếu có subject_eval_enabled nhưng không có subjects trong template_subjects_list
-    # (có thể template chỉ có scores config mà không có subjects config cho subject_eval)
-    # Thì cần tạo subjects từ subject_eval data đã được filter theo template
-    # ✨ QUAN TRỌNG: Chỉ dùng fallback này khi subject_eval_enabled được bật
-    if template_doc:
-        subject_eval_enabled = bool(getattr(template_doc, "subject_eval_enabled", 0))
-        if subject_eval_enabled:
-            subject_eval_data_raw = data.get("subject_eval", {})
-            if isinstance(subject_eval_data_raw, dict) and subject_eval_data_raw:
-                class_id = getattr(report, "class_id", "")
-                # Tạo subjects từ subject_eval data (đã được filter theo template ở get_report_data)
-                # Chỉ thêm subjects chưa có trong template_subjects_list
-                for subject_id, subject_eval_data in subject_eval_data_raw.items():
-                    if not subject_id or not subject_id.startswith("SIS_ACTUAL_SUBJECT-"):
-                        continue
-                    # Kiểm tra xem subject đã có trong template_subjects_list chưa
-                    if subject_id in seen_subject_ids:
-                        continue
-                    teacher_names = _resolve_teacher_names(subject_id, class_id)
-                    subject_info = {
-                        "subject_id": subject_id,
-                        "title_vn": _resolve_actual_subject_title(subject_id) or subject_id,
-                        "teacher_name": teacher_names[0] if teacher_names else ""
-                    }
-                    subjects_to_process.append(subject_info)
-                    template_subjects_map[subject_id] = subject_info
-                    frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Fallback: Created subject from subject_eval: {subject_id}")
+    # ✨ FALLBACK: Load subjects từ subject_eval data nếu có
+    # Điều này đảm bảo khi template có subject_eval_enabled, subjects sẽ được hiển thị
+    subject_eval_data_raw = data.get("subject_eval", {})
+    if isinstance(subject_eval_data_raw, dict) and subject_eval_data_raw:
+        class_id = getattr(report, "class_id", "")
+        # Tạo subjects từ subject_eval data (đã được filter theo template ở get_report_data)
+        # Chỉ thêm subjects chưa có trong template_subjects_list
+        for subject_id, subject_eval_data in subject_eval_data_raw.items():
+            if not subject_id or not subject_id.startswith("SIS_ACTUAL_SUBJECT-"):
+                continue
+            # Kiểm tra xem subject đã có trong template_subjects_list chưa
+            if subject_id in seen_subject_ids:
+                continue
+            teacher_names = _resolve_teacher_names(subject_id, class_id)
+            subject_title = subject_eval_data.get("subject_title", "") if isinstance(subject_eval_data, dict) else ""
+            subject_info = {
+                "subject_id": subject_id,
+                "title_vn": subject_title or _resolve_actual_subject_title(subject_id) or subject_id,
+                "teacher_name": teacher_names[0] if teacher_names else ""
+            }
+            subjects_to_process.append(subject_info)
+            template_subjects_map[subject_id] = subject_info
+            seen_subject_ids.add(subject_id)
+            frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Fallback: Created subject from subject_eval: {subject_id}")
     
     # ✨ REMOVED: Logic giữ lại subjects đã xóa khỏi template
     # Vì khi template được edit (xóa subjects), FinalView phải phản ánh template hiện tại
@@ -1366,21 +1363,22 @@ def get_report_data(report_id: Optional[str] = None):
             "subjects": standardized_data.get("subjects", []),
             "homeroom": standardized_data.get("homeroom", {}),
             "form_config": standardized_data.get("form_config", {}),
-            "scores": transformed_data.get("scores", {}),  # Bring scores to top level (đã được filter)
-            # ✨ QUAN TRỌNG: Update data.subjects và data.scores với standardized data để đảm bảo frontend không đọc subjects cũ
+            # ✨ REMOVED: Xóa scores ở top level để tránh trùng lặp với data.scores
+            # Frontend nên đọc từ data.scores hoặc subjects array đã được chuẩn hóa
+            # ✨ QUAN TRỌNG: Update data.subjects với standardized data để đảm bảo frontend không đọc subjects cũ
             "data": {
                 **transformed_data,
                 "subjects": standardized_data.get("subjects", []),  # Override với subjects đã được filter từ template
-                "scores": transformed_data.get("scores", {})  # Override với scores đã được filter
+                # scores, subject_eval, homeroom... giữ nguyên từ transformed_data
             },
         }
         
         # ✨ LOG để debug - kiểm tra response cuối cùng
         final_subjects_count = len(response_data.get("subjects", []))
         final_data_subjects_count = len(response_data.get("data", {}).get("subjects", []))
-        final_scores_count = len(response_data.get("scores", {}))
         final_data_scores_count = len(response_data.get("data", {}).get("scores", {}))
-        frappe.logger().info(f"[GET_REPORT_DATA] Response: {final_subjects_count} subjects, {final_scores_count} scores. Data: {final_data_subjects_count} subjects, {final_data_scores_count} scores")
+        final_data_subject_eval_count = len(response_data.get("data", {}).get("subject_eval", {}))
+        frappe.logger().info(f"[GET_REPORT_DATA] Response: {final_subjects_count} subjects (top). Data: {final_data_subjects_count} subjects, {final_data_scores_count} scores, {final_data_subject_eval_count} subject_eval")
         
         return single_item_response(response_data, "Report data retrieved for frontend rendering")
         
