@@ -228,17 +228,21 @@ def sync_new_subjects_to_reports():
                                 
                                 subject_data = {
                                     "subject_title": subject_title,
-                                    "test_points": {},
-                                    "criteria_scores": {},
-                                    "scale_scores": {},
-                                    "comments": {}
+                                    "test_point_values": [],  # Changed from test_points dict to list
+                                    "criteria": {},  # Changed from criteria_scores to criteria
+                                    "comments": {}  # Removed scale_scores as it's not used
                                 }
                                 
                                 # Initialize test points from template
                                 if subject_cfg.test_point_enabled and hasattr(subject_cfg, 'test_point_titles'):
-                                    for title_cfg in subject_cfg.test_point_titles:
-                                        if title_cfg.title:
-                                            subject_data["test_points"][title_cfg.title] = ""
+                                    # Initialize as empty list matching the number of titles
+                                    test_titles = [title_cfg.title for title_cfg in subject_cfg.test_point_titles if title_cfg.title]
+                                    if test_titles:
+                                        subject_data["test_point_values"] = [None] * len(test_titles)
+                                        subject_data["test_scores"] = {
+                                            "titles": test_titles,
+                                            "values": subject_data["test_point_values"]
+                                        }
                                 
                                 # Initialize rubric criteria from template
                                 if subject_cfg.rubric_enabled and hasattr(subject_cfg, 'criteria_id') and subject_cfg.criteria_id:
@@ -248,7 +252,7 @@ def sync_new_subjects_to_reports():
                                             for opt in criteria_doc.options:
                                                 criteria_name = opt.get("name", "") or opt.get("title", "")
                                                 if criteria_name:
-                                                    subject_data["criteria_scores"][criteria_name] = ""
+                                                    subject_data["criteria"][criteria_name] = ""  # Changed from criteria_scores to criteria
                                     except Exception as e:
                                         frappe.log_error(f"Failed to load criteria {subject_cfg.criteria_id}: {str(e)}")
                                 

@@ -513,17 +513,21 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                     if actual_subject_id in actual_subject_ids:
                         subject_data = {
                             "subject_title": subjects_info.get(actual_subject_id, actual_subject_id),
-                            "test_points": {},
-                            "criteria_scores": {},
-                            "scale_scores": {},
-                            "comments": {}
+                            "test_point_values": [],  # Changed from test_points dict to list
+                            "criteria": {},  # Changed from criteria_scores to criteria
+                            "comments": {}  # Removed scale_scores as it's not used
                         }
                         
                         # Initialize test points if enabled
                         if subject_config.test_point_enabled and hasattr(subject_config, 'test_point_titles'):
-                            for title_config in subject_config.test_point_titles:
-                                if title_config.title:
-                                    subject_data["test_points"][title_config.title] = ""
+                            # Initialize as empty list matching the number of titles
+                            test_titles = [title_config.title for title_config in subject_config.test_point_titles if title_config.title]
+                            if test_titles:
+                                subject_data["test_point_values"] = [None] * len(test_titles)
+                                subject_data["test_scores"] = {
+                                    "titles": test_titles,
+                                    "values": subject_data["test_point_values"]
+                                }
                         
                         # Initialize criteria scores (rubric evaluation)
                         if subject_config.rubric_enabled:
@@ -535,12 +539,9 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
                                         for opt in criteria_doc.options:
                                             criteria_name = opt.get("name", "") or opt.get("title", "")
                                             if criteria_name:
-                                                subject_data["criteria_scores"][criteria_name] = ""
+                                                subject_data["criteria"][criteria_name] = ""  # Changed from criteria_scores to criteria
                                 except:
                                     pass
-                            
-                            # Scale scores can be initialized as empty for now
-                            subject_data["scale_scores"] = {}
                         
                         # Initialize comment titles structure
                         if subject_config.comment_title_enabled:

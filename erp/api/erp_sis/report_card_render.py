@@ -727,7 +727,14 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         
         # === TEST SCORES - Load from template structure ===
         test_titles = []
+        # ✨ Fallback: Support both old format (test_points dict) and new format (test_point_values list)
         test_values = subject_data.get("test_point_values", []) or subject_data.get("test_point_inputs", [])
+        
+        # If old format (test_points dict), convert to list
+        if not test_values:
+            old_test_points = subject_data.get("test_points", {})
+            if isinstance(old_test_points, dict) and old_test_points:
+                test_values = list(old_test_points.values())
         
         # Load test point titles from template
         if template_config.get('test_point_enabled') and template_config.get('test_point_titles'):
@@ -738,6 +745,12 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         existing_titles = subject_data.get("test_point_titles", [])
         if existing_titles and not test_titles:
             test_titles = existing_titles
+        
+        # If old format (test_points dict), extract titles from keys
+        if not test_titles:
+            old_test_points = subject_data.get("test_points", {})
+            if isinstance(old_test_points, dict) and old_test_points:
+                test_titles = list(old_test_points.keys())
             
         # Always include test_scores structure (even if empty) when template has it enabled
         if template_config.get('test_point_enabled') or test_titles or test_values:
@@ -793,7 +806,10 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                 existing_criteria = {}
                 subject_eval_data = data.get("subject_eval", {})
                 if subject_id and subject_id in subject_eval_data:
+                    # ✨ Fallback: Support both old format (criteria_scores) and new format (criteria)
                     existing_criteria = subject_eval_data[subject_id].get("criteria", {})
+                    if not existing_criteria:
+                        existing_criteria = subject_eval_data[subject_id].get("criteria_scores", {})
                 
                 for template_crit in template_criteria:
                     crit_id = template_crit.get("id", "")
@@ -819,7 +835,10 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             
         # Fallback to existing data structure if template doesn't have config
         if not criteria_list:
+            # ✨ Fallback: Support both old format (criteria_scores) and new format (criteria)
             existing_criteria = subject_data.get("criteria", {})
+            if not existing_criteria:
+                existing_criteria = subject_data.get("criteria_scores", {})
             if isinstance(existing_criteria, dict):
                 for crit_id, value in existing_criteria.items():
                     criteria_list.append({
