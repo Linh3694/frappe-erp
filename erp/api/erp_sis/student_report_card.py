@@ -1141,140 +1141,224 @@ def update_report_section():
             # DEEP MERGE for scores section - merge per subject_id to avoid data loss
             # This ensures that updating one subject doesn't wipe out others
             
-            # Detect if payload contains a single subject or multiple subjects
-            subject_id = None
-            if isinstance(payload, dict):
-                # Check if payload is a single subject data (contains hs1_scores, etc.)
-                if any(key in payload for key in ['hs1_scores', 'hs2_scores', 'hs3_scores', 'hs1_average']):
-                    # This is a single subject update - need to extract subject_id from context
-                    # Look for subject_id in the payload itself or in data
-                    subject_id = payload.get("subject_id") or data.get("subject_id")
-                    if not subject_id:
-                        # Try to find SIS_ACTUAL_SUBJECT-* pattern in payload keys
-                        for key in payload.keys():
-                            if key.startswith("SIS_ACTUAL_SUBJECT-"):
-                                subject_id = key
-                                break
-                else:
-                    # Check if payload is a dict of subjects (keys are subject IDs)
-                    # In this case, we'll merge each subject
-                    payload_keys = list(payload.keys())
-                    if payload_keys and payload_keys[0].startswith("SIS_ACTUAL_SUBJECT-"):
-                        # This is a multi-subject payload, iterate and merge each
-                        pass
-            
             # Get existing scores or initialize empty dict
             existing_scores = json_data.get("scores")
             if not isinstance(existing_scores, dict):
                 existing_scores = {}
             
-            # If we have a single subject_id, do targeted merge
-            if subject_id and isinstance(payload, dict) and not any(k.startswith("SIS_ACTUAL_SUBJECT-") for k in payload.keys()):
-                frappe.logger().info(f"[SCORES_MERGE] Single subject update for: {subject_id}")
-                
-                # Load template config for this subject if available
-                template_id = json_data.get("_metadata", {}).get("template_id")
-                template_config = None
-                if template_id:
-                    try:
-                        template = frappe.get_doc("SIS Report Card Template", template_id)
-                        if hasattr(template, "scores") and template.scores:
-                            for score_cfg in template.scores:
-                                if getattr(score_cfg, "subject_id", None) == subject_id:
-                                    template_config = {
-                                        "display_name": score_cfg.display_name or _resolve_actual_subject_title(subject_id),
-                                        "subject_type": score_cfg.subject_type or "Môn tính điểm",
-                                        "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
-                                        "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
-                                        "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1
-                                    }
+            # Detect if payload contains multiple subjects (keys are subject IDs)
+            is_multi_subject = False
+            if isinstance(payload, dict):
+                payload_keys = list(payload.keys())
+                if payload_keys and all(k.startswith("SIS_ACTUAL_SUBJECT-") or k.startswith("SIS-ACTUAL-SUBJECT-") for k in payload_keys):
+                    # This is a multi-subject payload, iterate and merge each
+                    is_multi_subject = True
+                    frappe.logger().info(f"[SCORES_MERGE] Multi-subject payload detected with {len(payload_keys)} subjects")
+                    
+                    # Load template config for ALL subjects if available
+                    template_id = json_data.get("_metadata", {}).get("template_id")
+                    template_configs = {}
+                    if template_id:
+                        try:
+                            template = frappe.get_doc("SIS Report Card Template", template_id)
+                            if hasattr(template, "scores") and template.scores:
+                                for score_cfg in template.scores:
+                                    subj_id = getattr(score_cfg, "subject_id", None)
+                                    if subj_id:
+                                        template_configs[subj_id] = {
+                                            "display_name": score_cfg.display_name or _resolve_actual_subject_title(subj_id),
+                                            "subject_type": score_cfg.subject_type or "Môn tính điểm",
+                                            "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
+                                            "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
+                                            "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1
+                                        }
+                        except Exception as e:
+                            frappe.logger().warning(f"Failed to load template configs: {str(e)}")
+                    
+                    # Merge each subject in the payload
+                    for subject_id, new_subject_data in payload.items():
+                        if not subject_id.startswith("SIS_ACTUAL_SUBJECT-") and not subject_id.startswith("SIS-ACTUAL-SUBJECT-"):
+                            frappe.logger().warning(f"[SCORES_MERGE] Skipping invalid subject key: {subject_id}")
+                            continue
+                        
+                        frappe.logger().info(f"[SCORES_MERGE] Processing subject: {subject_id}")
+                        
+                        # Get or create subject entry
+                        if subject_id not in existing_scores:
+                            existing_scores[subject_id] = {
+                                "hs1_scores": [],
+                                "hs2_scores": [],
+                                "hs3_scores": [],
+                                "hs1_average": None,
+                                "hs2_average": None,
+                                "hs3_average": None,
+                                "final_average": None,
+                            }
+                        
+                        # Ensure required fields exist
+                        for field in ["hs1_average", "hs2_average", "hs3_average", "final_average"]:
+                            if field not in existing_scores[subject_id]:
+                                existing_scores[subject_id][field] = None
+                        
+                        # Add/update template config fields if available
+                        template_config = template_configs.get(subject_id)
+                        if template_config:
+                            for key, value in template_config.items():
+                                existing_scores[subject_id][key] = value
+                        else:
+                            # Use defaults
+                            if "display_name" not in existing_scores[subject_id]:
+                                existing_scores[subject_id]["display_name"] = existing_scores[subject_id].get("subject_title", subject_id)
+                            if "subject_type" not in existing_scores[subject_id]:
+                                existing_scores[subject_id]["subject_type"] = "Môn tính điểm"
+                            for weight_field in ["weight1_count", "weight2_count", "weight3_count"]:
+                                if weight_field not in existing_scores[subject_id]:
+                                    existing_scores[subject_id][weight_field] = 1
+                        
+                        # Merge subject data
+                        if isinstance(new_subject_data, dict):
+                            for field_name, field_value in new_subject_data.items():
+                                if field_name in ['hs1_scores', 'hs2_scores', 'hs3_scores']:
+                                    # Force overwrite arrays
+                                    if isinstance(field_value, list):
+                                        existing_scores[subject_id][field_name] = list(field_value)
+                                        frappe.logger().info(f"[SCORES_MERGE] Updated {field_name} for {subject_id}: {len(field_value)} scores")
+                                    else:
+                                        existing_scores[subject_id][field_name] = field_value
+                                elif field_value is not None:
+                                    # For other fields, only update non-null values
+                                    existing_scores[subject_id][field_name] = field_value
+                        else:
+                            existing_scores[subject_id] = new_subject_data
+                    
+                    # Deep copy to avoid reference issues
+                    import copy
+                    json_data["scores"] = copy.deepcopy(existing_scores)
+                    frappe.logger().info(f"[SCORES_MERGE] Multi-subject merge successful: updated {len(payload_keys)} subjects, total subjects: {len(existing_scores)}")
+            
+            # Single subject update handling (only if NOT multi-subject)
+            if not is_multi_subject:
+                # Detect single subject payload
+                subject_id = None
+                if isinstance(payload, dict):
+                    # Check if payload is a single subject data (contains hs1_scores, etc.)
+                    if any(key in payload for key in ['hs1_scores', 'hs2_scores', 'hs3_scores', 'hs1_average']):
+                        # This is a single subject update - need to extract subject_id from context
+                        # Look for subject_id in the payload itself or in data
+                        subject_id = payload.get("subject_id") or data.get("subject_id")
+                        if not subject_id:
+                            # Try to find SIS_ACTUAL_SUBJECT-* pattern in payload keys
+                            for key in payload.keys():
+                                if key.startswith("SIS_ACTUAL_SUBJECT-"):
+                                    subject_id = key
                                     break
-                    except Exception as e:
-                        frappe.logger().warning(f"Failed to load template config for subject {subject_id}: {str(e)}")
                 
-                # Get or create subject entry
-                if subject_id not in existing_scores:
-                    # Create new with full structure
-                    existing_scores[subject_id] = {
-                        "hs1_scores": [],
-                        "hs2_scores": [],
-                        "hs3_scores": [],
-                        "hs1_average": None,
-                        "hs2_average": None,
-                        "hs3_average": None,
-                        "final_average": None,
-                    }
-                
-                # Always ensure these fields exist (whether new or existing subject)
-                if "hs1_average" not in existing_scores[subject_id]:
-                    existing_scores[subject_id]["hs1_average"] = None
-                if "hs2_average" not in existing_scores[subject_id]:
-                    existing_scores[subject_id]["hs2_average"] = None
-                if "hs3_average" not in existing_scores[subject_id]:
-                    existing_scores[subject_id]["hs3_average"] = None
-                if "final_average" not in existing_scores[subject_id]:
-                    existing_scores[subject_id]["final_average"] = None
-                
-                # Add/update template config fields if available, or use defaults
-                if template_config:
-                    for key, value in template_config.items():
-                        # Always update from template (not just if missing)
-                        existing_scores[subject_id][key] = value
-                else:
-                    # If template config not found, ensure minimum required fields with defaults
-                    if "display_name" not in existing_scores[subject_id]:
-                        existing_scores[subject_id]["display_name"] = existing_scores[subject_id].get("subject_title", subject_id)
-                    if "subject_type" not in existing_scores[subject_id]:
-                        existing_scores[subject_id]["subject_type"] = "Môn tính điểm"
-                    if "weight1_count" not in existing_scores[subject_id]:
-                        existing_scores[subject_id]["weight1_count"] = 1
-                    if "weight2_count" not in existing_scores[subject_id]:
-                        existing_scores[subject_id]["weight2_count"] = 1
-                    if "weight3_count" not in existing_scores[subject_id]:
-                        existing_scores[subject_id]["weight3_count"] = 1
-                
-                new_subject_data = payload[subject_id]
-                frappe.logger().info(f"[SCORES_MERGE] New subject data to merge: {new_subject_data}")
-                
-                if isinstance(new_subject_data, dict):
-                    # always overwrite completely to avoid reference issues
-                    for field_name, field_value in new_subject_data.items():
-                        if field_name in ['hs1_scores', 'hs2_scores', 'hs3_scores']:
-                            # Force overwrite arrays (don't check if not None)
-                            if isinstance(field_value, list):
-                                existing_scores[subject_id][field_name] = list(field_value)  # Create new list
-                                frappe.logger().info(f"[SCORES_MERGE] Overwrite array {field_name} for subject '{subject_id}': {field_value}")
-                            else:
+                # If we have a single subject_id, do targeted merge
+                if subject_id and isinstance(payload, dict):
+                    frappe.logger().info(f"[SCORES_MERGE] Single subject update for: {subject_id}")
+                    
+                    # Load template config for this subject if available
+                    template_id = json_data.get("_metadata", {}).get("template_id")
+                    template_config = None
+                    if template_id:
+                        try:
+                            template = frappe.get_doc("SIS Report Card Template", template_id)
+                            if hasattr(template, "scores") and template.scores:
+                                for score_cfg in template.scores:
+                                    if getattr(score_cfg, "subject_id", None) == subject_id:
+                                        template_config = {
+                                            "display_name": score_cfg.display_name or _resolve_actual_subject_title(subject_id),
+                                            "subject_type": score_cfg.subject_type or "Môn tính điểm",
+                                            "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
+                                            "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
+                                            "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1
+                                        }
+                                        break
+                        except Exception as e:
+                            frappe.logger().warning(f"Failed to load template config for subject {subject_id}: {str(e)}")
+                    
+                    # Get or create subject entry
+                    if subject_id not in existing_scores:
+                        # Create new with full structure
+                        existing_scores[subject_id] = {
+                            "hs1_scores": [],
+                            "hs2_scores": [],
+                            "hs3_scores": [],
+                            "hs1_average": None,
+                            "hs2_average": None,
+                            "hs3_average": None,
+                            "final_average": None,
+                        }
+                    
+                    # Always ensure these fields exist (whether new or existing subject)
+                    if "hs1_average" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["hs1_average"] = None
+                    if "hs2_average" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["hs2_average"] = None
+                    if "hs3_average" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["hs3_average"] = None
+                    if "final_average" not in existing_scores[subject_id]:
+                        existing_scores[subject_id]["final_average"] = None
+                    
+                    # Add/update template config fields if available, or use defaults
+                    if template_config:
+                        for key, value in template_config.items():
+                            # Always update from template (not just if missing)
+                            existing_scores[subject_id][key] = value
+                    else:
+                        # If template config not found, ensure minimum required fields with defaults
+                        if "display_name" not in existing_scores[subject_id]:
+                            existing_scores[subject_id]["display_name"] = existing_scores[subject_id].get("subject_title", subject_id)
+                        if "subject_type" not in existing_scores[subject_id]:
+                            existing_scores[subject_id]["subject_type"] = "Môn tính điểm"
+                        if "weight1_count" not in existing_scores[subject_id]:
+                            existing_scores[subject_id]["weight1_count"] = 1
+                        if "weight2_count" not in existing_scores[subject_id]:
+                            existing_scores[subject_id]["weight2_count"] = 1
+                        if "weight3_count" not in existing_scores[subject_id]:
+                            existing_scores[subject_id]["weight3_count"] = 1
+                    
+                    new_subject_data = payload[subject_id]
+                    frappe.logger().info(f"[SCORES_MERGE] New subject data to merge: {new_subject_data}")
+                    
+                    if isinstance(new_subject_data, dict):
+                        # always overwrite completely to avoid reference issues
+                        for field_name, field_value in new_subject_data.items():
+                            if field_name in ['hs1_scores', 'hs2_scores', 'hs3_scores']:
+                                # Force overwrite arrays (don't check if not None)
+                                if isinstance(field_value, list):
+                                    existing_scores[subject_id][field_name] = list(field_value)  # Create new list
+                                    frappe.logger().info(f"[SCORES_MERGE] Overwrite array {field_name} for subject '{subject_id}': {len(field_value)} scores")
+                                else:
+                                    existing_scores[subject_id][field_name] = field_value
+                            elif field_value is not None:
+                                # For other fields, only update non-null values
                                 existing_scores[subject_id][field_name] = field_value
-                        elif field_value is not None:
-                            # For other fields, only update non-null values
-                            existing_scores[subject_id][field_name] = field_value
-                            frappe.logger().info(f"[SCORES_MERGE] Updated scores {field_name} for subject '{subject_id}': {field_value}")
+                    else:
+                        # Fallback: replace entire subject if not dict
+                        existing_scores[subject_id] = new_subject_data
+                    
+                    frappe.logger().info(f"[SCORES_MERGE] AFTER merge - scores for subject '{subject_id}' updated")
+                    
+                    # CRITICAL: Deep copy to avoid reference issues
+                    import copy
+                    json_data["scores"] = copy.deepcopy(existing_scores)
+                    frappe.logger().info(f"[SCORES_MERGE] Single subject merge successful: updated subject '{subject_id}', preserved {len(existing_scores) - 1} other subjects")
+                    
+                    # Store debug info for scores section
+                    json_data["_scores_debug"] = {
+                        "template_id": template_id,
+                        "template_config_loaded": template_config is not None,
+                        "template_config": template_config,
+                        "subject_existed_before_merge": subject_id in existing_scores,
+                        "payload_keys": list(payload.keys())[:5],  # First 5 keys only to avoid huge logs
+                        "final_data_keys": list(existing_scores.get(subject_id, {}).keys())
+                    }
                 else:
-                    # Fallback: replace entire subject if not dict
-                    existing_scores[subject_id] = new_subject_data
-                
-                frappe.logger().info(f"[SCORES_MERGE] AFTER merge - scores for subject '{subject_id}': {existing_scores[subject_id]}")
-                
-                # CRITICAL: Deep copy to avoid reference issues
-                import copy
-                json_data["scores"] = copy.deepcopy(existing_scores)
-                frappe.logger().info(f"scores deep merge successful: updated subject '{subject_id}', preserved {len(existing_scores) - 1} other subjects")
-                
-                # Store debug info for scores section
-                json_data["_scores_debug"] = {
-                    "template_id": template_id,
-                    "template_config_loaded": template_config is not None,
-                    "template_config": template_config,
-                    "subject_existed_before_merge": subject_id in existing_scores,
-                    "payload_received": new_subject_data,
-                    "final_data_before_save": existing_scores.get(subject_id)
-                }
-            else:
-                # Fallback: if no subject_id identified or payload doesn't match expected structure, 
-                # use old behavior (may cause data loss but maintains backward compatibility)
-                json_data["scores"] = payload
-                frappe.logger().warning("[SCORES_MERGE] Using fallback merge (entire scores section replaced)")
+                    # Fallback: if no subject_id identified or payload doesn't match expected structure, 
+                    # use old behavior (may cause data loss but maintains backward compatibility)
+                    json_data["scores"] = payload
+                    frappe.logger().warning("[SCORES_MERGE] Using fallback merge (entire scores section replaced)")
         else:
             # For other sections (homeroom, etc.), just overwrite
             json_data[section] = payload
