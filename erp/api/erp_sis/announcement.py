@@ -333,8 +333,8 @@ def create_announcement():
                         "recipients": recipients_data,
                         "announcement_id": created_announcement.name
                     },
-                    title=created_announcement.title_vn or created_announcement.title_en,
-                    body=created_announcement.content_vn[:100] if created_announcement.content_vn else (created_announcement.content_en[:100] if created_announcement.content_en else ""),
+                    title="Thông báo",
+                    body=created_announcement.title_vn or created_announcement.title_en or "Thông báo mới",
                     icon="/icon.png",
                     data={
                         "type": "announcement",
@@ -714,8 +714,8 @@ def send_announcement():
                     "recipients": recipients,  # Raw recipient selection
                     "announcement_id": announcement.name
                 },
-                title=announcement.title_vn or announcement.title_en,
-                body=announcement.content_vn[:100] if announcement.content_vn else (announcement.content_en[:100] if announcement.content_en else ""),
+                title="Thông báo",
+                body=announcement.title_vn or announcement.title_en or "Thông báo mới",
                 icon="/icon.png",
                 data={
                     "type": "announcement",
