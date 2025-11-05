@@ -581,11 +581,15 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             if criteria_options_snapshot and isinstance(criteria_options_snapshot, list):
                 # Parse snapshot format: [{name, title}] -> [{id, label}]
                 template_criteria = []
-                for opt in criteria_options_snapshot:
+                for idx, opt in enumerate(criteria_options_snapshot):
                     if isinstance(opt, dict):
+                        # ✨ Nếu name rỗng, tạo id từ index để match với frontend key "idx-X"
+                        opt_name = opt.get("name", "")
+                        opt_title = opt.get("title", "")
+                        crit_id = opt_name if opt_name else f"idx-{idx}"
                         template_criteria.append({
-                            "id": opt.get("name") or opt.get("title", ""),
-                            "label": opt.get("title", "")
+                            "id": crit_id,
+                            "label": opt_title or crit_id
                         })
             else:
                 criteria_id = template_config.get('criteria_id', '')
@@ -615,10 +619,24 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                 
                 for template_crit in template_criteria:
                     crit_id = template_crit.get("id", "")
+                    # ✨ Tìm value từ existing_criteria: thử cả crit_id và key rỗng (backward compatibility)
+                    value = ""
+                    if isinstance(existing_criteria, dict):
+                        value = existing_criteria.get(crit_id, "")
+                        # Nếu không tìm thấy và crit_id có dạng "idx-X", thử tìm với key rỗng
+                        if not value and crit_id.startswith("idx-"):
+                            value = existing_criteria.get("", "")
+                        # Nếu không tìm thấy và crit_id rỗng, thử tìm với key theo index
+                        if not value and crit_id == "":
+                            # Tìm index của criteria này trong template_criteria
+                            crit_idx = next((i for i, tc in enumerate(template_criteria) if tc == template_crit), -1)
+                            if crit_idx >= 0:
+                                value = existing_criteria.get(f"idx-{crit_idx}", "")
+                    
                     criteria_list.append({
                         "id": crit_id,
                         "label": template_crit.get("label", crit_id),
-                        "value": existing_criteria.get(crit_id, "") if isinstance(existing_criteria, dict) else ""
+                        "value": value
                     })
             
         # Fallback to existing data structure if template doesn't have config
