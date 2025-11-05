@@ -176,10 +176,28 @@ def get_my_leave_requests(student_id=None):
 			parent_guardian_id = parent_user_email.split("@")[0]
 		actual_parent_id = parent_id
 
-		# Build filters
-		filters = {"parent_id": parent_id}
+		# This ensures parent sees all leave requests for their children, even if created by teacher
+		# Teacher creates leave with parent_id = first parent, but other parents should also see it
+		family_relationships = frappe.get_all(
+			"CRM Family Relationship",
+			filters={"parent": parent_id},
+			fields=["student"]
+		)
+		
+		student_ids = [rel.student for rel in family_relationships] if family_relationships else []
+		
+		if not student_ids:
+			return list_response([])  # No students linked to this parent
+
+		# Build filters - filter by student_id instead of parent_id
+		# This ensures all parents of a student can see leave requests for that student
+		filters = {"student_id": ["in", student_ids]}
 		if student_id:
-			filters["student_id"] = student_id
+			# If specific student_id requested, ensure it belongs to this parent
+			if student_id in student_ids:
+				filters = {"student_id": student_id}
+			else:
+				return list_response([])  # Student doesn't belong to this parent
 
 		# Get leave requests - include owner field
 		requests = frappe.get_all(
