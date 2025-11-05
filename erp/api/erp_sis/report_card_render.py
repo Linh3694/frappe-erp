@@ -446,6 +446,14 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                     "teacher_name": subject.get("teacher_name", "")
                 }
     
+    # ✨ Tạo map từ subjects_raw để dễ lookup sau này
+    subjects_raw_map = {}
+    for subject in subjects_raw:
+        if isinstance(subject, dict):
+            subj_id = subject.get("subject_id", "")
+            if subj_id:
+                subjects_raw_map[subj_id] = subject
+    
     # 3. Process từng subject
     for subject_id, subject_info in subjects_to_process.items():
         standardized_subject = {
@@ -453,6 +461,16 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             "title_vn": subject_info.get("title_vn", ""),
             "teacher_name": subject_info.get("teacher_name", ""),
         }
+        
+        # ✨ Lấy subject data từ subjects_raw_map và subject_eval_data
+        subject_data = subjects_raw_map.get(subject_id, {})
+        # Merge với subject_eval data nếu có (để lấy test_point_values, criteria, comments)
+        subject_eval_data_raw = data.get("subject_eval", {})
+        if isinstance(subject_eval_data_raw, dict) and subject_id in subject_eval_data_raw:
+            subject_eval_data_item = subject_eval_data_raw.get(subject_id, {})
+            if isinstance(subject_eval_data_item, dict):
+                # Merge các trường từ subject_eval vào subject_data
+                subject_data = {**subject_data, **subject_eval_data_item}
 
         # Merge INTL scoreboard data if available for this subject
         if subject_id and isinstance(intl_scores_data, dict) and intl_scores_data.get(subject_id):
@@ -601,7 +619,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         
         # === TEST SCORES - Load from template structure ===
         test_titles = []
-        test_values = subject.get("test_point_values", []) or subject.get("test_point_inputs", [])
+        test_values = subject_data.get("test_point_values", []) or subject_data.get("test_point_inputs", [])
         
         # Load test point titles from template
         if template_config.get('test_point_enabled') and template_config.get('test_point_titles'):
@@ -609,7 +627,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             test_titles = [t.get('title', '') for t in template_titles if isinstance(t, dict) and t.get('title')]
         
         # Also check existing data for backwards compatibility
-        existing_titles = subject.get("test_point_titles", [])
+        existing_titles = subject_data.get("test_point_titles", [])
         if existing_titles and not test_titles:
             test_titles = existing_titles
             
@@ -693,7 +711,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             
         # Fallback to existing data structure if template doesn't have config
         if not criteria_list:
-            existing_criteria = subject.get("criteria", {})
+            existing_criteria = subject_data.get("criteria", {})
             if isinstance(existing_criteria, dict):
                 for crit_id, value in existing_criteria.items():
                     criteria_list.append({
@@ -703,7 +721,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                     })
         
         if not scale_options:
-            existing_rubric = subject.get("rubric", {})
+            existing_rubric = subject_data.get("rubric", {})
             scale_options = existing_rubric.get("scale_options", [])
         
         # Always include rubric structure (even if empty) when template has it enabled
@@ -754,7 +772,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         
         # Fallback to existing data structure if template doesn't have config
         if not comments_list:
-            existing_comments = subject.get("comments", {})
+            existing_comments = subject_data.get("comments", {})
             if isinstance(existing_comments, dict):
                 for comment_id, value in existing_comments.items():
                     comments_list.append({
