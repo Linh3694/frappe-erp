@@ -553,6 +553,54 @@ def create_leave_request():
         leave_request.insert(ignore_permissions=True)
         leave_request.save()
         
+        # Send push notification to parent
+        try:
+            from erp.utils.notification_handler import send_bulk_parent_notifications
+            
+            # Reason mapping for display
+            reason_mapping = {
+                'sick_child': 'Con ốm',
+                'family_matters': 'Gia đình có việc bận',
+                'other': other_reason if other_reason else 'Lý do khác'
+            }
+            reason_display = reason_mapping.get(reason, reason)
+            
+            # Format date for display
+            start_date_display = datetime.strptime(start_date, '%Y-%m-%d').strftime('%d/%m/%Y')
+            end_date_display = datetime.strptime(end_date, '%Y-%m-%d').strftime('%d/%m/%Y')
+            
+            # Notification title and body
+            notification_title = "Đơn nghỉ phép mới"
+            notification_body = f"Giáo viên đã tạo đơn nghỉ phép cho {leave_request.student_name}.\nLý do: {reason_display}\nThời gian: {start_date_display} - {end_date_display}"
+            
+            # Send notification
+            notification_result = send_bulk_parent_notifications(
+                recipient_type="leave",
+                recipients_data={
+                    "student_ids": [student_id],
+                    "leave_request_id": leave_request.name
+                },
+                title=notification_title,
+                body=notification_body,
+                icon="/icon.png",
+                data={
+                    "type": "leave",
+                    "student_id": student_id,
+                    "student_name": leave_request.student_name,
+                    "leave_request_id": leave_request.name,
+                    "reason": reason,
+                    "reason_display": reason_display,
+                    "start_date": start_date,
+                    "end_date": end_date
+                }
+            )
+            
+            frappe.logger().info(f"📬 [Leave Notification] Sent to {notification_result.get('total_parents', 0)} parents for leave request {leave_request.name}")
+        except Exception as e:
+            # Don't fail the request if notification fails
+            frappe.logger().error(f"❌ [Leave Notification] Failed to send notification: {str(e)}")
+            frappe.log_error(f"Leave Notification Error: {str(e)}", "Leave Notification")
+        
         return success_response({
             "id": leave_request.name,
             "student_id": leave_request.student_id,
