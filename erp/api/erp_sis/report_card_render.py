@@ -1175,8 +1175,10 @@ def get_report_data(report_id: Optional[str] = None):
         if template_id:
             try:
                 # ✨ QUAN TRỌNG: Clear cache và reload template để đảm bảo lấy dữ liệu mới nhất (không cache)
+                # Đặc biệt quan trọng khi EditReportCard vừa cập nhật template
                 frappe.db.commit()  # Commit để đảm bảo changes đã được lưu
                 frappe.clear_cache(doctype="SIS Report Card Template")  # Clear cache cho doctype này
+                frappe.clear_cache(doctype="SIS Report Card Template", name=template_id)  # Clear cache cho template cụ thể
                 template_doc = frappe.get_doc("SIS Report Card Template", template_id)
                 template_doc.reload()  # Force reload để đảm bảo không dùng cache
                 template_subject_ids = set()
@@ -1188,14 +1190,14 @@ def get_report_data(report_id: Optional[str] = None):
                         if subject_id:
                             template_subject_ids.add(subject_id)
                 
-                # Lấy từ subjects config
+                # Lấy từ subjects config (bao gồm cả VN và INTL)
                 if hasattr(template_doc, 'subjects') and template_doc.subjects:
                     for subject_cfg in template_doc.subjects:
                         subject_id = getattr(subject_cfg, 'subject_id', None)
                         if subject_id:
                             template_subject_ids.add(subject_id)
                 
-                # ✨ LOG để debug
+                # ✨ LOG để debug - kiểm tra số lượng subjects sau khi reload
                 frappe.logger().info(f"[FILTER_SUBJECTS] Template {template_id} has {len(template_subject_ids)} subjects: {sorted(template_subject_ids)}")
                 
                 # ✨ QUAN TRỌNG: Filter subject_eval và intl_scores theo template
