@@ -1163,14 +1163,9 @@ def get_report_data(report_id: Optional[str] = None):
         except Exception:
             pass
         
-        # Transform data to match frontend layout binding expectations
-        try:
-            transformed_data = _transform_data_for_bindings(data)
-        except Exception as e:
-            return error_response(f"Failed to transform data for frontend: {str(e)}")
-
-        # ✨ QUAN TRỌNG: Filter subject_eval và intl_scores theo template để tránh dữ liệu cũ
+        # ✨ QUAN TRỌNG: Filter subject_eval và intl_scores theo template TRƯỚC khi transform
         # Subjects array sẽ được tạo lại từ template trong _standardize_report_data
+        # ✨ PHẢI filter TRƯỚC khi gọi _transform_data_for_bindings để đảm bảo không tạo subjects từ data cũ
         template_id = getattr(report, "template_id", "")
         if template_id:
             try:
@@ -1200,11 +1195,12 @@ def get_report_data(report_id: Optional[str] = None):
                 # ✨ LOG để debug - kiểm tra số lượng subjects sau khi reload
                 frappe.logger().info(f"[FILTER_SUBJECTS] Template {template_id} has {len(template_subject_ids)} subjects: {sorted(template_subject_ids)}")
                 
-                # ✨ QUAN TRỌNG: Filter subject_eval và intl_scores theo template
+                # ✨ QUAN TRỌNG: Filter subject_eval và intl_scores theo template TRƯỚC khi transform
                 # Để đảm bảo không có subjects đã xóa trong các section này
                 # Note: subjects array sẽ được tạo lại từ template trong _standardize_report_data
                 if template_subject_ids:
-                    subject_eval = transformed_data.get("subject_eval", {})
+                    # ✨ Filter subject_eval TRƯỚC khi transform
+                    subject_eval = data.get("subject_eval", {})
                     if isinstance(subject_eval, dict):
                         original_subject_eval_count = len(subject_eval)
                         filtered_subject_eval = {
@@ -1214,9 +1210,10 @@ def get_report_data(report_id: Optional[str] = None):
                         filtered_count = len(filtered_subject_eval)
                         if original_subject_eval_count != filtered_count:
                             frappe.logger().info(f"[FILTER_SUBJECTS] Filtered subject_eval: {original_subject_eval_count} -> {filtered_count}")
-                        transformed_data["subject_eval"] = filtered_subject_eval
+                        data["subject_eval"] = filtered_subject_eval
                     
-                    intl_scores = transformed_data.get("intl_scores", {})
+                    # ✨ Filter intl_scores TRƯỚC khi transform
+                    intl_scores = data.get("intl_scores", {})
                     if isinstance(intl_scores, dict):
                         original_intl_scores_count = len(intl_scores)
                         filtered_intl_scores = {
@@ -1226,10 +1223,10 @@ def get_report_data(report_id: Optional[str] = None):
                         filtered_count = len(filtered_intl_scores)
                         if original_intl_scores_count != filtered_count:
                             frappe.logger().info(f"[FILTER_SUBJECTS] Filtered intl_scores: {original_intl_scores_count} -> {filtered_count}")
-                        transformed_data["intl_scores"] = filtered_intl_scores
+                        data["intl_scores"] = filtered_intl_scores
                     
-                    # ✨ QUAN TRỌNG: Filter scores theo template
-                    scores = transformed_data.get("scores", {})
+                    # ✨ Filter scores TRƯỚC khi transform
+                    scores = data.get("scores", {})
                     if isinstance(scores, dict):
                         original_scores_count = len(scores)
                         filtered_scores = {
@@ -1239,14 +1236,27 @@ def get_report_data(report_id: Optional[str] = None):
                         filtered_count = len(filtered_scores)
                         if original_scores_count != filtered_count:
                             frappe.logger().info(f"[FILTER_SUBJECTS] Filtered scores: {original_scores_count} -> {filtered_count}")
-                        transformed_data["scores"] = filtered_scores
-                    
-                    # ✨ QUAN TRỌNG: Xóa subjects array cũ - sẽ được tạo lại từ template trong _standardize_report_data
-                    if "subjects" in transformed_data:
-                        del transformed_data["subjects"]
+                        data["scores"] = filtered_scores
+                
+                # ✨ QUAN TRỌNG: Xóa subjects array cũ từ data TRƯỚC khi transform
+                # Sẽ được tạo lại từ template trong _standardize_report_data
+                if "subjects" in data:
+                    del data["subjects"]
             except Exception as e:
                 frappe.logger().error(f"[FILTER_SUBJECTS] Error filtering subjects: {str(e)}")
                 pass  # Nếu không load được template, giữ nguyên subjects
+        
+        # Transform data to match frontend layout binding expectations
+        # ✨ Sau khi filter, transform data sẽ chỉ tạo subjects từ data đã được filter
+        try:
+            transformed_data = _transform_data_for_bindings(data)
+        except Exception as e:
+            return error_response(f"Failed to transform data for frontend: {str(e)}")
+        
+        # ✨ QUAN TRỌNG: Đảm bảo transformed_data không có subjects cũ
+        # Subjects sẽ được tạo lại từ template trong _standardize_report_data
+        if "subjects" in transformed_data:
+            del transformed_data["subjects"]
 
         # Create report object with title from report card document
         report_obj = transformed_data.get("report", {})
