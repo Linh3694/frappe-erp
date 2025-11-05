@@ -1133,7 +1133,7 @@ def get_report_data(report_id: Optional[str] = None):
         # ✨ QUAN TRỌNG: Filter subjects trong transformed_data theo template hiện tại
         # Để tránh hiển thị subjects đã xóa khỏi template
         template_id = getattr(report, "template_id", "")
-        if template_id and "subjects" in transformed_data:
+        if template_id:
             try:
                 template_doc = frappe.get_doc("SIS Report Card Template", template_id)
                 template_subject_ids = set()
@@ -1161,6 +1161,24 @@ def get_report_data(report_id: Optional[str] = None):
                             if isinstance(s, dict) and s.get("subject_id") in template_subject_ids
                         ]
                         transformed_data["subjects"] = filtered_subjects
+                    
+                    # ✨ QUAN TRỌNG: Filter subject_eval và intl_scores theo template
+                    # Để đảm bảo không có subjects đã xóa trong các section này
+                    subject_eval = transformed_data.get("subject_eval", {})
+                    if isinstance(subject_eval, dict):
+                        filtered_subject_eval = {
+                            k: v for k, v in subject_eval.items() 
+                            if k in template_subject_ids or not k.startswith("SIS_ACTUAL_SUBJECT-")
+                        }
+                        transformed_data["subject_eval"] = filtered_subject_eval
+                    
+                    intl_scores = transformed_data.get("intl_scores", {})
+                    if isinstance(intl_scores, dict):
+                        filtered_intl_scores = {
+                            k: v for k, v in intl_scores.items() 
+                            if k in template_subject_ids or not k.startswith("SIS_ACTUAL_SUBJECT-")
+                        }
+                        transformed_data["intl_scores"] = filtered_intl_scores
             except Exception:
                 pass  # Nếu không load được template, giữ nguyên subjects
 
@@ -1226,7 +1244,11 @@ def get_report_data(report_id: Optional[str] = None):
             "homeroom": standardized_data.get("homeroom", {}),
             "form_config": standardized_data.get("form_config", {}),
             "scores": transformed_data.get("scores", {}),  # Bring scores to top level
-            "data": transformed_data,
+            # ✨ QUAN TRỌNG: Update data.subjects với standardized_subjects để đảm bảo frontend không đọc subjects cũ
+            "data": {
+                **transformed_data,
+                "subjects": standardized_data.get("subjects", [])  # Override với subjects đã được filter
+            },
         }
         
         return single_item_response(response_data, "Report data retrieved for frontend rendering")
