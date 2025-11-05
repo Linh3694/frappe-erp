@@ -434,40 +434,53 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         frappe.logger().info(f"[TEMPLATE_DEBUG] Scores count: {len(template_doc.scores) if hasattr(template_doc, 'scores') and template_doc.scores else 0}")
         frappe.logger().info(f"[TEMPLATE_DEBUG] Subjects count: {len(template_doc.subjects) if hasattr(template_doc, 'subjects') and template_doc.subjects else 0}")
         
+        # ✨ LOG thứ tự subjects trong template để debug drag & drop
+        if hasattr(template_doc, 'scores') and template_doc.scores:
+            scores_order = [(getattr(s, 'idx', 'no-idx'), getattr(s, 'subject_id', 'no-id')[-6:]) for s in template_doc.scores[:5]]
+            frappe.logger().info(f"[TEMPLATE_DEBUG] Scores order (first 5): {scores_order}")
+        
         # ✨ 1. Load từ template.scores (Scores section) - giữ thứ tự idx
         if hasattr(template_doc, 'scores') and template_doc.scores:
-            for idx, score_cfg in enumerate(template_doc.scores):
+            # ✨ CRITICAL: Sort theo score_cfg.idx (thứ tự DB sau drag & drop), KHÔNG dùng enumerate
+            sorted_scores = sorted(template_doc.scores, key=lambda s: getattr(s, 'idx', 0))
+            
+            for score_cfg in sorted_scores:
                 subject_id = getattr(score_cfg, 'subject_id', None)
                 if subject_id and subject_id not in seen_subject_ids:
                     seen_subject_ids.add(subject_id)
                     teacher_names = _resolve_teacher_names(subject_id, class_id)
+                    cfg_idx = getattr(score_cfg, 'idx', 0)
                     subject_info = {
                         "subject_id": subject_id,
                         "title_vn": getattr(score_cfg, 'display_name', None) or _resolve_actual_subject_title(subject_id) or subject_id,
                         "teacher_name": teacher_names[0] if teacher_names else "",
                         "source": "scores",  # Mark source
-                        "idx": idx  # Keep idx for ordering
+                        "idx": cfg_idx  # Keep idx for ordering
                     }
                     subjects_to_process.append(subject_info)
-                    frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Added from scores[{idx}]: {subject_id}")
+                    frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Added from scores[idx={cfg_idx}]: {subject_id}")
         
         # ✨ 2. Load từ template.subjects (Subject Eval section) - giữ thứ tự idx
         # CHỈ thêm subjects CHƯA có trong scores (để tránh trùng)
         if hasattr(template_doc, 'subjects') and template_doc.subjects:
-            for idx, subject_cfg in enumerate(template_doc.subjects):
+            # ✨ CRITICAL: Sort theo subject_cfg.idx (thứ tự DB sau drag & drop), KHÔNG dùng enumerate
+            sorted_subjects = sorted(template_doc.subjects, key=lambda s: getattr(s, 'idx', 0))
+            
+            for subject_cfg in sorted_subjects:
                 subject_id = getattr(subject_cfg, 'subject_id', None)
                 if subject_id and subject_id not in seen_subject_ids:
                     seen_subject_ids.add(subject_id)
                     teacher_names = _resolve_teacher_names(subject_id, class_id)
+                    cfg_idx = getattr(subject_cfg, 'idx', 0)
                     subject_info = {
                         "subject_id": subject_id,
                         "title_vn": _resolve_actual_subject_title(subject_id) or subject_id,
                         "teacher_name": teacher_names[0] if teacher_names else "",
                         "source": "subject_eval",  # Mark source
-                        "idx": idx  # Keep idx for ordering
+                        "idx": cfg_idx  # Keep idx for ordering
                     }
                     subjects_to_process.append(subject_info)
-                    frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Added from subjects[{idx}]: {subject_id}")
+                    frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Added from subjects[idx={cfg_idx}]: {subject_id}")
     
     # ✨ FALLBACK: CHỈ load từ data nếu KHÔNG CÓ TEMPLATE (backward compatibility)
     # KHÔNG fallback nếu có template dù subjects_to_process rỗng (tránh hiển thị subjects đã xóa)
@@ -677,26 +690,31 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         if subject_id and isinstance(scores_data, dict) and scores_data.get(subject_id):
             score_info = scores_data.get(subject_id) or {}
             try:
-                # ✨ Lấy weight counts từ template nếu không có trong score_info
-                weight1_count = score_info.get("weight1_count")
-                weight2_count = score_info.get("weight2_count")
-                weight3_count = score_info.get("weight3_count")
+                # ✨ CRITICAL: LUÔN LUÔN ưu tiên weight counts từ TEMPLATE (không từ data cũ)
+                # Vì khi user edit template (đổi weight), data cũ vẫn giữ weight cũ → Phải override
+                weight1_count = None
+                weight2_count = None
+                weight3_count = None
                 
-                # Nếu weight counts không có hoặc là None, lấy từ template
-                if (weight1_count is None or weight2_count is None or weight3_count is None) and template_doc:
-                    if hasattr(template_doc, 'scores') and template_doc.scores:
-                        for score_cfg in template_doc.scores:
-                            cfg_subject_id = getattr(score_cfg, 'subject_id', None)
-                            if cfg_subject_id == subject_id:
-                                if weight1_count is None:
-                                    weight1_count = getattr(score_cfg, "weight1_count", 1) or 1
-                                if weight2_count is None:
-                                    weight2_count = getattr(score_cfg, "weight2_count", 1) or 1
-                                if weight3_count is None:
-                                    weight3_count = getattr(score_cfg, "weight3_count", 1) or 1
-                                break
+                # 1. Lấy từ template TRƯỚC (highest priority)
+                if template_doc and hasattr(template_doc, 'scores') and template_doc.scores:
+                    for score_cfg in template_doc.scores:
+                        cfg_subject_id = getattr(score_cfg, 'subject_id', None)
+                        if cfg_subject_id == subject_id:
+                            weight1_count = getattr(score_cfg, "weight1_count", None)
+                            weight2_count = getattr(score_cfg, "weight2_count", None)
+                            weight3_count = getattr(score_cfg, "weight3_count", None)
+                            break
                 
-                # Fallback về 1 nếu vẫn không có
+                # 2. Fallback: Nếu template không có, lấy từ data cũ
+                if weight1_count is None:
+                    weight1_count = score_info.get("weight1_count")
+                if weight2_count is None:
+                    weight2_count = score_info.get("weight2_count")
+                if weight3_count is None:
+                    weight3_count = score_info.get("weight3_count")
+                
+                # 3. Fallback cuối: Default = 1
                 weight1_count = weight1_count if weight1_count is not None else 1
                 weight2_count = weight2_count if weight2_count is not None else 1
                 weight3_count = weight3_count if weight3_count is not None else 1
