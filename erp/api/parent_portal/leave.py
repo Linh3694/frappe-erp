@@ -168,13 +168,20 @@ def get_my_leave_requests(student_id=None):
 		parent_id = _get_current_parent()
 		if not parent_id:
 			return error_response("Không tìm thấy thông tin phụ huynh")
+		
+		# Get parent's email for ownership check
+		parent_user_email = frappe.session.user
+		parent_guardian_id = None
+		if "@parent.wellspring.edu.vn" in parent_user_email:
+			parent_guardian_id = parent_user_email.split("@")[0]
+		actual_parent_id = parent_id
 
 		# Build filters
 		filters = {"parent_id": parent_id}
 		if student_id:
 			filters["student_id"] = student_id
 
-		# Get leave requests
+		# Get leave requests - include owner field
 		requests = frappe.get_all(
 			"SIS Student Leave Request",
 			filters=filters,
@@ -182,7 +189,7 @@ def get_my_leave_requests(student_id=None):
 				"name", "student_id", "student_name", "student_code",
 				"reason", "other_reason", "start_date", "end_date",
 				"total_days", "description", "submitted_at",
-				"creation", "modified"
+				"creation", "modified", "owner", "parent_id"
 			],
 			order_by="creation desc"
 		)
@@ -196,13 +203,37 @@ def get_my_leave_requests(student_id=None):
 
 		for request in requests:
 			request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
-			# Check if can edit (within 24 hours)
+			
+			# Check if can edit (within 24 hours AND created by this parent)
+			# Leave can only be edited if:
+			# 1. Created by this parent (owner is parent's email) OR owner is None (old records)
+			# 2. Within 24 hours
+			is_created_by_parent = False
+			if request.get('owner'):
+				# Check if owner is parent's email or parent portal user
+				if request['owner'] == parent_user_email:
+					is_created_by_parent = True
+				elif parent_guardian_id and request['owner'].startswith(parent_guardian_id):
+					is_created_by_parent = True
+				# Also check if owner is a parent portal email pattern
+				elif "@parent.wellspring.edu.vn" in str(request['owner']):
+					owner_guardian_id = str(request['owner']).split("@")[0]
+					if owner_guardian_id == parent_guardian_id:
+						is_created_by_parent = True
+			else:
+				# Old records without owner - assume created by parent if parent_id matches
+				is_created_by_parent = (request.get('parent_id') == actual_parent_id) if actual_parent_id else False
+			
 			if request['submitted_at']:
 				submitted_time = datetime.strptime(str(request['submitted_at']), '%Y-%m-%d %H:%M:%S.%f')
 				time_diff = datetime.now() - submitted_time
-				request['can_edit'] = time_diff.total_seconds() <= (24 * 60 * 60)
+				within_24_hours = time_diff.total_seconds() <= (24 * 60 * 60)
+				request['can_edit'] = is_created_by_parent and within_24_hours
 			else:
-				request['can_edit'] = True
+				request['can_edit'] = is_created_by_parent
+			
+			# Add creator info for display
+			request['is_created_by_parent'] = is_created_by_parent
 
 		return list_response(requests)
 
@@ -238,10 +269,32 @@ def update_leave_request():
 		# Get leave request
 		leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
 
-		# Check ownership
+		# Check ownership - only parent who created can edit
 		parent_id = _get_current_parent()
 		if leave_request.parent_id != parent_id:
 			return error_response("Bạn không có quyền chỉnh sửa đơn này")
+		
+		# Check if created by this parent (via owner field)
+		parent_user_email = frappe.session.user
+		is_created_by_parent = False
+		if leave_request.owner:
+			# Check if owner is parent's email or parent portal user
+			if parent_user_email == "Guest":
+				return error_response("Vui lòng đăng nhập để chỉnh sửa đơn")
+			if leave_request.owner == parent_user_email:
+				is_created_by_parent = True
+			else:
+				# Check if owner matches parent guardian_id pattern
+				if "@parent.wellspring.edu.vn" in parent_user_email:
+					parent_guardian_id = parent_user_email.split("@")[0]
+					if leave_request.owner.startswith(parent_guardian_id):
+						is_created_by_parent = True
+		else:
+			# Old records without owner - assume created by parent if parent_id matches
+			is_created_by_parent = (leave_request.parent_id == parent_id)
+		
+		if not is_created_by_parent:
+			return error_response("Bạn chỉ có thể chỉnh sửa đơn nghỉ phép mà bạn đã tạo")
 
 		# Check if can edit (within 24 hours)
 		if not leave_request.can_edit():
@@ -309,6 +362,28 @@ def delete_leave_request():
 
 		if leave_request.parent_id != parent_id:
 			return error_response("Bạn không có quyền xóa đơn này")
+		
+		# Check if created by this parent (via owner field)
+		parent_user_email = frappe.session.user
+		is_created_by_parent = False
+		if leave_request.owner:
+			# Check if owner is parent's email or parent portal user
+			if parent_user_email == "Guest":
+				return error_response("Vui lòng đăng nhập để xóa đơn")
+			if leave_request.owner == parent_user_email:
+				is_created_by_parent = True
+			else:
+				# Check if owner matches parent guardian_id pattern
+				if "@parent.wellspring.edu.vn" in parent_user_email:
+					parent_guardian_id = parent_user_email.split("@")[0]
+					if leave_request.owner.startswith(parent_guardian_id):
+						is_created_by_parent = True
+		else:
+			# Old records without owner - assume created by parent if parent_id matches
+			is_created_by_parent = (leave_request.parent_id == parent_id)
+		
+		if not is_created_by_parent:
+			return error_response("Bạn chỉ có thể xóa đơn nghỉ phép mà bạn đã tạo")
 
 		# Check if within editable time (24 hours)
 		if leave_request.submitted_at:
