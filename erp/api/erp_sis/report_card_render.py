@@ -388,6 +388,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     # === SUBJECTS STANDARDIZATION ===
     # ✨ QUAN TRỌNG: Load subjects từ template thay vì chỉ dựa vào subjects_raw đã lưu
     # Điều này đảm bảo khi template được edit (thêm/xóa subjects), FinalView vẫn hiển thị đúng
+    # ✨ KHÔNG sử dụng subjects từ data nếu có template_doc (đã được filter ở get_report_data)
+    # subjects_raw chỉ được dùng để lookup dữ liệu đã nhập (scores, criteria, comments) cho subjects từ template
     subjects_raw = data.get("subjects", [])
     standardized_subjects = []
     scores_data = data.get("scores") if isinstance(data.get("scores"), dict) else {}
@@ -1127,6 +1129,40 @@ def get_report_data(report_id: Optional[str] = None):
             transformed_data = _transform_data_for_bindings(data)
         except Exception as e:
             return error_response(f"Failed to transform data for frontend: {str(e)}")
+
+        # ✨ QUAN TRỌNG: Filter subjects trong transformed_data theo template hiện tại
+        # Để tránh hiển thị subjects đã xóa khỏi template
+        template_id = getattr(report, "template_id", "")
+        if template_id and "subjects" in transformed_data:
+            try:
+                template_doc = frappe.get_doc("SIS Report Card Template", template_id)
+                template_subject_ids = set()
+                
+                # Lấy từ scores config
+                if hasattr(template_doc, 'scores') and template_doc.scores:
+                    for score_cfg in template_doc.scores:
+                        subject_id = getattr(score_cfg, 'subject_id', None)
+                        if subject_id:
+                            template_subject_ids.add(subject_id)
+                
+                # Lấy từ subjects config
+                if hasattr(template_doc, 'subjects') and template_doc.subjects:
+                    for subject_cfg in template_doc.subjects:
+                        subject_id = getattr(subject_cfg, 'subject_id', None)
+                        if subject_id:
+                            template_subject_ids.add(subject_id)
+                
+                # Filter subjects array theo template
+                if template_subject_ids:
+                    subjects_array = transformed_data.get("subjects", [])
+                    if isinstance(subjects_array, list):
+                        filtered_subjects = [
+                            s for s in subjects_array 
+                            if isinstance(s, dict) and s.get("subject_id") in template_subject_ids
+                        ]
+                        transformed_data["subjects"] = filtered_subjects
+            except Exception:
+                pass  # Nếu không load được template, giữ nguyên subjects
 
         # Create report object with title from report card document
         report_obj = transformed_data.get("report", {})
