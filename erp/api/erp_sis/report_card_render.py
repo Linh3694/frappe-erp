@@ -931,9 +931,9 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                             "value": value
                         })
 
-                # Always include comments structure (even if empty) when template has it enabled
-                if template_config.get('comment_title_enabled') or comments_list:
-                    standardized_subject["comments"] = comments_list
+            # Always include comments structure (even if empty) when template has it enabled
+            if template_config.get('comment_title_enabled') or comments_list:
+                standardized_subject["comments"] = comments_list
             
         standardized_subjects.append(standardized_subject)
     
