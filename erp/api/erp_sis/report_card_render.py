@@ -353,8 +353,11 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             # Clear cache trước khi load để đảm bảo lấy dữ liệu mới nhất
             # Đặc biệt quan trọng khi EditReportCard vừa cập nhật template
             frappe.db.commit()  # Commit để đảm bảo changes đã được lưu
-            frappe.clear_cache(doctype="SIS Report Card Template")  # Clear cache cho doctype này
-            frappe.clear_cache(doctype="SIS Report Card Template", name=template_id)  # Clear cache cho template cụ thể
+            
+            # ✨ Clear cache đúng cách - không dùng tham số name
+            frappe.clear_cache(doctype="SIS Report Card Template")
+            
+            # Load template và force reload
             template_doc = frappe.get_doc("SIS Report Card Template", template_id)
             template_doc.reload()  # Force reload để đảm bảo không dùng cache
             
