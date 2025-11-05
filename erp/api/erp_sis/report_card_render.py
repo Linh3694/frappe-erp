@@ -425,31 +425,17 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                             "teacher_name": teacher_names[0] if teacher_names else ""
                         }
     
-    # ✨ Merge: Ưu tiên subjects từ template, fallback về subjects_raw nếu không có trong template
-    # Nhưng giữ lại dữ liệu đã nhập (scores, subject_eval) từ subjects_raw
+    # ✨ QUAN TRỌNG: Chỉ hiển thị subjects từ template hiện tại
+    # Subjects đã xóa khỏi template sẽ không được hiển thị trong FinalView
     subjects_to_process = {}
     
-    # 1. Thêm subjects từ template
+    # 1. Chỉ thêm subjects từ template
     for subject_id, subject_info in template_subjects_map.items():
         subjects_to_process[subject_id] = subject_info.copy()
     
-    # 2. Thêm subjects từ subjects_raw nếu chưa có trong template (để giữ lại dữ liệu đã nhập)
-    for subject in subjects_raw:
-        if not isinstance(subject, dict):
-            continue
-        subject_id = subject.get("subject_id", "")
-        if subject_id and subject_id not in subjects_to_process:
-            # Giữ lại subject từ subjects_raw nếu có dữ liệu đã nhập
-            has_data = (
-                (subject_id in scores_data and scores_data[subject_id]) or
-                (subject_id in intl_scores_data and intl_scores_data[subject_id])
-            )
-            if has_data:
-                subjects_to_process[subject_id] = {
-                    "subject_id": subject_id,
-                    "title_vn": subject.get("title_vn", ""),
-                    "teacher_name": subject.get("teacher_name", "")
-                }
+    # ✨ REMOVED: Logic giữ lại subjects đã xóa khỏi template
+    # Vì khi template được edit (xóa subjects), FinalView phải phản ánh template hiện tại
+    # Không hiển thị subjects đã xóa để tránh nhầm lẫn
     
     # ✨ Tạo map từ subjects_raw để dễ lookup sau này
     subjects_raw_map = {}
