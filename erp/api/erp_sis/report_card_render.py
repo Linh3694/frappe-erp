@@ -601,6 +601,30 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         if subject_id and isinstance(scores_data, dict) and scores_data.get(subject_id):
             score_info = scores_data.get(subject_id) or {}
             try:
+                # ✨ Lấy weight counts từ template nếu không có trong score_info
+                weight1_count = score_info.get("weight1_count")
+                weight2_count = score_info.get("weight2_count")
+                weight3_count = score_info.get("weight3_count")
+                
+                # Nếu weight counts không có hoặc là None, lấy từ template
+                if (weight1_count is None or weight2_count is None or weight3_count is None) and template_doc:
+                    if hasattr(template_doc, 'scores') and template_doc.scores:
+                        for score_cfg in template_doc.scores:
+                            cfg_subject_id = getattr(score_cfg, 'subject_id', None)
+                            if cfg_subject_id == subject_id:
+                                if weight1_count is None:
+                                    weight1_count = getattr(score_cfg, "weight1_count", 1) or 1
+                                if weight2_count is None:
+                                    weight2_count = getattr(score_cfg, "weight2_count", 1) or 1
+                                if weight3_count is None:
+                                    weight3_count = getattr(score_cfg, "weight3_count", 1) or 1
+                                break
+                
+                # Fallback về 1 nếu vẫn không có
+                weight1_count = weight1_count if weight1_count is not None else 1
+                weight2_count = weight2_count if weight2_count is not None else 1
+                weight3_count = weight3_count if weight3_count is not None else 1
+                
                 standardized_subject["scores"] = {
                     "hs1_scores": score_info.get("hs1_scores", []),
                     "hs2_scores": score_info.get("hs2_scores", []),
@@ -611,9 +635,9 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                     "final_average": score_info.get("final_average"),
                     "semester1_average": score_info.get("semester1_average"),  # ĐTB HK1 (for End Term 2)
                     "year_average": score_info.get("year_average"),  # ĐTB cả năm (for End Term 2)
-                    "weight1_count": score_info.get("weight1_count"),
-                    "weight2_count": score_info.get("weight2_count"),
-                    "weight3_count": score_info.get("weight3_count"),
+                    "weight1_count": weight1_count,
+                    "weight2_count": weight2_count,
+                    "weight3_count": weight3_count,
                     "subject_type": score_info.get("subject_type"),
                 }
             except Exception:
@@ -621,29 +645,31 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         else:
             # ✨ Nếu subject không có trong scores_data, vẫn tạo scores structure với weight counts từ template
             # Điều này đảm bảo frontend có đủ thông tin để hiển thị đúng số cột
-            if template_doc and hasattr(template_doc, 'scores') and template_doc.scores:
-                for score_cfg in template_doc.scores:
-                    cfg_subject_id = getattr(score_cfg, 'subject_id', None)
-                    if cfg_subject_id == subject_id:
-                        try:
-                            standardized_subject["scores"] = {
-                                "hs1_scores": [],
-                                "hs2_scores": [],
-                                "hs3_scores": [],
-                                "hs1_average": None,
-                                "hs2_average": None,
-                                "hs3_average": None,
-                                "final_average": None,
-                                "semester1_average": None,
-                                "year_average": None,
-                                "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
-                                "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
-                                "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1,
-                                "subject_type": getattr(score_cfg, "subject_type", "Môn tính điểm"),
-                            }
-                        except Exception:
-                            pass
-                        break
+            if template_doc:
+                # Thử tìm trong scores config trước
+                if hasattr(template_doc, 'scores') and template_doc.scores:
+                    for score_cfg in template_doc.scores:
+                        cfg_subject_id = getattr(score_cfg, 'subject_id', None)
+                        if cfg_subject_id == subject_id:
+                            try:
+                                standardized_subject["scores"] = {
+                                    "hs1_scores": [],
+                                    "hs2_scores": [],
+                                    "hs3_scores": [],
+                                    "hs1_average": None,
+                                    "hs2_average": None,
+                                    "hs3_average": None,
+                                    "final_average": None,
+                                    "semester1_average": None,
+                                    "year_average": None,
+                                    "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
+                                    "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
+                                    "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1,
+                                    "subject_type": getattr(score_cfg, "subject_type", "Môn tính điểm"),
+                                }
+                            except Exception:
+                                pass
+                            break
         
         # Load template configuration for this subject
         template_config = _get_template_config_for_subject(template_id, subject_id)
