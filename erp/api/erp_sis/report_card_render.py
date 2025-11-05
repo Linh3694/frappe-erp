@@ -514,27 +514,10 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
                 subjects_raw_map[subj_id] = subject
     
     # 3. Process từng subject (giữ thứ tự từ template)
-    # ✨ CHỈ thêm subject nếu nó thực sự có data tương ứng trong report
+    # ✨ QUAN TRỌNG: CHỈ thêm data tương ứng với source của subject
     for subject_info in subjects_to_process:
         subject_id = subject_info.get("subject_id", "")
         source = subject_info.get("source", "")
-        
-        # ✨ CRITICAL: Kiểm tra xem subject có data tương ứng không
-        # - Nếu source = "scores" → phải có trong scores_data
-        # - Nếu source = "subject_eval" → phải có trong subject_eval_data_raw
-        has_data = False
-        if source == "scores" and subject_id in scores_data:
-            has_data = True
-        elif source == "subject_eval" and isinstance(subject_eval_data_raw, dict) and subject_id in subject_eval_data_raw:
-            has_data = True
-        elif source == "" and (subject_id in scores_data or (isinstance(subject_eval_data_raw, dict) and subject_id in subject_eval_data_raw)):
-            # Fallback: nếu không có source, check cả 2
-            has_data = True
-        
-        # ✨ BỎ QUA subject nếu không có data (đã bị xóa khỏi template)
-        if not has_data:
-            frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Skipping {subject_id} - no data in report (source={source})")
-            continue
         
         standardized_subject = {
             "subject_id": subject_id,
@@ -542,14 +525,27 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             "teacher_name": subject_info.get("teacher_name", ""),
         }
         
-        # ✨ Lấy subject data từ subjects_raw_map và subject_eval_data
-        subject_data = subjects_raw_map.get(subject_id, {})
-        # Merge với subject_eval data nếu có (để lấy test_point_values, criteria, comments)
-        if isinstance(subject_eval_data_raw, dict) and subject_id in subject_eval_data_raw:
-            subject_eval_data_item = subject_eval_data_raw.get(subject_id, {})
-            if isinstance(subject_eval_data_item, dict):
-                # Merge các trường từ subject_eval vào subject_data
-                subject_data = {**subject_data, **subject_eval_data_item}
+        # ✨ CRITICAL: CHỈ lấy data tương ứng với source
+        # - source = "scores" → CHỈ lấy scores data (KHÔNG lấy subject_eval)
+        # - source = "subject_eval" → CHỈ lấy subject_eval data (KHÔNG lấy scores)
+        subject_data = {}
+        
+        if source == "scores":
+            # CHỈ lấy từ subjects_raw_map, KHÔNG merge subject_eval
+            subject_data = subjects_raw_map.get(subject_id, {})
+        elif source == "subject_eval":
+            # CHỈ lấy từ subject_eval_data_raw, KHÔNG merge scores
+            if isinstance(subject_eval_data_raw, dict) and subject_id in subject_eval_data_raw:
+                subject_eval_data_item = subject_eval_data_raw.get(subject_id, {})
+                if isinstance(subject_eval_data_item, dict):
+                    subject_data = subject_eval_data_item
+        else:
+            # Fallback: nếu không có source (backward compatibility), merge cả 2
+            subject_data = subjects_raw_map.get(subject_id, {})
+            if isinstance(subject_eval_data_raw, dict) and subject_id in subject_eval_data_raw:
+                subject_eval_data_item = subject_eval_data_raw.get(subject_id, {})
+                if isinstance(subject_eval_data_item, dict):
+                    subject_data = {**subject_data, **subject_eval_data_item}
 
         # Merge INTL scoreboard data if available for this subject
         if subject_id and isinstance(intl_scores_data, dict) and intl_scores_data.get(subject_id):
@@ -671,269 +667,273 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
             except Exception:
                 pass
 
-        # Merge scores data if available for this subject
-        if subject_id and isinstance(scores_data, dict) and scores_data.get(subject_id):
-            score_info = scores_data.get(subject_id) or {}
-            try:
-                # ✨ Lấy weight counts từ template nếu không có trong score_info
-                weight1_count = score_info.get("weight1_count")
-                weight2_count = score_info.get("weight2_count")
-                weight3_count = score_info.get("weight3_count")
-                
-                # Nếu weight counts không có hoặc là None, lấy từ template
-                if (weight1_count is None or weight2_count is None or weight3_count is None) and template_doc:
+        # ✨ CHỈ add scores nếu source = "scores" hoặc không có source (backward compatibility)
+        if source in ["scores", ""]:
+            # Merge scores data if available for this subject
+            if subject_id and isinstance(scores_data, dict) and scores_data.get(subject_id):
+                score_info = scores_data.get(subject_id) or {}
+                try:
+                    # ✨ Lấy weight counts từ template nếu không có trong score_info
+                    weight1_count = score_info.get("weight1_count")
+                    weight2_count = score_info.get("weight2_count")
+                    weight3_count = score_info.get("weight3_count")
+                    
+                    # Nếu weight counts không có hoặc là None, lấy từ template
+                    if (weight1_count is None or weight2_count is None or weight3_count is None) and template_doc:
+                        if hasattr(template_doc, 'scores') and template_doc.scores:
+                            for score_cfg in template_doc.scores:
+                                cfg_subject_id = getattr(score_cfg, 'subject_id', None)
+                                if cfg_subject_id == subject_id:
+                                    if weight1_count is None:
+                                        weight1_count = getattr(score_cfg, "weight1_count", 1) or 1
+                                    if weight2_count is None:
+                                        weight2_count = getattr(score_cfg, "weight2_count", 1) or 1
+                                    if weight3_count is None:
+                                        weight3_count = getattr(score_cfg, "weight3_count", 1) or 1
+                                    break
+                    
+                    # Fallback về 1 nếu vẫn không có
+                    weight1_count = weight1_count if weight1_count is not None else 1
+                    weight2_count = weight2_count if weight2_count is not None else 1
+                    weight3_count = weight3_count if weight3_count is not None else 1
+                    
+                    standardized_subject["scores"] = {
+                        "hs1_scores": score_info.get("hs1_scores", []),
+                        "hs2_scores": score_info.get("hs2_scores", []),
+                        "hs3_scores": score_info.get("hs3_scores", []),
+                        "hs1_average": score_info.get("hs1_average"),
+                        "hs2_average": score_info.get("hs2_average"),
+                        "hs3_average": score_info.get("hs3_average"),
+                        "final_average": score_info.get("final_average"),
+                        "semester1_average": score_info.get("semester1_average"),  # ĐTB HK1 (for End Term 2)
+                        "year_average": score_info.get("year_average"),  # ĐTB cả năm (for End Term 2)
+                        "weight1_count": weight1_count,
+                        "weight2_count": weight2_count,
+                        "weight3_count": weight3_count,
+                        "subject_type": score_info.get("subject_type"),
+                    }
+                except Exception:
+                    pass
+            else:
+                # ✨ Nếu subject không có trong scores_data, vẫn tạo scores structure với weight counts từ template
+                # Điều này đảm bảo frontend có đủ thông tin để hiển thị đúng số cột
+                if template_doc:
+                    # Thử tìm trong scores config trước
                     if hasattr(template_doc, 'scores') and template_doc.scores:
                         for score_cfg in template_doc.scores:
                             cfg_subject_id = getattr(score_cfg, 'subject_id', None)
                             if cfg_subject_id == subject_id:
-                                if weight1_count is None:
-                                    weight1_count = getattr(score_cfg, "weight1_count", 1) or 1
-                                if weight2_count is None:
-                                    weight2_count = getattr(score_cfg, "weight2_count", 1) or 1
-                                if weight3_count is None:
-                                    weight3_count = getattr(score_cfg, "weight3_count", 1) or 1
+                                try:
+                                    standardized_subject["scores"] = {
+                                        "hs1_scores": [],
+                                        "hs2_scores": [],
+                                        "hs3_scores": [],
+                                        "hs1_average": None,
+                                        "hs2_average": None,
+                                        "hs3_average": None,
+                                        "final_average": None,
+                                        "semester1_average": None,
+                                        "year_average": None,
+                                        "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
+                                        "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
+                                        "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1,
+                                        "subject_type": getattr(score_cfg, "subject_type", "Môn tính điểm"),
+                                    }
+                                except Exception:
+                                    pass
                                 break
-                
-                # Fallback về 1 nếu vẫn không có
-                weight1_count = weight1_count if weight1_count is not None else 1
-                weight2_count = weight2_count if weight2_count is not None else 1
-                weight3_count = weight3_count if weight3_count is not None else 1
-                
-                standardized_subject["scores"] = {
-                    "hs1_scores": score_info.get("hs1_scores", []),
-                    "hs2_scores": score_info.get("hs2_scores", []),
-                    "hs3_scores": score_info.get("hs3_scores", []),
-                    "hs1_average": score_info.get("hs1_average"),
-                    "hs2_average": score_info.get("hs2_average"),
-                    "hs3_average": score_info.get("hs3_average"),
-                    "final_average": score_info.get("final_average"),
-                    "semester1_average": score_info.get("semester1_average"),  # ĐTB HK1 (for End Term 2)
-                    "year_average": score_info.get("year_average"),  # ĐTB cả năm (for End Term 2)
-                    "weight1_count": weight1_count,
-                    "weight2_count": weight2_count,
-                    "weight3_count": weight3_count,
-                    "subject_type": score_info.get("subject_type"),
-                }
-            except Exception:
-                pass
-        else:
-            # ✨ Nếu subject không có trong scores_data, vẫn tạo scores structure với weight counts từ template
-            # Điều này đảm bảo frontend có đủ thông tin để hiển thị đúng số cột
-            if template_doc:
-                # Thử tìm trong scores config trước
-                if hasattr(template_doc, 'scores') and template_doc.scores:
-                    for score_cfg in template_doc.scores:
-                        cfg_subject_id = getattr(score_cfg, 'subject_id', None)
-                        if cfg_subject_id == subject_id:
-                            try:
-                                standardized_subject["scores"] = {
-                                    "hs1_scores": [],
-                                    "hs2_scores": [],
-                                    "hs3_scores": [],
-                                    "hs1_average": None,
-                                    "hs2_average": None,
-                                    "hs3_average": None,
-                                    "final_average": None,
-                                    "semester1_average": None,
-                                    "year_average": None,
-                                    "weight1_count": getattr(score_cfg, "weight1_count", 1) or 1,
-                                    "weight2_count": getattr(score_cfg, "weight2_count", 1) or 1,
-                                    "weight3_count": getattr(score_cfg, "weight3_count", 1) or 1,
-                                    "subject_type": getattr(score_cfg, "subject_type", "Môn tính điểm"),
-                                }
-                            except Exception:
-                                pass
-                            break
         
         # Load template configuration for this subject
         template_config = _get_template_config_for_subject(template_id, subject_id)
         
-        # === TEST SCORES - Load from template structure ===
-        test_titles = []
-        # ✨ Fallback: Support both old format (test_points dict) and new format (test_point_values list)
-        test_values = subject_data.get("test_point_values", []) or subject_data.get("test_point_inputs", [])
-        
-        # If old format (test_points dict), convert to list
-        if not test_values:
-            old_test_points = subject_data.get("test_points", {})
-            if isinstance(old_test_points, dict) and old_test_points:
-                test_values = list(old_test_points.values())
-        
-        # Load test point titles from template
-        if template_config.get('test_point_enabled') and template_config.get('test_point_titles'):
-            template_titles = template_config.get('test_point_titles', [])
-            test_titles = [t.get('title', '') for t in template_titles if isinstance(t, dict) and t.get('title')]
-        
-        # Also check existing data for backwards compatibility
-        existing_titles = subject_data.get("test_point_titles", [])
-        if existing_titles and not test_titles:
-            test_titles = existing_titles
-        
-        # If old format (test_points dict), extract titles from keys
-        if not test_titles:
-            old_test_points = subject_data.get("test_points", {})
-            if isinstance(old_test_points, dict) and old_test_points:
-                test_titles = list(old_test_points.keys())
+        # ✨ CHỈ add test_scores/rubric/comments nếu source = "subject_eval" hoặc không có source (backward compatibility)
+        if source in ["subject_eval", ""]:
+            # === TEST SCORES - Load from template structure ===
+            test_titles = []
+            # ✨ Fallback: Support both old format (test_points dict) and new format (test_point_values list)
+            test_values = subject_data.get("test_point_values", []) or subject_data.get("test_point_inputs", [])
             
-        # Always include test_scores structure (even if empty) when template has it enabled
-        if template_config.get('test_point_enabled') or test_titles or test_values:
-            standardized_subject["test_scores"] = {
-                "titles": test_titles if isinstance(test_titles, list) else [],
-                "values": test_values if isinstance(test_values, list) else []
-            }
-        
-        # === RUBRIC - Load from template structure ===
-        criteria_list = []
-        scale_options = []
-        
-        # Load rubric structure from template  
-        if template_config.get('rubric_enabled'):
-            criteria_options_snapshot = template_config.get('criteria_options', None)
-            scale_options_snapshot = template_config.get('scale_options', None)
+            # If old format (test_points dict), convert to list
+            if not test_values:
+                old_test_points = subject_data.get("test_points", {})
+                if isinstance(old_test_points, dict) and old_test_points:
+                    test_values = list(old_test_points.values())
             
-            # Load criteria: Ưu tiên từ snapshot, fallback to template gốc
-            if criteria_options_snapshot and isinstance(criteria_options_snapshot, list):
-                # Parse snapshot format: [{name, title}] -> [{id, label}]
-                template_criteria = []
-                for idx, opt in enumerate(criteria_options_snapshot):
-                    if isinstance(opt, dict):
-                        # ✨ Nếu name rỗng, tạo id từ index để match với frontend key "idx-X"
-                        opt_name = opt.get("name", "")
-                        opt_title = opt.get("title", "")
-                        crit_id = opt_name if opt_name else f"idx-{idx}"
-                        template_criteria.append({
+            # Load test point titles from template
+            if template_config.get('test_point_enabled') and template_config.get('test_point_titles'):
+                template_titles = template_config.get('test_point_titles', [])
+                test_titles = [t.get('title', '') for t in template_titles if isinstance(t, dict) and t.get('title')]
+            
+            # Also check existing data for backwards compatibility
+            existing_titles = subject_data.get("test_point_titles", [])
+            if existing_titles and not test_titles:
+                test_titles = existing_titles
+            
+            # If old format (test_points dict), extract titles from keys
+            if not test_titles:
+                old_test_points = subject_data.get("test_points", {})
+                if isinstance(old_test_points, dict) and old_test_points:
+                    test_titles = list(old_test_points.keys())
+                
+            # Always include test_scores structure (even if empty) when template has it enabled
+            if template_config.get('test_point_enabled') or test_titles or test_values:
+                standardized_subject["test_scores"] = {
+                    "titles": test_titles if isinstance(test_titles, list) else [],
+                    "values": test_values if isinstance(test_values, list) else []
+                }
+            
+            # === RUBRIC - Load from template structure ===
+            criteria_list = []
+            scale_options = []
+            
+            # Load rubric structure from template  
+            if template_config.get('rubric_enabled'):
+                criteria_options_snapshot = template_config.get('criteria_options', None)
+                scale_options_snapshot = template_config.get('scale_options', None)
+                
+                # Load criteria: Ưu tiên từ snapshot, fallback to template gốc
+                if criteria_options_snapshot and isinstance(criteria_options_snapshot, list):
+                    # Parse snapshot format: [{name, title}] -> [{id, label}]
+                    template_criteria = []
+                    for idx, opt in enumerate(criteria_options_snapshot):
+                        if isinstance(opt, dict):
+                            # ✨ Nếu name rỗng, tạo id từ index để match với frontend key "idx-X"
+                            opt_name = opt.get("name", "")
+                            opt_title = opt.get("title", "")
+                            crit_id = opt_name if opt_name else f"idx-{idx}"
+                            template_criteria.append({
+                                "id": crit_id,
+                                "label": opt_title or crit_id
+                            })
+                else:
+                    criteria_id = template_config.get('criteria_id', '')
+                    template_criteria = _load_evaluation_criteria_options(criteria_id)
+
+                # Load scale: Ưu tiên từ snapshot, fallback to template gốc
+                if scale_options_snapshot and isinstance(scale_options_snapshot, list):
+                    # Parse snapshot format: [{name, title}] -> [{id, label}]
+                    scale_options = []
+                    for opt in scale_options_snapshot:
+                        if isinstance(opt, dict):
+                            scale_options.append({
+                                "id": opt.get("name") or opt.get("title", ""),
+                                "label": opt.get("title", "")
+                            })
+                else:
+                    scale_id = template_config.get('scale_id', '')
+                    scale_options = _load_evaluation_scale_options(scale_id)
+
+                # Helper functions loaded
+                if template_criteria:
+                    # Map existing data to template criteria - READ FROM subject_eval section
+                    existing_criteria = {}
+                    subject_eval_data = data.get("subject_eval", {})
+                    if subject_id and subject_id in subject_eval_data:
+                        # ✨ Fallback: Support both old format (criteria_scores) and new format (criteria)
+                        existing_criteria = subject_eval_data[subject_id].get("criteria", {})
+                        if not existing_criteria:
+                            existing_criteria = subject_eval_data[subject_id].get("criteria_scores", {})
+
+                    for template_crit in template_criteria:
+                        crit_id = template_crit.get("id", "")
+                        # ✨ Tìm value từ existing_criteria: thử cả crit_id và key rỗng (backward compatibility)
+                        value = ""
+                        if isinstance(existing_criteria, dict):
+                            value = existing_criteria.get(crit_id, "")
+                            # Nếu không tìm thấy và crit_id có dạng "idx-X", thử tìm với key rỗng
+                            if not value and crit_id.startswith("idx-"):
+                                value = existing_criteria.get("", "")
+                            # Nếu không tìm thấy và crit_id rỗng, thử tìm với key theo index
+                            if not value and crit_id == "":
+                                # Tìm index của criteria này trong template_criteria
+                                crit_idx = next((i for i, tc in enumerate(template_criteria) if tc == template_crit), -1)
+                                if crit_idx >= 0:
+                                    value = existing_criteria.get(f"idx-{crit_idx}", "")
+
+                        criteria_list.append({
                             "id": crit_id,
-                            "label": opt_title or crit_id
+                            "label": template_crit.get("label", crit_id),
+                            "value": value
                         })
-            else:
-                criteria_id = template_config.get('criteria_id', '')
-                template_criteria = _load_evaluation_criteria_options(criteria_id)
-            
-            # Load scale: Ưu tiên từ snapshot, fallback to template gốc
-            if scale_options_snapshot and isinstance(scale_options_snapshot, list):
-                # Parse snapshot format: [{name, title}] -> [{id, label}]
-                scale_options = []
-                for opt in scale_options_snapshot:
-                    if isinstance(opt, dict):
-                        scale_options.append({
-                            "id": opt.get("name") or opt.get("title", ""),
-                            "label": opt.get("title", "")
+
+            # Fallback to existing data structure if template doesn't have config
+            if not criteria_list:
+                # ✨ Fallback: Support both old format (criteria_scores) and new format (criteria)
+                existing_criteria = subject_data.get("criteria", {})
+                if not existing_criteria:
+                    existing_criteria = subject_data.get("criteria_scores", {})
+                if isinstance(existing_criteria, dict):
+                    for crit_id, value in existing_criteria.items():
+                        criteria_list.append({
+                            "id": crit_id,
+                            "label": crit_id,
+                            "value": value
                         })
-            else:
-                scale_id = template_config.get('scale_id', '')
-                scale_options = _load_evaluation_scale_options(scale_id)
-            
-            # Helper functions loaded
-            if template_criteria:
-                # Map existing data to template criteria - READ FROM subject_eval section
-                existing_criteria = {}
-                subject_eval_data = data.get("subject_eval", {})
-                if subject_id and subject_id in subject_eval_data:
-                    # ✨ Fallback: Support both old format (criteria_scores) and new format (criteria)
-                    existing_criteria = subject_eval_data[subject_id].get("criteria", {})
-                    if not existing_criteria:
-                        existing_criteria = subject_eval_data[subject_id].get("criteria_scores", {})
-                
-                for template_crit in template_criteria:
-                    crit_id = template_crit.get("id", "")
-                    # ✨ Tìm value từ existing_criteria: thử cả crit_id và key rỗng (backward compatibility)
-                    value = ""
-                    if isinstance(existing_criteria, dict):
-                        value = existing_criteria.get(crit_id, "")
-                        # Nếu không tìm thấy và crit_id có dạng "idx-X", thử tìm với key rỗng
-                        if not value and crit_id.startswith("idx-"):
-                            value = existing_criteria.get("", "")
-                        # Nếu không tìm thấy và crit_id rỗng, thử tìm với key theo index
-                        if not value and crit_id == "":
-                            # Tìm index của criteria này trong template_criteria
-                            crit_idx = next((i for i, tc in enumerate(template_criteria) if tc == template_crit), -1)
-                            if crit_idx >= 0:
-                                value = existing_criteria.get(f"idx-{crit_idx}", "")
-                    
-                    criteria_list.append({
-                        "id": crit_id,
-                        "label": template_crit.get("label", crit_id),
-                        "value": value
-                    })
-            
-        # Fallback to existing data structure if template doesn't have config
-        if not criteria_list:
-            # ✨ Fallback: Support both old format (criteria_scores) and new format (criteria)
-            existing_criteria = subject_data.get("criteria", {})
-            if not existing_criteria:
-                existing_criteria = subject_data.get("criteria_scores", {})
-            if isinstance(existing_criteria, dict):
-                for crit_id, value in existing_criteria.items():
-                    criteria_list.append({
-                        "id": crit_id,
-                        "label": crit_id,
-                        "value": value
-                    })
-        
-        if not scale_options:
-            existing_rubric = subject_data.get("rubric", {})
-            scale_options = existing_rubric.get("scale_options", [])
-        
-        # Always include rubric structure (even if empty) when template has it enabled
-        if template_config.get('rubric_enabled') or criteria_list or scale_options:
-            standardized_subject["rubric"] = {
-                "criteria": criteria_list,
-                "scale_options": scale_options
-            }
-        
-        # === COMMENTS - Load from template structure ===
-        comments_list = []
-        
-        # Load comment structure from template  
-        if template_config.get('comment_title_enabled'):
-            # ✨ PRIORITY 1: Load from options snapshot (độc lập cho mỗi template)
-            comment_title_options_snapshot = template_config.get('comment_title_options', None)
-            
-            # Load comments: Ưu tiên từ snapshot, fallback to template gốc
-            if comment_title_options_snapshot and isinstance(comment_title_options_snapshot, list):
-                # Parse snapshot format: [{name, title}] -> [{id, label}]
-                template_comments = []
-                for opt in comment_title_options_snapshot:
-                    if isinstance(opt, dict):
-                        template_comments.append({
-                            "id": opt.get("name") or opt.get("title", ""),
-                            "label": opt.get("title", "")
+
+            if not scale_options:
+                existing_rubric = subject_data.get("rubric", {})
+                scale_options = existing_rubric.get("scale_options", [])
+
+            # Always include rubric structure (even if empty) when template has it enabled
+            if template_config.get('rubric_enabled') or criteria_list or scale_options:
+                standardized_subject["rubric"] = {
+                    "criteria": criteria_list,
+                    "scale_options": scale_options
+                }
+
+            # === COMMENTS - Load from template structure ===
+            comments_list = []
+
+            # Load comment structure from template
+            if template_config.get('comment_title_enabled'):
+                # ✨ PRIORITY 1: Load from options snapshot (độc lập cho mỗi template)
+                comment_title_options_snapshot = template_config.get('comment_title_options', None)
+
+                # Load comments: Ưu tiên từ snapshot, fallback to template gốc
+                if comment_title_options_snapshot and isinstance(comment_title_options_snapshot, list):
+                    # Parse snapshot format: [{name, title}] -> [{id, label}]
+                    template_comments = []
+                    for opt in comment_title_options_snapshot:
+                        if isinstance(opt, dict):
+                            template_comments.append({
+                                "id": opt.get("name") or opt.get("title", ""),
+                                "label": opt.get("title", "")
+                            })
+                else:
+                    comment_title_id = template_config.get('comment_title_id', '')
+                    template_comments = _load_comment_title_options(comment_title_id)
+
+                # Load comments from template
+
+                if template_comments:
+                    # Map existing data to template comments - READ FROM subject_eval section
+                    existing_comments = {}
+                    subject_eval_data = data.get("subject_eval", {})
+                    if subject_id and subject_id in subject_eval_data:
+                        existing_comments = subject_eval_data[subject_id].get("comments", {})
+
+                    for template_comment in template_comments:
+                        comment_id = template_comment.get("id", "")
+                        comments_list.append({
+                            "id": comment_id,
+                            "label": template_comment.get("label", comment_id),
+                            "value": existing_comments.get(comment_id, "") if isinstance(existing_comments, dict) else ""
                         })
-            else:
-                comment_title_id = template_config.get('comment_title_id', '')
-                template_comments = _load_comment_title_options(comment_title_id)
-            
-            # Load comments from template
-            
-            if template_comments:
-                # Map existing data to template comments - READ FROM subject_eval section
-                existing_comments = {}
-                subject_eval_data = data.get("subject_eval", {})
-                if subject_id and subject_id in subject_eval_data:
-                    existing_comments = subject_eval_data[subject_id].get("comments", {})
-                
-                for template_comment in template_comments:
-                    comment_id = template_comment.get("id", "")
-                    comments_list.append({
-                        "id": comment_id,
-                        "label": template_comment.get("label", comment_id),
-                        "value": existing_comments.get(comment_id, "") if isinstance(existing_comments, dict) else ""
-                    })
-        
-        # Fallback to existing data structure if template doesn't have config
-        if not comments_list:
-            existing_comments = subject_data.get("comments", {})
-            if isinstance(existing_comments, dict):
-                for comment_id, value in existing_comments.items():
-                    comments_list.append({
-                        "id": comment_id,
-                        "label": comment_id,
-                        "value": value
-                    })
-        
-        # Always include comments structure (even if empty) when template has it enabled
-        if template_config.get('comment_title_enabled') or comments_list:
-            standardized_subject["comments"] = comments_list
+
+            # Fallback to existing data structure if template doesn't have config
+            if not comments_list:
+                existing_comments = subject_data.get("comments", {})
+                if isinstance(existing_comments, dict):
+                    for comment_id, value in existing_comments.items():
+                        comments_list.append({
+                            "id": comment_id,
+                            "label": comment_id,
+                            "value": value
+                        })
+
+                # Always include comments structure (even if empty) when template has it enabled
+                if template_config.get('comment_title_enabled') or comments_list:
+                    standardized_subject["comments"] = comments_list
             
         standardized_subjects.append(standardized_subject)
     
