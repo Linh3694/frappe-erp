@@ -386,20 +386,72 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     }
     
     # === SUBJECTS STANDARDIZATION ===
+    # ✨ QUAN TRỌNG: Load subjects từ template thay vì chỉ dựa vào subjects_raw đã lưu
+    # Điều này đảm bảo khi template được edit (thêm/xóa subjects), FinalView vẫn hiển thị đúng
     subjects_raw = data.get("subjects", [])
     standardized_subjects = []
     scores_data = data.get("scores") if isinstance(data.get("scores"), dict) else {}
     intl_scores_data = data.get("intl_scores") if isinstance(data.get("intl_scores"), dict) else {}
     
+    # ✨ Load subjects từ template nếu có template_doc
+    template_subjects_map = {}  # {subject_id: {subject_id, title_vn, teacher_name}}
+    if template_doc:
+        class_id = getattr(report, "class_id", "")
+        if hasattr(template_doc, 'scores') and template_doc.scores:
+            # Load từ scores config (VN program)
+            for score_cfg in template_doc.scores:
+                subject_id = getattr(score_cfg, 'subject_id', None)
+                if subject_id:
+                    teacher_names = _resolve_teacher_names(subject_id, class_id)
+                    template_subjects_map[subject_id] = {
+                        "subject_id": subject_id,
+                        "title_vn": getattr(score_cfg, 'display_name', None) or _resolve_actual_subject_title(subject_id) or subject_id,
+                        "teacher_name": teacher_names[0] if teacher_names else ""
+                    }
+        elif hasattr(template_doc, 'subjects') and template_doc.subjects:
+            # Load từ subjects config (VN program với subject_eval hoặc INTL program)
+            for subject_cfg in template_doc.subjects:
+                subject_id = getattr(subject_cfg, 'subject_id', None)
+                if subject_id:
+                    teacher_names = _resolve_teacher_names(subject_id, class_id)
+                    template_subjects_map[subject_id] = {
+                        "subject_id": subject_id,
+                        "title_vn": _resolve_actual_subject_title(subject_id) or subject_id,
+                        "teacher_name": teacher_names[0] if teacher_names else ""
+                    }
+    
+    # ✨ Merge: Ưu tiên subjects từ template, fallback về subjects_raw nếu không có trong template
+    # Nhưng giữ lại dữ liệu đã nhập (scores, subject_eval) từ subjects_raw
+    subjects_to_process = {}
+    
+    # 1. Thêm subjects từ template
+    for subject_id, subject_info in template_subjects_map.items():
+        subjects_to_process[subject_id] = subject_info.copy()
+    
+    # 2. Thêm subjects từ subjects_raw nếu chưa có trong template (để giữ lại dữ liệu đã nhập)
     for subject in subjects_raw:
         if not isinstance(subject, dict):
             continue
-            
         subject_id = subject.get("subject_id", "")
+        if subject_id and subject_id not in subjects_to_process:
+            # Giữ lại subject từ subjects_raw nếu có dữ liệu đã nhập
+            has_data = (
+                (subject_id in scores_data and scores_data[subject_id]) or
+                (subject_id in intl_scores_data and intl_scores_data[subject_id])
+            )
+            if has_data:
+                subjects_to_process[subject_id] = {
+                    "subject_id": subject_id,
+                    "title_vn": subject.get("title_vn", ""),
+                    "teacher_name": subject.get("teacher_name", "")
+                }
+    
+    # 3. Process từng subject
+    for subject_id, subject_info in subjects_to_process.items():
         standardized_subject = {
             "subject_id": subject_id,
-            "title_vn": subject.get("title_vn", ""),
-            "teacher_name": subject.get("teacher_name", ""),
+            "title_vn": subject_info.get("title_vn", ""),
+            "teacher_name": subject_info.get("teacher_name", ""),
         }
 
         # Merge INTL scoreboard data if available for this subject
