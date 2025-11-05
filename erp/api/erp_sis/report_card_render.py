@@ -350,9 +350,18 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     template_doc = None
     if template_id:
         try:
+            # Clear cache trước khi load để đảm bảo lấy dữ liệu mới nhất
+            frappe.db.commit()  # Commit để đảm bảo changes đã được lưu
+            frappe.clear_cache(doctype="SIS Report Card Template")  # Clear cache cho doctype này
             template_doc = frappe.get_doc("SIS Report Card Template", template_id)
             template_doc.reload()  # Force reload để đảm bảo không dùng cache
-        except Exception:
+            
+            # ✨ LOG để debug
+            scores_count = len(template_doc.scores) if hasattr(template_doc, 'scores') and template_doc.scores else 0
+            subjects_count = len(template_doc.subjects) if hasattr(template_doc, 'subjects') and template_doc.subjects else 0
+            frappe.logger().info(f"[STANDARDIZE_TEMPLATE] Template {template_id} loaded: {scores_count} scores, {subjects_count} subjects")
+        except Exception as e:
+            frappe.logger().error(f"[STANDARDIZE_TEMPLATE] Error loading template {template_id}: {str(e)}")
             template_doc = None
     
     # === STUDENT INFO ===
@@ -453,6 +462,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     if template_doc:
         subjects_raw_count = len(subjects_raw) if isinstance(subjects_raw, list) else 0
         frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Processing {len(subjects_to_process)} subjects from template. Raw subjects count: {subjects_raw_count}")
+        frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Template subject IDs: {[s.get('subject_id') for s in subjects_to_process]}")
     
     # ✨ Tạo map từ subjects_raw để dễ lookup sau này
     subjects_raw_map = {}
@@ -1155,7 +1165,9 @@ def get_report_data(report_id: Optional[str] = None):
         template_id = getattr(report, "template_id", "")
         if template_id:
             try:
-                # ✨ QUAN TRỌNG: Reload template để đảm bảo lấy dữ liệu mới nhất (không cache)
+                # ✨ QUAN TRỌNG: Clear cache và reload template để đảm bảo lấy dữ liệu mới nhất (không cache)
+                frappe.db.commit()  # Commit để đảm bảo changes đã được lưu
+                frappe.clear_cache(doctype="SIS Report Card Template")  # Clear cache cho doctype này
                 template_doc = frappe.get_doc("SIS Report Card Template", template_id)
                 template_doc.reload()  # Force reload để đảm bảo không dùng cache
                 template_subject_ids = set()
@@ -1174,30 +1186,55 @@ def get_report_data(report_id: Optional[str] = None):
                         if subject_id:
                             template_subject_ids.add(subject_id)
                 
+                # ✨ LOG để debug
+                frappe.logger().info(f"[FILTER_SUBJECTS] Template {template_id} has {len(template_subject_ids)} subjects: {sorted(template_subject_ids)}")
+                
                 # ✨ QUAN TRỌNG: Filter subject_eval và intl_scores theo template
                 # Để đảm bảo không có subjects đã xóa trong các section này
                 # Note: subjects array sẽ được tạo lại từ template trong _standardize_report_data
                 if template_subject_ids:
                     subject_eval = transformed_data.get("subject_eval", {})
                     if isinstance(subject_eval, dict):
+                        original_subject_eval_count = len(subject_eval)
                         filtered_subject_eval = {
                             k: v for k, v in subject_eval.items() 
                             if k in template_subject_ids or not k.startswith("SIS_ACTUAL_SUBJECT-")
                         }
+                        filtered_count = len(filtered_subject_eval)
+                        if original_subject_eval_count != filtered_count:
+                            frappe.logger().info(f"[FILTER_SUBJECTS] Filtered subject_eval: {original_subject_eval_count} -> {filtered_count}")
                         transformed_data["subject_eval"] = filtered_subject_eval
                     
                     intl_scores = transformed_data.get("intl_scores", {})
                     if isinstance(intl_scores, dict):
+                        original_intl_scores_count = len(intl_scores)
                         filtered_intl_scores = {
                             k: v for k, v in intl_scores.items() 
                             if k in template_subject_ids or not k.startswith("SIS_ACTUAL_SUBJECT-")
                         }
+                        filtered_count = len(filtered_intl_scores)
+                        if original_intl_scores_count != filtered_count:
+                            frappe.logger().info(f"[FILTER_SUBJECTS] Filtered intl_scores: {original_intl_scores_count} -> {filtered_count}")
                         transformed_data["intl_scores"] = filtered_intl_scores
+                    
+                    # ✨ QUAN TRỌNG: Filter scores theo template
+                    scores = transformed_data.get("scores", {})
+                    if isinstance(scores, dict):
+                        original_scores_count = len(scores)
+                        filtered_scores = {
+                            k: v for k, v in scores.items() 
+                            if k in template_subject_ids or not k.startswith("SIS_ACTUAL_SUBJECT-")
+                        }
+                        filtered_count = len(filtered_scores)
+                        if original_scores_count != filtered_count:
+                            frappe.logger().info(f"[FILTER_SUBJECTS] Filtered scores: {original_scores_count} -> {filtered_count}")
+                        transformed_data["scores"] = filtered_scores
                     
                     # ✨ QUAN TRỌNG: Xóa subjects array cũ - sẽ được tạo lại từ template trong _standardize_report_data
                     if "subjects" in transformed_data:
                         del transformed_data["subjects"]
-            except Exception:
+            except Exception as e:
+                frappe.logger().error(f"[FILTER_SUBJECTS] Error filtering subjects: {str(e)}")
                 pass  # Nếu không load được template, giữ nguyên subjects
 
         # Create report object with title from report card document
@@ -1261,13 +1298,21 @@ def get_report_data(report_id: Optional[str] = None):
             "subjects": standardized_data.get("subjects", []),
             "homeroom": standardized_data.get("homeroom", {}),
             "form_config": standardized_data.get("form_config", {}),
-            "scores": transformed_data.get("scores", {}),  # Bring scores to top level
-            # ✨ QUAN TRỌNG: Update data.subjects với standardized_subjects để đảm bảo frontend không đọc subjects cũ
+            "scores": transformed_data.get("scores", {}),  # Bring scores to top level (đã được filter)
+            # ✨ QUAN TRỌNG: Update data.subjects và data.scores với standardized data để đảm bảo frontend không đọc subjects cũ
             "data": {
                 **transformed_data,
-                "subjects": standardized_data.get("subjects", [])  # Override với subjects đã được filter
+                "subjects": standardized_data.get("subjects", []),  # Override với subjects đã được filter từ template
+                "scores": transformed_data.get("scores", {})  # Override với scores đã được filter
             },
         }
+        
+        # ✨ LOG để debug - kiểm tra response cuối cùng
+        final_subjects_count = len(response_data.get("subjects", []))
+        final_data_subjects_count = len(response_data.get("data", {}).get("subjects", []))
+        final_scores_count = len(response_data.get("scores", {}))
+        final_data_scores_count = len(response_data.get("data", {}).get("scores", {}))
+        frappe.logger().info(f"[GET_REPORT_DATA] Response: {final_subjects_count} subjects, {final_scores_count} scores. Data: {final_data_subjects_count} subjects, {final_data_scores_count} scores")
         
         return single_item_response(response_data, "Report data retrieved for frontend rendering")
         
