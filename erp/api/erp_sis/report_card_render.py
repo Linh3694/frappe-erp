@@ -427,6 +427,10 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     if template_doc:
         class_id = getattr(report, "class_id", "")
         
+        frappe.logger().info(f"[TEMPLATE_DEBUG] Template loaded: {template_id}")
+        frappe.logger().info(f"[TEMPLATE_DEBUG] Scores count: {len(template_doc.scores) if hasattr(template_doc, 'scores') and template_doc.scores else 0}")
+        frappe.logger().info(f"[TEMPLATE_DEBUG] Subjects count: {len(template_doc.subjects) if hasattr(template_doc, 'subjects') and template_doc.subjects else 0}")
+        
         # ✨ 1. Load từ template.scores (Scores section) - giữ thứ tự idx
         if hasattr(template_doc, 'scores') and template_doc.scores:
             for idx, score_cfg in enumerate(template_doc.scores):
@@ -464,7 +468,11 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     
     # ✨ FALLBACK: CHỈ load từ data nếu KHÔNG CÓ TEMPLATE (backward compatibility)
     # KHÔNG fallback nếu có template dù subjects_to_process rỗng (tránh hiển thị subjects đã xóa)
+    frappe.logger().info(f"[TEMPLATE_DEBUG] Template doc exists: {template_doc is not None}")
+    frappe.logger().info(f"[TEMPLATE_DEBUG] subjects_to_process count: {len(subjects_to_process)}")
+    
     if not template_doc:
+        frappe.logger().info(f"[TEMPLATE_DEBUG] FALLBACK TRIGGERED - No template doc!")
         class_id = getattr(report, "class_id", "")
         
         # Fallback từ scores data
