@@ -720,30 +720,28 @@ def get_guardian_info():
         if not guardian_name:
             return validation_error_response("guardian là bắt buộc")
 
-        # Get guardian info
-        guardian = frappe.get_doc("User", guardian_name)
+        # Get guardian info from CRM Guardian
+        guardian = frappe.get_doc("CRM Guardian", guardian_name)
         guardian_data = {
-            "name": guardian.full_name or guardian.name,
-            "phone_number": getattr(guardian, 'phone', None),
+            "name": guardian.guardian_name,
+            "phone_number": guardian.phone_number,
             "email": guardian.email,
             "students": []
         }
 
-        # Get students linked to this guardian
-        student_guardians = frappe.get_all("Student Guardian",
-            filters={"guardian": guardian_name},
-            fields=["parent", "student", "student_name"]
-        )
-
+        # Get students from student_relationships table
         students = []
-        for sg in student_guardians:
-            student_doc = frappe.get_doc("Student", sg.student)
-            students.append({
-                "name": student_doc.student_name,
-                "student_id": student_doc.name,
-                "class_name": getattr(student_doc, 'student_class', None),
-                "program": getattr(student_doc, 'program', None)
-            })
+        if guardian.student_relationships:
+            for relationship in guardian.student_relationships:
+                # Get student info from CRM Family Relationship
+                student_info = {
+                    "name": relationship.student_name or relationship.student,
+                    "student_id": relationship.student,
+                    "relationship": relationship.relationship,
+                    "class_name": getattr(relationship, 'student_class', None),
+                    "program": getattr(relationship, 'program', None)
+                }
+                students.append(student_info)
 
         guardian_data["students"] = students
 
