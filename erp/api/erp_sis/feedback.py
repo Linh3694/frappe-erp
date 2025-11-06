@@ -706,3 +706,102 @@ def export():
             code="EXPORT_ERROR"
         )
 
+
+@frappe.whitelist(allow_guest=False)
+def get_guardian_info():
+    """Get complete guardian information including students"""
+    try:
+        _check_staff_permission()
+
+        data = frappe.local.form_dict
+        request_args = frappe.request.args
+
+        guardian_name = data.get("guardian") or request_args.get("guardian")
+        if not guardian_name:
+            return validation_error_response("guardian là bắt buộc")
+
+        # Get guardian info
+        guardian = frappe.get_doc("User", guardian_name)
+        guardian_data = {
+            "name": guardian.full_name or guardian.name,
+            "phone_number": getattr(guardian, 'phone', None),
+            "email": guardian.email,
+            "students": []
+        }
+
+        # Get students linked to this guardian
+        student_guardians = frappe.get_all("Student Guardian",
+            filters={"guardian": guardian_name},
+            fields=["parent", "student", "student_name"]
+        )
+
+        students = []
+        for sg in student_guardians:
+            student_doc = frappe.get_doc("Student", sg.student)
+            students.append({
+                "name": student_doc.student_name,
+                "student_id": student_doc.name,
+                "class_name": getattr(student_doc, 'student_class', None),
+                "program": getattr(student_doc, 'program', None)
+            })
+
+        guardian_data["students"] = students
+
+        return single_item_response(data=guardian_data)
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Guardian không tồn tại",
+            code="NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error getting guardian info: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy thông tin guardian: {str(e)}",
+            code="GET_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def update_assignment():
+    """Update feedback assignment and priority together"""
+    try:
+        _check_staff_permission()
+
+        data = frappe.local.form_dict
+
+        feedback_name = data.get("name")
+        assigned_to = data.get("assigned_to")
+        priority = data.get("priority")
+
+        if not feedback_name:
+            return validation_error_response("name là bắt buộc")
+
+        # Get feedback
+        feedback = frappe.get_doc("Feedback", feedback_name)
+
+        # Update fields
+        if assigned_to:
+            feedback.assigned_to = assigned_to
+            feedback.assigned_date = now()
+
+        if priority:
+            feedback.priority = priority
+
+        # Save
+        feedback.save()
+
+        return single_item_response(data={"name": feedback.name})
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Feedback không tồn tại",
+            code="NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error updating assignment: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật assignment: {str(e)}",
+            code="UPDATE_ERROR"
+        )
+
