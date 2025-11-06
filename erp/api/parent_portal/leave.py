@@ -218,6 +218,9 @@ def submit_leave_request():
 		# Validate students list
 		if not students or (isinstance(students, list) and len(students) == 0):
 			return validation_error_response("Vui lòng chọn ít nhất một học sinh", {"students": ["Phải chọn ít nhất một học sinh"]})
+		
+		# Log the request
+		frappe.logger().info(f"📝 [SUBMIT_LEAVE_REQUEST] Parent: {parent_id}, Students requested: {students}, Reason: {data.get('reason')}, Dates: {data.get('start_date')} to {data.get('end_date')}")
 
 		# Validate parent has access to all students AND is key person
 		if not _validate_parent_student_access(parent_id, students):
