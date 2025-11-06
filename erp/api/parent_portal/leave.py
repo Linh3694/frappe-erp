@@ -40,6 +40,8 @@ def _validate_parent_student_access(parent_id, student_ids):
 	Returns:
 		True if guardian is key person for ALL students, False otherwise
 	"""
+	frappe.logger().info(f"🔍 Validating access - Guardian: {parent_id}, Students: {student_ids}")
+	
 	for student_id in student_ids:
 		# Check if relationship exists where:
 		# - guardian = parent_id (current logged in guardian)
@@ -52,10 +54,19 @@ def _validate_parent_student_access(parent_id, student_ids):
 		}, ["name", "key_person"])
 
 		if not relationship:  # If no relationship found or key_person is not 1
-			frappe.logger().warning(f"Guardian {parent_id} is NOT key_person for student {student_id}")
+			# Debug: Get all relationships for this guardian-student pair to see what exists
+			all_relationships = frappe.db.get_all("CRM Family Relationship", {
+				"guardian": parent_id,
+				"student": student_id
+			}, ["name", "key_person", "parent", "access"])
+			
+			frappe.logger().warning(f"❌ Guardian {parent_id} is NOT key_person for student {student_id}")
+			frappe.logger().warning(f"   Found relationships: {all_relationships}")
 			return False
+		else:
+			frappe.logger().info(f"✅ Guardian {parent_id} IS key_person for student {student_id}")
 
-	frappe.logger().info(f"Guardian {parent_id} validated as key_person for all {len(student_ids)} students")
+	frappe.logger().info(f"✅ Guardian {parent_id} validated as key_person for all {len(student_ids)} students")
 	return True
 
 
@@ -80,10 +91,8 @@ def submit_leave_request():
 			data = frappe.form_dict
 			frappe.logger().info("Using frappe.form_dict (fallback)")
 		
-		
 		if frappe.request.is_json:
 			frappe.logger().info(f"frappe.request.json: {frappe.request.json}")
-		
 
 		# Required fields validation (except students, handled separately)
 		required_fields = ['reason', 'start_date', 'end_date']
@@ -119,6 +128,7 @@ def submit_leave_request():
 
 		# Validate parent has access to all students AND is key person
 		if not _validate_parent_student_access(parent_id, students):
+			frappe.logger().error(f"❌ Parent {parent_id} failed key_person validation for students {students}")
 			return error_response("Bạn không có quyền gửi đơn cho một số học sinh đã chọn. Chỉ người liên hệ chính (key person) mới có thể tạo đơn nghỉ phép.")
 
 		created_requests = []
