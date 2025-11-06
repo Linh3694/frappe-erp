@@ -9,6 +9,7 @@ Guardians can create, view, update, delete feedback and add replies
 import frappe
 from frappe import _
 from frappe.utils import now, get_datetime
+import json
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -52,6 +53,40 @@ def _get_device_info():
     return device_info
 
 
+def _get_request_data():
+    """Get request data from various sources"""
+    data = {}
+    
+    # Check if request is JSON
+    is_json = False
+    if hasattr(frappe.request, 'content_type'):
+        content_type = frappe.request.content_type or ''
+        is_json = 'application/json' in content_type.lower()
+    
+    # Try to get from JSON body first if Content-Type is JSON
+    if is_json:
+        try:
+            if hasattr(frappe.request, 'data') and frappe.request.data:
+                raw = frappe.request.data
+                body = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
+                if body:
+                    parsed = json.loads(body)
+                    if isinstance(parsed, dict):
+                        data.update(parsed)
+        except (json.JSONDecodeError, AttributeError, TypeError) as e:
+            frappe.logger().error(f"Error parsing JSON body: {str(e)}")
+    
+    # Also try form_dict (might have data from URL params or form data)
+    if frappe.local.form_dict:
+        form_dict_data = dict(frappe.local.form_dict)
+        # Merge form_dict data, but don't overwrite JSON data
+        for key, value in form_dict_data.items():
+            if key not in data or not data.get(key):
+                data[key] = value
+    
+    return data
+
+
 @frappe.whitelist(allow_guest=False)
 def create():
     """Create new feedback"""
@@ -63,7 +98,7 @@ def create():
                 code="GUARDIAN_NOT_FOUND"
             )
         
-        data = frappe.local.form_dict
+        data = _get_request_data()
         
         # Validate required fields
         feedback_type = data.get("feedback_type")
