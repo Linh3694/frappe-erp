@@ -288,87 +288,87 @@ def get_my_leave_requests(student_id=None):
 			parent_guardian_id = parent_user_email.split("@")[0]
 		actual_parent_id = parent_id
 
-	# Get all students where current guardian has any relationship (key person or not)
-	# This ensures parent sees all leave requests for their children, even if created by teacher
-	# CRM Family Relationship is a child table in CRM Guardian, not a standalone doctype
-	guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
-	student_ids = [rel.student for rel in guardian_doc.student_relationships] if guardian_doc.student_relationships else []
-	
-	if not student_ids:
-		return list_response([])  # No students linked to this parent
-
-	# Build filters - filter by student_id instead of parent_id
-	# This ensures all parents of a student can see leave requests for that student
-	filters = {"student_id": ["in", student_ids]}
-	if student_id:
-		# If specific student_id requested, ensure it belongs to this parent
-		frappe.logger().info(f"DEBUG: Requested student_id={student_id}, parent student_ids={student_ids}")
-		if student_id in student_ids:
-			filters = {"student_id": student_id}
-			frappe.logger().info(f"DEBUG: Using specific student filter: {filters}")
-		else:
-			frappe.logger().info(f"DEBUG: Student {student_id} not in parent's students {student_ids}, returning empty")
-			return list_response([])  # Student doesn't belong to this parent
-
-	# Get leave requests - include owner field
-	frappe.logger().info(f"DEBUG: Final filters used: {filters}")
-	requests = frappe.get_all(
-		"SIS Student Leave Request",
-		filters=filters,
-		fields=[
-			"name", "student_id", "student_name", "student_code",
-			"reason", "other_reason", "start_date", "end_date",
-			"total_days", "description", "submitted_at",
-			"creation", "modified", "owner", "parent_id"
-		],
-		order_by="creation desc"
-	)
-	frappe.logger().info(f"DEBUG: Found {len(requests)} leave requests")
-	for req in requests[:3]:  # Log first 3 requests
-		frappe.logger().info(f"DEBUG: Request {req.name} for student {req.student_id}")
-
-	# Transform reason to Vietnamese for display
-	reason_mapping = {
-		'sick_child': 'Con ốm',
-		'family_matters': 'Gia đình có việc bận',
-		'other': 'Lý do khác'
-	}
-
-	for request in requests:
-		request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
+		# Get all students where current guardian has any relationship (key person or not)
+		# This ensures parent sees all leave requests for their children, even if created by teacher
+		# CRM Family Relationship is a child table in CRM Guardian, not a standalone doctype
+		guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
+		student_ids = [rel.student for rel in guardian_doc.student_relationships] if guardian_doc.student_relationships else []
 		
-		# Check if can edit (within 24 hours AND created by this parent)
-		# Leave can only be edited if:
-		# 1. Created by this parent (owner is parent's email) OR owner is None (old records)
-		# 2. Within 24 hours
-		is_created_by_parent = False
-		if request.get('owner'):
-			# Check if owner is parent's email or parent portal user
-			if request['owner'] == parent_user_email:
-				is_created_by_parent = True
-			elif parent_guardian_id and request['owner'].startswith(parent_guardian_id):
-				is_created_by_parent = True
-			# Also check if owner is a parent portal email pattern
-			elif "@parent.wellspring.edu.vn" in str(request['owner']):
-				owner_guardian_id = str(request['owner']).split("@")[0]
-				if owner_guardian_id == parent_guardian_id:
+		if not student_ids:
+			return list_response([])  # No students linked to this parent
+
+		# Build filters - filter by student_id instead of parent_id
+		# This ensures all parents of a student can see leave requests for that student
+		filters = {"student_id": ["in", student_ids]}
+		if student_id:
+			# If specific student_id requested, ensure it belongs to this parent
+			frappe.logger().info(f"DEBUG: Requested student_id={student_id}, parent student_ids={student_ids}")
+			if student_id in student_ids:
+				filters = {"student_id": student_id}
+				frappe.logger().info(f"DEBUG: Using specific student filter: {filters}")
+			else:
+				frappe.logger().info(f"DEBUG: Student {student_id} not in parent's students {student_ids}, returning empty")
+				return list_response([])  # Student doesn't belong to this parent
+
+		# Get leave requests - include owner field
+		frappe.logger().info(f"DEBUG: Final filters used: {filters}")
+		requests = frappe.get_all(
+			"SIS Student Leave Request",
+			filters=filters,
+			fields=[
+				"name", "student_id", "student_name", "student_code",
+				"reason", "other_reason", "start_date", "end_date",
+				"total_days", "description", "submitted_at",
+				"creation", "modified", "owner", "parent_id"
+			],
+			order_by="creation desc"
+		)
+		frappe.logger().info(f"DEBUG: Found {len(requests)} leave requests")
+		for req in requests[:3]:  # Log first 3 requests
+			frappe.logger().info(f"DEBUG: Request {req.name} for student {req.student_id}")
+
+		# Transform reason to Vietnamese for display
+		reason_mapping = {
+			'sick_child': 'Con ốm',
+			'family_matters': 'Gia đình có việc bận',
+			'other': 'Lý do khác'
+		}
+
+		for request in requests:
+			request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
+			
+			# Check if can edit (within 24 hours AND created by this parent)
+			# Leave can only be edited if:
+			# 1. Created by this parent (owner is parent's email) OR owner is None (old records)
+			# 2. Within 24 hours
+			is_created_by_parent = False
+			if request.get('owner'):
+				# Check if owner is parent's email or parent portal user
+				if request['owner'] == parent_user_email:
 					is_created_by_parent = True
-		else:
-			# Old records without owner - assume created by parent if parent_id matches
-			is_created_by_parent = (request.get('parent_id') == actual_parent_id) if actual_parent_id else False
-		
-		if request['submitted_at']:
-			submitted_time = datetime.strptime(str(request['submitted_at']), '%Y-%m-%d %H:%M:%S.%f')
-			time_diff = datetime.now() - submitted_time
-			within_24_hours = time_diff.total_seconds() <= (24 * 60 * 60)
-			request['can_edit'] = is_created_by_parent and within_24_hours
-		else:
-			request['can_edit'] = is_created_by_parent
-		
-		# Add creator info for display
-		request['is_created_by_parent'] = is_created_by_parent
+				elif parent_guardian_id and request['owner'].startswith(parent_guardian_id):
+					is_created_by_parent = True
+				# Also check if owner is a parent portal email pattern
+				elif "@parent.wellspring.edu.vn" in str(request['owner']):
+					owner_guardian_id = str(request['owner']).split("@")[0]
+					if owner_guardian_id == parent_guardian_id:
+						is_created_by_parent = True
+			else:
+				# Old records without owner - assume created by parent if parent_id matches
+				is_created_by_parent = (request.get('parent_id') == actual_parent_id) if actual_parent_id else False
+			
+			if request['submitted_at']:
+				submitted_time = datetime.strptime(str(request['submitted_at']), '%Y-%m-%d %H:%M:%S.%f')
+				time_diff = datetime.now() - submitted_time
+				within_24_hours = time_diff.total_seconds() <= (24 * 60 * 60)
+				request['can_edit'] = is_created_by_parent and within_24_hours
+			else:
+				request['can_edit'] = is_created_by_parent
+			
+			# Add creator info for display
+			request['is_created_by_parent'] = is_created_by_parent
 
-	return list_response(requests)
+		return list_response(requests)
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Parent Portal Get Leave Requests Error")
