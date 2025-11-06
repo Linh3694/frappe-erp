@@ -108,6 +108,31 @@ def create():
                 {"feedback_type": ["feedback_type là bắt buộc"]}
             )
         
+        # Validate fields based on feedback type
+        if feedback_type == "Đánh giá":
+            rating = data.get("rating")
+            if not rating or rating == 0:
+                return validation_error_response(
+                    "rating là bắt buộc cho loại Đánh giá",
+                    {"rating": ["rating là bắt buộc cho loại Đánh giá"]}
+                )
+        elif feedback_type == "Góp ý":
+            if not data.get("department"):
+                return validation_error_response(
+                    "department là bắt buộc cho loại Góp ý",
+                    {"department": ["department là bắt buộc cho loại Góp ý"]}
+                )
+            if not data.get("title"):
+                return validation_error_response(
+                    "title là bắt buộc cho loại Góp ý",
+                    {"title": ["title là bắt buộc cho loại Góp ý"]}
+                )
+            if not data.get("content"):
+                return validation_error_response(
+                    "content là bắt buộc cho loại Góp ý",
+                    {"content": ["content là bắt buộc cho loại Góp ý"]}
+                )
+        
         # Create feedback doc
         feedback = frappe.get_doc({
             "doctype": "Feedback",
@@ -122,10 +147,20 @@ def create():
             feedback.title = data.get("title")
             feedback.content = data.get("content")
             feedback.priority = data.get("priority", "Trung bình")
+            # Explicitly clear rating fields for "Góp ý" type
+            feedback.rating = None
+            feedback.rating_comment = None
         elif feedback_type == "Đánh giá":
-            feedback.rating = data.get("rating")
-            feedback.rating_comment = data.get("rating_comment", "")
+            # Ensure rating is set as integer
+            rating_value = int(data.get("rating", 0))
+            feedback.rating = rating_value  # Always set rating (validation already checked it's > 0)
+            feedback.rating_comment = data.get("rating_comment", "") or ""
             feedback.status = "Hoàn thành"  # Auto-complete for rating
+            # Explicitly clear "Góp ý" fields for "Đánh giá" type
+            feedback.department = None
+            feedback.title = None
+            feedback.content = None
+            feedback.priority = None
         
         # Set device info
         device_info = _get_device_info()
@@ -203,6 +238,7 @@ def list_feedback():
         
         # Get total count
         total = frappe.db.count("Feedback", filters=filters)
+
         
         return success_response(
             data={
