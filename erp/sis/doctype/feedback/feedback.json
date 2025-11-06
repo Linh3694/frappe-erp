@@ -1,0 +1,362 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 1,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:FB-{YYYY}-{MM}-{#####}",
+ "beta": 0,
+ "creation": "2025-11-06 10:00:00.000000",
+ "custom": 0,
+ "description": "Feedback Management System for Parent Portal",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_info_section",
+  "feedback_type",
+  "guardian",
+  "column_break_1",
+  "status",
+  "priority",
+  "feedback_content_section",
+  "department",
+  "title",
+  "content",
+  "rating_section",
+  "rating",
+  "rating_comment",
+  "resolution_rating_section",
+  "resolution_rating",
+  "resolution_comment",
+  "attachments_section",
+  "attachments",
+  "conversation_section",
+  "replies",
+  "assignment_section",
+  "assigned_to",
+  "assigned_date",
+  "sla_section",
+  "first_response_date",
+  "deadline",
+  "sla_status",
+  "conversation_count",
+  "last_reply_date",
+  "auto_close_hours",
+  "auto_close_scheduled",
+  "system_info_section",
+  "device_info",
+  "ip_address",
+  "user_agent",
+  "timestamps_section",
+  "submitted_at",
+  "last_updated",
+  "closed_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_info_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "feedback_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Loại feedback",
+   "options": "Góp ý\nĐánh giá",
+   "reqd": 1,
+   "default": "Góp ý"
+  },
+  {
+   "fieldname": "guardian",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Phụ huynh",
+   "options": "CRM Guardian",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Trạng thái",
+   "options": "Mới\nĐang xử lý\nChờ phản hồi phụ huynh\nĐã phản hồi\nĐóng\nTự động đóng\nHoàn thành",
+   "default": "Mới",
+   "reqd": 1
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Độ ưu tiên",
+   "options": "Thấp\nTrung bình\nCao\nKhẩn cấp",
+   "default": "Trung bình",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "feedback_content_section",
+   "fieldtype": "Section Break",
+   "label": "Nội dung feedback",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Select",
+   "label": "Bộ phận",
+   "options": "Công nghệ thông tin\nHọc vụ\nTài chính\nKhác",
+   "reqd": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tiêu đề",
+   "reqd": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "content",
+   "fieldtype": "Text Editor",
+   "label": "Nội dung",
+   "reqd": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "rating_section",
+   "fieldtype": "Section Break",
+   "label": "Đánh giá",
+   "depends_on": "feedback_type=='Đánh giá'"
+  },
+  {
+   "fieldname": "rating",
+   "fieldtype": "Rating",
+   "label": "Đánh giá",
+   "reqd": 1,
+   "depends_on": "feedback_type=='Đánh giá'"
+  },
+  {
+   "fieldname": "rating_comment",
+   "fieldtype": "Text",
+   "label": "Nhận xét",
+   "depends_on": "feedback_type=='Đánh giá'"
+  },
+  {
+   "fieldname": "resolution_rating_section",
+   "fieldtype": "Section Break",
+   "label": "Đánh giá việc giải quyết",
+   "depends_on": "feedback_type=='Góp ý' AND status=='Đóng'"
+  },
+  {
+   "fieldname": "resolution_rating",
+   "fieldtype": "Rating",
+   "label": "Đánh giá việc giải quyết",
+   "depends_on": "feedback_type=='Góp ý' AND status=='Đóng'"
+  },
+  {
+   "fieldname": "resolution_comment",
+   "fieldtype": "Text",
+   "label": "Nhận xét về việc giải quyết",
+   "depends_on": "feedback_type=='Góp ý' AND status=='Đóng'"
+  },
+  {
+   "fieldname": "attachments_section",
+   "fieldtype": "Section Break",
+   "label": "File đính kèm"
+  },
+  {
+   "fieldname": "attachments",
+   "fieldtype": "Attach",
+   "label": "File đính kèm"
+  },
+  {
+   "fieldname": "conversation_section",
+   "fieldtype": "Section Break",
+   "label": "Phản hồi",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "replies",
+   "fieldtype": "Table",
+   "label": "Phản hồi",
+   "options": "Feedback Reply",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "assignment_section",
+   "fieldtype": "Section Break",
+   "label": "Phân công",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "assigned_to",
+   "fieldtype": "Link",
+   "label": "Người xử lý",
+   "options": "User",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "assigned_date",
+   "fieldtype": "Datetime",
+   "label": "Ngày giao",
+   "read_only": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "sla_section",
+   "fieldtype": "Section Break",
+   "label": "SLA Tracking",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "first_response_date",
+   "fieldtype": "Datetime",
+   "label": "Ngày phản hồi đầu tiên",
+   "read_only": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "deadline",
+   "fieldtype": "Datetime",
+   "label": "Hạn xử lý",
+   "read_only": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "sla_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái SLA",
+   "options": "On time\nWarning\nOverdue",
+   "read_only": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "conversation_count",
+   "fieldtype": "Int",
+   "default": 0,
+   "label": "Số lượng phản hồi",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_reply_date",
+   "fieldtype": "Datetime",
+   "label": "Lần phản hồi cuối",
+   "read_only": 1
+  },
+  {
+   "fieldname": "auto_close_hours",
+   "fieldtype": "Int",
+   "default": 48,
+   "hidden": 1,
+   "label": "Auto Close Hours"
+  },
+  {
+   "fieldname": "auto_close_scheduled",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Auto Close Scheduled"
+  },
+  {
+   "fieldname": "system_info_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống"
+  },
+  {
+   "fieldname": "device_info",
+   "fieldtype": "Text",
+   "label": "Thông tin thiết bị"
+  },
+  {
+   "fieldname": "ip_address",
+   "fieldtype": "Data",
+   "label": "IP Address"
+  },
+  {
+   "fieldname": "user_agent",
+   "fieldtype": "Text",
+   "label": "User Agent"
+  },
+  {
+   "fieldname": "timestamps_section",
+   "fieldtype": "Section Break",
+   "label": "Thời gian"
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "default": "Now",
+   "label": "Ngày gửi",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_updated",
+   "fieldtype": "Datetime",
+   "label": "Cập nhật cuối",
+   "read_only": 1
+  },
+  {
+   "fieldname": "closed_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày đóng",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-11-06 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "Feedback",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 0,
+   "role": "Guardian",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
+
