@@ -30,8 +30,71 @@ def _get_current_parent():
 	return guardian
 
 
+def _check_overlapping_leave_requests(student_id, start_date, end_date):
+	"""Check if there are overlapping leave requests for this student
+	
+	Args:
+		student_id: Student ID
+		start_date: Start date of new leave request (string: YYYY-MM-DD)
+		end_date: End date of new leave request (string: YYYY-MM-DD)
+	
+	Returns:
+		Dict with:
+		- overlapping_dates: List of individual dates that overlap
+		- overlapping_requests: List of request details
+		- has_overlap: Boolean flag
+	"""
+	from datetime import datetime, timedelta
+	
+	# Convert string dates to datetime objects
+	new_start = datetime.strptime(str(start_date), '%Y-%m-%d').date()
+	new_end = datetime.strptime(str(end_date), '%Y-%m-%d').date()
+	
+	# Find all existing leave requests for this student
+	existing_requests = frappe.get_all(
+		"SIS Student Leave Request",
+		filters={"student_id": student_id},
+		fields=["name", "start_date", "end_date", "reason"]
+	)
+	
+	overlapping_requests = []
+	overlapping_dates_set = set()
+	
+	for req in existing_requests:
+		req_start = datetime.strptime(str(req.start_date), '%Y-%m-%d').date()
+		req_end = datetime.strptime(str(req.end_date), '%Y-%m-%d').date()
+		
+		# Check if date ranges overlap
+		# Ranges overlap if: new_start <= req_end AND new_end >= req_start
+		if new_start <= req_end and new_end >= req_start:
+			overlapping_requests.append({
+				"id": req.name,
+				"start_date": str(req.start_date),
+				"end_date": str(req.end_date),
+				"reason": req.reason
+			})
+			
+			# Collect all overlapping dates
+			current_date = max(new_start, req_start)
+			overlap_end = min(new_end, req_end)
+			while current_date <= overlap_end:
+				overlapping_dates_set.add(str(current_date))
+				current_date += timedelta(days=1)
+	
+	# Sort overlapping dates
+	overlapping_dates = sorted(list(overlapping_dates_set))
+	
+	return {
+		"has_overlap": len(overlapping_requests) > 0,
+		"overlapping_dates": overlapping_dates,
+		"overlapping_requests": overlapping_requests
+	}
+
+
 def _validate_parent_student_access(parent_id, student_ids):
 	"""Validate that parent has access to all students and is key person
+	
+	CRM Family Relationship is a child table within CRM Family, so we query it from the parent table.
 	
 	Args:
 		parent_id: Guardian name (from _get_current_parent)
@@ -43,28 +106,34 @@ def _validate_parent_student_access(parent_id, student_ids):
 	frappe.logger().info(f"🔍 Validating access - Guardian: {parent_id}, Students: {student_ids}")
 	
 	for student_id in student_ids:
-		# Check if relationship exists where:
-		# - guardian = parent_id (current logged in guardian)
-		# - student = student_id
-		# - key_person = true
-		relationship = frappe.db.get_value("CRM Family Relationship", {
-			"guardian": parent_id,  # guardian field, not parent (parent is family name)
-			"student": student_id,
-			"key_person": 1  # Must be key person
-		}, ["name", "key_person"])
-
-		if not relationship:  # If no relationship found or key_person is not 1
-			# Debug: Get all relationships for this guardian-student pair to see what exists
-			all_relationships = frappe.db.get_all("CRM Family Relationship", {
-				"guardian": parent_id,
-				"student": student_id
-			}, ["name", "key_person", "parent", "access"])
+		# Query from CRM Guardian's student_relationships child table
+		# CRM Family Relationship is stored as a child table in CRM Guardian
+		guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
+		
+		# Find the relationship record in the child table
+		found_and_key_person = False
+		for rel in guardian_doc.student_relationships:
+			if rel.student == student_id and rel.key_person:
+				found_and_key_person = True
+				frappe.logger().info(f"✅ Guardian {parent_id} IS key_person for student {student_id}")
+				break
+		
+		if not found_and_key_person:
+			# Debug: Get all relationships for this guardian-student pair
+			all_rels = []
+			for rel in guardian_doc.student_relationships:
+				if rel.student == student_id:
+					all_rels.append({
+						"student": rel.student,
+						"key_person": rel.key_person,
+						"access": rel.access,
+						"relationship_type": rel.relationship_type
+					})
 			
 			frappe.logger().warning(f"❌ Guardian {parent_id} is NOT key_person for student {student_id}")
-			frappe.logger().warning(f"   Found relationships: {all_relationships}")
+			frappe.logger().warning(f"   Found relationships for this student: {all_rels}")
+			frappe.logger().warning(f"   All student relationships for guardian: {[(r.student, r.key_person) for r in guardian_doc.student_relationships]}")
 			return False
-		else:
-			frappe.logger().info(f"✅ Guardian {parent_id} IS key_person for student {student_id}")
 
 	frappe.logger().info(f"✅ Guardian {parent_id} validated as key_person for all {len(student_ids)} students")
 	return True
@@ -135,6 +204,24 @@ def submit_leave_request():
 
 		# Create separate request for each student
 		for student_id in students:
+			# Check for overlapping leave requests
+			# This prevents duplicate/overlapping leave records for the same student
+			overlap_check = _check_overlapping_leave_requests(student_id, data['start_date'], data['end_date'])
+			if overlap_check['has_overlap']:
+				# Format overlapping dates (Vietnamese + English)
+				overlapping_dates = overlap_check['overlapping_dates']
+				dates_str_vi = ", ".join(overlapping_dates)  # e.g. "2025-01-10, 2025-01-12, 2025-01-15"
+				dates_str_en = ", ".join(overlapping_dates)
+				
+				frappe.logger().warning(f"⚠️ Student {student_id} has overlapping leave requests on dates: {dates_str_en}")
+				
+				# Song ngữ error message
+				error_msg_vi = f"Ngày {dates_str_vi} đã có đơn xin nghỉ phép. Vui lòng chọn ngày khác hoặc chỉnh sửa đơn hiện tại."
+				error_msg_en = f"Days {dates_str_en} already have leave requests. Please choose different dates or edit the existing request."
+				error_msg = f"{error_msg_vi} | {error_msg_en}"
+				
+				return error_response(error_msg_vi)
+			
 			# Get student campus
 			student_campus = frappe.db.get_value("CRM Student", student_id, "campus_id")
 			if not student_campus:
@@ -201,91 +288,87 @@ def get_my_leave_requests(student_id=None):
 			parent_guardian_id = parent_user_email.split("@")[0]
 		actual_parent_id = parent_id
 
-		# Get all students where current guardian has any relationship (key person or not)
-		# This ensures parent sees all leave requests for their children, even if created by teacher
-		family_relationships = frappe.get_all(
-			"CRM Family Relationship",
-			filters={"guardian": parent_id},  # guardian field, not parent (parent is family name)
-			fields=["student"]
-		)
+	# Get all students where current guardian has any relationship (key person or not)
+	# This ensures parent sees all leave requests for their children, even if created by teacher
+	# CRM Family Relationship is a child table in CRM Guardian, not a standalone doctype
+	guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
+	student_ids = [rel.student for rel in guardian_doc.student_relationships] if guardian_doc.student_relationships else []
+	
+	if not student_ids:
+		return list_response([])  # No students linked to this parent
+
+	# Build filters - filter by student_id instead of parent_id
+	# This ensures all parents of a student can see leave requests for that student
+	filters = {"student_id": ["in", student_ids]}
+	if student_id:
+		# If specific student_id requested, ensure it belongs to this parent
+		frappe.logger().info(f"DEBUG: Requested student_id={student_id}, parent student_ids={student_ids}")
+		if student_id in student_ids:
+			filters = {"student_id": student_id}
+			frappe.logger().info(f"DEBUG: Using specific student filter: {filters}")
+		else:
+			frappe.logger().info(f"DEBUG: Student {student_id} not in parent's students {student_ids}, returning empty")
+			return list_response([])  # Student doesn't belong to this parent
+
+	# Get leave requests - include owner field
+	frappe.logger().info(f"DEBUG: Final filters used: {filters}")
+	requests = frappe.get_all(
+		"SIS Student Leave Request",
+		filters=filters,
+		fields=[
+			"name", "student_id", "student_name", "student_code",
+			"reason", "other_reason", "start_date", "end_date",
+			"total_days", "description", "submitted_at",
+			"creation", "modified", "owner", "parent_id"
+		],
+		order_by="creation desc"
+	)
+	frappe.logger().info(f"DEBUG: Found {len(requests)} leave requests")
+	for req in requests[:3]:  # Log first 3 requests
+		frappe.logger().info(f"DEBUG: Request {req.name} for student {req.student_id}")
+
+	# Transform reason to Vietnamese for display
+	reason_mapping = {
+		'sick_child': 'Con ốm',
+		'family_matters': 'Gia đình có việc bận',
+		'other': 'Lý do khác'
+	}
+
+	for request in requests:
+		request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
 		
-		student_ids = [rel.student for rel in family_relationships] if family_relationships else []
+		# Check if can edit (within 24 hours AND created by this parent)
+		# Leave can only be edited if:
+		# 1. Created by this parent (owner is parent's email) OR owner is None (old records)
+		# 2. Within 24 hours
+		is_created_by_parent = False
+		if request.get('owner'):
+			# Check if owner is parent's email or parent portal user
+			if request['owner'] == parent_user_email:
+				is_created_by_parent = True
+			elif parent_guardian_id and request['owner'].startswith(parent_guardian_id):
+				is_created_by_parent = True
+			# Also check if owner is a parent portal email pattern
+			elif "@parent.wellspring.edu.vn" in str(request['owner']):
+				owner_guardian_id = str(request['owner']).split("@")[0]
+				if owner_guardian_id == parent_guardian_id:
+					is_created_by_parent = True
+		else:
+			# Old records without owner - assume created by parent if parent_id matches
+			is_created_by_parent = (request.get('parent_id') == actual_parent_id) if actual_parent_id else False
 		
-		if not student_ids:
-			return list_response([])  # No students linked to this parent
+		if request['submitted_at']:
+			submitted_time = datetime.strptime(str(request['submitted_at']), '%Y-%m-%d %H:%M:%S.%f')
+			time_diff = datetime.now() - submitted_time
+			within_24_hours = time_diff.total_seconds() <= (24 * 60 * 60)
+			request['can_edit'] = is_created_by_parent and within_24_hours
+		else:
+			request['can_edit'] = is_created_by_parent
+		
+		# Add creator info for display
+		request['is_created_by_parent'] = is_created_by_parent
 
-		# Build filters - filter by student_id instead of parent_id
-		# This ensures all parents of a student can see leave requests for that student
-		filters = {"student_id": ["in", student_ids]}
-		if student_id:
-			# If specific student_id requested, ensure it belongs to this parent
-			frappe.logger().info(f"DEBUG: Requested student_id={student_id}, parent student_ids={student_ids}")
-			if student_id in student_ids:
-				filters = {"student_id": student_id}
-				frappe.logger().info(f"DEBUG: Using specific student filter: {filters}")
-			else:
-				frappe.logger().info(f"DEBUG: Student {student_id} not in parent's students {student_ids}, returning empty")
-				return list_response([])  # Student doesn't belong to this parent
-
-		# Get leave requests - include owner field
-		frappe.logger().info(f"DEBUG: Final filters used: {filters}")
-		requests = frappe.get_all(
-			"SIS Student Leave Request",
-			filters=filters,
-			fields=[
-				"name", "student_id", "student_name", "student_code",
-				"reason", "other_reason", "start_date", "end_date",
-				"total_days", "description", "submitted_at",
-				"creation", "modified", "owner", "parent_id"
-			],
-			order_by="creation desc"
-		)
-		frappe.logger().info(f"DEBUG: Found {len(requests)} leave requests")
-		for req in requests[:3]:  # Log first 3 requests
-			frappe.logger().info(f"DEBUG: Request {req.name} for student {req.student_id}")
-
-		# Transform reason to Vietnamese for display
-		reason_mapping = {
-			'sick_child': 'Con ốm',
-			'family_matters': 'Gia đình có việc bận',
-			'other': 'Lý do khác'
-		}
-
-		for request in requests:
-			request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
-			
-			# Check if can edit (within 24 hours AND created by this parent)
-			# Leave can only be edited if:
-			# 1. Created by this parent (owner is parent's email) OR owner is None (old records)
-			# 2. Within 24 hours
-			is_created_by_parent = False
-			if request.get('owner'):
-				# Check if owner is parent's email or parent portal user
-				if request['owner'] == parent_user_email:
-					is_created_by_parent = True
-				elif parent_guardian_id and request['owner'].startswith(parent_guardian_id):
-					is_created_by_parent = True
-				# Also check if owner is a parent portal email pattern
-				elif "@parent.wellspring.edu.vn" in str(request['owner']):
-					owner_guardian_id = str(request['owner']).split("@")[0]
-					if owner_guardian_id == parent_guardian_id:
-						is_created_by_parent = True
-			else:
-				# Old records without owner - assume created by parent if parent_id matches
-				is_created_by_parent = (request.get('parent_id') == actual_parent_id) if actual_parent_id else False
-			
-			if request['submitted_at']:
-				submitted_time = datetime.strptime(str(request['submitted_at']), '%Y-%m-%d %H:%M:%S.%f')
-				time_diff = datetime.now() - submitted_time
-				within_24_hours = time_diff.total_seconds() <= (24 * 60 * 60)
-				request['can_edit'] = is_created_by_parent and within_24_hours
-			else:
-				request['can_edit'] = is_created_by_parent
-			
-			# Add creator info for display
-			request['is_created_by_parent'] = is_created_by_parent
-
-		return list_response(requests)
+	return list_response(requests)
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Parent Portal Get Leave Requests Error")
