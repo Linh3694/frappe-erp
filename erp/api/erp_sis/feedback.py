@@ -228,6 +228,9 @@ def admin_get():
                             student_name = crm_student.student_name or relationship.student
                             student_code = crm_student.student_code
 
+                            # Debug logging
+                            frappe.logger().info(f"CRM Student {relationship.student}: name={student_name}, code={student_code}")
+
                             # If we have student_code, get class info from SIS Student
                             if student_code:
                                 sis_students = frappe.get_all("Student",
@@ -235,9 +238,13 @@ def admin_get():
                                     fields=["name", "student_name", "program"]
                                 )
 
+                                frappe.logger().info(f"SIS Students found for code {student_code}: {len(sis_students)}")
+
                                 if sis_students:
                                     sis_student = sis_students[0]
-                                    program = sis_student.program
+                                    program = sis_student.program or sis_student.student_name
+
+                                    frappe.logger().info(f"SIS Student {sis_student.name}: program={program}")
 
                                     # Get class info from SIS Class Student - only regular classes
                                     student_classes = frappe.get_all("SIS Class Student",
@@ -245,14 +252,19 @@ def admin_get():
                                         fields=["class_id"]
                                     )
 
+                                    frappe.logger().info(f"Class assignments for student {sis_student.name}: {len(student_classes)}")
+
                                     for class_ref in student_classes:
                                         try:
                                             class_doc = frappe.get_doc("SIS Class", class_ref.class_id)
+                                            frappe.logger().info(f"Class {class_ref.class_id}: type={getattr(class_doc, 'class_type', 'N/A')}, title={getattr(class_doc, 'title', 'N/A')}")
                                             # Check if this is a regular class (not mixed/club)
                                             if hasattr(class_doc, 'class_type') and class_doc.class_type == "regular":
                                                 class_name = class_doc.title
+                                                frappe.logger().info(f"Found regular class: {class_name}")
                                                 break  # Use first regular class found
-                                        except:
+                                        except Exception as e:
+                                            frappe.logger().error(f"Error getting class {class_ref.class_id}: {str(e)}")
                                             continue
 
                         except frappe.DoesNotExistError:
