@@ -12,7 +12,6 @@ from frappe.utils import now, get_datetime
 from erp.utils.api_response import (
     success_response,
     error_response,
-    list_response,
     single_item_response,
     validation_error_response,
     not_found_response
@@ -69,7 +68,10 @@ def create():
         # Validate required fields
         feedback_type = data.get("feedback_type")
         if not feedback_type:
-            return validation_error_response("feedback_type là bắt buộc")
+            return validation_error_response(
+                "feedback_type là bắt buộc",
+                {"feedback_type": ["feedback_type là bắt buộc"]}
+            )
         
         # Create feedback doc
         feedback = frappe.get_doc({
@@ -199,7 +201,10 @@ def get():
         
         feedback_name = data.get("name") or request_args.get("name")
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response(
+                "name là bắt buộc",
+                {"name": ["name là bắt buộc"]}
+            )
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -255,7 +260,10 @@ def update():
         feedback_name = data.get("name")
         
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response(
+                "name là bắt buộc",
+                {"name": ["name là bắt buộc"]}
+            )
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -319,7 +327,10 @@ def delete():
         feedback_name = data.get("name")
         
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response(
+                "name là bắt buộc",
+                {"name": ["name là bắt buộc"]}
+            )
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -370,9 +381,15 @@ def add_reply():
         content = data.get("content")
         
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response(
+                "name là bắt buộc",
+                {"name": ["name là bắt buộc"]}
+            )
         if not content:
-            return validation_error_response("content là bắt buộc")
+            return validation_error_response(
+                "content là bắt buộc",
+                {"content": ["content là bắt buộc"]}
+            )
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -438,9 +455,15 @@ def update_status():
         status = data.get("status")
         
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response(
+                "name là bắt buộc",
+                {"name": ["name là bắt buộc"]}
+            )
         if not status:
-            return validation_error_response("status là bắt buộc")
+            return validation_error_response(
+                "status là bắt buộc",
+                {"status": ["status là bắt buộc"]}
+            )
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -502,9 +525,15 @@ def submit_resolution_rating():
         resolution_comment = data.get("resolution_comment", "")
         
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response(
+                "name là bắt buộc",
+                {"name": ["name là bắt buộc"]}
+            )
         if not resolution_rating:
-            return validation_error_response("resolution_rating là bắt buộc")
+            return validation_error_response(
+                "resolution_rating là bắt buộc",
+                {"resolution_rating": ["resolution_rating là bắt buộc"]}
+            )
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
