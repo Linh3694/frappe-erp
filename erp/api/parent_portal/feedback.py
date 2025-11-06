@@ -136,7 +136,9 @@ def create():
         if data.get("attachments"):
             feedback.attachments = data.get("attachments")
         
-        feedback.insert()
+        # Insert with ignore_permissions since API validates permissions separately
+        feedback.flags.ignore_permissions = True
+        feedback.insert(ignore_permissions=True)
         frappe.db.commit()
         
         return success_response(

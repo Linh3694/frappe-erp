@@ -327,10 +327,18 @@ def verify_otp_and_login(phone_number, otp):
             
             # Add Parent role
             user_doc.add_roles("Parent")
+            # Add Guardian role for feedback access
+            user_doc.add_roles("Guardian")
             
             logs.append(f"✅ User created: {user_email}")
         else:
             logs.append(f"✅ User already exists: {user_email}")
+            # Ensure existing user has Guardian role
+            user_doc = frappe.get_doc("User", user_email)
+            if "Guardian" not in [r.role for r in user_doc.roles]:
+                user_doc.add_roles("Guardian")
+                user_doc.save(ignore_permissions=True)
+                logs.append(f"✅ Added Guardian role to existing user: {user_email}")
         
         # Generate JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
