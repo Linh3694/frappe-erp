@@ -165,11 +165,14 @@ def list_feedback():
         # Get total count
         total = frappe.db.count("Feedback", filters=filters)
         
-        return list_response(
-            data=feedback_list,
-            total=total,
-            page=page,
-            page_length=page_length
+        return success_response(
+            data={
+                "data": feedback_list,
+                "total": total,
+                "page": page,
+                "page_length": page_length
+            },
+            message="Lấy danh sách feedback thành công"
         )
     
     except Exception as e:
