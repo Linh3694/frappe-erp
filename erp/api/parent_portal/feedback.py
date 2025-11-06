@@ -148,7 +148,8 @@ def create():
             feedback.content = data.get("content")
             feedback.priority = data.get("priority", "Trung bình")
             # Explicitly clear rating fields for "Góp ý" type
-            feedback.rating = None
+            # Set rating to 0 instead of None because Rating fieldtype may not accept None
+            feedback.rating = 0
             feedback.rating_comment = None
         elif feedback_type == "Đánh giá":
             # Ensure rating is set as integer
@@ -180,6 +181,9 @@ def create():
         # Manually call validate() to run business logic (deadline calculation, SLA status, etc.)
         # Keep ignore_validate=True to skip required field validation (already validated in API)
         feedback.validate()
+        # Keep ignore_validate=True when saving to prevent Frappe from re-validating required fields
+        # This is necessary because rating field has reqd=1 but depends_on condition
+        feedback.flags.ignore_validate = True
         feedback.save()
         
         frappe.db.commit()

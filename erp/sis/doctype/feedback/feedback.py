@@ -6,13 +6,24 @@ from frappe.model.document import Document
 
 
 class Feedback(Document):
+	def _get_missing_mandatory_fields(self):
+		"""Override to skip rating validation for 'Góp ý' type"""
+		missing = super()._get_missing_mandatory_fields()
+		
+		# Filter out rating field if feedback_type is "Góp ý"
+		if self.feedback_type == "Góp ý":
+			missing = [m for m in missing if m[0] != "rating"]
+		
+		return missing
+	
 	def validate(self):
 		"""Validate feedback before save"""
 		# Skip rating validation for "Góp ý" type
 		if self.feedback_type == "Góp ý":
 			# Clear rating fields to avoid validation errors
+			# Set rating to 0 instead of None because Rating fieldtype may not accept None
 			if hasattr(self, 'rating'):
-				self.rating = None
+				self.rating = 0
 			if hasattr(self, 'rating_comment'):
 				self.rating_comment = None
 		
