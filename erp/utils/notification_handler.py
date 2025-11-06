@@ -397,6 +397,17 @@ def send_bulk_parent_notifications(
                     "en": body
                 }
             
+            # Merge custom data parameter if provided
+            merged_data = {
+                "type": recipient_type,
+                "notificationType": recipient_type,
+                **notification_data
+            }
+            
+            # If custom data is provided, merge it (data parameter takes precedence)
+            if data:
+                merged_data.update(data)
+            
             payload = {
                 "title": notification_title,
                 "body": notification_body,
@@ -405,11 +416,7 @@ def send_bulk_parent_notifications(
                 "type": "system",
                 "priority": "medium",
                 "channel": "push",
-                "data": {
-                    "type": recipient_type,
-                    "notificationType": recipient_type,
-                    **notification_data
-                }
+                "data": merged_data
             }
             
             frappe.logger().info(f"📤 [Notification Handler] Sending to notification-service: {notification_service_url}/api/notifications/send")
