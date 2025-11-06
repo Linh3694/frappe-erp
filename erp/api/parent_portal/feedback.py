@@ -152,9 +152,12 @@ def create():
             feedback.rating = 0
             feedback.rating_comment = None
         elif feedback_type == "Đánh giá":
-            # Ensure rating is set as integer
+            # Ensure rating is set as integer (1-5 scale)
             rating_value = int(data.get("rating", 0))
-            feedback.rating = rating_value  # Always set rating (validation already checked it's > 0)
+            # Frappe Rating fieldtype stores normalized value (0-1), so we need to divide by 5
+            # Rating 5 stars = 5/5 = 1.0, Rating 1 star = 1/5 = 0.2
+            normalized_rating = rating_value / 5.0
+            feedback.rating = normalized_rating  # Store normalized value (0-1)
             feedback.rating_comment = data.get("rating_comment", "") or ""
             feedback.status = "Hoàn thành"  # Auto-complete for rating
             # Explicitly clear "Góp ý" fields for "Đánh giá" type
