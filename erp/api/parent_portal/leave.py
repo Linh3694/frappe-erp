@@ -31,14 +31,15 @@ def _get_current_parent():
 
 
 def _validate_parent_student_access(parent_id, student_ids):
-	"""Validate that parent has access to all students"""
+	"""Validate that parent has access to all students and is key person"""
 	for student_id in student_ids:
-		# Check if relationship exists
-		exists = frappe.db.exists("CRM Family Relationship", {
+		# Check if relationship exists AND parent is key person
+		relationship = frappe.db.get_value("CRM Family Relationship", {
 			"parent": parent_id,
 			"student": student_id
-		})
-		if not exists:
+		}, ["name", "key_person"])
+
+		if not relationship or not relationship[1]:  # relationship[1] is key_person field
 			return False
 
 	return True
@@ -102,9 +103,9 @@ def submit_leave_request():
 		if not students or (isinstance(students, list) and len(students) == 0):
 			return validation_error_response("Vui lòng chọn ít nhất một học sinh", {"students": ["Phải chọn ít nhất một học sinh"]})
 
-		# Validate parent has access to all students
+		# Validate parent has access to all students AND is key person
 		if not _validate_parent_student_access(parent_id, students):
-			return error_response("Bạn không có quyền gửi đơn cho một số học sinh đã chọn")
+			return error_response("Bạn không có quyền gửi đơn cho một số học sinh đã chọn. Chỉ người liên hệ chính (key person) mới có thể tạo đơn nghỉ phép.")
 
 		created_requests = []
 
