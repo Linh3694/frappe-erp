@@ -365,8 +365,19 @@ def get_student_subject_teachers():
     logs = []
 
     try:
+        # Debug: Log all form data
+        logs.append(f"🔍 DEBUG frappe.form_dict: {dict(frappe.form_dict)}")
+        logs.append(f"🔍 DEBUG frappe.request.args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
+
         # Get student_id from frappe form data
         student_id = frappe.form_dict.get('student_id')
+
+        # Also try to get from request args
+        if not student_id:
+            student_id = frappe.request.args.get('student_id') if hasattr(frappe.request, 'args') else None
+
+        logs.append(f"🔍 DEBUG student_id from form_dict: {student_id}")
+        logs.append(f"🔍 DEBUG student_id from request.args: {frappe.request.args.get('student_id') if hasattr(frappe.request, 'args') else 'No request.args'}")
 
         if not student_id:
             return validation_error_response("Student ID is required", {"student_id": ["Required"]})
