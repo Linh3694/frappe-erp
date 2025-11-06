@@ -330,9 +330,13 @@ def get_my_leave_requests(student_id=None):
 
 		# Get all students where current guardian has any relationship (key person or not)
 		# This ensures parent sees all leave requests for their children, even if created by teacher
-		# CRM Family Relationship is a child table in CRM Guardian, not a standalone doctype
-		guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
-		student_ids = [rel.student for rel in guardian_doc.student_relationships] if guardian_doc.student_relationships else []
+		# Query CRM Family Relationship directly to get all student IDs linked to this guardian
+		all_relationships = frappe.get_all(
+			"CRM Family Relationship",
+			filters={"guardian": parent_id},
+			fields=["student"]
+		)
+		student_ids = list(set([rel.student for rel in all_relationships]))  # Unique student IDs
 		
 		if not student_ids:
 			return list_response([])  # No students linked to this parent
