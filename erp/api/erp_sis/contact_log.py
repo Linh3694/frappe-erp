@@ -366,26 +366,57 @@ def send_contact_log():
                 code="UPDATE_FAILED"
             )
         
-        # Send notifications using unified handler
+        # Send notifications using unified handler - individually for each student
         from erp.utils.notification_handler import send_bulk_parent_notifications
         
         try:
-            print(f"📨 [CONTACT_LOG] Sending notifications to parents of {len(student_ids)} students")
+            print(f"📨 [CONTACT_LOG] Sending individual notifications to parents of {len(student_ids)} students")
             
-            notification_result = send_bulk_parent_notifications(
-                recipient_type="contact_log",
-                recipients_data={
-                    "student_ids": student_ids
-                },
-                title="Sổ liên lạc",
-                body="Học sinh của bạn có nhận xét mới về ngày học hôm nay.",
-                icon="/icon.png",
-                data={
-                    "type": "contact_log",
-                    "student_ids": student_ids,
-                    "timestamp": frappe.utils.now()
-                }
-            )
+            # Send notification for each student individually (so we can include student_name)
+            total_success = 0
+            total_failed = 0
+            total_parents = 0
+            
+            for student_id in student_ids:
+                try:
+                    # Get student name
+                    student_name = frappe.db.get_value("CRM Student", student_id, "student_name")
+                    
+                    if not student_name:
+                        print(f"⚠️ [CONTACT_LOG] Student name not found for {student_id}, skipping")
+                        continue
+                    
+                    # Send notification for this student with their name
+                    result = send_bulk_parent_notifications(
+                        recipient_type="contact_log",
+                        recipients_data={
+                            "student_ids": [student_id]
+                        },
+                        title="Sổ liên lạc",
+                        body=f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay.",
+                        icon="/icon.png",
+                        data={
+                            "type": "contact_log",
+                            "student_id": student_id,
+                            "student_name": student_name,
+                            "timestamp": frappe.utils.now()
+                        }
+                    )
+                    
+                    total_success += result.get('success_count', 0)
+                    total_failed += result.get('failed_count', 0)
+                    total_parents += result.get('total_parents', 0)
+                    
+                except Exception as student_error:
+                    print(f"❌ [CONTACT_LOG] Error sending notification for {student_id}: {str(student_error)}")
+                    continue
+            
+            # Create summary result
+            notification_result = {
+                'success_count': total_success,
+                'failed_count': total_failed,
+                'total_parents': total_parents
+            }
             
             print(f"✅ [CONTACT_LOG] Notifications sent - Success: {notification_result.get('success_count')}, Failed: {notification_result.get('failed_count')}")
             
