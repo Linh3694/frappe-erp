@@ -283,7 +283,7 @@ def admin_get():
 
                         student_info = {
                             "name": student_name,
-                            "student_id": student_code or relationship.student,  # Use student_code, fallback to CRM Student ID
+                            "student_id": student_code or relationship.student,  # student_code from CRM Student, fallback to CRM Student ID
                             "relationship": relationship.relationship_type,
                             "class_name": class_name,
                             "program": program,
@@ -808,6 +808,51 @@ def export():
             code="EXPORT_ERROR"
         )
 
+
+
+@frappe.whitelist(allow_guest=False)
+def get_users_for_assignment():
+    """Get users with SIS IT role for feedback assignment selection"""
+    try:
+        _check_staff_permission()
+
+        # Get enabled users with SIS IT role using SQL join for better performance
+        users = frappe.db.sql("""
+            SELECT DISTINCT
+                u.name,
+                u.email,
+                u.full_name,
+                u.first_name,
+                u.last_name,
+                u.user_image,
+                u.employee_code,
+                u.employee_id
+            FROM `tabUser` u
+            INNER JOIN `tabHas Role` hr ON hr.parent = u.name
+            WHERE u.enabled = 1
+                AND hr.role = 'SIS IT'
+            ORDER BY u.full_name ASC
+        """, as_dict=True)
+
+        # Ensure each user has user_id field (use name if not present)
+        processed_users = []
+        for user in users:
+            processed_user = user.copy()
+            # Ensure user_id is always present
+            processed_user["user_id"] = user.get("name")  # name is the user ID in Frappe
+            processed_users.append(processed_user)
+
+        return success_response(
+            data=processed_users,
+            message="Lấy danh sách user SIS IT thành công"
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"Error getting users for assignment: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách user: {str(e)}",
+            code="GET_USERS_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False)
