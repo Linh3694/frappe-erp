@@ -250,7 +250,7 @@ def submit_leave_request():
 				frappe.logger().warning(f"⚠️ Student {student_id} has overlapping leave requests on dates: {dates_str_vi}")
 				
 				# Song ngữ error message
-				error_msg_vi = f"Ngày {dates_str_vi} đã có đơn xin nghỉ phép. Vui lòng chọn ngày khác hoặc chỉnh sửa đơn hiện tại."
+				error_msg_vi = f"Ngày {dates_str_vi} đã có đơn xin nghỉ phép."
 				
 				return error_response(error_msg_vi)
 			
