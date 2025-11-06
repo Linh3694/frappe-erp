@@ -228,14 +228,11 @@ def admin_get():
                             student_name = crm_student.student_name or relationship.student
                             student_code = crm_student.student_code
 
-                            # Get class info from SIS Class Student - similar to otp_auth.py approach
-                            program = None  # Will be set from SIS Student if found
-
-                            # Get SIS Student by student_code to get program and class info
+                            # If we have student_code, get class info from SIS Student
                             if student_code:
                                 sis_students = frappe.get_all("Student",
                                     filters={"student_code": student_code},
-                                    fields=["name", "program"]
+                                    fields=["name", "student_name", "program"]
                                 )
 
                                 if sis_students:
@@ -251,9 +248,9 @@ def admin_get():
                                     for class_ref in student_classes:
                                         try:
                                             class_doc = frappe.get_doc("SIS Class", class_ref.class_id)
-                                            # Check if this is a regular class (same as otp_auth.py)
+                                            # Check if this is a regular class (not mixed/club)
                                             if hasattr(class_doc, 'class_type') and class_doc.class_type == "regular":
-                                                class_name = class_doc.title  # Use title as class_name (same as otp_auth.py)
+                                                class_name = class_doc.title
                                                 break  # Use first regular class found
                                         except:
                                             continue
