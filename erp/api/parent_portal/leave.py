@@ -260,20 +260,25 @@ def submit_leave_request():
 				continue
 
 			# Create leave request
-			leave_request = frappe.get_doc({
-				"doctype": "SIS Student Leave Request",
-				"student_id": student_id,
-				"parent_id": parent_id,
-				"campus_id": student_campus,
-				"reason": data['reason'],
-				"other_reason": data.get('other_reason', ''),
-				"start_date": data['start_date'],
-				"end_date": data['end_date'],
-				"description": data.get('description', ''),
-				"submitted_at": datetime.now()
-			})
+			try:
+				leave_request = frappe.get_doc({
+					"doctype": "SIS Student Leave Request",
+					"student_id": student_id,
+					"parent_id": parent_id,
+					"campus_id": student_campus,
+					"reason": data['reason'],
+					"other_reason": data.get('other_reason', ''),
+					"start_date": data['start_date'],
+					"end_date": data['end_date'],
+					"description": data.get('description', ''),
+					"submitted_at": datetime.now()
+				})
 
-			leave_request.insert(ignore_permissions=True)
+				leave_request.insert(ignore_permissions=True)
+			except Exception as e:
+				frappe.logger().error(f"❌ Error creating leave request for student {student_id}: {str(e)}")
+				error_detail = str(e)
+				return error_response(f"Lỗi khi tạo đơn: {error_detail}")
 
 			# Attach files if any
 			if frappe.request.files:
