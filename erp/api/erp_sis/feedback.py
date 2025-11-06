@@ -216,20 +216,59 @@ def admin_get():
                 students = []
                 if guardian.student_relationships:
                     for relationship in guardian.student_relationships:
-                        # Get student name from CRM Student doctype
+                        # Get student info from CRM Student and SIS Student doctypes
                         student_name = relationship.student
+                        student_code = None
+                        class_name = None
+                        program = None
+
                         try:
-                            student_doc = frappe.get_doc("CRM Student", relationship.student)
-                            student_name = student_doc.student_name or relationship.student
-                        except:
-                            pass  # Use student ID if can't fetch name
+                            # Get from CRM Student
+                            crm_student = frappe.get_doc("CRM Student", relationship.student)
+                            student_name = crm_student.student_name or relationship.student
+                            student_code = crm_student.student_code
+
+                            # If we have student_code, get class info from SIS Student
+                            if student_code:
+                                sis_students = frappe.get_all("Student",
+                                    filters={"student_code": student_code},
+                                    fields=["name", "student_name", "program"]
+                                )
+
+                                if sis_students:
+                                    sis_student = sis_students[0]
+                                    program = sis_student.program
+
+                                    # Get class info from SIS Class Student - only regular classes
+                                    student_classes = frappe.get_all("SIS Class Student",
+                                        filters={"student_id": sis_student.name},
+                                        fields=["class_id"]
+                                    )
+
+                                    for class_ref in student_classes:
+                                        try:
+                                            class_doc = frappe.get_doc("SIS Class", class_ref.class_id)
+                                            # Check if this is a regular class (not mixed/club)
+                                            if hasattr(class_doc, 'class_type') and class_doc.class_type == "regular":
+                                                class_name = class_doc.title
+                                                break  # Use first regular class found
+                                        except:
+                                            continue
+
+                        except frappe.DoesNotExistError:
+                            # Student not found, use relationship student ID
+                            student_name = relationship.student
+                        except Exception as e:
+                            # Any other error, log and use relationship student ID
+                            frappe.logger().error(f"Error getting student {relationship.student}: {str(e)}")
+                            student_name = relationship.student
 
                         student_info = {
                             "name": student_name,
                             "student_id": relationship.student,
                             "relationship": relationship.relationship_type,
-                            "class_name": None,  # CRM Family Relationship doesn't have these fields
-                            "program": None
+                            "class_name": class_name,
+                            "program": program
                         }
                         students.append(student_info)
 
