@@ -182,7 +182,7 @@ def admin_get():
         
         feedback_name = data.get("name") or request_args.get("name")
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -328,9 +328,9 @@ def assign():
         feedback_name = data.get("name")
         assigned_to = data.get("assigned_to")
         priority = data.get("priority")
-        
+
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -410,11 +410,11 @@ def assign_bulk():
         feedback_names = data.get("feedback_names", [])
         assigned_to = data.get("assigned_to")
         priority = data.get("priority")
-        
+
         if not feedback_names:
-            return validation_error_response("feedback_names là bắt buộc")
+            return validation_error_response("feedback_names là bắt buộc", {"feedback_names": ["feedback_names là bắt buộc"]})
         if not assigned_to:
-            return validation_error_response("assigned_to là bắt buộc")
+            return validation_error_response("assigned_to là bắt buộc", {"assigned_to": ["assigned_to là bắt buộc"]})
         
         success_count = 0
         error_count = 0
@@ -483,11 +483,11 @@ def update_priority():
         data = frappe.local.form_dict
         feedback_name = data.get("name")
         priority = data.get("priority")
-        
+
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
         if not priority:
-            return validation_error_response("priority là bắt buộc")
+            return validation_error_response("priority là bắt buộc", {"priority": ["priority là bắt buộc"]})
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -546,11 +546,11 @@ def add_reply():
         feedback_name = data.get("name")
         content = data.get("content")
         is_internal = data.get("is_internal", False)
-        
+
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
         if not content:
-            return validation_error_response("content là bắt buộc")
+            return validation_error_response("content là bắt buộc", {"content": ["content là bắt buộc"]})
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -609,11 +609,11 @@ def update_status():
         data = frappe.local.form_dict
         feedback_name = data.get("name")
         status = data.get("status")
-        
+
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
         if not status:
-            return validation_error_response("status là bắt buộc")
+            return validation_error_response("status là bắt buộc", {"status": ["status là bắt buộc"]})
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -652,9 +652,9 @@ def close_feedback():
         
         data = frappe.local.form_dict
         feedback_name = data.get("name")
-        
+
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
         
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
@@ -868,7 +868,7 @@ def update_assignment():
         priority = data.get("priority")
 
         if not feedback_name:
-            return validation_error_response("name là bắt buộc")
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
 
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
