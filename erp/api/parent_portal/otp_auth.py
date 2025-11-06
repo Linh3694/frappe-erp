@@ -310,40 +310,47 @@ def verify_otp_and_login(phone_number, otp):
         # Get or create User for this guardian
         user_email = f"{guardian['guardian_id']}@parent.wellspring.edu.vn"
         
-        if not frappe.db.exists("User", user_email):
-            logs.append(f"📝 Creating new User for guardian: {user_email}")
-            
-            # Create user
-            user_doc = frappe.get_doc({
-                "doctype": "User",
-                "email": user_email,
-                "first_name": guardian["guardian_name"],
-                "enabled": 1,
-                "user_type": "Website User",
-                "send_welcome_email": 0
-            })
-            user_doc.flags.ignore_permissions = True
-            user_doc.insert(ignore_permissions=True)
-            
-            # Add Parent role
-            user_doc.add_roles("Parent")
-            # Add Guardian role for feedback access
-            user_doc.add_roles("Guardian")
-            
-            logs.append(f"✅ User created: {user_email}")
-        else:
-            logs.append(f"✅ User already exists: {user_email}")
-            # Ensure existing user has Guardian role
-            user_doc = frappe.get_doc("User", user_email, ignore_permissions=True)
-            if "Guardian" not in [r.role for r in user_doc.roles]:
-                user_doc.add_roles("Guardian")
-                user_doc.save(ignore_permissions=True)
-                logs.append(f"✅ Added Guardian role to existing user: {user_email}")
+        # Use Administrator context to bypass permissions
+        frappe.set_user("Administrator")
         
-        # Generate JWT token
-        from erp.api.erp_common_user.auth import generate_jwt_token
-        token = generate_jwt_token(user_email)
-        logs.append("JWT token generated")
+        try:
+            if not frappe.db.exists("User", user_email):
+                logs.append(f"📝 Creating new User for guardian: {user_email}")
+                
+                # Create user
+                user_doc = frappe.get_doc({
+                    "doctype": "User",
+                    "email": user_email,
+                    "first_name": guardian["guardian_name"],
+                    "enabled": 1,
+                    "user_type": "Website User",
+                    "send_welcome_email": 0
+                })
+                user_doc.flags.ignore_permissions = True
+                user_doc.insert(ignore_permissions=True)
+                
+                # Add Parent role
+                user_doc.add_roles("Parent")
+                # Add Guardian role for feedback access
+                user_doc.add_roles("Guardian")
+                
+                logs.append(f"✅ User created: {user_email}")
+            else:
+                logs.append(f"✅ User already exists: {user_email}")
+                # Ensure existing user has Guardian role
+                user_doc = frappe.get_doc("User", user_email)
+                if "Guardian" not in [r.role for r in user_doc.roles]:
+                    user_doc.add_roles("Guardian")
+                    user_doc.save()
+                    logs.append(f"✅ Added Guardian role to existing user: {user_email}")
+            
+            # Generate JWT token
+            from erp.api.erp_common_user.auth import generate_jwt_token
+            token = generate_jwt_token(user_email)
+            logs.append("JWT token generated")
+        finally:
+            # Restore Guest user context
+            frappe.set_user("Guest")
         
         # Clear OTP from cache
         frappe.cache().delete_value(cache_key)
