@@ -464,9 +464,10 @@ def add_reply():
                 code="GUARDIAN_NOT_FOUND"
             )
         
-        data = frappe.local.form_dict
+        data = _get_request_data()
         feedback_name = data.get("name")
         content = data.get("content")
+        request_close = data.get("request_close", False)
         
         if not feedback_name:
             return validation_error_response(
@@ -497,8 +498,12 @@ def add_reply():
             )
         
         # Add reply
+        reply_content = content
+        if request_close:
+            reply_content = f"{content}\n\n[Phụ huynh yêu cầu đóng yêu cầu]"
+        
         feedback.append("replies", {
-            "content": content,
+            "content": reply_content,
             "reply_by": frappe.session.user,
             "reply_by_type": "Guardian",
             "reply_date": now(),
@@ -506,7 +511,10 @@ def add_reply():
         })
         
         # Update status
-        if feedback.status == "Chờ phản hồi phụ huynh":
+        if request_close:
+            # If requesting close, set status to waiting for staff confirmation
+            feedback.status = "Chờ phản hồi phụ huynh"
+        elif feedback.status == "Chờ phản hồi phụ huynh":
             feedback.status = "Đã phản hồi"
         
         feedback.save()
@@ -524,6 +532,104 @@ def add_reply():
         return error_response(
             message=f"Lỗi khi thêm phản hồi: {str(e)}",
             code="REPLY_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def close_and_rate():
+    """Close feedback and rate admin support"""
+    try:
+        guardian = _get_current_guardian()
+        if not guardian:
+            return error_response(
+                message="Không tìm thấy thông tin phụ huynh",
+                code="GUARDIAN_NOT_FOUND"
+            )
+        
+        data = _get_request_data()
+        feedback_name = data.get("name")
+        resolution_rating = data.get("resolution_rating")
+        resolution_comment = data.get("resolution_comment", "")
+        close_message = data.get("close_message", "")
+        
+        if not feedback_name:
+            return validation_error_response(
+                "name là bắt buộc",
+                {"name": ["name là bắt buộc"]}
+            )
+        if not resolution_rating:
+            return validation_error_response(
+                "resolution_rating là bắt buộc",
+                {"resolution_rating": ["resolution_rating là bắt buộc"]}
+            )
+        
+        # Get feedback
+        feedback = frappe.get_doc("Feedback", feedback_name)
+        
+        # Check permission
+        if feedback.guardian != guardian:
+            return error_response(
+                message="Bạn không có quyền đóng feedback này",
+                code="PERMISSION_DENIED"
+            )
+        
+        # Only allow closing "Góp ý" type
+        if feedback.feedback_type != "Góp ý":
+            return error_response(
+                message="Chỉ có thể đóng feedback loại Góp ý",
+                code="CLOSE_NOT_ALLOWED"
+            )
+        
+        # Check if feedback has staff replies
+        if not feedback.replies:
+            return error_response(
+                message="Không thể đóng feedback chưa có phản hồi từ nhân viên",
+                code="NO_STAFF_REPLY"
+            )
+        
+        # Check if there's at least one staff reply
+        has_staff_reply = any(reply.reply_by_type == "Staff" and not reply.is_internal for reply in feedback.replies)
+        if not has_staff_reply:
+            return error_response(
+                message="Không thể đóng feedback chưa có phản hồi từ nhân viên",
+                code="NO_STAFF_REPLY"
+            )
+        
+        # Add closing message if provided
+        if close_message:
+            feedback.append("replies", {
+                "content": close_message,
+                "reply_by": frappe.session.user,
+                "reply_by_type": "Guardian",
+                "reply_date": now(),
+                "is_internal": False
+            })
+        
+        # Update status to closed
+        feedback.status = "Đóng"
+        feedback.closed_at = now()
+        
+        # Update resolution rating
+        # Convert rating from 1-5 scale to normalized 0-1 scale
+        normalized_rating = float(resolution_rating) / 5.0
+        feedback.resolution_rating = normalized_rating
+        feedback.resolution_comment = resolution_comment
+        
+        feedback.save()
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": feedback.name},
+            message="Đóng yêu cầu và đánh giá thành công"
+        )
+    
+    except frappe.DoesNotExistError:
+        return not_found_response("Feedback không tồn tại")
+    except Exception as e:
+        frappe.logger().error(f"Error closing and rating feedback: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi đóng và đánh giá feedback: {str(e)}",
+            code="CLOSE_RATE_ERROR"
         )
 
 
