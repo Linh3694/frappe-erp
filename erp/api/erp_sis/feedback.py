@@ -862,10 +862,13 @@ def update_assignment():
         _check_staff_permission()
 
         data = frappe.local.form_dict
+        frappe.logger().info(f"update_assignment - form_dict: {data}")
 
         feedback_name = data.get("name")
         assigned_to = data.get("assigned_to")
         priority = data.get("priority")
+
+        frappe.logger().info(f"update_assignment - extracted: name={feedback_name}, assigned_to={assigned_to}, priority={priority}")
 
         if not feedback_name:
             return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
