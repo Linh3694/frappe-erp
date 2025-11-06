@@ -216,11 +216,20 @@ def admin_get():
                 students = []
                 if guardian.student_relationships:
                     for relationship in guardian.student_relationships:
+                        # Get student name from CRM Student doctype
+                        student_name = relationship.student
+                        try:
+                            student_doc = frappe.get_doc("CRM Student", relationship.student)
+                            student_name = student_doc.student_name or relationship.student
+                        except:
+                            pass  # Use student ID if can't fetch name
+
                         student_info = {
-                            "name": relationship.student_name or relationship.student,
+                            "name": student_name,
                             "student_id": relationship.student,
-                            "relationship": relationship.relationship,
-                            "class_name": getattr(relationship, 'student_class', None),
+                            "relationship": relationship.relationship_type,
+                            "class_name": None,  # CRM Family Relationship doesn't have these fields
+                            "program": None
                         }
                         students.append(student_info)
 
@@ -740,58 +749,6 @@ def export():
             code="EXPORT_ERROR"
         )
 
-
-@frappe.whitelist(allow_guest=False)
-def get_guardian_info():
-    """Get complete guardian information including students"""
-    try:
-        _check_staff_permission()
-
-        data = frappe.local.form_dict
-        request_args = frappe.request.args
-
-        guardian_name = data.get("guardian") or request_args.get("guardian")
-        if not guardian_name:
-            return validation_error_response("guardian là bắt buộc")
-
-        # Get guardian info from CRM Guardian
-        guardian = frappe.get_doc("CRM Guardian", guardian_name)
-        guardian_data = {
-            "name": guardian.guardian_name,
-            "phone_number": guardian.phone_number,
-            "email": guardian.email,
-            "students": []
-        }
-
-        # Get students from student_relationships table
-        students = []
-        if guardian.student_relationships:
-            for relationship in guardian.student_relationships:
-                # Get student info from CRM Family Relationship
-                student_info = {
-                    "name": relationship.student_name or relationship.student,
-                    "student_id": relationship.student,
-                    "relationship": relationship.relationship,
-                    "class_name": getattr(relationship, 'student_class', None),
-                    "program": getattr(relationship, 'program', None)
-                }
-                students.append(student_info)
-
-        guardian_data["students"] = students
-
-        return single_item_response(data=guardian_data)
-
-    except frappe.DoesNotExistError:
-        return error_response(
-            message="Guardian không tồn tại",
-            code="NOT_FOUND"
-        )
-    except Exception as e:
-        frappe.logger().error(f"Error getting guardian info: {str(e)}")
-        return error_response(
-            message=f"Lỗi khi lấy thông tin guardian: {str(e)}",
-            code="GET_ERROR"
-        )
 
 
 @frappe.whitelist(allow_guest=False)
