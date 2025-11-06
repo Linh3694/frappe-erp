@@ -317,6 +317,10 @@ def submit_leave_request():
 def get_my_leave_requests(student_id=None):
 	"""Get leave requests for current parent's students"""
 	try:
+		# Debug: Log the parameter received
+		frappe.logger().info(f"📝 [GET_LEAVE_REQUESTS] Called with student_id param: {student_id}")
+		frappe.logger().info(f"📝 [GET_LEAVE_REQUESTS] Request args: {frappe.form_dict}")
+		
 		parent_id = _get_current_parent()
 		if not parent_id:
 			return error_response("Không tìm thấy thông tin phụ huynh")
