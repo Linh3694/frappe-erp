@@ -7,18 +7,22 @@ from frappe.model.document import Document
 
 class Feedback(Document):
 	def _get_missing_mandatory_fields(self):
-		"""Override to skip rating validation for 'Góp ý' type"""
+		"""Override to skip field validation based on feedback_type"""
 		missing = super()._get_missing_mandatory_fields()
 		
-		# Filter out rating field if feedback_type is "Góp ý"
+		# Filter out fields based on feedback_type
 		if self.feedback_type == "Góp ý":
+			# Skip rating field for "Góp ý" type
 			missing = [m for m in missing if m[0] != "rating"]
+		elif self.feedback_type == "Đánh giá":
+			# Skip "Góp ý" fields (department, title, content) for "Đánh giá" type
+			missing = [m for m in missing if m[0] not in ["department", "title", "content", "priority"]]
 		
 		return missing
 	
 	def validate(self):
 		"""Validate feedback before save"""
-		# Skip rating validation for "Góp ý" type
+		# Handle fields based on feedback_type
 		if self.feedback_type == "Góp ý":
 			# Clear rating fields to avoid validation errors
 			# Set rating to 0 instead of None because Rating fieldtype may not accept None
@@ -26,11 +30,19 @@ class Feedback(Document):
 				self.rating = 0
 			if hasattr(self, 'rating_comment'):
 				self.rating_comment = None
-		
-		# Validate rating for "Đánh giá" type
-		if self.feedback_type == "Đánh giá":
+		elif self.feedback_type == "Đánh giá":
+			# Validate rating for "Đánh giá" type
 			if not self.rating or self.rating == 0:
 				frappe.throw("Rating là bắt buộc cho loại Đánh giá")
+			# Clear "Góp ý" fields to avoid validation errors
+			if hasattr(self, 'department'):
+				self.department = None
+			if hasattr(self, 'title'):
+				self.title = None
+			if hasattr(self, 'content'):
+				self.content = None
+			if hasattr(self, 'priority'):
+				self.priority = None
 		
 		# Auto-set status for Rating type
 		if self.feedback_type == "Đánh giá" and self.status == "Mới":
