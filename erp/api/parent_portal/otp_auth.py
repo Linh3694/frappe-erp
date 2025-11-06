@@ -334,7 +334,7 @@ def verify_otp_and_login(phone_number, otp):
         else:
             logs.append(f"✅ User already exists: {user_email}")
             # Ensure existing user has Guardian role
-            user_doc = frappe.get_doc("User", user_email)
+            user_doc = frappe.get_doc("User", user_email, ignore_permissions=True)
             if "Guardian" not in [r.role for r in user_doc.roles]:
                 user_doc.add_roles("Guardian")
                 user_doc.save(ignore_permissions=True)
