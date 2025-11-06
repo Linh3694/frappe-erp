@@ -1,13 +1,26 @@
 # Copyright (c) 2025, Wellspring International School and contributors
 # For license information, please see license.txt
 
-# import frappe
+import frappe
 from frappe.model.document import Document
 
 
 class Feedback(Document):
 	def validate(self):
 		"""Validate feedback before save"""
+		# Skip rating validation for "Góp ý" type
+		if self.feedback_type == "Góp ý":
+			# Clear rating fields to avoid validation errors
+			if hasattr(self, 'rating'):
+				self.rating = None
+			if hasattr(self, 'rating_comment'):
+				self.rating_comment = None
+		
+		# Validate rating for "Đánh giá" type
+		if self.feedback_type == "Đánh giá":
+			if not self.rating or self.rating == 0:
+				frappe.throw("Rating là bắt buộc cho loại Đánh giá")
+		
 		# Auto-set status for Rating type
 		if self.feedback_type == "Đánh giá" and self.status == "Mới":
 			self.status = "Hoàn thành"

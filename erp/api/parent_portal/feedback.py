@@ -172,8 +172,16 @@ def create():
             feedback.attachments = data.get("attachments")
         
         # Insert with ignore_permissions since API validates permissions separately
+        # Also ignore_validate to skip Frappe's required field validation (we validate in API)
         feedback.flags.ignore_permissions = True
-        feedback.insert(ignore_permissions=True)
+        feedback.flags.ignore_validate = True
+        feedback.insert(ignore_permissions=True, ignore_validate=True)
+        
+        # Manually call validate() to run business logic (deadline calculation, SLA status, etc.)
+        # Keep ignore_validate=True to skip required field validation (already validated in API)
+        feedback.validate()
+        feedback.save(ignore_permissions=True, ignore_validate=True)
+        
         frappe.db.commit()
         
         return success_response(
