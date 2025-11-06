@@ -120,8 +120,24 @@ def admin_list():
             limit_start=offset
         )
         
-        # Calculate SLA status for each feedback
+        # Get guardian names for all feedback
+        guardian_names = set([f.get("guardian") for f in feedback_list if f.get("guardian")])
+        guardian_name_map = {}
+        if guardian_names:
+            guardians = frappe.get_all(
+                "CRM Guardian",
+                filters={"name": ["in", list(guardian_names)]},
+                fields=["name", "guardian_name"]
+            )
+            guardian_name_map = {g["name"]: g.get("guardian_name") for g in guardians}
+        
+        # Calculate SLA status and add guardian_name for each feedback
         for feedback in feedback_list:
+            # Add guardian_name
+            if feedback.get("guardian"):
+                feedback["guardian_name"] = guardian_name_map.get(feedback["guardian"], feedback["guardian"])
+            
+            # Calculate SLA status
             if feedback.get("deadline"):
                 deadline_dt = get_datetime(feedback["deadline"])
                 now_dt = get_datetime(now())
