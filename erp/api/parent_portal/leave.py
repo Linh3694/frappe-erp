@@ -221,54 +221,8 @@ def submit_leave_request():
 
 		# Validate parent has access to all students AND is key person
 		if not _validate_parent_student_access(parent_id, students):
-			error_msg = "Bạn không có quyền gửi đơn cho một số học sinh đã chọn. Chỉ người liên hệ chính (key person) mới có thể tạo đơn nghỉ phép."
+			error_msg = "Bạn chưa được cấp quyền tạo đơn, hãy liên hệ người liên hệ chính hoặc nhà trường để cấp quyền tạo đơn."
 			frappe.logger().error(f"❌ Parent {parent_id} failed key_person validation for students {students}")
-			
-			# Get detailed debug info
-			try:
-				guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
-				relationships_list = [(r.student, bool(r.key_person)) for r in guardian_doc.student_relationships]
-				
-				# Check which students are missing or not key_person
-				missing_students = []
-				not_key_person = []
-				for std in students:
-					found = False
-					for rel_student, is_key in relationships_list:
-						if rel_student == std:
-							found = True
-							if not is_key:
-								not_key_person.append(std)
-							break
-					if not found:
-						missing_students.append(std)
-				
-				debug_info = {
-					"logged_in_guardian": parent_id,
-					"guardian_id": guardian_doc.guardian_id,
-					"guardian_name": guardian_doc.guardian_name,
-					"total_relationships": len(guardian_doc.student_relationships),
-					"all_relationships": relationships_list,
-					"requested_students": students,
-					"missing_students": missing_students,
-					"not_key_person": not_key_person
-				}
-				
-				frappe.logger().error(f"KEY_PERSON_VALIDATION_FAILED: {debug_info}")
-				
-				# Build detailed error message
-				error_msg += f"\n\n[DEBUG_INFO]\n"
-				error_msg += f"Guardian: {guardian_doc.guardian_id} ({guardian_doc.guardian_name})\n"
-				error_msg += f"Requested Students: {', '.join(students)}\n"
-				error_msg += f"Guardian's Students (Key Person): {', '.join([s for s, k in relationships_list if k])}\n"
-				if missing_students:
-					error_msg += f"❌ Missing/Not Linked: {', '.join(missing_students)}\n"
-				if not_key_person:
-					error_msg += f"❌ Not Key Person: {', '.join(not_key_person)}\n"
-					
-			except Exception as e:
-				frappe.logger().error(f"Error getting debug info: {str(e)}")
-				error_msg += f"\n\n[ERROR] {str(e)}"
 			
 			return error_response(error_msg)
 
@@ -280,17 +234,23 @@ def submit_leave_request():
 			# This prevents duplicate/overlapping leave records for the same student
 			overlap_check = _check_overlapping_leave_requests(student_id, data['start_date'], data['end_date'])
 			if overlap_check['has_overlap']:
-				# Format overlapping dates (Vietnamese + English)
+				# Format overlapping dates (Vietnamese + English) - DD/MM format only
 				overlapping_dates = overlap_check['overlapping_dates']
-				dates_str_vi = ", ".join(overlapping_dates)  # e.g. "2025-01-10, 2025-01-12, 2025-01-15"
-				dates_str_en = ", ".join(overlapping_dates)
+				# Convert from YYYY-MM-DD to DD/MM format
+				dates_formatted = []
+				for date_str in overlapping_dates:
+					try:
+						date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+						dates_formatted.append(date_obj.strftime('%d/%m'))
+					except:
+						dates_formatted.append(date_str)
 				
-				frappe.logger().warning(f"⚠️ Student {student_id} has overlapping leave requests on dates: {dates_str_en}")
+				dates_str_vi = ", ".join(dates_formatted)  # e.g. "06/11, 07/11, 08/11"
+				
+				frappe.logger().warning(f"⚠️ Student {student_id} has overlapping leave requests on dates: {dates_str_vi}")
 				
 				# Song ngữ error message
 				error_msg_vi = f"Ngày {dates_str_vi} đã có đơn xin nghỉ phép. Vui lòng chọn ngày khác hoặc chỉnh sửa đơn hiện tại."
-				error_msg_en = f"Days {dates_str_en} already have leave requests. Please choose different dates or edit the existing request."
-				error_msg = f"{error_msg_vi} | {error_msg_en}"
 				
 				return error_response(error_msg_vi)
 			
