@@ -365,19 +365,12 @@ def get_student_subject_teachers():
     logs = []
 
     try:
-        # Debug: Log all form data
-        logs.append(f"🔍 DEBUG frappe.form_dict: {dict(frappe.form_dict)}")
-        logs.append(f"🔍 DEBUG frappe.request.args: {dict(frappe.request.args) if hasattr(frappe.request, 'args') else 'No args'}")
-
-        # Get student_id from frappe form data
+        # Get student_id from frappe form data or request args
         student_id = frappe.form_dict.get('student_id')
 
         # Also try to get from request args
         if not student_id:
             student_id = frappe.request.args.get('student_id') if hasattr(frappe.request, 'args') else None
-
-        logs.append(f"🔍 DEBUG student_id from form_dict: {student_id}")
-        logs.append(f"🔍 DEBUG student_id from request.args: {frappe.request.args.get('student_id') if hasattr(frappe.request, 'args') else 'No request.args'}")
 
         if not student_id:
             return validation_error_response("Student ID is required", {"student_id": ["Required"]})
@@ -445,6 +438,11 @@ def get_student_subject_teachers():
         # Process each subject-class combination
         for key, group in subject_groups.items():
             try:
+                # Skip if actual_subject_id is None
+                if not group["actual_subject_id"]:
+                    logs.append(f"⚠️ Skipping subject with None actual_subject_id for class {group['class_id']}")
+                    continue
+
                 # Get actual subject details
                 actual_subject = frappe.get_doc("SIS Actual Subject", group["actual_subject_id"])
                 actual_subject_name = actual_subject.title_vn or actual_subject.title_en
@@ -510,11 +508,12 @@ def get_student_subject_teachers():
 
         logs.append(f"✅ Retrieved {len(subject_teachers)} subject teachers for student")
 
-        return list_response(
-            data=subject_teachers,
-            message=f"Retrieved {len(subject_teachers)} subject teachers",
-            logs=logs
-        )
+        return {
+            "success": True,
+            "message": f"Retrieved {len(subject_teachers)} subject teachers",
+            "data": subject_teachers,
+            "logs": logs
+        }
 
     except Exception as e:
         logs.append(f"❌ Error getting subject teachers: {str(e)}")
