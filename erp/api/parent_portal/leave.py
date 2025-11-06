@@ -94,7 +94,7 @@ def _check_overlapping_leave_requests(student_id, start_date, end_date):
 def _validate_parent_student_access(parent_id, student_ids):
 	"""Validate that parent has access to all students and is key person
 	
-	CRM Family Relationship is a child table within CRM Family, so we query it from the parent table.
+	CRM Family Relationship is a child table within CRM Guardian.
 	
 	Args:
 		parent_id: Guardian name (from _get_current_parent)
@@ -103,39 +103,63 @@ def _validate_parent_student_access(parent_id, student_ids):
 	Returns:
 		True if guardian is key person for ALL students, False otherwise
 	"""
-	frappe.logger().info(f"🔍 Validating access - Guardian: {parent_id}, Students: {student_ids}")
+	frappe.logger().info(f"🔍 [KEY_PERSON_CHECK] Validating access - Guardian: {parent_id}, Students: {student_ids}")
 	
-	for student_id in student_ids:
-		# Query from CRM Guardian's student_relationships child table
-		# CRM Family Relationship is stored as a child table in CRM Guardian
+	# Verify parent_id exists
+	if not parent_id:
+		frappe.logger().error(f"❌ [KEY_PERSON_CHECK] parent_id is empty!")
+		return False
+	
+	try:
+		# Get guardian document
 		guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
+		frappe.logger().info(f"✅ [KEY_PERSON_CHECK] Guardian doc loaded: {guardian_doc.name}")
+		frappe.logger().info(f"   Guardian ID: {guardian_doc.guardian_id}")
+		frappe.logger().info(f"   Total relationships: {len(guardian_doc.student_relationships)}")
+		
+		# Log all relationships
+		for idx, rel in enumerate(guardian_doc.student_relationships):
+			frappe.logger().info(f"   [{idx}] Student: {rel.student}, Key Person: {rel.key_person}, Access: {rel.access}, Type: {rel.relationship_type}")
+		
+	except Exception as e:
+		frappe.logger().error(f"❌ [KEY_PERSON_CHECK] Error loading guardian doc: {str(e)}")
+		return False
+	
+	# Check each student
+	for student_id in student_ids:
+		frappe.logger().info(f"🔎 [KEY_PERSON_CHECK] Checking student: {student_id}")
 		
 		# Find the relationship record in the child table
 		found_and_key_person = False
 		for rel in guardian_doc.student_relationships:
-			if rel.student == student_id and rel.key_person:
-				found_and_key_person = True
-				frappe.logger().info(f"✅ Guardian {parent_id} IS key_person for student {student_id}")
-				break
+			if rel.student == student_id:
+				frappe.logger().info(f"   Found relationship - Student: {rel.student}, Key Person: {rel.key_person} (type: {type(rel.key_person)})")
+				# Check if key_person is True/1
+				if rel.key_person:
+					found_and_key_person = True
+					frappe.logger().info(f"✅ [KEY_PERSON_CHECK] Guardian {parent_id} IS key_person for student {student_id}")
+					break
+				else:
+					frappe.logger().warning(f"⚠️  [KEY_PERSON_CHECK] key_person is False for this relationship")
 		
 		if not found_and_key_person:
-			# Debug: Get all relationships for this guardian-student pair
-			all_rels = []
+			# Debug: Get all relationships for this student
+			all_rels_for_student = []
 			for rel in guardian_doc.student_relationships:
 				if rel.student == student_id:
-					all_rels.append({
+					all_rels_for_student.append({
 						"student": rel.student,
 						"key_person": rel.key_person,
 						"access": rel.access,
 						"relationship_type": rel.relationship_type
 					})
 			
-			frappe.logger().warning(f"❌ Guardian {parent_id} is NOT key_person for student {student_id}")
-			frappe.logger().warning(f"   Found relationships for this student: {all_rels}")
-			frappe.logger().warning(f"   All student relationships for guardian: {[(r.student, r.key_person) for r in guardian_doc.student_relationships]}")
+			frappe.logger().error(f"❌ [KEY_PERSON_CHECK] Guardian {parent_id} is NOT key_person for student {student_id}")
+			frappe.logger().error(f"   Relationships found for this student: {all_rels_for_student}")
+			frappe.logger().error(f"   All relationships: {[(r.student, r.key_person) for r in guardian_doc.student_relationships]}")
 			return False
 
-	frappe.logger().info(f"✅ Guardian {parent_id} validated as key_person for all {len(student_ids)} students")
+	frappe.logger().info(f"✅ [KEY_PERSON_CHECK] SUCCESS - Guardian {parent_id} is key_person for all {len(student_ids)} students")
 	return True
 
 
@@ -197,8 +221,25 @@ def submit_leave_request():
 
 		# Validate parent has access to all students AND is key person
 		if not _validate_parent_student_access(parent_id, students):
+			error_msg = "Bạn không có quyền gửi đơn cho một số học sinh đã chọn. Chỉ người liên hệ chính (key person) mới có thể tạo đơn nghỉ phép."
 			frappe.logger().error(f"❌ Parent {parent_id} failed key_person validation for students {students}")
-			return error_response("Bạn không có quyền gửi đơn cho một số học sinh đã chọn. Chỉ người liên hệ chính (key person) mới có thể tạo đơn nghỉ phép.")
+			
+			# Get detailed debug info
+			try:
+				guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
+				debug_info = {
+					"guardian_id": guardian_doc.guardian_id,
+					"guardian_name": guardian_doc.guardian_name,
+					"total_relationships": len(guardian_doc.student_relationships),
+					"relationships": [(r.student, bool(r.key_person)) for r in guardian_doc.student_relationships],
+					"requested_students": students
+				}
+				frappe.logger().error(f"DEBUG INFO: {debug_info}")
+				error_msg += f"\n\n[DEBUG] Guardian: {guardian_doc.guardian_id} ({guardian_doc.guardian_name}), Relationships: {debug_info['relationships']}"
+			except Exception as e:
+				frappe.logger().error(f"Error getting debug info: {str(e)}")
+			
+			return error_response(error_msg)
 
 		created_requests = []
 
