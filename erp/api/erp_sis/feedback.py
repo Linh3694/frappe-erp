@@ -577,10 +577,11 @@ def add_reply():
     try:
         _check_staff_permission()
         
-        data = frappe.local.form_dict
+        data = _get_request_data()
         feedback_name = data.get("name")
         content = data.get("content")
         is_internal = data.get("is_internal", False)
+        is_draft = data.get("is_draft", False)
 
         if not feedback_name:
             return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
@@ -597,16 +598,67 @@ def add_reply():
                 code="REPLY_NOT_ALLOWED"
             )
         
-        # Add reply
-        feedback.append("replies", {
-            "content": content,
-            "reply_by": frappe.session.user,
-            "reply_by_type": "Staff",
-            "reply_date": now(),
-            "is_internal": is_internal
-        })
+        # If draft, check if there's existing draft from this user and update it
+        if is_draft:
+            # Find existing draft reply from current user
+            draft_found = False
+            if feedback.replies:
+                for reply in feedback.replies:
+                    if reply.is_internal and reply.reply_by == frappe.session.user:
+                        # Update existing draft
+                        reply.content = content
+                        reply.reply_date = now()
+                        draft_found = True
+                        break
+            
+            # If no existing draft, create new one
+            if not draft_found:
+                feedback.append("replies", {
+                    "content": content,
+                    "reply_by": frappe.session.user,
+                    "reply_by_type": "Staff",
+                    "reply_date": now(),
+                    "is_internal": True  # Draft is always internal
+                })
+            
+            # Don't update status for draft
+            feedback.save()
+            frappe.db.commit()
+            
+            return success_response(
+                data={"name": feedback.name},
+                message="Lưu tạm thành công"
+            )
         
-        # Update status
+        # For non-draft replies, check if there's a draft to convert
+        if feedback.replies:
+            for reply in feedback.replies:
+                if reply.is_internal and reply.reply_by == frappe.session.user:
+                    # Convert draft to public reply
+                    reply.content = content
+                    reply.is_internal = is_internal
+                    reply.reply_date = now()
+                    break
+            else:
+                # No draft found, add new reply
+                feedback.append("replies", {
+                    "content": content,
+                    "reply_by": frappe.session.user,
+                    "reply_by_type": "Staff",
+                    "reply_date": now(),
+                    "is_internal": is_internal
+                })
+        else:
+            # No replies yet, add new one
+            feedback.append("replies", {
+                "content": content,
+                "reply_by": frappe.session.user,
+                "reply_by_type": "Staff",
+                "reply_date": now(),
+                "is_internal": is_internal
+            })
+        
+        # Update status only for non-draft replies
         if feedback.status == "Mới":
             feedback.status = "Đang xử lý"
         elif feedback.status == "Đã phản hồi":
@@ -632,6 +684,48 @@ def add_reply():
         return error_response(
             message=f"Lỗi khi thêm phản hồi: {str(e)}",
             code="REPLY_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_draft_reply():
+    """Get draft reply for current user"""
+    try:
+        _check_staff_permission()
+        
+        data = _get_request_data()
+        request_args = frappe.request.args
+        
+        feedback_name = data.get("name") or request_args.get("name")
+        if not feedback_name:
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
+        
+        # Get feedback
+        feedback = frappe.get_doc("Feedback", feedback_name)
+        
+        # Find draft reply from current user
+        draft_content = None
+        if feedback.replies:
+            for reply in feedback.replies:
+                if reply.is_internal and reply.reply_by == frappe.session.user:
+                    draft_content = reply.content
+                    break
+        
+        return success_response(
+            data={"draft_content": draft_content},
+            message="Lấy draft thành công" if draft_content else "Không có draft"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Feedback không tồn tại",
+            code="NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error getting draft reply: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy draft: {str(e)}",
+            code="GET_DRAFT_ERROR"
         )
 
 
