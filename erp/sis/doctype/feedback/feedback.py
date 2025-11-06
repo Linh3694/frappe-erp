@@ -132,12 +132,49 @@ class Feedback(Document):
 	def before_insert(self):
 		"""Set default values before insert"""
 		from frappe.utils import now
-		
+
 		if not self.submitted_at:
 			self.submitted_at = now()
-		
+
 		if not self.last_updated:
 			self.last_updated = now()
+
+	def autoname(self):
+		"""Generate custom autoname with monthly counter reset"""
+		from frappe.utils import now
+
+		# Get current year and month (YYMM format)
+		current_date = now()
+		yy = current_date[2:4]  # Last 2 digits of year
+		mm = current_date[5:7]  # Month
+
+		# Base name format: PP + YY + MM
+		base_name = f"PP{yy}{mm}"
+
+		# Find the highest number for this month
+		existing_names = frappe.db.sql("""
+			SELECT name FROM `tabFeedback`
+			WHERE name LIKE %s
+			ORDER BY name DESC
+			LIMIT 1
+		""", (f"{base_name}%",))
+
+		if existing_names:
+			# Extract the number from the last name (last 4 digits)
+			last_name = existing_names[0][0]
+			try:
+				last_number = int(last_name[-4:])  # Last 4 digits
+				next_number = last_number + 1
+			except (ValueError, IndexError):
+				next_number = 1
+		else:
+			next_number = 1
+
+		# Format number with leading zeros (4 digits)
+		formatted_number = f"{next_number:04d}"
+
+		# Set the name
+		self.name = f"{base_name}{formatted_number}"
 	
 	def on_update(self):
 		"""Handle status changes"""
