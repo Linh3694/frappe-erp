@@ -259,12 +259,36 @@ def admin_get():
                             frappe.logger().error(f"Error getting student {relationship.student}: {str(e)}")
                             student_name = relationship.student
 
+                        # Get student photo from SIS Photo (same as otp_auth.py)
+                        student_photo = None
+                        photo_title = None
+
+                        try:
+                            sis_photos = frappe.get_all("SIS Photo",
+                                filters={
+                                    "student_id": relationship.student,  # Use CRM Student ID
+                                    "type": "student",
+                                    "status": "Active"
+                                },
+                                fields=["photo", "title", "upload_date"],
+                                order_by="upload_date desc",
+                                limit_page_length=1
+                            )
+
+                            if sis_photos:
+                                student_photo = sis_photos[0]["photo"]
+                                photo_title = sis_photos[0]["title"]
+                        except:
+                            pass  # Photo is optional, don't fail if not found
+
                         student_info = {
                             "name": student_name,
-                            "student_id": relationship.student,
+                            "student_id": student_code or relationship.student,  # Use student_code, fallback to CRM Student ID
                             "relationship": relationship.relationship_type,
                             "class_name": class_name,
-                            "program": program
+                            "program": program,
+                            "photo": student_photo,
+                            "photo_title": photo_title
                         }
                         students.append(student_info)
 
