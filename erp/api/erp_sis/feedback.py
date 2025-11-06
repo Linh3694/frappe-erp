@@ -187,7 +187,7 @@ def admin_get():
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
         feedback_data = feedback.as_dict()
-        
+
         # Include all replies (including internal notes for admin)
         if feedback.replies:
             feedback_data["replies"] = [
@@ -200,6 +200,40 @@ def admin_get():
                 }
                 for reply in feedback.replies
             ]
+
+        # Include guardian information
+        if feedback.guardian:
+            try:
+                guardian = frappe.get_doc("CRM Guardian", feedback.guardian)
+                feedback_data["guardian_info"] = {
+                    "name": guardian.guardian_name,
+                    "phone_number": guardian.phone_number,
+                    "email": guardian.email,
+                    "students": []
+                }
+
+                # Get students from student_relationships table
+                students = []
+                if guardian.student_relationships:
+                    for relationship in guardian.student_relationships:
+                        student_info = {
+                            "name": relationship.student_name or relationship.student,
+                            "student_id": relationship.student,
+                            "relationship": relationship.relationship,
+                            "class_name": getattr(relationship, 'student_class', None),
+                        }
+                        students.append(student_info)
+
+                feedback_data["guardian_info"]["students"] = students
+
+            except frappe.DoesNotExistError:
+                # Guardian not found, set empty info
+                feedback_data["guardian_info"] = {
+                    "name": feedback.guardian_name or feedback.guardian,
+                    "phone_number": None,
+                    "email": None,
+                    "students": []
+                }
         
         return single_item_response(data=feedback_data)
     
