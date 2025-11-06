@@ -352,12 +352,12 @@ def get_subject_curriculum_and_teacher(subject_id, class_id):
 
 
 @frappe.whitelist()
-def get_student_subject_teachers(student_id):
+def get_student_subject_teachers():
     """
     Get all subject teachers for a specific student
 
     Args:
-        student_id: Student document name (CRM Student)
+        student_id: Student document name (CRM Student) - passed via frappe.form_dict
 
     Returns:
         dict: List of subjects with their assigned teachers
@@ -365,6 +365,9 @@ def get_student_subject_teachers(student_id):
     logs = []
 
     try:
+        # Get student_id from frappe form data
+        student_id = frappe.form_dict.get('student_id')
+
         if not student_id:
             return validation_error_response("Student ID is required", {"student_id": ["Required"]})
 
