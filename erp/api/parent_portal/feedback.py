@@ -215,7 +215,7 @@ def list_feedback():
                 code="GUARDIAN_NOT_FOUND"
             )
         
-        data = frappe.local.form_dict
+        data = _get_request_data()
         request_args = frappe.request.args
         
         # Get pagination params
@@ -284,7 +284,7 @@ def get():
                 code="GUARDIAN_NOT_FOUND"
             )
         
-        data = frappe.local.form_dict
+        data = _get_request_data()
         request_args = frappe.request.args
         
         feedback_name = data.get("name") or request_args.get("name")
