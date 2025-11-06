@@ -227,17 +227,48 @@ def submit_leave_request():
 			# Get detailed debug info
 			try:
 				guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
+				relationships_list = [(r.student, bool(r.key_person)) for r in guardian_doc.student_relationships]
+				
+				# Check which students are missing or not key_person
+				missing_students = []
+				not_key_person = []
+				for std in students:
+					found = False
+					for rel_student, is_key in relationships_list:
+						if rel_student == std:
+							found = True
+							if not is_key:
+								not_key_person.append(std)
+							break
+					if not found:
+						missing_students.append(std)
+				
 				debug_info = {
+					"logged_in_guardian": parent_id,
 					"guardian_id": guardian_doc.guardian_id,
 					"guardian_name": guardian_doc.guardian_name,
 					"total_relationships": len(guardian_doc.student_relationships),
-					"relationships": [(r.student, bool(r.key_person)) for r in guardian_doc.student_relationships],
-					"requested_students": students
+					"all_relationships": relationships_list,
+					"requested_students": students,
+					"missing_students": missing_students,
+					"not_key_person": not_key_person
 				}
-				frappe.logger().error(f"DEBUG INFO: {debug_info}")
-				error_msg += f"\n\n[DEBUG] Guardian: {guardian_doc.guardian_id} ({guardian_doc.guardian_name}), Relationships: {debug_info['relationships']}"
+				
+				frappe.logger().error(f"KEY_PERSON_VALIDATION_FAILED: {debug_info}")
+				
+				# Build detailed error message
+				error_msg += f"\n\n[DEBUG_INFO]\n"
+				error_msg += f"Guardian: {guardian_doc.guardian_id} ({guardian_doc.guardian_name})\n"
+				error_msg += f"Requested Students: {', '.join(students)}\n"
+				error_msg += f"Guardian's Students (Key Person): {', '.join([s for s, k in relationships_list if k])}\n"
+				if missing_students:
+					error_msg += f"❌ Missing/Not Linked: {', '.join(missing_students)}\n"
+				if not_key_person:
+					error_msg += f"❌ Not Key Person: {', '.join(not_key_person)}\n"
+					
 			except Exception as e:
 				frappe.logger().error(f"Error getting debug info: {str(e)}")
+				error_msg += f"\n\n[ERROR] {str(e)}"
 			
 			return error_response(error_msg)
 
