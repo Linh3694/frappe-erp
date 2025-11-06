@@ -702,13 +702,22 @@ def get_leave_request_attachments():
 		# Get the leave request to check permissions
 		leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
 
-		# PARENT PORTAL: Only allow parents to see their own children's leave request attachments
+		# PARENT PORTAL: Verify parent has access to this student
 		parent_id = _get_current_parent()
 		if not parent_id:
 			return error_response("Không tìm thấy thông tin phụ huynh")
 
-		if leave_request.parent_id != parent_id:
-			return forbidden_response("Bạn chỉ có thể xem file đính kèm của đơn nghỉ phép của con mình")
+		# Get parent's students to verify access
+		all_relationships = frappe.get_all(
+			"CRM Family Relationship",
+			filters={"guardian": parent_id},
+			fields=["student"]
+		)
+		student_ids = [rel.student for rel in all_relationships]
+
+		# Check if the leave request's student belongs to this parent
+		if leave_request.student_id not in student_ids:
+			return forbidden_response("Bạn không có quyền truy cập file đính kèm của đơn này")
 
 		# Get all files attached to this leave request
 		attachments = frappe.get_all("File",
