@@ -349,3 +349,159 @@ def get_subject_curriculum_and_teacher(subject_id, class_id):
     except Exception as e:
         logs.append(f"Error retrieving subject curriculum and teacher: {str(e)}")
         return error_response(f"An error occurred: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_student_subject_teachers(student_id):
+    """
+    Get all subject teachers for a specific student
+
+    Args:
+        student_id: Student document name (CRM Student)
+
+    Returns:
+        dict: List of subjects with their assigned teachers
+    """
+    logs = []
+
+    try:
+        if not student_id:
+            return validation_error_response("Student ID is required", {"student_id": ["Required"]})
+
+        logs.append(f"🔍 Getting subject teachers for student: {student_id}")
+
+        # Step 1: Get all classes for this student
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            filters={"student_id": student_id},
+            fields=["class_id", "school_year_id"],
+            ignore_permissions=True
+        )
+
+        if not class_students:
+            logs.append("⚠️ No classes found for student")
+            return list_response(
+                data=[],
+                message="No classes found for student",
+                logs=logs
+            )
+
+        class_ids = [cs.class_id for cs in class_students if cs.class_id]
+        logs.append(f"✅ Found {len(class_ids)} classes for student: {class_ids}")
+
+        # Step 2: Get all subjects for this student from SIS Student Subject
+        student_subjects = frappe.get_all(
+            "SIS Student Subject",
+            filters={
+                "student_id": student_id,
+                "class_id": ["in", class_ids]
+            },
+            fields=["subject_id", "actual_subject_id", "class_id"],
+            ignore_permissions=True
+        )
+
+        if not student_subjects:
+            logs.append("⚠️ No subjects found for student")
+            return list_response(
+                data=[],
+                message="No subjects found for student",
+                logs=logs
+            )
+
+        logs.append(f"✅ Found {len(student_subjects)} subjects for student")
+
+        # Step 3: Get subject assignments and teacher info
+        subject_teachers = []
+
+        # Group subjects by actual_subject_id and class_id to avoid duplicates
+        subject_groups = {}
+        for ss in student_subjects:
+            key = f"{ss.actual_subject_id}_{ss.class_id}"
+            if key not in subject_groups:
+                subject_groups[key] = {
+                    "actual_subject_id": ss.actual_subject_id,
+                    "class_id": ss.class_id,
+                    "subject_ids": []
+                }
+            if ss.subject_id not in subject_groups[key]["subject_ids"]:
+                subject_groups[key]["subject_ids"].append(ss.subject_id)
+
+        logs.append(f"✅ Grouped into {len(subject_groups)} unique subject-class combinations")
+
+        # Process each subject-class combination
+        for key, group in subject_groups.items():
+            try:
+                # Get actual subject details
+                actual_subject = frappe.get_doc("SIS Actual Subject", group["actual_subject_id"])
+                actual_subject_name = actual_subject.title_vn or actual_subject.title_en
+
+                # Get subject assignment for this actual_subject and class
+                assignments = frappe.get_all(
+                    "SIS Subject Assignment",
+                    filters={
+                        "actual_subject_id": group["actual_subject_id"],
+                        "class_id": group["class_id"]
+                    },
+                    fields=["teacher_id"],
+                    ignore_permissions=True
+                )
+
+                teacher_info = None
+                if assignments and assignments[0].teacher_id:
+                    teacher_id = assignments[0].teacher_id
+                    try:
+                        teacher_doc = frappe.get_doc("SIS Teacher", teacher_id)
+
+                        # Get user info for avatar and full name
+                        user_info = None
+                        if teacher_doc.user_id:
+                            try:
+                                user = frappe.get_doc("User", teacher_doc.user_id)
+                                user_info = {
+                                    "full_name": getattr(user, 'full_name', ''),
+                                    "email": getattr(user, 'email', ''),
+                                    "user_image": getattr(user, 'user_image', None),
+                                    "mobile_no": getattr(user, 'mobile_no', ''),
+                                    "phone": getattr(user, 'phone', '')
+                                }
+                            except Exception as e:
+                                logs.append(f"⚠️ Could not get user info for teacher {teacher_id}: {str(e)}")
+
+                        teacher_info = {
+                            "teacher_id": teacher_doc.name,
+                            "teacher_name": getattr(teacher_doc, 'teacher_name', ''),
+                            "teacher_code": getattr(teacher_doc, 'teacher_code', ''),
+                            "email": user_info.get('email') if user_info else getattr(teacher_doc, 'email', ''),
+                            "phone": user_info.get('mobile_no') or user_info.get('phone') if user_info else getattr(teacher_doc, 'phone', ''),
+                            "avatar": user_info.get('user_image') if user_info and user_info.get('user_image') else None,
+                            "full_name": user_info.get('full_name') if user_info else getattr(teacher_doc, 'teacher_name', '')
+                        }
+
+                    except Exception as e:
+                        logs.append(f"⚠️ Could not get teacher {teacher_id}: {str(e)}")
+
+                subject_teachers.append({
+                    "actual_subject_id": group["actual_subject_id"],
+                    "subject_name": actual_subject_name,
+                    "class_id": group["class_id"],
+                    "teacher": teacher_info
+                })
+
+            except Exception as e:
+                logs.append(f"⚠️ Error processing subject {group['actual_subject_id']}: {str(e)}")
+                continue
+
+        # Sort by subject name
+        subject_teachers.sort(key=lambda x: x.get('subject_name', ''))
+
+        logs.append(f"✅ Retrieved {len(subject_teachers)} subject teachers for student")
+
+        return list_response(
+            data=subject_teachers,
+            message=f"Retrieved {len(subject_teachers)} subject teachers",
+            logs=logs
+        )
+
+    except Exception as e:
+        logs.append(f"❌ Error getting subject teachers: {str(e)}")
+        return error_response(f"An error occurred: {str(e)}", logs=logs)
