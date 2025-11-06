@@ -259,12 +259,9 @@ def submit_leave_request():
 			if not student_campus:
 				continue
 
-			# Create leave request - use db.insert to bypass validation hooks
+			# Create leave request
 			try:
-				from frappe.utils import now as frappe_now
-				
-				# Insert directly into database to bypass doctype validation hooks
-				leave_doc = {
+				leave_request = frappe.get_doc({
 					"doctype": "SIS Student Leave Request",
 					"student_id": student_id,
 					"parent_id": parent_id,
@@ -275,18 +272,12 @@ def submit_leave_request():
 					"end_date": data['end_date'],
 					"description": data.get('description', ''),
 					"submitted_at": datetime.now()
-				}
+				})
 				
-				# Insert directly to DB without going through validation
-				frappe.db.insert("SIS Student Leave Request", leave_doc)
-				frappe.db.commit()
-				
-				# Get the created doc name for reference
-				leave_name = frappe.db.get_value("SIS Student Leave Request", 
-					{"student_id": student_id, "start_date": data['start_date'], "end_date": data['end_date']},
-					"name")
-				
-				leave_request = frappe.get_doc("SIS Student Leave Request", leave_name)
+				# Bypass all validations and permissions
+				leave_request.flags.ignore_permissions = True
+				leave_request.flags.ignore_validate = True
+				leave_request.insert()
 			except Exception as e:
 				frappe.logger().error(f"❌ Error creating leave request for student {student_id}: {str(e)}")
 				error_detail = str(e)
