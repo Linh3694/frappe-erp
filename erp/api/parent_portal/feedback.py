@@ -306,7 +306,15 @@ def get():
         
         # Format response
         feedback_data = feedback.as_dict()
-        
+
+        # Include guardian information (guardian_name)
+        if feedback.guardian:
+            try:
+                guardian_doc = frappe.get_doc("Guardian", feedback.guardian)
+                feedback_data["guardian_name"] = guardian_doc.guardian_name
+            except frappe.DoesNotExistError:
+                feedback_data["guardian_name"] = None
+
         # Include assigned user information (full_name, jobtitle, avatar)
         if feedback.assigned_to:
             try:
