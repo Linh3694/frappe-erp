@@ -39,6 +39,9 @@
   "assignment_section",
   "assigned_to",
   "assigned_date",
+  "assigned_to_full_name",
+  "assigned_to_jobtitle",
+  "assigned_to_avatar",
   "sla_section",
   "first_response_date",
   "deadline",
@@ -206,6 +209,27 @@
    "fieldname": "assigned_date",
    "fieldtype": "Datetime",
    "label": "Ngày giao",
+   "read_only": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "assigned_to_full_name",
+   "fieldtype": "Data",
+   "label": "Tên người xử lý",
+   "read_only": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "assigned_to_jobtitle",
+   "fieldtype": "Data",
+   "label": "Chức danh",
+   "read_only": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "assigned_to_avatar",
+   "fieldtype": "Attach Image",
+   "label": "Avatar",
    "read_only": 1,
    "depends_on": "feedback_type=='Góp ý'"
   },
