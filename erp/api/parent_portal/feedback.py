@@ -242,9 +242,10 @@ def list_feedback():
             filters=filters,
             fields=[
                 "name", "feedback_type", "title", "status", "priority",
-                "rating", "rating_comment", "department",
+                "rating", "rating_comment", "department", "assigned_to",
                 "submitted_at", "last_updated", "closed_at",
-                "conversation_count", "resolution_rating"
+                "conversation_count", "resolution_rating",
+                "assigned_to_full_name", "assigned_to_jobtitle", "assigned_to_avatar"
             ],
             order_by="submitted_at desc",
             limit=page_length,
@@ -306,6 +307,19 @@ def get():
         
         # Format response
         feedback_data = feedback.as_dict()
+        
+        # Include assigned user information (full_name, jobtitle, avatar)
+        if feedback.assigned_to:
+            try:
+                assigned_user = frappe.get_doc("User", feedback.assigned_to)
+                feedback_data["assigned_to_full_name"] = assigned_user.full_name
+                feedback_data["assigned_to_jobtitle"] = getattr(assigned_user, "job_title", None)
+                feedback_data["assigned_to_avatar"] = assigned_user.user_image
+            except frappe.DoesNotExistError:
+                # If user not found, leave fields empty
+                feedback_data["assigned_to_full_name"] = None
+                feedback_data["assigned_to_jobtitle"] = None
+                feedback_data["assigned_to_avatar"] = None
         
         # Format replies
         if feedback.replies:
