@@ -236,6 +236,19 @@ def admin_get():
                 for reply in feedback.replies
             ]
 
+        # Include assigned user information (full_name, jobtitle, avatar)
+        if feedback.assigned_to:
+            try:
+                assigned_user = frappe.get_doc("User", feedback.assigned_to)
+                feedback_data["assigned_to_full_name"] = assigned_user.full_name
+                feedback_data["assigned_to_jobtitle"] = getattr(assigned_user, "job_title", None)
+                feedback_data["assigned_to_avatar"] = assigned_user.user_image
+            except frappe.DoesNotExistError:
+                # If user not found, leave fields empty
+                feedback_data["assigned_to_full_name"] = None
+                feedback_data["assigned_to_jobtitle"] = None
+                feedback_data["assigned_to_avatar"] = None
+
         # Include guardian information
         if feedback.guardian:
             try:
@@ -382,6 +395,18 @@ def assign():
             feedback.assigned_to = assigned_to
             feedback.assigned_date = now()
             
+            # Save assigned user information
+            try:
+                assigned_user = frappe.get_doc("User", assigned_to)
+                feedback.assigned_to_full_name = assigned_user.full_name
+                feedback.assigned_to_jobtitle = getattr(assigned_user, "job_title", None)
+                feedback.assigned_to_avatar = assigned_user.user_image
+            except frappe.DoesNotExistError:
+                # If user not found, set to None
+                feedback.assigned_to_full_name = None
+                feedback.assigned_to_jobtitle = None
+                feedback.assigned_to_avatar = None
+            
             # Calculate deadline based on priority
             if feedback.priority:
                 priority_hours = {
@@ -465,6 +490,18 @@ def assign_bulk():
                 
                 feedback.assigned_to = assigned_to
                 feedback.assigned_date = now()
+                
+                # Save assigned user information
+                try:
+                    assigned_user = frappe.get_doc("User", assigned_to)
+                    feedback.assigned_to_full_name = assigned_user.full_name
+                    feedback.assigned_to_jobtitle = getattr(assigned_user, "job_title", None)
+                    feedback.assigned_to_avatar = assigned_user.user_image
+                except frappe.DoesNotExistError:
+                    # If user not found, set to None
+                    feedback.assigned_to_full_name = None
+                    feedback.assigned_to_jobtitle = None
+                    feedback.assigned_to_avatar = None
                 
                 # Update priority if provided
                 if priority:
@@ -1009,6 +1046,18 @@ def update_assignment():
         if assigned_to:
             feedback.assigned_to = assigned_to
             feedback.assigned_date = now()
+            
+            # Save assigned user information
+            try:
+                assigned_user = frappe.get_doc("User", assigned_to)
+                feedback.assigned_to_full_name = assigned_user.full_name
+                feedback.assigned_to_jobtitle = getattr(assigned_user, "job_title", None)
+                feedback.assigned_to_avatar = assigned_user.user_image
+            except frappe.DoesNotExistError:
+                # If user not found, set to None
+                feedback.assigned_to_full_name = None
+                feedback.assigned_to_jobtitle = None
+                feedback.assigned_to_avatar = None
 
         if priority:
             feedback.priority = priority
