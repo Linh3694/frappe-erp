@@ -54,24 +54,24 @@ class Feedback(Document):
 		else:
 			self.conversation_count = 0
 		
-	# Update last_reply_date if there are replies
-	if self.replies:
-		from frappe.utils import get_datetime
-		last_reply = max(self.replies, key=lambda x: get_datetime(x.reply_date) if x.reply_date else get_datetime(self.creation))
-		self.last_reply_date = last_reply.reply_date or self.creation
+		# Update last_reply_date if there are replies
+		if self.replies:
+			from frappe.utils import get_datetime
+			last_reply = max(self.replies, key=lambda x: get_datetime(x.reply_date) if x.reply_date else get_datetime(self.creation))
+			self.last_reply_date = last_reply.reply_date or self.creation
 		
 		# Update last_updated
 		from frappe.utils import now
 		self.last_updated = now()
 		
-	# Set first_response_date when first PUBLIC reply is added by staff
-	if self.replies and not self.first_response_date:
-		# Only consider public replies (not internal/draft)
-		public_staff_replies = [r for r in self.replies if r.reply_by_type == "Staff" and not r.is_internal]
-		if public_staff_replies:
-			from frappe.utils import get_datetime
-			first_staff_reply = min(public_staff_replies, key=lambda x: get_datetime(x.reply_date) if x.reply_date else get_datetime(self.creation))
-			self.first_response_date = first_staff_reply.reply_date or self.creation
+		# Set first_response_date when first PUBLIC reply is added by staff
+		if self.replies and not self.first_response_date:
+			# Only consider public replies (not internal/draft)
+			public_staff_replies = [r for r in self.replies if r.reply_by_type == "Staff" and not r.is_internal]
+			if public_staff_replies:
+				from frappe.utils import get_datetime
+				first_staff_reply = min(public_staff_replies, key=lambda x: get_datetime(x.reply_date) if x.reply_date else get_datetime(self.creation))
+				self.first_response_date = first_staff_reply.reply_date or self.creation
 		
 		# Calculate deadline based on priority (only for Góp ý)
 		if self.feedback_type == "Góp ý" and self.priority and not self.deadline:
