@@ -63,11 +63,12 @@ class Feedback(Document):
 		from frappe.utils import now
 		self.last_updated = now()
 		
-		# Set first_response_date when first reply is added by staff
+		# Set first_response_date when first PUBLIC reply is added by staff
 		if self.replies and not self.first_response_date:
-			staff_replies = [r for r in self.replies if r.reply_by_type == "Staff"]
-			if staff_replies:
-				first_staff_reply = min(staff_replies, key=lambda x: x.reply_date or self.creation)
+			# Only consider public replies (not internal/draft)
+			public_staff_replies = [r for r in self.replies if r.reply_by_type == "Staff" and not r.is_internal]
+			if public_staff_replies:
+				first_staff_reply = min(public_staff_replies, key=lambda x: x.reply_date or self.creation)
 				self.first_response_date = first_staff_reply.reply_date or self.creation
 		
 		# Calculate deadline based on priority (only for Góp ý)
