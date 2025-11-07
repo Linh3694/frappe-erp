@@ -244,8 +244,7 @@ def list_feedback():
                 "name", "feedback_type", "title", "status", "priority",
                 "rating", "rating_comment", "department", "assigned_to",
                 "submitted_at", "last_updated", "closed_at",
-                "conversation_count", "resolution_rating",
-                "assigned_to_full_name", "assigned_to_jobtitle", "assigned_to_avatar"
+                "conversation_count", "resolution_rating"
             ],
             order_by="submitted_at desc",
             limit=page_length,
