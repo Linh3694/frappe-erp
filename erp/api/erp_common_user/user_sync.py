@@ -26,34 +26,38 @@ def get_all_enabled_users():
         GET/POST: /api/method/erp.api.erp_common_user.user_sync.get_all_enabled_users
     """
     try:
-        # Query all enabled users với tất cả fields cần thiết
-        users = frappe.db.sql("""
-            SELECT 
-                name,
-                email,
-                full_name,
-                first_name,
-                middle_name,
-                last_name,
-                user_image,
-                enabled,
-                disabled,
-                location,
-                department,
-                job_title,
-                designation,
-                employee_code,
-                microsoft_id,
-                docstatus,
-                user_type,
-                creation,
-                modified
-            FROM `tabUser`
-            WHERE enabled = 1
-            AND user_type IN ('System User', 'Website User')
-            AND name NOT IN ('Guest', 'Administrator')
-            ORDER BY name ASC
-        """, as_dict=True)
+        # Get all fields available in User doctype
+        user_meta = frappe.get_meta("User")
+        available_fields = [field.fieldname for field in user_meta.fields]
+        
+        # Standard fields we want
+        desired_fields = [
+            'name', 'email', 'full_name', 'first_name', 'middle_name', 'last_name',
+            'user_image', 'enabled', 'disabled', 'location', 'department',
+            'job_title', 'designation', 'employee_code', 'microsoft_id',
+            'user_type', 'creation', 'modified'
+        ]
+        
+        # Only query fields that exist
+        fields_to_query = ['name']  # name is always available
+        for field in desired_fields:
+            if field in available_fields or field in ['name', 'owner', 'creation', 'modified']:
+                fields_to_query.append(field)
+        
+        # Remove duplicates
+        fields_to_query = list(set(fields_to_query))
+        
+        # Use frappe.get_all for safe querying
+        users = frappe.get_all(
+            "User",
+            filters={
+                "enabled": 1,
+                "user_type": ["in", ["System User", "Website User"]],
+                "name": ["not in", ["Guest", "Administrator"]]
+            },
+            fields=fields_to_query,
+            order_by="name asc"
+        )
         
         # Count by user type
         user_type_stats = {
@@ -110,16 +114,11 @@ def get_user_by_email(email):
                 "error": "Email is required"
             }
         
-        user = frappe.db.get_value(
+        user = frappe.get_all(
             "User",
-            {"email": email, "enabled": 1},
-            [
-                "name", "email", "full_name", "first_name", "middle_name", "last_name",
-                "user_image", "enabled", "disabled", "location", "department",
-                "job_title", "designation", "employee_code", "microsoft_id",
-                "docstatus", "user_type", "creation", "modified"
-            ],
-            as_dict=True
+            filters={"email": email, "enabled": 1},
+            fields=["*"],  # Get all available fields
+            limit=1
         )
         
         if not user:
@@ -127,6 +126,8 @@ def get_user_by_email(email):
                 "success": False,
                 "error": f"User not found or disabled: {email}"
             }
+        
+        user = user[0]  # Get first result
         
         return {
             "success": True,
@@ -162,12 +163,12 @@ def get_users_paginated(start=0, page_length=100, filters=None):
         start = int(start) if start else 0
         page_length = int(page_length) if page_length else 100
         
-        # Base query conditions
-        conditions = [
-            "enabled = 1",
-            "user_type IN ('System User', 'Website User')",
-            "name NOT IN ('Guest', 'Administrator')"
-        ]
+        # Build filters
+        frappe_filters = {
+            "enabled": 1,
+            "user_type": ["in", ["System User", "Website User"]],
+            "name": ["not in", ["Guest", "Administrator"]]
+        }
         
         # Additional filters if provided
         if filters:
@@ -176,31 +177,22 @@ def get_users_paginated(start=0, page_length=100, filters=None):
                 filters = json.loads(filters)
             
             if filters.get('department'):
-                conditions.append(f"department = '{filters['department']}'")
+                frappe_filters['department'] = filters['department']
             if filters.get('user_type'):
-                conditions.append(f"user_type = '{filters['user_type']}'")
-        
-        where_clause = " AND ".join(conditions)
+                frappe_filters['user_type'] = filters['user_type']
         
         # Get total count
-        total_count = frappe.db.sql(f"""
-            SELECT COUNT(*) as count
-            FROM `tabUser`
-            WHERE {where_clause}
-        """, as_dict=True)[0]['count']
+        total_count = frappe.db.count("User", frappe_filters)
         
         # Get paginated data
-        users = frappe.db.sql(f"""
-            SELECT 
-                name, email, full_name, first_name, middle_name, last_name,
-                user_image, enabled, disabled, location, department,
-                job_title, designation, employee_code, microsoft_id,
-                docstatus, user_type, creation, modified
-            FROM `tabUser`
-            WHERE {where_clause}
-            ORDER BY name ASC
-            LIMIT {page_length} OFFSET {start}
-        """, as_dict=True)
+        users = frappe.get_all(
+            "User",
+            filters=frappe_filters,
+            fields=["*"],
+            order_by="name asc",
+            start=start,
+            page_length=page_length
+        )
         
         return {
             "success": True,
@@ -232,15 +224,22 @@ def get_sync_stats():
         GET: /api/method/erp.api.erp_common_user.user_sync.get_sync_stats
     """
     try:
-        stats = frappe.db.sql("""
-            SELECT 
-                user_type,
-                enabled,
-                COUNT(*) as count
-            FROM `tabUser`
-            WHERE name NOT IN ('Guest', 'Administrator')
-            GROUP BY user_type, enabled
-        """, as_dict=True)
+        # Get user counts by type and status
+        all_users = frappe.get_all(
+            "User",
+            filters={"name": ["not in", ["Guest", "Administrator"]]},
+            fields=["user_type", "enabled"]
+        )
+        
+        stats = []
+        # Count manually
+        from collections import Counter
+        for (user_type, enabled), count in Counter((u.get('user_type'), u.get('enabled')) for u in all_users).items():
+            stats.append({
+                'user_type': user_type,
+                'enabled': enabled,
+                'count': count
+            })
         
         # Format stats
         formatted_stats = {
