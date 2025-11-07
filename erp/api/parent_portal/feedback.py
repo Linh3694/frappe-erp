@@ -310,7 +310,7 @@ def get():
         # Include guardian information (guardian_name)
         if feedback.guardian:
             try:
-                guardian_doc = frappe.get_doc("Guardian", feedback.guardian)
+                guardian_doc = frappe.get_doc("CRM Guardian", feedback.guardian)
                 feedback_data["guardian_name"] = guardian_doc.guardian_name
             except frappe.DoesNotExistError:
                 feedback_data["guardian_name"] = None
