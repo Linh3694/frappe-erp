@@ -1075,3 +1075,78 @@ def update_assignment():
             code="UPDATE_ERROR"
         )
 
+
+@frappe.whitelist(allow_guest=False)
+def get_staff_rating_stats():
+    """Get rating statistics for staff members"""
+    try:
+        _check_staff_permission()
+
+        # Get all closed feedbacks with resolution ratings and assigned_to
+        feedbacks = frappe.get_all(
+            "Feedback",
+            filters={
+                "status": "Đóng",
+                "resolution_rating": ["!=", ""],
+                "assigned_to": ["!=", ""]
+            },
+            fields=[
+                "assigned_to",
+                "resolution_rating",
+                "assigned_to_full_name",
+                "assigned_to_jobtitle"
+            ]
+        )
+
+        # Group by assigned_to
+        staff_stats = {}
+        for feedback in feedbacks:
+            staff_id = feedback.assigned_to
+            rating = float(feedback.resolution_rating) if feedback.resolution_rating else 0
+
+            if staff_id not in staff_stats:
+                staff_stats[staff_id] = {
+                    "staff_id": staff_id,
+                    "staff_name": feedback.assigned_to_full_name or staff_id,
+                    "job_title": feedback.assigned_to_jobtitle or "",
+                    "total_feedbacks": 0,
+                    "total_rating": 0,
+                    "average_rating": 0,
+                    "rating_distribution": {
+                        "1_star": 0,
+                        "2_star": 0,
+                        "3_star": 0,
+                        "4_star": 0,
+                        "5_star": 0
+                    }
+                }
+
+            staff_stats[staff_id]["total_feedbacks"] += 1
+            staff_stats[staff_id]["total_rating"] += rating
+
+            # Count rating distribution (convert to 1-5 scale)
+            star_rating = round(rating * 5)
+            if 1 <= star_rating <= 5:
+                staff_stats[staff_id]["rating_distribution"][f"{star_rating}_star"] += 1
+
+        # Calculate averages
+        for staff_id, stats in staff_stats.items():
+            if stats["total_feedbacks"] > 0:
+                stats["average_rating"] = round(stats["total_rating"] / stats["total_feedbacks"], 2)
+
+        # Convert to list and sort by average rating (highest first)
+        result = list(staff_stats.values())
+        result.sort(key=lambda x: x["average_rating"], reverse=True)
+
+        return success_response(
+            data=result,
+            message="Lấy thống kê rating staff thành công"
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"Error getting staff rating stats: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy thống kê rating: {str(e)}",
+            code="STATS_ERROR"
+        )
+
