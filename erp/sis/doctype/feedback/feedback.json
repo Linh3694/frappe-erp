@@ -32,6 +32,10 @@
   "resolution_rating_section",
   "resolution_rating",
   "resolution_comment",
+  "support_rating_section",
+  "support_rated_for",
+  "support_rating",
+  "support_comment",
   "attachments_section",
   "attachments",
   "conversation_section",
@@ -168,6 +172,32 @@
    "fieldtype": "Text",
    "label": "Nhận xét về việc giải quyết",
    "depends_on": "feedback_type=='Góp ý' AND status=='Đóng'"
+  },
+  {
+   "fieldname": "support_rating_section",
+   "fieldtype": "Section Break",
+   "label": "Đánh giá đội ngũ hỗ trợ",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "support_rated_for",
+   "fieldtype": "Link",
+   "label": "Đánh giá cho",
+   "options": "User",
+   "read_only": 1,
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "support_rating",
+   "fieldtype": "Rating",
+   "label": "Đánh giá chất lượng hỗ trợ",
+   "depends_on": "feedback_type=='Góp ý'"
+  },
+  {
+   "fieldname": "support_comment",
+   "fieldtype": "Text",
+   "label": "Nhận xét về hỗ trợ",
+   "depends_on": "feedback_type=='Góp ý'"
   },
   {
    "fieldname": "attachments_section",

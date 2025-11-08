@@ -696,12 +696,8 @@ def add_reply():
             })
         
         # Update status only for non-draft replies
-        if feedback.status == "Mới":
-            feedback.status = "Đang xử lý"
-        elif feedback.status == "Đã phản hồi":
-            feedback.status = "Chờ phản hồi phụ huynh"
-        else:
-            feedback.status = "Đã phản hồi"
+        # When staff replies, always set status to waiting for parent response
+        feedback.status = "Chờ phản hồi phụ huynh"
         
         feedback.save()
         frappe.db.commit()

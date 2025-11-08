@@ -615,8 +615,9 @@ def add_reply():
         if request_close:
             # If requesting close, set status to waiting for staff confirmation
             feedback.status = "Chờ phản hồi phụ huynh"
-        elif feedback.status == "Chờ phản hồi phụ huynh":
-            feedback.status = "Đã phản hồi"
+        else:
+            # If just replying, set status back to processing
+            feedback.status = "Đang xử lý"
         
         feedback.save()
         frappe.db.commit()
@@ -652,6 +653,8 @@ def close_and_rate():
         resolution_rating = data.get("resolution_rating")
         resolution_comment = data.get("resolution_comment", "")
         close_message = data.get("close_message", "")
+        support_rating = data.get("support_rating")
+        support_comment = data.get("support_comment", "")
         
         if not feedback_name:
             return validation_error_response(
@@ -662,6 +665,11 @@ def close_and_rate():
             return validation_error_response(
                 "resolution_rating là bắt buộc",
                 {"resolution_rating": ["resolution_rating là bắt buộc"]}
+            )
+        if not support_rating:
+            return validation_error_response(
+                "support_rating là bắt buộc",
+                {"support_rating": ["support_rating là bắt buộc"]}
             )
         
         # Get feedback
@@ -715,6 +723,13 @@ def close_and_rate():
         normalized_rating = float(resolution_rating) / 5.0
         feedback.resolution_rating = normalized_rating
         feedback.resolution_comment = resolution_comment
+        
+        # Update support team rating
+        # Convert rating from 1-5 scale to normalized 0-1 scale
+        normalized_support_rating = float(support_rating) / 5.0
+        feedback.support_rating = normalized_support_rating
+        feedback.support_comment = support_comment
+        feedback.support_rated_for = feedback.assigned_to  # Auto-set to who handled the support
         
         feedback.save()
         frappe.db.commit()
