@@ -104,8 +104,14 @@ def _get_request_data():
         is_json = 'application/json' in content_type.lower()
         is_form_data = 'multipart/form-data' in content_type.lower() or 'application/x-www-form-urlencoded' in content_type.lower()
 
-    # Try to get from JSON body first if Content-Type is JSON
-    if is_json:
+    # Priority: FormData > JSON > form_dict
+    if frappe.local.form_dict:
+        form_dict_data = dict(frappe.local.form_dict)
+        data.update(form_dict_data)
+        frappe.logger().info(f"DEBUG [FORM_DICT] Data from form_dict: {form_dict_data}")
+
+    # Try to get from JSON body if Content-Type suggests JSON and no form data
+    if is_json and not data:
         try:
             if hasattr(frappe.request, 'data') and frappe.request.data:
                 raw = frappe.request.data
@@ -114,21 +120,11 @@ def _get_request_data():
                     parsed = json.loads(body)
                     if isinstance(parsed, dict):
                         data.update(parsed)
+                        frappe.logger().info(f"DEBUG [JSON_BODY] Data from JSON body: {parsed}")
         except (json.JSONDecodeError, AttributeError, TypeError) as e:
             frappe.logger().error(f"Error parsing JSON body: {str(e)}")
 
-    # For FormData or form submissions, get data from form_dict
-    if frappe.local.form_dict:
-        form_dict_data = dict(frappe.local.form_dict)
-        # For FormData, overwrite JSON data (FormData takes precedence)
-        if is_form_data or not is_json:
-            data.update(form_dict_data)
-        else:
-            # For mixed requests, merge but don't overwrite JSON data
-            for key, value in form_dict_data.items():
-                if key not in data or not data.get(key):
-                    data[key] = value
-
+    frappe.logger().info(f"DEBUG [FINAL_DATA] Final parsed data: {data}")
     return data
 
 
@@ -145,6 +141,12 @@ def create():
 
         # Get data from form (handles both FormData and JSON)
         data = _get_request_data()
+
+        # Debug logging
+        frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Content-Type: {frappe.request.content_type}")
+        frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Form dict keys: {list(frappe.local.form_dict.keys()) if frappe.local.form_dict else 'None'}")
+        frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Request files: {len(frappe.request.files) if frappe.request.files else 0} files")
+        frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Parsed data: {data}")
 
         # Validate required fields
         feedback_type = data.get("feedback_type")
