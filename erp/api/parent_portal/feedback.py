@@ -10,12 +10,15 @@ import frappe
 from frappe import _
 from frappe.utils import now, get_datetime
 import json
+import base64
 from erp.utils.api_response import (
     success_response,
     error_response,
     single_item_response,
     validation_error_response,
-    not_found_response
+    not_found_response,
+    list_response,
+    forbidden_response
 )
 
 
@@ -51,6 +54,42 @@ def _get_device_info():
         "user_agent": request.headers.get("User-Agent", "")
     }
     return device_info
+
+
+def _process_attachments(feedback_name):
+    """Process file attachments from frappe.request.files (similar to leave system)"""
+    attachment_urls = []
+
+    if not frappe.request.files:
+        return attachment_urls
+
+    for file_key, file_obj in frappe.request.files.items():
+        if file_key.startswith('documents'):
+            try:
+                # Create File doc (similar to leave.py approach)
+                file_doc = frappe.get_doc({
+                    "doctype": "File",
+                    "file_name": file_obj.filename,
+                    "attached_to_doctype": "Feedback",
+                    "attached_to_name": feedback_name,
+                    "content": file_obj.stream.read(),
+                    "is_private": 1
+                })
+
+                file_doc.insert(ignore_permissions=True)
+
+                if file_doc.file_url:
+                    # Ensure full URL
+                    full_url = file_doc.file_url
+                    if not full_url.startswith('http'):
+                        full_url = frappe.utils.get_url(full_url)
+                    attachment_urls.append(full_url)
+
+            except Exception as e:
+                frappe.logger().error(f"Error processing attachment {file_key}: {str(e)}")
+                # Continue processing other attachments
+
+    return attachment_urls
 
 
 def _get_request_data():
@@ -97,7 +136,8 @@ def create():
                 message="Không tìm thấy thông tin phụ huynh",
                 code="GUARDIAN_NOT_FOUND"
             )
-        
+
+        # Get data from form (handles both FormData and JSON)
         data = _get_request_data()
         
         # Validate required fields
@@ -171,16 +211,18 @@ def create():
         feedback.ip_address = device_info.get("ip_address")
         feedback.user_agent = device_info.get("user_agent")
         
-        # Handle attachments if provided
-        if data.get("attachments"):
-            feedback.attachments = data.get("attachments")
-        
         # Insert with ignore_permissions since API validates permissions separately
         # Also ignore_validate to skip Frappe's required field validation (we validate in API)
         feedback.flags.ignore_permissions = True
         feedback.flags.ignore_validate = True
         feedback.insert()
-        
+
+        # Handle attachments if provided (after insert to have feedback_name)
+        attachment_urls = _process_attachments(feedback.name)
+        if attachment_urls:
+            # Set attachments as JSON string of URLs (Frappe Attach field expects this)
+            feedback.attachments = json.dumps(attachment_urls)
+
         # Manually call validate() to run business logic (deadline calculation, SLA status, etc.)
         # Keep ignore_validate=True to skip required field validation (already validated in API)
         feedback.validate()
@@ -188,7 +230,7 @@ def create():
         # This is necessary because rating field has reqd=1 but depends_on condition
         feedback.flags.ignore_validate = True
         feedback.save()
-        
+
         frappe.db.commit()
         
         return success_response(
@@ -306,6 +348,18 @@ def get():
         
         # Format response
         feedback_data = feedback.as_dict()
+
+        # Process attachments - convert from JSON string to array
+        if feedback.attachments:
+            try:
+                if isinstance(feedback.attachments, str):
+                    feedback_data["attachments"] = json.loads(feedback.attachments)
+                else:
+                    feedback_data["attachments"] = feedback.attachments
+            except (json.JSONDecodeError, TypeError):
+                feedback_data["attachments"] = []
+        else:
+            feedback_data["attachments"] = []
 
         # Include guardian information (guardian_name)
         if feedback.guardian:
@@ -787,4 +841,56 @@ def submit_resolution_rating():
             message=f"Lỗi khi gửi đánh giá: {str(e)}",
             code="RATING_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_feedback_attachments():
+    """
+    Get all attachments for a feedback - PARENT PORTAL ONLY
+
+    This endpoint is dedicated for parent portal usage.
+    Admins should use erp.api.erp_sis.feedback.get_feedback_attachments instead.
+    """
+    try:
+        # Try to get feedback_name from various sources
+        feedback_name = frappe.form_dict.get('feedback_name') or frappe.request.args.get('feedback_name')
+
+        if not feedback_name:
+            return validation_error_response("Thiếu feedback_name", {"feedback_name": ["Feedback name là bắt buộc"]})
+
+        # Get the feedback to check permissions
+        feedback = frappe.get_doc("Feedback", feedback_name)
+
+        # PARENT PORTAL: Verify guardian has access to this feedback
+        guardian = _get_current_guardian()
+        if not guardian:
+            return error_response("Không tìm thấy thông tin phụ huynh")
+
+        # Check if the feedback belongs to this guardian
+        if feedback.guardian != guardian:
+            return forbidden_response("Bạn không có quyền truy cập file đính kèm của feedback này")
+
+        # Get all files attached to this feedback
+        attachments = frappe.get_all("File",
+            filters={
+                "attached_to_doctype": "Feedback",
+                "attached_to_name": feedback_name,
+                "is_private": 1
+            },
+            fields=["name", "file_name", "file_url", "file_size", "creation"],
+            order_by="creation desc"
+        )
+
+        # Add full URLs for files
+        for attachment in attachments:
+            if attachment.file_url and not attachment.file_url.startswith('http'):
+                attachment.file_url = frappe.utils.get_url(attachment.file_url)
+
+        return list_response(attachments)
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Feedback không tồn tại")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Get Feedback Attachments Error")
+        return error_response(f"Lỗi khi lấy file đính kèm: {str(e)}")
 
