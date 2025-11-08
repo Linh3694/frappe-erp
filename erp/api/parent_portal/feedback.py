@@ -88,16 +88,20 @@ def _process_attachments(feedback_name):
                     file_doc.insert(ignore_permissions=True)
 
                     if file_doc.file_url:
-                        # Ensure full URL
-                        full_url = file_doc.file_url
-                        if not full_url.startswith('http'):
-                            full_url = frappe.utils.get_url(full_url)
+                        # Extract relative path from /files onwards (remove /private/ prefix)
+                        file_url = file_doc.file_url
+                        if '/private/files/' in file_url:
+                            # Extract from /files onwards: /private/files/xxx -> /files/xxx
+                            file_url = '/files/' + file_url.split('/private/files/')[-1]
+                        elif '/files/' not in file_url:
+                            # Fallback: ensure starts with /files/
+                            file_url = '/files/' + file_obj.filename
                         
-                        # Store file metadata
+                        # Store file metadata with relative path only
                         attachment_data.append({
                             "name": file_doc.name,
                             "file_name": file_obj.filename,
-                            "file_url": full_url,
+                            "file_url": file_url,
                             "file_size": len(file_content),
                             "file_type": file_obj.content_type or "application/octet-stream",
                             "creation": file_doc.creation
@@ -374,12 +378,7 @@ def get():
             try:
                 if isinstance(feedback.attachments, str):
                     attachment_list = json.loads(feedback.attachments)
-                    # Ensure each attachment has required fields
-                    for att in attachment_list:
-                        if isinstance(att, dict) and 'file_url' in att:
-                            # Ensure full URL
-                            if att['file_url'] and not att['file_url'].startswith('http'):
-                                att['file_url'] = frappe.utils.get_url(att['file_url'])
+                    # Return relative paths as-is (/files/xxx)
                     feedback_data["attachments"] = attachment_list
                 else:
                     feedback_data["attachments"] = feedback.attachments
