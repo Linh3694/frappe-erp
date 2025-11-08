@@ -93,15 +93,17 @@ def _process_attachments(feedback_name):
 
 
 def _get_request_data():
-    """Get request data from various sources"""
+    """Get request data from various sources (JSON, FormData, form_dict)"""
     data = {}
-    
+
     # Check if request is JSON
     is_json = False
+    is_form_data = False
     if hasattr(frappe.request, 'content_type'):
         content_type = frappe.request.content_type or ''
         is_json = 'application/json' in content_type.lower()
-    
+        is_form_data = 'multipart/form-data' in content_type.lower() or 'application/x-www-form-urlencoded' in content_type.lower()
+
     # Try to get from JSON body first if Content-Type is JSON
     if is_json:
         try:
@@ -114,15 +116,19 @@ def _get_request_data():
                         data.update(parsed)
         except (json.JSONDecodeError, AttributeError, TypeError) as e:
             frappe.logger().error(f"Error parsing JSON body: {str(e)}")
-    
-    # Also try form_dict (might have data from URL params or form data)
+
+    # For FormData or form submissions, get data from form_dict
     if frappe.local.form_dict:
         form_dict_data = dict(frappe.local.form_dict)
-        # Merge form_dict data, but don't overwrite JSON data
-        for key, value in form_dict_data.items():
-            if key not in data or not data.get(key):
-                data[key] = value
-    
+        # For FormData, overwrite JSON data (FormData takes precedence)
+        if is_form_data or not is_json:
+            data.update(form_dict_data)
+        else:
+            # For mixed requests, merge but don't overwrite JSON data
+            for key, value in form_dict_data.items():
+                if key not in data or not data.get(key):
+                    data[key] = value
+
     return data
 
 
@@ -139,7 +145,7 @@ def create():
 
         # Get data from form (handles both FormData and JSON)
         data = _get_request_data()
-        
+
         # Validate required fields
         feedback_type = data.get("feedback_type")
         if not feedback_type:
