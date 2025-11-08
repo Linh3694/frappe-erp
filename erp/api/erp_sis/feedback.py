@@ -1102,7 +1102,9 @@ def get_staff_rating_stats():
         staff_stats = {}
         for feedback in feedbacks:
             staff_id = feedback.assigned_to
-            rating = float(feedback.resolution_rating) if feedback.resolution_rating else 0
+            # Convert from 0-1 scale to 1-5 scale for calculations
+            rating_01 = float(feedback.resolution_rating) if feedback.resolution_rating else 0
+            rating = rating_01 * 5  # Convert to 1-5 scale
 
             if staff_id not in staff_stats:
                 staff_stats[staff_id] = {
@@ -1124,15 +1126,18 @@ def get_staff_rating_stats():
             staff_stats[staff_id]["total_feedbacks"] += 1
             staff_stats[staff_id]["total_rating"] += rating
 
-            # Count rating distribution (convert to 1-5 scale)
-            star_rating = round(rating * 5)
+            # Count rating distribution (already in 1-5 scale from the converted rating)
+            star_rating = round(rating)
             if 1 <= star_rating <= 5:
                 staff_stats[staff_id]["rating_distribution"][f"{star_rating}_star"] += 1
 
-        # Calculate averages
+        # Calculate averages (keep in 0-1 scale for frontend compatibility)
         for staff_id, stats in staff_stats.items():
             if stats["total_feedbacks"] > 0:
-                stats["average_rating"] = round(stats["total_rating"] / stats["total_feedbacks"], 2)
+                average_rating_5_scale = stats["total_rating"] / stats["total_feedbacks"]
+                stats["average_rating"] = round(average_rating_5_scale / 5, 2)  # Convert to 0-1 scale
+                # Update total_rating to be in 1-5 scale for better readability
+                stats["total_rating"] = round(average_rating_5_scale, 2)
 
         # Convert to list and sort by average rating (highest first)
         result = list(staff_stats.values())
