@@ -58,38 +58,56 @@ def _get_device_info():
 
 def _process_attachments(feedback_name):
     """Process file attachments from frappe.request.files (similar to leave system)"""
-    attachment_urls = []
+    attachment_data = []
 
     if not frappe.request.files:
-        return attachment_urls
+        return attachment_data
 
-    for file_key, file_obj in frappe.request.files.items():
+    for file_key, file_list in frappe.request.files.items(multi=True):
+        # Handle both single file and multi=True
+        if not isinstance(file_list, list):
+            file_list = [file_list]
+            
         if file_key.startswith('documents'):
-            try:
-                # Create File doc (similar to leave.py approach)
-                file_doc = frappe.get_doc({
-                    "doctype": "File",
-                    "file_name": file_obj.filename,
-                    "attached_to_doctype": "Feedback",
-                    "attached_to_name": feedback_name,
-                    "content": file_obj.stream.read(),
-                    "is_private": 1
-                })
+            for file_obj in file_list:
+                try:
+                    # Read file content
+                    file_content = file_obj.stream.read()
+                    file_obj.stream.seek(0)  # Reset stream for potential re-read
+                    
+                    # Create File doc (similar to leave.py approach)
+                    file_doc = frappe.get_doc({
+                        "doctype": "File",
+                        "file_name": file_obj.filename,
+                        "attached_to_doctype": "Feedback",
+                        "attached_to_name": feedback_name,
+                        "content": file_content,
+                        "is_private": 1
+                    })
 
-                file_doc.insert(ignore_permissions=True)
+                    file_doc.insert(ignore_permissions=True)
 
-                if file_doc.file_url:
-                    # Ensure full URL
-                    full_url = file_doc.file_url
-                    if not full_url.startswith('http'):
-                        full_url = frappe.utils.get_url(full_url)
-                    attachment_urls.append(full_url)
+                    if file_doc.file_url:
+                        # Ensure full URL
+                        full_url = file_doc.file_url
+                        if not full_url.startswith('http'):
+                            full_url = frappe.utils.get_url(full_url)
+                        
+                        # Store file metadata
+                        attachment_data.append({
+                            "name": file_doc.name,
+                            "file_name": file_obj.filename,
+                            "file_url": full_url,
+                            "file_size": len(file_content),
+                            "file_type": file_obj.content_type or "application/octet-stream",
+                            "creation": file_doc.creation
+                        })
 
-            except Exception as e:
-                frappe.logger().error(f"Error processing attachment {file_key}: {str(e)}")
-                # Continue processing other attachments
+                except Exception as e:
+                    frappe.logger().error(f"Error processing attachment {file_key}: {str(e)}")
+                    # Continue processing other attachments
 
-    return attachment_urls
+    return attachment_data
 
 
 def _get_request_data():
@@ -104,11 +122,15 @@ def _get_request_data():
         is_json = 'application/json' in content_type.lower()
         is_form_data = 'multipart/form-data' in content_type.lower() or 'application/x-www-form-urlencoded' in content_type.lower()
 
-    # Priority: FormData > JSON > form_dict
+    # Priority: form_dict (handles FormData automatically) > JSON body
     if frappe.local.form_dict:
         form_dict_data = dict(frappe.local.form_dict)
-        data.update(form_dict_data)
+        # Remove file keys from form_dict (will be handled separately)
+        for key in list(form_dict_data.keys()):
+            if not key.startswith('documents'):
+                data[key] = form_dict_data[key]
         frappe.logger().info(f"DEBUG [FORM_DICT] Data from form_dict: {form_dict_data}")
+        frappe.logger().info(f"DEBUG [FORM_DICT] Extracted non-file data: {data}")
 
     # Try to get from JSON body if Content-Type suggests JSON and no form data
     if is_json and not data:
@@ -226,10 +248,10 @@ def create():
         feedback.insert()
 
         # Handle attachments if provided (after insert to have feedback_name)
-        attachment_urls = _process_attachments(feedback.name)
-        if attachment_urls:
-            # Set attachments as JSON string of URLs (Frappe Attach field expects this)
-            feedback.attachments = json.dumps(attachment_urls)
+        attachment_data = _process_attachments(feedback.name)
+        if attachment_data:
+            # Set attachments as JSON string with file metadata (for BE storage)
+            feedback.attachments = json.dumps(attachment_data)
 
         # Manually call validate() to run business logic (deadline calculation, SLA status, etc.)
         # Keep ignore_validate=True to skip required field validation (already validated in API)
@@ -357,11 +379,18 @@ def get():
         # Format response
         feedback_data = feedback.as_dict()
 
-        # Process attachments - convert from JSON string to array
+        # Process attachments - convert from JSON string to array with metadata
         if feedback.attachments:
             try:
                 if isinstance(feedback.attachments, str):
-                    feedback_data["attachments"] = json.loads(feedback.attachments)
+                    attachment_list = json.loads(feedback.attachments)
+                    # Ensure each attachment has required fields
+                    for att in attachment_list:
+                        if isinstance(att, dict) and 'file_url' in att:
+                            # Ensure full URL
+                            if att['file_url'] and not att['file_url'].startswith('http'):
+                                att['file_url'] = frappe.utils.get_url(att['file_url'])
+                    feedback_data["attachments"] = attachment_list
                 else:
                     feedback_data["attachments"] = feedback.attachments
             except (json.JSONDecodeError, TypeError):
