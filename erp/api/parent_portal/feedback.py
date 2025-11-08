@@ -111,42 +111,25 @@ def _process_attachments(feedback_name):
 
 
 def _get_request_data():
-    """Get request data from various sources (JSON, FormData, form_dict)"""
-    data = {}
-
-    # Check if request is JSON
-    is_json = False
-    is_form_data = False
-    if hasattr(frappe.request, 'content_type'):
-        content_type = frappe.request.content_type or ''
-        is_json = 'application/json' in content_type.lower()
-        is_form_data = 'multipart/form-data' in content_type.lower() or 'application/x-www-form-urlencoded' in content_type.lower()
-
-    # Priority: form_dict (handles FormData automatically) > JSON body
-    if frappe.local.form_dict:
-        form_dict_data = dict(frappe.local.form_dict)
-        # Remove file keys from form_dict (will be handled separately)
-        for key in list(form_dict_data.keys()):
-            if not key.startswith('documents'):
-                data[key] = form_dict_data[key]
-        frappe.logger().info(f"DEBUG [FORM_DICT] Data from form_dict: {form_dict_data}")
-        frappe.logger().info(f"DEBUG [FORM_DICT] Extracted non-file data: {data}")
-
-    # Try to get from JSON body if Content-Type suggests JSON and no form data
-    if is_json and not data:
-        try:
-            if hasattr(frappe.request, 'data') and frappe.request.data:
-                raw = frappe.request.data
-                body = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
-                if body:
-                    parsed = json.loads(body)
-                    if isinstance(parsed, dict):
-                        data.update(parsed)
-                        frappe.logger().info(f"DEBUG [JSON_BODY] Data from JSON body: {parsed}")
-        except (json.JSONDecodeError, AttributeError, TypeError) as e:
-            frappe.logger().error(f"Error parsing JSON body: {str(e)}")
-
-    frappe.logger().info(f"DEBUG [FINAL_DATA] Final parsed data: {data}")
+    """Get request data from various sources, following leave.py pattern"""
+    # Check if files exist AND not empty
+    has_files = frappe.request.files and len(frappe.request.files) > 0
+    
+    if has_files:
+        # FormData with files - use request.form
+        data = frappe.request.form
+        frappe.logger().info(f"Using frappe.request.form (has {len(frappe.request.files)} files)")
+    elif frappe.request.is_json:
+        # JSON request - use request.json
+        data = frappe.request.json or {}
+        frappe.logger().info("Using frappe.request.json (JSON body)")
+    else:
+        # Fallback to form_dict
+        data = frappe.form_dict
+        frappe.logger().info("Using frappe.form_dict (fallback)")
+    
+    frappe.logger().info(f"DEBUG [FINAL_DATA] Parsed data keys: {list(data.keys())}")
+    frappe.logger().info(f"DEBUG [FINAL_DATA] 'feedback_type' value: {data.get('feedback_type', 'NOT FOUND')}")
     return data
 
 
@@ -154,7 +137,13 @@ def _get_request_data():
 def create():
     """Create new feedback"""
     try:
+        frappe.logger().info("="*100)
+        frappe.logger().info("DEBUG [FEEDBACK CREATE] ===== START CREATE FEEDBACK =====")
+        frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Current user: {frappe.session.user}")
+        
         guardian = _get_current_guardian()
+        frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Guardian: {guardian}")
+        
         if not guardian:
             return error_response(
                 message="Không tìm thấy thông tin phụ huynh",
@@ -168,6 +157,7 @@ def create():
         frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Content-Type: {frappe.request.content_type}")
         frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Form dict keys: {list(frappe.local.form_dict.keys()) if frappe.local.form_dict else 'None'}")
         frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Request files: {len(frappe.request.files) if frappe.request.files else 0} files")
+        frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Parsed data keys: {list(data.keys())}")
         frappe.logger().info(f"DEBUG [FEEDBACK CREATE] Parsed data: {data}")
 
         # Validate required fields
