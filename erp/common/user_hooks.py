@@ -20,12 +20,16 @@ def get_webhook_endpoints():
 	# Try to get from site config first
 	endpoints = frappe.conf.get("user_webhook_endpoints", [])
 	
-	# Fallback: hardcode ticket service endpoint
+	# Fallback: hardcode service endpoints
 	if not endpoints:
 		endpoints = [
 			{
 				"url": "http://172.16.20.113:5001/api/ticket/user/webhook/frappe-user-changed",
 				"name": "Ticket Service User Webhook"
+			},
+			{
+				"url": "http://172.16.20.113:5010/api/inventory/user/webhook/frappe-user-changed",
+				"name": "Inventory Service User Webhook"
 			}
 		]
 	
