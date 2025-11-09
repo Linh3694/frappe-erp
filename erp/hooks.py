@@ -212,13 +212,16 @@ doc_events = {
 	},
 	"ERP Administrative Room": {
 		"after_insert": [
-			"erp.common.room_events.on_room_after_insert"
+			"erp.common.room_events.on_room_after_insert",
+			"erp.common.user_hooks.trigger_room_webhooks"
 		],
 		"on_update": [
-			"erp.common.room_events.on_room_on_update"
+			"erp.common.room_events.on_room_on_update",
+			"erp.common.user_hooks.trigger_room_webhooks"
 		],
 		"on_trash": [
-			"erp.common.room_events.on_room_on_trash"
+			"erp.common.room_events.on_room_on_trash",
+			"erp.common.user_hooks.trigger_room_webhooks"
 		]
 	},
 	"SIS Class": {

@@ -36,6 +36,34 @@ def get_webhook_endpoints():
 	return endpoints
 
 
+def get_room_webhook_endpoints():
+	"""
+	Get room webhook endpoints từ site config hoặc default values
+	Format trong site_config.json:
+	{
+		"room_webhook_endpoints": [
+			{
+				"url": "http://172.16.20.113:5010/api/inventory/room/webhook/frappe-room-changed",
+				"name": "Inventory Service Room Webhook"
+			}
+		]
+	}
+	"""
+	# Try to get from site config first
+	endpoints = frappe.conf.get("room_webhook_endpoints", [])
+	
+	# Fallback: hardcode service endpoints
+	if not endpoints:
+		endpoints = [
+			{
+				"url": "http://172.16.20.113:5010/api/inventory/room/webhook/frappe-room-changed",
+				"name": "Inventory Service Room Webhook"
+			}
+		]
+	
+	return endpoints
+
+
 def trigger_user_webhooks(doc, event):
 	"""
 	Trigger webhooks khi User được insert/update/delete
@@ -152,3 +180,96 @@ def send_user_webhook(endpoint, data):
 # after_insert → create
 # on_update → update
 # on_trash → delete (khi xóa user)
+
+
+def trigger_room_webhooks(doc, event):
+	"""
+	Trigger webhooks khi Room được insert/update/delete
+	Gửi ĐẦY ĐỦ room data đến inventory service
+	"""
+	try:
+		# Get webhook endpoints
+		endpoints = get_room_webhook_endpoints()
+		
+		if not endpoints:
+			frappe.logger().debug("[Room Hooks] No webhook endpoints configured")
+			return
+			
+		frappe.logger().info(
+			f"🔔 [Room Hooks] Triggering {len(endpoints)} webhooks for Room {doc.name} - Event: {event}"
+		)
+		
+		# Build FULL room payload
+		room_payload = {
+			"name": doc.name,
+			"room_name": getattr(doc, 'room_name', None),
+			"room_number": getattr(doc, 'room_number', None),
+			"building": getattr(doc, 'building', None),
+			"floor": getattr(doc, 'floor', None),
+			"block": getattr(doc, 'block', None),
+			"capacity": getattr(doc, 'capacity', None),
+			"room_type": getattr(doc, 'room_type', None),
+			"status": getattr(doc, 'status', 'Active'),
+			"disabled": getattr(doc, 'disabled', 0),
+			"creation": str(doc.creation) if doc.creation else None,
+			"modified": str(doc.modified) if doc.modified else None
+		}
+		
+		# Webhook payload format
+		webhook_data = {
+			"doc": room_payload,
+			"event": event
+		}
+		
+		# Send to each endpoint
+		for endpoint in endpoints:
+			try:
+				send_room_webhook(endpoint, webhook_data)
+			except Exception as e:
+				frappe.logger().error(
+					f"❌ [Room Hooks] Failed to send webhook to {endpoint.get('name')}: {str(e)}"
+				)
+	except Exception as e:
+		frappe.logger().error(f"❌ [Room Hooks] Error triggering webhooks: {str(e)}")
+
+
+def send_room_webhook(endpoint, data):
+	"""
+	Send webhook to external service với đầy đủ room data
+	"""
+	try:
+		url = endpoint.get('url')
+		if not url:
+			frappe.logger().error(f"Endpoint {endpoint.get('name')} has no URL")
+			return
+		
+		# Headers
+		headers = {
+			'Content-Type': 'application/json'
+		}
+		
+		# Add custom headers if specified
+		if endpoint.get('headers'):
+			headers.update(endpoint['headers'])
+		
+		# Send request
+		frappe.logger().info(f"📤 [Room Hooks] Sending webhook to {url}")
+		frappe.logger().debug(f"Payload: {json.dumps(data, indent=2)}")
+		
+		response = requests.post(
+			url,
+			json=data,
+			headers=headers,
+			timeout=10
+		)
+		
+		if response.status_code >= 200 and response.status_code < 300:
+			frappe.logger().info(
+				f"✅ [Room Hooks] Webhook sent successfully to {endpoint.get('name')} (status {response.status_code})"
+			)
+		else:
+			frappe.logger().error(
+				f"❌ [Room Hooks] Webhook failed to {endpoint.get('name')} (status {response.status_code}, body: {response.text})"
+			)
+	except Exception as e:
+		frappe.logger().error(f"❌ [Room Hooks] Failed to send webhook to {endpoint.get('name')}: {str(e)}")
