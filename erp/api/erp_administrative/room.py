@@ -2617,3 +2617,43 @@ def get_room_for_class_subject(class_id: str, subject_title: str = None) -> Dict
             "room_name": "Lỗi tải phòng",
             "room_type": None
         }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_all_rooms_for_sync():
+    """
+    Get ALL rooms for inventory service sync (không bị giới hạn bởi campus)
+    Dành riêng cho microservice sync - không filter bởi user's campus
+    """
+    try:
+        # Fetch ALL rooms từ database - không filter campus
+        rooms = frappe.get_all(
+            "ERP Administrative Room",
+            fields=[
+                "name",
+                "room_name",
+                "room_number",
+                "building",
+                "floor",
+                "block",
+                "capacity",
+                "room_type",
+                "status",
+                "disabled",
+                "creation",
+                "modified"
+            ],
+            order_by="name asc"
+        )
+        
+        frappe.logger().info(f"[Room Sync] Fetched {len(rooms)} rooms for sync")
+        
+        return success_response(
+            data=rooms,
+            message="All rooms fetched successfully for sync",
+            meta={"total_count": len(rooms)}
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error fetching rooms for sync: {str(e)}")
+        return error_response(f"Error fetching rooms: {str(e)}")
