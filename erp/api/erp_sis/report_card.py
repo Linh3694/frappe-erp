@@ -919,8 +919,7 @@ def delete_template(template_id: Optional[str] = None):
         linked_reports = frappe.get_all(
             "SIS Student Report Card",
             fields=["name", "title", "student_id"],
-            filters={"template_id": template_id},
-            limit=100
+            filters={"template_id": template_id}
         )
 
         if linked_reports and not force_delete:
