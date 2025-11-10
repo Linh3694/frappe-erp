@@ -335,6 +335,20 @@ def update_timetable_column():
             updates_made.append(f"period_type: {period_type}")
 
         if period_name and period_name != timetable_column_doc.period_name:
+            # Check for duplicate period_name
+            final_education_stage_id = education_stage_id or timetable_column_doc.education_stage_id
+            existing_name = frappe.db.exists(
+                "SIS Timetable Column",
+                {
+                    "education_stage_id": final_education_stage_id,
+                    "period_name": period_name,
+                    "campus_id": campus_id,
+                    "name": ["!=", timetable_column_id]
+                }
+            )
+            if existing_name:
+                return validation_error_response("Validation failed", {"period_name": [f"Timetable column with name '{period_name}' already exists for this education stage"]})
+
             frappe.logger().info(f"Update timetable column - Updating period_name: {timetable_column_doc.period_name} -> {period_name}")
             timetable_column_doc.period_name = period_name
             updates_made.append(f"period_name: {period_name}")
@@ -612,7 +626,7 @@ def create_timetable_column():
                 campus_id = default_campus.name
         
         # Check if period priority already exists for this education stage
-        existing = frappe.db.exists(
+        existing_priority = frappe.db.exists(
             "SIS Timetable Column",
             {
                 "education_stage_id": education_stage_id,
@@ -620,9 +634,22 @@ def create_timetable_column():
                 "campus_id": campus_id
             }
         )
-        
-        if existing:
+
+        if existing_priority:
             frappe.throw(_(f"Period priority '{period_priority}' already exists for this education stage"))
+
+        # Check if period name already exists for this education stage
+        existing_name = frappe.db.exists(
+            "SIS Timetable Column",
+            {
+                "education_stage_id": education_stage_id,
+                "period_name": period_name,
+                "campus_id": campus_id
+            }
+        )
+
+        if existing_name:
+            frappe.throw(_(f"Period name '{period_name}' already exists for this education stage"))
         
         # Create new timetable column
         timetable_column_doc = frappe.get_doc({
