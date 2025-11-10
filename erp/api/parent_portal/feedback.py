@@ -535,8 +535,8 @@ def delete():
                 code="DELETE_NOT_ALLOWED"
             )
         
-        # Delete feedback
-        frappe.delete_doc("Feedback", feedback_name)
+        # Delete feedback (ignore permissions as we already checked guardian ownership)
+        frappe.delete_doc("Feedback", feedback_name, ignore_permissions=True, force=True)
         frappe.db.commit()
         
         return success_response(message="Xóa feedback thành công")
