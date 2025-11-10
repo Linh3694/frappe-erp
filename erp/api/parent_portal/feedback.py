@@ -509,7 +509,7 @@ def delete():
                 code="GUARDIAN_NOT_FOUND"
             )
         
-        data = frappe.local.form_dict
+        data = _get_request_data()
         feedback_name = data.get("name")
         
         if not feedback_name:
