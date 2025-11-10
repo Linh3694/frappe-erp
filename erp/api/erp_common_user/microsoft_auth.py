@@ -1616,22 +1616,6 @@ def sync_microsoft_group_members_once(group_ids: str | None = None, limit: int |
                             local_user = find_or_create_frappe_user(ms_user, m)
                             if local_user:
                                 update_frappe_user(local_user, ms_user, m)
-                                # Đồng bộ avatar nếu có
-                                try:
-                                    photo_resp = requests.get(
-                                        f"https://graph.microsoft.com/v1.0/users/{user_id}/photo/$value",
-                                        headers=headers,
-                                        stream=True,
-                                    )
-                                    if photo_resp.status_code == 200:
-                                        content_type = photo_resp.headers.get('Content-Type')
-                                        content_bytes = photo_resp.content
-                                        from erp.api.erp_common_user.avatar_management import save_user_avatar_bytes
-                                        save_user_avatar_bytes(email, content_bytes, content_type)
-                                    else:
-                                        pass
-                                except Exception:
-                                    pass
                             if existed:
                                 updated += 1
                             else:
