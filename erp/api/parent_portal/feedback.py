@@ -181,11 +181,6 @@ def create():
                     {"rating": ["rating là bắt buộc cho loại Đánh giá"]}
                 )
         elif feedback_type == "Góp ý":
-            if not data.get("department"):
-                return validation_error_response(
-                    "department là bắt buộc cho loại Góp ý",
-                    {"department": ["department là bắt buộc cho loại Góp ý"]}
-                )
             if not data.get("title"):
                 return validation_error_response(
                     "title là bắt buộc cho loại Góp ý",
@@ -207,7 +202,9 @@ def create():
         
         # Set fields based on feedback type
         if feedback_type == "Góp ý":
-            feedback.department = data.get("department")
+            # Department is now optional, only set if provided
+            if data.get("department"):
+                feedback.department = data.get("department")
             feedback.title = data.get("title")
             feedback.content = data.get("content")
             feedback.priority = data.get("priority", "Trung bình")
