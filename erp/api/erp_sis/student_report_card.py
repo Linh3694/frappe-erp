@@ -1225,6 +1225,23 @@ def update_report_section():
                                         frappe.logger().info(f"[SCORES_MERGE] Updated {field_name} for {subject_id}: {len(field_value)} scores")
                                     else:
                                         existing_scores[subject_id][field_name] = field_value
+                                elif field_name == 'semester1_average':
+                                    # 🚨 CRITICAL FIX: Only save semester1_average if it's a valid number or evaluation string
+                                    # Reject if it's the same for all subjects (likely wrong data from frontend)
+                                    if field_value is not None:
+                                        # For scored subjects: must be a number between 0-10
+                                        if isinstance(field_value, (int, float)):
+                                            if 0 <= field_value <= 10:
+                                                existing_scores[subject_id][field_name] = field_value
+                                                frappe.logger().info(f"[SCORES_MERGE] Saved valid semester1_average for {subject_id}: {field_value}")
+                                            else:
+                                                frappe.logger().warning(f"[SCORES_MERGE] Rejected invalid semester1_average for {subject_id}: {field_value} (out of range)")
+                                        # For evaluated subjects: must be "Đạt" or "Không Đạt"
+                                        elif isinstance(field_value, str) and field_value in ["Đạt", "Không Đạt"]:
+                                            existing_scores[subject_id][field_name] = field_value
+                                            frappe.logger().info(f"[SCORES_MERGE] Saved valid semester1_average (evaluated) for {subject_id}: {field_value}")
+                                        else:
+                                            frappe.logger().warning(f"[SCORES_MERGE] Rejected invalid semester1_average for {subject_id}: {field_value} (invalid format)")
                                 elif field_value is not None:
                                     # For other fields, only update non-null values
                                     existing_scores[subject_id][field_name] = field_value
@@ -1331,6 +1348,22 @@ def update_report_section():
                                     frappe.logger().info(f"[SCORES_MERGE] Overwrite array {field_name} for subject '{subject_id}': {len(field_value)} scores")
                                 else:
                                     existing_scores[subject_id][field_name] = field_value
+                            elif field_name == 'semester1_average':
+                                # 🚨 CRITICAL FIX: Validate semester1_average before saving
+                                if field_value is not None:
+                                    # For scored subjects: must be a number between 0-10
+                                    if isinstance(field_value, (int, float)):
+                                        if 0 <= field_value <= 10:
+                                            existing_scores[subject_id][field_name] = field_value
+                                            frappe.logger().info(f"[SCORES_MERGE] Saved valid semester1_average for {subject_id}: {field_value}")
+                                        else:
+                                            frappe.logger().warning(f"[SCORES_MERGE] Rejected invalid semester1_average for {subject_id}: {field_value} (out of range)")
+                                    # For evaluated subjects: must be "Đạt" or "Không Đạt"
+                                    elif isinstance(field_value, str) and field_value in ["Đạt", "Không Đạt"]:
+                                        existing_scores[subject_id][field_name] = field_value
+                                        frappe.logger().info(f"[SCORES_MERGE] Saved valid semester1_average (evaluated) for {subject_id}: {field_value}")
+                                    else:
+                                        frappe.logger().warning(f"[SCORES_MERGE] Rejected invalid semester1_average for {subject_id}: {field_value} (invalid format)")
                             elif field_value is not None:
                                 # For other fields, only update non-null values
                                 existing_scores[subject_id][field_name] = field_value
@@ -1477,12 +1510,24 @@ def get_previous_semester_score():
 
         # Lấy điểm từ scores section
         scores_data = data_json.get("scores", {})
+        
+        # 🔍 DEBUG: Log request and available subjects
+        frappe.logger().info(f"[GET_PREV_SCORE] Request for student={student_id}, subject={subject_id}, year={academic_year}")
+        frappe.logger().info(f"[GET_PREV_SCORE] Available subjects in HK1 report: {list(scores_data.keys())}")
+        
         subject_scores = scores_data.get(subject_id, {})
+        
+        # 🔍 DEBUG: Log subject data
+        frappe.logger().info(f"[GET_PREV_SCORE] Subject '{subject_id}' data: {subject_scores}")
 
         # final_average chính là overall score
         overall_score = subject_scores.get("final_average")
+        
+        # 🔍 DEBUG: Log final score
+        frappe.logger().info(f"[GET_PREV_SCORE] Final score for '{subject_id}': {overall_score}")
 
         if overall_score is None:
+            frappe.logger().warning(f"[GET_PREV_SCORE] Subject '{subject_id}' NOT FOUND in HK1 report or has no final_average")
             return success_response({
                 "overall_score": None,
                 "report_id": report.get("name"),

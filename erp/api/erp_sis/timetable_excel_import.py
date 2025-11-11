@@ -1057,6 +1057,7 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 # SMART CLEANUP: SPLIT/DELETE instances for ONLY the classes in the uploaded file
                 # This ensures that when uploading partial data (e.g., only 2 classes),
                 # we don't accidentally delete other classes that were not uploaded
+                old_instance_end_dates = {}  # Track original end_dates of split instances
                 try:
                     from datetime import timedelta
                     class_list = list(rows_by_class.keys())
@@ -1085,9 +1086,12 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     
                     # SPLIT instances: Truncate end_date to one day before upload_start
                     # This preserves existing instances before the upload_start date
+                    # Also track the original end_date so we can extend new instances if needed
                     split_count = 0
                     for inst in cleanup_to_split:
                         try:
+                            # Store original end_date for this class (keyed by class_id)
+                            old_instance_end_dates[inst.class_id] = inst.end_date
                             new_end_date = upload_start - timedelta(days=1)
                             frappe.db.set_value("SIS Timetable Instance", inst.name, "end_date", new_end_date)
                             split_count += 1
@@ -1155,6 +1159,28 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     processed_classes += 1
                     instance_start = import_data.get("start_date")
                     instance_end = import_data.get("end_date")
+                    
+                    # If this class had a split instance with a later end_date, extend the new instance
+                    # to preserve continuity (e.g., if old instance went until 31/12 but upload is only until 30/11,
+                    # the new instance should still go until 31/12 for the classes not covered by this partial upload)
+                    if class_id in old_instance_end_dates:
+                        old_end = old_instance_end_dates[class_id]
+                        # Convert strings to date objects for comparison
+                        from datetime import datetime as dt
+                        if isinstance(instance_end, str):
+                            instance_end_date = dt.strptime(instance_end, "%Y-%m-%d").date()
+                        else:
+                            instance_end_date = instance_end
+                        
+                        if isinstance(old_end, str):
+                            old_end_date = dt.strptime(old_end, "%Y-%m-%d").date()
+                        else:
+                            old_end_date = old_end
+                        
+                        # If the old instance ended later than this upload ends, extend the new instance
+                        if old_end_date > instance_end_date:
+                            instance_end = old_end
+                            logs.append(f"📌 Class {class_id}: Extending instance end_date from {import_data.get('end_date')} to {old_end} (preserving continuity)")
                     
                     instance_doc = frappe.get_doc({
                         "doctype": "SIS Timetable Instance",
