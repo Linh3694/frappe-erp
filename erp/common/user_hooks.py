@@ -185,7 +185,7 @@ def send_user_webhook(endpoint, data):
 def trigger_room_webhooks(doc, event):
 	"""
 	Trigger webhooks khi Room được insert/update/delete
-	Gửi ĐẦY ĐỦ room data đến inventory service
+	Gửi ĐẦY ĐỦ room data + thông tin building đầy đủ đến inventory service
 	"""
 	try:
 		# Get webhook endpoints
@@ -199,21 +199,39 @@ def trigger_room_webhooks(doc, event):
 			f"🔔 [Room Hooks] Triggering {len(endpoints)} webhooks for Room {doc.name} - Event: {event}"
 		)
 		
-		# Build FULL room payload
+		# Build FULL room payload - UPDATED TO MATCH ACTUAL DOCTYPE FIELDS
 		room_payload = {
 			"name": doc.name,
-			"room_name": getattr(doc, 'room_name', None),
-			"room_number": getattr(doc, 'room_number', None),
-			"building": getattr(doc, 'building', None),
-			"floor": getattr(doc, 'floor', None),
-			"block": getattr(doc, 'block', None),
+			"title_vn": getattr(doc, 'title_vn', None),
+			"title_en": getattr(doc, 'title_en', None),
+			"short_title": getattr(doc, 'short_title', None),
+			"building_id": getattr(doc, 'building_id', None),
+			"campus_id": getattr(doc, 'campus_id', None),
 			"capacity": getattr(doc, 'capacity', None),
 			"room_type": getattr(doc, 'room_type', None),
-			"status": getattr(doc, 'status', 'Active'),
-			"disabled": getattr(doc, 'disabled', 0),
 			"creation": str(doc.creation) if doc.creation else None,
 			"modified": str(doc.modified) if doc.modified else None
 		}
+
+		# Populate full building information if building_id exists
+		if getattr(doc, 'building_id', None):
+			try:
+				building_doc = frappe.get_doc("ERP Administrative Building", doc.building_id)
+				room_payload["building"] = {
+					"name": building_doc.name,
+					"title_vn": getattr(building_doc, 'title_vn', None),
+					"title_en": getattr(building_doc, 'title_en', None),
+					"short_title": getattr(building_doc, 'short_title', None),
+					"campus_id": getattr(building_doc, 'campus_id', None),
+					"creation": str(building_doc.creation) if building_doc.creation else None,
+					"modified": str(building_doc.modified) if building_doc.modified else None
+				}
+				frappe.logger().debug(f"[Room Hooks] Populated building info for {building_doc.name}")
+			except Exception as e:
+				frappe.logger().warning(f"[Room Hooks] Failed to populate building info for {doc.building_id}: {str(e)}")
+				room_payload["building"] = None
+		else:
+			room_payload["building"] = None
 		
 		# Webhook payload format
 		webhook_data = {
