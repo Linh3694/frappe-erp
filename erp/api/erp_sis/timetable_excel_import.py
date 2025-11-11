@@ -1008,54 +1008,9 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                             for field, value in updates.items():
                                 frappe.db.set_value("SIS Timetable", timetable_id, field, value)
 
-                        # DELETE PHASE: Xóa instances cũ từ timetable hiện tại
-                        try:
-                            all_instances = frappe.get_all(
-                                "SIS Timetable Instance",
-                                fields=["name", "start_date", "end_date", "class_id"],
-                                filters={"timetable_id": timetable_id}
-                            )
-                            
-                            # Xóa instances BẮT ĐẦU từ upload_start trở đi
-                            instances_to_delete = [inst for inst in all_instances if inst.start_date >= upload_start]
-                            overlapping_instances = instances_to_delete
-                        except Exception:
-                            overlapping_instances = []
-
-                        deleted_instances = 0
-                        if overlapping_instances:
-                            # OPTIMIZATION: Bulk delete related records first
-                            instance_names = [inst.name for inst in overlapping_instances]
-                            try:
-                                # Bulk delete child tables in one query
-                                frappe.db.sql("""
-                                    DELETE FROM `tabSIS Teacher Timetable` 
-                                    WHERE timetable_instance_id IN ({})
-                                """.format(','.join(['%s'] * len(instance_names))), instance_names)
-                                
-                                frappe.db.sql("""
-                                    DELETE FROM `tabSIS Student Timetable` 
-                                    WHERE timetable_instance_id IN ({})
-                                """.format(','.join(['%s'] * len(instance_names))), instance_names)
-                                
-                                frappe.db.sql("""
-                                    DELETE FROM `tabSIS Timetable Instance Row` 
-                                    WHERE parent IN ({})
-                                """.format(','.join(['%s'] * len(instance_names))), instance_names)
-                                
-                                # Delete parent instances one by one (required by Frappe framework)
-                                for instance in overlapping_instances:
-                                    try:
-                                        frappe.delete_doc("SIS Timetable Instance", instance.name, ignore_permissions=True, force=True)
-                                        deleted_instances += 1
-                                    except Exception:
-                                        pass
-                            except Exception as del_error:
-                                logs.append(f"⚠️ Bulk delete warning: {str(del_error)}")
-
-                        if deleted_instances > 0:
-                            logs.append(f"🗑️ Đã xóa {deleted_instances} instances cũ từ timetable hiện tại")
-                            frappe.db.commit()
+                        # NOTE: The SMART CLEANUP phase (below) handles all necessary deletions/splits for classes
+                        # in the uploaded file, so we skip the old DELETE PHASE here to avoid deleting classes
+                        # that are not in the current upload
 
                     else:
                         # No overlapping timetable found, create new one
@@ -1099,32 +1054,37 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                 instances_created = 0
                 rows_created = 0
                 
-                # SMART CLEANUP: SPLIT/DELETE instances to prevent conflict
+                # SMART CLEANUP: SPLIT/DELETE instances for ONLY the classes in the uploaded file
+                # This ensures that when uploading partial data (e.g., only 2 classes),
+                # we don't accidentally delete other classes that were not uploaded
                 try:
                     from datetime import timedelta
                     class_list = list(rows_by_class.keys())
                     
-                    # Query instances của các classes này từ MỌI timetable
+                    # Query instances for classes in the uploaded file only (across all timetables)
                     cleanup_instances = frappe.get_all(
                         "SIS Timetable Instance",
                         fields=["name", "timetable_id", "class_id", "start_date", "end_date"],
                         filters={
-                            "class_id": ["in", class_list],
+                            "class_id": ["in", class_list],  # ONLY classes in this upload
                             "campus_id": campus_id
                         }
                     )
                     
-                    # Categorize instances
+                    # Categorize instances to handle overlapping date ranges
                     cleanup_to_delete = []
                     cleanup_to_split = []
                     
                     for inst in cleanup_instances:
                         if inst.start_date >= upload_start:
+                            # Instance starts at or after upload_start: delete entirely
                             cleanup_to_delete.append(inst)
                         elif inst.end_date >= upload_start:
+                            # Instance overlaps with upload_start: truncate end_date
                             cleanup_to_split.append(inst)
                     
-                    # SPLIT instances: Rút ngắn end_date về 1 ngày trước upload_start
+                    # SPLIT instances: Truncate end_date to one day before upload_start
+                    # This preserves existing instances before the upload_start date
                     split_count = 0
                     for inst in cleanup_to_split:
                         try:
@@ -1137,7 +1097,8 @@ def process_excel_import_with_metadata_v2(import_data: dict):
                     if split_count > 0:
                         frappe.db.commit()
                     
-                    # DELETE instances - OPTIMIZATION: Bulk delete
+                    # DELETE instances - OPTIMIZATION: Bulk delete old instances for uploaded classes
+                    # This only removes instances that start at or after upload_start for the uploaded classes
                     deleted_cleanup = 0
                     if cleanup_to_delete:
                         cleanup_names = [inst.name for inst in cleanup_to_delete]
