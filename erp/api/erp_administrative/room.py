@@ -66,7 +66,36 @@ def get_all_rooms():
             filters={"building_id": ["in", building_ids]},
             order_by="title_vn asc"
         )
-        
+
+        # Get unique building IDs from rooms
+        room_building_ids = list(set(room["building_id"] for room in rooms if room.get("building_id")))
+
+        # Get building information for populate
+        buildings = []
+        if room_building_ids:
+            buildings = frappe.get_all(
+                "ERP Administrative Building",
+                fields=[
+                    "name",
+                    "title_vn",
+                    "title_en",
+                    "short_title",
+                    "campus_id"
+                ],
+                filters={"name": ["in", room_building_ids]}
+            )
+
+        # Create building mapping for quick lookup
+        building_map = {building["name"]: building for building in buildings}
+
+        # Add building information to each room
+        for room in rooms:
+            building_id = room.get("building_id")
+            if building_id and building_id in building_map:
+                room["building"] = building_map[building_id]
+            else:
+                room["building"] = None
+
         return success_response(
             data=rooms,
             message="Rooms fetched successfully",
