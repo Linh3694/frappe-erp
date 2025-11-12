@@ -244,14 +244,21 @@ def log_crud_operation(doctype: str, operation: str, docname: str, user: str, ch
 
 
 def log_error(user: str, action: str, error_message: str, resource: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
-    """Log errors"""
+    """Log errors with details"""
     logger = get_logger()
+    
+    # Format error message with icon
+    msg = f'❌ {action}'
+    if resource:
+        msg += f' | {resource}'
+    msg += f' | {error_message}'
+    
     record = logging.LogRecord(
         name='wis_centralized',
         level=logging.ERROR,
         pathname='',
         lineno=0,
-        msg=f'Lỗi: {action} - {error_message}',
+        msg=msg,
         args=(),
         exc_info=None
     )
@@ -259,7 +266,61 @@ def log_error(user: str, action: str, error_message: str, resource: Optional[str
     record.action = action
     if resource:
         record.resource = resource
-    record.details = details or {}
+    record.details = {
+        'error_message': error_message,
+        'timestamp': datetime.now(timezone(timedelta(hours=7))).strftime("%d/%m/%Y %H:%M:%S"),
+        **(details or {})
+    }
+    
+    logger.handle(record)
+
+
+def log_http_error(user: str, method: str, endpoint: str, status_code: int, error_message: str, response_time_ms: float = 0, details: Optional[Dict[str, Any]] = None):
+    """Log HTTP errors (4xx, 5xx responses)"""
+    logger = get_logger()
+    
+    # Determine error severity
+    if status_code >= 500:
+        icon = "❌"
+        level = logging.ERROR
+        severity = "Server Error"
+    elif status_code >= 400:
+        icon = "⚠️"
+        level = logging.WARNING
+        severity = "Client Error"
+    else:
+        icon = "❌"
+        level = logging.ERROR
+        severity = "Error"
+    
+    msg = f'{icon} {severity} {status_code} | {method} {endpoint}'
+    if response_time_ms > 0:
+        msg += f' ({response_time_ms:.0f}ms)'
+    msg += f' | {error_message[:100]}'
+    
+    record = logging.LogRecord(
+        name='wis_centralized',
+        level=level,
+        pathname='',
+        lineno=0,
+        msg=msg,
+        args=(),
+        exc_info=None
+    )
+    record.user = user
+    record.action = f'HTTP {status_code}'
+    record.resource = endpoint
+    record.status_code = status_code
+    record.response_time = response_time_ms
+    record.details = {
+        'status_code': status_code,
+        'method': method,
+        'endpoint': endpoint,
+        'error_message': error_message,
+        'response_time_ms': response_time_ms,
+        'timestamp': datetime.now(timezone(timedelta(hours=7))).strftime("%d/%m/%Y %H:%M:%S"),
+        **(details or {})
+    }
     
     logger.handle(record)
 
