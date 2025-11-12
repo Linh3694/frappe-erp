@@ -290,6 +290,33 @@ def microsoft_callback(code, state):
         # Commit any changes before querying roles
         frappe.db.commit()
         
+        # 🔵 LOG MICROSOFT LOGIN
+        try:
+            from erp.utils.centralized_logger import log_authentication
+            ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
+            if ip and ',' in ip:
+                ip = ip.split(',')[0].strip()
+            
+            first_name = frappe_user.first_name or ""
+            last_name = frappe_user.last_name or ""
+            fullname = f"{first_name} {last_name}".strip() or frappe_user.email
+            
+            log_authentication(
+                user=frappe_user.email,
+                action='login',
+                ip=ip,
+                status='success',
+                details={
+                    'fullname': fullname,
+                    'provider': 'microsoft',
+                    'user_type': frappe_user.user_type if hasattr(frappe_user, 'user_type') else None,
+                    'timestamp': frappe.utils.now()
+                }
+            )
+            frappe.errprint(f"✅ [microsoft_callback] Logged Microsoft login for {frappe_user.email}")
+        except Exception as e:
+            frappe.errprint(f"❌ [microsoft_callback] Error logging: {str(e)}")
+        
         # Generate JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
         

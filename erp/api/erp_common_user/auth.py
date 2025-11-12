@@ -97,6 +97,33 @@ def login(email=None, username=None, password=None, provider="local"):
             if not apple_id:
                 frappe.throw(_("Apple authentication not configured"))
         
+        # 🔵 LOG LOGIN - Backend handles this directly instead of relying on hook
+        try:
+            from erp.utils.centralized_logger import log_authentication
+            ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
+            if ip and ',' in ip:
+                ip = ip.split(',')[0].strip()
+            
+            first_name = user_doc.first_name or ""
+            last_name = user_doc.last_name or ""
+            fullname = f"{first_name} {last_name}".strip() or user_doc.email
+            
+            log_authentication(
+                user=user_doc.email,
+                action='login',
+                ip=ip,
+                status='success',
+                details={
+                    'fullname': fullname,
+                    'user_type': user_doc.user_type if hasattr(user_doc, 'user_type') else None,
+                    'provider': provider,
+                    'timestamp': frappe.utils.now()
+                }
+            )
+            frappe.errprint(f"✅ [auth.login] Logged login for {user_doc.email}")
+        except Exception as e:
+            frappe.errprint(f"❌ [auth.login] Error logging: {str(e)}")
+        
         # Update last login timestamp on User if custom field exists
         try:
             if hasattr(user_doc, 'last_login'):
@@ -157,6 +184,36 @@ def login(email=None, username=None, password=None, provider="local"):
 def logout():
     """User logout"""
     try:
+        user_email = frappe.session.user
+        
+        # 🔵 LOG LOGOUT - before clearing session
+        if user_email and user_email != "Guest":
+            try:
+                from erp.utils.centralized_logger import log_authentication
+                user_doc = frappe.get_doc("User", user_email)
+                
+                ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
+                if ip and ',' in ip:
+                    ip = ip.split(',')[0].strip()
+                
+                first_name = user_doc.first_name or ""
+                last_name = user_doc.last_name or ""
+                fullname = f"{first_name} {last_name}".strip() or user_email
+                
+                log_authentication(
+                    user=user_email,
+                    action='logout',
+                    ip=ip,
+                    status='success',
+                    details={
+                        'fullname': fullname,
+                        'timestamp': frappe.utils.now()
+                    }
+                )
+                frappe.errprint(f"✅ [auth.logout] Logged logout for {user_email}")
+            except Exception as e:
+                frappe.errprint(f"❌ [auth.logout] Error logging: {str(e)}")
+        
         # Update last seen timestamp if custom field exists
         if frappe.session.user != "Guest":
             try:
