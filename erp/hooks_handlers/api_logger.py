@@ -64,9 +64,11 @@ def log_api_request_end(**kwargs):
             status_code=status_code,
             details={
                 'ip': ip,
+                'user_agent': frappe.get_request_header('User-Agent')[:100] or 'unknown',
+                'status_code': status_code,
                 'timestamp': frappe.utils.now()
             }
         )
     except Exception as e:
-        frappe.errprint(f"Error in log_api_request_end: {str(e)}")
+        frappe.errprint(f"❌ [api_logger] Error: {str(e)}")
 

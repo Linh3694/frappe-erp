@@ -151,18 +151,32 @@ def log_authentication(user: str, action: str, ip: str, status: str = "success",
 
 
 def log_api_call(user: str, method: str, endpoint: str, response_time_ms: float, status_code: int, details: Optional[Dict[str, Any]] = None):
-    """Log API calls with response time"""
+    """Log API calls with response time and colored indicators"""
     logger = get_logger()
     
-    # Determine if slow
-    slow_marker = " [CHẬM]" if response_time_ms > 2000 else ""
+    # Determine icon and level based on response time
+    if response_time_ms > 3000:
+        icon = "🔴"  # Red - very slow
+        level = logging.WARNING
+    elif response_time_ms > 1000:
+        icon = "🟡"  # Yellow - medium
+        level = logging.INFO
+    else:
+        icon = "🟢"  # Green - fast
+        level = logging.INFO
+    
+    # Override level if error status code
+    if status_code >= 400:
+        level = logging.WARNING
+        if status_code >= 500:
+            icon = "🔴"
     
     record = logging.LogRecord(
         name='wis_centralized',
-        level=logging.INFO if status_code < 400 else logging.WARNING,
+        level=level,
         pathname='',
         lineno=0,
-        msg=f'API Call{slow_marker}: {method} {endpoint}',
+        msg=f'{icon} {method} {endpoint} ({response_time_ms:.0f}ms)',
         args=(),
         exc_info=None
     )
