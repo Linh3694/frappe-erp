@@ -17,9 +17,15 @@ def on_user_login(login_manager=None, **kwargs):
         fullname = user_doc.full_name if user_doc else user
         
         # Get IP address
-        ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
-        if ip and ',' in ip:
-            ip = ip.split(',')[0].strip()
+        try:
+            ip = frappe.get_request_header('X-Forwarded-For') if hasattr(frappe, 'request') else None
+            if not ip and hasattr(frappe, 'request'):
+                ip = frappe.request.remote_addr
+            ip = ip or 'unknown'
+            if ip and ',' in ip:
+                ip = ip.split(',')[0].strip()
+        except:
+            ip = 'unknown'
         
         log_authentication(
             user=user,
@@ -46,9 +52,15 @@ def on_user_logout(user=None, **kwargs):
         fullname = user_doc.full_name if user_doc else user
         
         # Get IP address
-        ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
-        if ip and ',' in ip:
-            ip = ip.split(',')[0].strip()
+        try:
+            ip = frappe.get_request_header('X-Forwarded-For') if hasattr(frappe, 'request') else None
+            if not ip and hasattr(frappe, 'request'):
+                ip = frappe.request.remote_addr
+            ip = ip or 'unknown'
+            if ip and ',' in ip:
+                ip = ip.split(',')[0].strip()
+        except:
+            ip = 'unknown'
         
         log_authentication(
             user=user,
