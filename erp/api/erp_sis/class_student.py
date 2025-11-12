@@ -272,14 +272,15 @@ def sync_student_subjects_for_class_change(student_id, new_class_id, school_year
 def get_all_class_students(page=1, limit=20, school_year_id=None, class_id=None):
     """Get all class students with pagination and filters"""
     try:
-        page = int(page)
-        limit = int(limit)
+        # Get parameters from form_dict (POST) or request args (GET)
+        page = int(frappe.form_dict.get('page') or frappe.request.args.get('page', page))
+        limit = int(frappe.form_dict.get('limit') or frappe.request.args.get('limit', limit))
 
         # Get parameters from request args if not provided as function parameters
         if not school_year_id:
-            school_year_id = frappe.request.args.get("school_year_id")
+            school_year_id = frappe.form_dict.get("school_year_id") or frappe.request.args.get("school_year_id")
         if not class_id:
-            class_id = frappe.request.args.get("class_id")
+            class_id = frappe.form_dict.get("class_id") or frappe.request.args.get("class_id")
 
         # Build filters
         filters = {}
