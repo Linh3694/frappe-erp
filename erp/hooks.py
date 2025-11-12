@@ -228,6 +228,340 @@ doc_events = {
 		"on_update": [
 			"erp.api.erp_administrative.room.sync_class_room_assignment"
 		]
+	},
+	# Logging hooks for audit trail
+	"File": {
+		"after_insert": [
+			"erp.hooks_handlers.file_logger.log_file_upload"
+		],
+		"on_update": [
+			"erp.hooks_handlers.file_logger.log_file_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.file_logger.log_file_delete"
+		]
+	},
+	"Student": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		],
+		"on_cancel": [
+			"erp.hooks_handlers.crud_logger.log_cancel"
+		]
+	},
+	"Guardian": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Class Student": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Class Attendance": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Event": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Class": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Teacher": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Subject": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Curriculum": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Actual Subject": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Timetable": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Timetable Subject": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Photo": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS School Year": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Education Stage": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Education Grade": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Academic Program": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Sub Curriculum": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Calendar": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Subject Assignment": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"Feedback": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Student Leave Request": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Announcement": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS News Article": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"Daily Menu": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Bus Route": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Bus Student": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Bus Daily Trip": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
+	},
+	"SIS Badge": {
+		"after_insert": [
+			"erp.hooks_handlers.crud_logger.log_create"
+		],
+		"on_update": [
+			"erp.hooks_handlers.crud_logger.log_update"
+		],
+		"on_trash": [
+			"erp.hooks_handlers.crud_logger.log_delete"
+		]
 	}
 }
 
@@ -319,8 +653,13 @@ guest_method_whitelist = [
 
 # Request Events
 # ----------------
-before_request = ["erp.utils.auth_middleware.jwt_auth_middleware"]
-# after_request = ["erp.utils.after_request"]
+before_request = [
+	"erp.utils.auth_middleware.jwt_auth_middleware",
+	"erp.hooks_handlers.api_logger.log_api_request_start"
+]
+after_request = [
+	"erp.hooks_handlers.api_logger.log_api_request_end"
+]
 
 # Job Events
 # ----------
@@ -389,13 +728,13 @@ before_request = ["erp.utils.auth_middleware.jwt_auth_middleware"]
 
 # Login/Logout Hooks
 # ------------------
-# on_login = [
-#     "erp.utils.hooks.on_login"
-# ]
+on_login = [
+	"erp.hooks_handlers.auth_logger.on_user_login"
+]
 
-# on_logout = [
-#     "erp.utils.hooks.on_logout"
-# ]
+on_logout = [
+	"erp.hooks_handlers.auth_logger.on_user_logout"
+]
 
 # Fixtures - Explicitly register child tables to prevent orphaning
 fixtures = [
