@@ -106,7 +106,7 @@ def login(email=None, username=None, password=None, provider="local"):
             
             first_name = user_doc.first_name or ""
             last_name = user_doc.last_name or ""
-            fullname = f"{first_name} {last_name}".strip() or user_doc.email
+            fullname = f"{last_name} {first_name}".strip() or user_doc.email
             
             log_authentication(
                 user=user_doc.email,
