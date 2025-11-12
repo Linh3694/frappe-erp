@@ -204,7 +204,7 @@ def logout():
                 
                 first_name = user_doc.first_name or ""
                 last_name = user_doc.last_name or ""
-                fullname = f"{first_name} {last_name}".strip() or user_email
+                fullname = f"{last_name} {first_name} ".strip() or user_email
                 
                 # Get request source for debugging
                 user_agent = frappe.get_request_header('User-Agent') or 'unknown'
