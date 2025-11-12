@@ -22,7 +22,10 @@ def log_api_request_start(**kwargs):
 def log_api_request_end(**kwargs):
     """Hook called after API request execution"""
     try:
+        frappe.errprint(f"🔵 [api_logger] after_request hook triggered")
+        
         if not hasattr(frappe.local, 'request_start_time'):
+            frappe.errprint(f"🔵 [api_logger] No request_start_time found, skipping")
             return
         
         # Calculate response time

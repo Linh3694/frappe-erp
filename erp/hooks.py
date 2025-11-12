@@ -657,7 +657,8 @@ before_request = [
 	"erp.utils.auth_middleware.jwt_auth_middleware",
 	"erp.hooks_handlers.api_logger.log_api_request_start"
 ]
-after_request = [
+
+teardown_request = [
 	"erp.hooks_handlers.api_logger.log_api_request_end"
 ]
 
