@@ -7,7 +7,7 @@ Format: JSON structured để dễ parse trên Grafana/Loki
 import logging
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from logging.handlers import RotatingFileHandler
 from typing import Optional, Dict, Any
 
@@ -18,8 +18,12 @@ class JSONFormatter(logging.Formatter):
     """Custom JSON formatter cho structured logging"""
     
     def format(self, record: logging.LogRecord) -> str:
+        # Vietnam timezone: UTC+7
+        vietnam_tz = timezone(timedelta(hours=7))
+        vn_time = datetime.now(vietnam_tz)
+        
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": vn_time.strftime("%d/%m/%Y %H:%M:%S"),  # Format: 12/11/2025 09:22:54
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
