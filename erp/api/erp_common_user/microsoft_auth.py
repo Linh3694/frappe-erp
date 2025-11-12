@@ -299,7 +299,7 @@ def microsoft_callback(code, state):
             
             first_name = frappe_user.first_name or ""
             last_name = frappe_user.last_name or ""
-            fullname = f"{first_name} {last_name}".strip() or frappe_user.email
+            fullname = f"{last_name} {first_name}".strip() or frappe_user.email
             
             log_authentication(
                 user=frappe_user.email,
