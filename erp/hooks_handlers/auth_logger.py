@@ -79,7 +79,7 @@ def on_user_logout(user=None, **kwargs):
 def log_failed_login(user: str, reason: str):
     """Log failed login attempts"""
     try:
-        ip = get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
+        ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
         if ip and ',' in ip:
             ip = ip.split(',')[0].strip()
         
