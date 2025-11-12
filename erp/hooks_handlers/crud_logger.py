@@ -130,8 +130,8 @@ def log_cancel(doc, method=None, **kwargs):
 def _get_key_fields(doctype: str) -> list:
     """Get key fields to track for a doctype"""
     key_fields_map = {
-        'CRM Student': ['name', 'student_name', 'student_code', 'dob', 'gender', 'campus_id'],
-        'CRM Guardian': ['name', 'guardian_id', 'guardian_name', 'phone_number', 'email', 'family_code'],
+        'Student': ['name', 'student_name', 'student_code', 'dob', 'gender', 'campus_id'],
+        'Guardian': ['name', 'guardian_id', 'guardian_name', 'phone_number', 'email', 'family_code'],
         'SIS Class Student': ['name', 'campus_id', 'class_id', 'student_id', 'school_year_id'],
         'SIS Class Attendance': ['name', 'student_id', 'class_id', 'date', 'status', 'remarks'],
         'SIS Event': ['name', 'title', 'start_time', 'end_time', 'status', 'campus_id'],
