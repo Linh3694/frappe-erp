@@ -106,7 +106,11 @@ def login(email=None, username=None, password=None, provider="local"):
             
             first_name = user_doc.first_name or ""
             last_name = user_doc.last_name or ""
-            fullname = f"{last_name} {first_name}".strip() or user_doc.email
+            fullname = f" {last_name} {first_name}".strip() or user_doc.email
+            
+            # Get request source for debugging
+            user_agent = frappe.get_request_header('User-Agent') or 'unknown'
+            referer = frappe.get_request_header('Referer') or 'unknown'
             
             log_authentication(
                 user=user_doc.email,
@@ -117,10 +121,12 @@ def login(email=None, username=None, password=None, provider="local"):
                     'fullname': fullname,
                     'user_type': user_doc.user_type if hasattr(user_doc, 'user_type') else None,
                     'provider': provider,
+                    'user_agent': user_agent[:100],
+                    'referer': referer[:100],
                     'timestamp': frappe.utils.now()
                 }
             )
-            frappe.errprint(f"✅ [auth.login] Logged login for {user_doc.email}")
+            frappe.errprint(f"✅ [auth.login] Login for {user_doc.email} from {ip} via {provider}")
         except Exception as e:
             frappe.errprint(f"❌ [auth.login] Error logging: {str(e)}")
         
@@ -200,6 +206,10 @@ def logout():
                 last_name = user_doc.last_name or ""
                 fullname = f"{first_name} {last_name}".strip() or user_email
                 
+                # Get request source for debugging
+                user_agent = frappe.get_request_header('User-Agent') or 'unknown'
+                referer = frappe.get_request_header('Referer') or 'unknown'
+                
                 log_authentication(
                     user=user_email,
                     action='logout',
@@ -207,12 +217,16 @@ def logout():
                     status='success',
                     details={
                         'fullname': fullname,
+                        'user_agent': user_agent[:100],
+                        'referer': referer[:100],
                         'timestamp': frappe.utils.now()
                     }
                 )
-                frappe.errprint(f"✅ [auth.logout] Logged logout for {user_email}")
+                frappe.errprint(f"✅ [auth.logout] Logout for {user_email} from {ip}")
             except Exception as e:
                 frappe.errprint(f"❌ [auth.logout] Error logging: {str(e)}")
+                import traceback
+                frappe.errprint(traceback.format_exc())
         
         # Update last seen timestamp if custom field exists
         if frappe.session.user != "Guest":
