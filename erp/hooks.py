@@ -728,13 +728,14 @@ after_request = [
 
 # Login/Logout Hooks
 # ------------------
-on_login = [
-	"erp.hooks_handlers.auth_logger.on_user_login"
-]
+# ⚠️ DISABLED: Logging handled directly in auth.py endpoints to avoid timing issues
+# on_login = [
+# 	"erp.hooks_handlers.auth_logger.on_user_login"
+# ]
 
-on_logout = [
-	"erp.hooks_handlers.auth_logger.on_user_logout"
-]
+# on_logout = [
+# 	"erp.hooks_handlers.auth_logger.on_user_logout"
+# ]
 
 # Fixtures - Explicitly register child tables to prevent orphaning
 fixtures = [

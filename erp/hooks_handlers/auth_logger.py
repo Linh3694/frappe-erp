@@ -34,7 +34,7 @@ def on_user_login(login_manager=None, **kwargs):
         if user_doc:
             first_name = user_doc.first_name or ""
             last_name = user_doc.last_name or ""
-            fullname = f"{first_name} {last_name}".strip() or user
+            fullname = f"{last_name} {first_name}".strip() or user
 
         # Get IP address
         try:
@@ -93,7 +93,7 @@ def on_user_logout(user=None, **kwargs):
         if user_doc:
             first_name = user_doc.first_name or ""
             last_name = user_doc.last_name or ""
-            fullname = f"{first_name} {last_name}".strip() or user
+            fullname = f"{last_name} {first_name}".strip() or user
 
         # Get IP address
         try:
