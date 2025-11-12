@@ -4,7 +4,6 @@ Logs login, logout, and authentication failures
 """
 
 import frappe
-from frappe.utils import get_request_header
 from erp.utils.centralized_logger import log_authentication, log_error
 
 
@@ -18,7 +17,7 @@ def on_user_login(login_manager=None, **kwargs):
         fullname = user_doc.full_name if user_doc else user
         
         # Get IP address
-        ip = get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
+        ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
         if ip and ',' in ip:
             ip = ip.split(',')[0].strip()
         
@@ -47,7 +46,7 @@ def on_user_logout(user=None, **kwargs):
         fullname = user_doc.full_name if user_doc else user
         
         # Get IP address
-        ip = get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
+        ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
         if ip and ',' in ip:
             ip = ip.split(',')[0].strip()
         

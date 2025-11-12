@@ -71,10 +71,14 @@ class CentralizedLogger:
     def setup_logging():
         """Setup centralized logging configuration"""
         try:
-            site = frappe.local.site if hasattr(frappe, 'local') and hasattr(frappe.local, 'site') else 'admin.sis.wellspring.edu.vn'
+            # Get site path from frappe
+            site_path = frappe.get_site_path() if hasattr(frappe, 'local') and hasattr(frappe.local, 'site') else None
+            
+            if not site_path:
+                return  # Skip if no site context
             
             # Ensure logs directory exists
-            log_dir = os.path.join(site, 'logs')
+            log_dir = os.path.join(site_path, 'logs')
             os.makedirs(log_dir, exist_ok=True)
             
             log_file = os.path.join(log_dir, 'logging.log')
