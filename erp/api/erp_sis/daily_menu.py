@@ -643,11 +643,20 @@ def get_meal_tracking_by_date(date=None):
         education_grade_ids = list(set([cls.education_grade for cls in classes_with_homeroom if cls.education_grade]))
         education_grades = frappe.get_all(
             "SIS Education Grade",
-            fields=["name", "education_stage_id as education_stage"],
+            fields=["name", "education_stage_id"],
             filters={"name": ["in", education_grade_ids]}
         ) if education_grade_ids else []
 
-        grade_to_stage_map = {grade.name: grade.education_stage for grade in education_grades}
+        # Get education stage IDs and map to their Vietnamese titles
+        education_stage_ids = list(set([grade.education_stage_id for grade in education_grades if grade.education_stage_id]))
+        education_stages = frappe.get_all(
+            "SIS Education Stage",
+            fields=["name", "title_vn"],
+            filters={"name": ["in", education_stage_ids]}
+        ) if education_stage_ids else []
+
+        stage_id_to_title_map = {stage.name: stage.title_vn for stage in education_stages}
+        grade_to_stage_map = {grade.name: stage_id_to_title_map.get(grade.education_stage_id, grade.education_stage_id or "Unknown") for grade in education_grades}
 
         # Step 3: Get attendance data for the specified date
         # Only count students who were actually marked as present (not absent/unknown)
