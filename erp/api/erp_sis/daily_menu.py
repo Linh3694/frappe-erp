@@ -599,3 +599,138 @@ def get_daily_menus_by_month(month=None):
         frappe.log_error(f"Error fetching daily menus for month {month}: {str(e)}")
         return error_response(f"Error fetching daily menus for month: {str(e)}")
 
+
+@frappe.whitelist(allow_guest=False)
+def get_meal_tracking_by_date(date=None):
+    """Get meal tracking data by date - attendance summary by school for homeroom teachers"""
+    try:
+        if not date:
+            date = get_request_param('date')
+
+        if not date:
+            return validation_error_response("Date is required", {"date": ["Date is required"]})
+
+        # Validate date format (YYYY-MM-DD)
+        try:
+            from datetime import datetime
+            datetime.strptime(date, '%Y-%m-%d')
+        except ValueError:
+            return validation_error_response("Invalid date format", {"date": ["Date must be in YYYY-MM-DD format"]})
+
+        # Get current campus from context
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+
+        # Step 1: Get all classes with homeroom teachers for the current campus
+        classes_with_homeroom = frappe.get_all(
+            "SIS Class",
+            fields=["name", "homeroom_teacher", "vice_homeroom_teacher", "campus_id"],
+            filters={
+                "campus_id": campus_id or "campus-1",
+                "homeroom_teacher": ["!=", ""],  # Must have homeroom teacher
+            }
+        )
+
+        # Step 2: Get unique homeroom teacher names
+        teacher_names = set()
+        for cls in classes_with_homeroom:
+            if cls.homeroom_teacher:
+                teacher_names.add(cls.homeroom_teacher)
+            if cls.vice_homeroom_teacher:
+                teacher_names.add(cls.vice_homeroom_teacher)
+
+        if not teacher_names:
+            return list_response([], "No homeroom teachers found for the current campus")
+
+        # Step 3: Get teacher user IDs
+        teachers = frappe.get_all(
+            "SIS Teacher",
+            fields=["name", "user_id"],
+            filters={"name": ["in", list(teacher_names)]}
+        )
+
+        teacher_user_map = {t.name: t.user_id for t in teachers if t.user_id}
+
+        if not teacher_user_map:
+            return list_response([], "No teacher user mappings found")
+
+        # Step 4: Get attendance data for the specified date
+        # We need attendance data for homeroom period or any period on that date
+        attendance_data = frappe.get_all(
+            "SIS Class Attendance",
+            fields=[
+                "class_id", "student_id", "status", "period",
+                "student_name", "student_code"
+            ],
+            filters={
+                "date": date,
+                "class_id": ["in", [cls.name for cls in classes_with_homeroom]]
+            }
+        )
+
+        # Step 5: Group attendance by class and calculate statistics
+        class_stats = {}
+        for record in attendance_data:
+            class_id = record.class_id
+            status = record.status.lower() if record.status else 'present'
+
+            if class_id not in class_stats:
+                class_stats[class_id] = {
+                    'total_students': 0,
+                    'present_students': 0,
+                    'absent_students': 0,
+                    'homeroom_teacher': None
+                }
+
+            class_stats[class_id]['total_students'] += 1
+
+            if status in ['present', 'late', 'excused']:
+                class_stats[class_id]['present_students'] += 1
+            else:
+                class_stats[class_id]['absent_students'] += 1
+
+        # Step 6: Add homeroom teacher info to class stats
+        for cls in classes_with_homeroom:
+            if cls.name in class_stats:
+                # Get the primary homeroom teacher
+                teacher_name = cls.homeroom_teacher
+                if teacher_name and teacher_name in teacher_user_map:
+                    class_stats[cls.name]['homeroom_teacher'] = teacher_name
+
+        # Step 7: Get school information from classes and group by school
+        school_stats = {}
+
+        for cls in classes_with_homeroom:
+            if cls.name not in class_stats:
+                continue
+
+            # Get school name from campus
+            campus_name = frappe.get_value("SIS Campus", cls.campus_id, "title_vn") or "Unknown School"
+
+            if campus_name not in school_stats:
+                school_stats[campus_name] = {
+                    'school_name': campus_name,
+                    'total_students': 0,
+                    'present_students': 0,
+                    'absent_students': 0
+                }
+
+            # Add class stats to school stats
+            school_stats[campus_name]['total_students'] += class_stats[cls.name]['total_students']
+            school_stats[campus_name]['present_students'] += class_stats[cls.name]['present_students']
+            school_stats[campus_name]['absent_students'] += class_stats[cls.name]['absent_students']
+
+        # Step 8: Convert to list format for response
+        result = {
+            'schools': list(school_stats.values()),
+            'date': date,
+            'total_classes': len([cls for cls in classes_with_homeroom if cls.name in class_stats]),
+            'total_homeroom_teachers': len(teacher_user_map)
+        }
+
+        return single_item_response(result, f"Meal tracking data fetched successfully for date {date}")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching meal tracking data: {str(e)}")
+        return error_response(f"Error fetching meal tracking data: {str(e)}")
+
