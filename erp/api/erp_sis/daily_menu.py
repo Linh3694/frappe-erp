@@ -643,7 +643,7 @@ def get_meal_tracking_by_date(date=None):
         education_grade_ids = list(set([cls.education_grade for cls in classes_with_homeroom if cls.education_grade]))
         education_grades = frappe.get_all(
             "SIS Education Grade",
-            fields=["name", "education_stage"],
+            fields=["name", "education_stage_id as education_stage"],
             filters={"name": ["in", education_grade_ids]}
         ) if education_grade_ids else []
 
