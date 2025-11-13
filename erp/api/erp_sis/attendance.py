@@ -162,8 +162,6 @@ def save_class_attendance(items=None, overwrite=None):
 		from erp.utils.campus_utils import get_current_campus_from_context
 		campus_id = get_current_campus_from_context()
 
-		frappe.logger().info(f"💾 [Backend] Saving {len(items)} attendance records")
-
 		# Validate and prepare items
 		valid_items = []
 		for it in items:
@@ -201,8 +199,6 @@ def save_class_attendance(items=None, overwrite=None):
 		dates = list(set([item['date'] for item in valid_items]))
 		periods = list(set([item['period'] for item in valid_items]))
 
-		frappe.logger().info(f"🔍 [Backend] Fetching existing records for {len(student_ids)} students")
-		
 		existing_records = frappe.get_all(
 			"SIS Class Attendance",
 			filters={
@@ -219,8 +215,6 @@ def save_class_attendance(items=None, overwrite=None):
 		for rec in existing_records:
 			key = f"{rec['student_id']}|{rec['class_id']}|{rec['date']}|{rec['period']}"
 			existing_map[key] = rec['name']
-
-		frappe.logger().info(f"📊 [Backend] Found {len(existing_records)} existing records")
 
 		# Process items with batch operations
 		upserts = 0
@@ -268,7 +262,6 @@ def save_class_attendance(items=None, overwrite=None):
 				upserts += 1
 
 		frappe.db.commit()
-		frappe.logger().info(f"✅ [Backend] Saved attendance: {upserts} inserted, {updates} updated")
 		return success_response(message=f"Saved attendance ({upserts} inserted, {updates} updated)")
 	except Exception as e:
 		frappe.db.rollback()
