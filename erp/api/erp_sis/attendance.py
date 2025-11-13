@@ -162,7 +162,10 @@ def save_class_attendance(items=None, overwrite=None):
 		from erp.utils.campus_utils import get_current_campus_from_context
 		campus_id = get_current_campus_from_context()
 
-		upserts = 0
+		frappe.logger().info(f"💾 [Backend] Saving {len(items)} attendance records")
+
+		# Validate and prepare items
+		valid_items = []
 		for it in items:
 			student_id = (it or {}).get('student_id')
 			class_id = (it or {}).get('class_id')
@@ -174,37 +177,90 @@ def save_class_attendance(items=None, overwrite=None):
 			student_name = (it or {}).get('student_name')
 
 			if not student_id or not class_id or not date or not period:
-				# Skip invalid rows
 				continue
 			if status not in ATTENDANCE_STATUSES:
 				status = 'present'
 
-			existing = frappe.get_all(
-				"SIS Class Attendance",
-				filters={"student_id": student_id, "class_id": class_id, "date": date, "period": period},
-				fields=["name"], limit=1
-			)
-			if existing:
-				name = existing[0]['name']
-				values = {"status": status, "remarks": remarks, "student_code": student_code, "student_name": student_name}
+			valid_items.append({
+				'student_id': student_id,
+				'class_id': class_id,
+				'date': date,
+				'period': period,
+				'status': status,
+				'remarks': remarks,
+				'student_code': student_code,
+				'student_name': student_name
+			})
+
+		if not valid_items:
+			return error_response(message="No valid attendance items", code="NO_VALID_ITEMS")
+
+		# Batch fetch all existing records in one query
+		student_ids = [item['student_id'] for item in valid_items]
+		class_ids = list(set([item['class_id'] for item in valid_items]))
+		dates = list(set([item['date'] for item in valid_items]))
+		periods = list(set([item['period'] for item in valid_items]))
+
+		frappe.logger().info(f"🔍 [Backend] Fetching existing records for {len(student_ids)} students")
+		
+		existing_records = frappe.get_all(
+			"SIS Class Attendance",
+			filters={
+				"student_id": ["in", student_ids],
+				"class_id": ["in", class_ids],
+				"date": ["in", dates],
+				"period": ["in", periods]
+			},
+			fields=["name", "student_id", "class_id", "date", "period"]
+		)
+
+		# Create a lookup map for existing records
+		existing_map = {}
+		for rec in existing_records:
+			key = f"{rec['student_id']}|{rec['class_id']}|{rec['date']}|{rec['period']}"
+			existing_map[key] = rec['name']
+
+		frappe.logger().info(f"📊 [Backend] Found {len(existing_records)} existing records")
+
+		# Process items with batch operations
+		upserts = 0
+		updates = 0
+		for item in valid_items:
+			key = f"{item['student_id']}|{item['class_id']}|{item['date']}|{item['period']}"
+			
+			if key in existing_map:
+				# Update existing record
+				name = existing_map[key]
+				values = {
+					"status": item['status'],
+					"remarks": item['remarks'],
+					"student_code": item['student_code'],
+					"student_name": item['student_name']
+				}
 				if campus_id:
 					values["campus_id"] = campus_id
+				
 				if overwrite:
 					frappe.db.set_value("SIS Class Attendance", name, values, update_modified=True)
 				else:
 					# Partial update
-					frappe.db.set_value("SIS Class Attendance", name, {"status": status, "remarks": remarks}, update_modified=True)
+					frappe.db.set_value("SIS Class Attendance", name, {
+						"status": item['status'],
+						"remarks": item['remarks']
+					}, update_modified=True)
+				updates += 1
 			else:
+				# Create new record
 				doc = frappe.get_doc({
 					"doctype": "SIS Class Attendance",
-					"student_id": student_id,
-					"student_code": student_code,
-					"student_name": student_name,
-					"class_id": class_id,
-					"date": date,
-					"period": period,
-					"status": status,
-					"remarks": remarks,
+					"student_id": item['student_id'],
+					"student_code": item['student_code'],
+					"student_name": item['student_name'],
+					"class_id": item['class_id'],
+					"date": item['date'],
+					"period": item['period'],
+					"status": item['status'],
+					"remarks": item['remarks'],
 					"campus_id": campus_id,
 					"recorded_by": user_id,
 				})
@@ -212,7 +268,8 @@ def save_class_attendance(items=None, overwrite=None):
 				upserts += 1
 
 		frappe.db.commit()
-		return success_response(message=f"Saved attendance ({upserts} inserted)")
+		frappe.logger().info(f"✅ [Backend] Saved attendance: {upserts} inserted, {updates} updated")
+		return success_response(message=f"Saved attendance ({upserts} inserted, {updates} updated)")
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(f"save_class_attendance error: {str(e)}")
