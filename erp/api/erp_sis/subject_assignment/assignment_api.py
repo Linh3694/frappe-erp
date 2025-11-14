@@ -625,13 +625,16 @@ def create_subject_assignment():
                 frappe.db.rollback()
                 frappe.logger().warning(f"⚠️ Rolling back due to {len(all_conflicts)} conflicts")
                 
-                return {
+                # Return conflict response using standard format but with additional fields
+                conflict_response = {
                     "success": False,
                     "message": f"Phát hiện {len(all_conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
                     "error_type": "teacher_conflict",
                     "conflicts": all_conflicts,
                     "created_assignments": created_names  # Frontend can use this to retry
                 }
+                frappe.logger().info(f"🚫 Returning conflict response: {conflict_response}")
+                return conflict_response
             
             frappe.logger().info(f"✅ Timetable sync completed: {sync_summary}")
             
