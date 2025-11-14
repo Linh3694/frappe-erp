@@ -50,6 +50,7 @@ class TimetableImportExecutor:
 		self.file_path = file_path
 		self.metadata = metadata
 		self.df = None
+		self.format = None  # "row_based" or "column_based" - detected during load
 		self.job_id = None  # Set by caller for progress tracking
 		
 		# Cache for lookups
@@ -139,24 +140,56 @@ class TimetableImportExecutor:
 	# ============= EXECUTION STEPS =============
 	
 	def _load_excel(self):
-		"""Load Excel file"""
+		"""Load Excel file and detect format"""
 		self.df = pd.read_excel(self.file_path, sheet_name=0)
 		self.logs.append(f"📊 Loaded {len(self.df)} rows from Excel")
+		
+		# Detect format (same logic as validator)
+		df_columns = [str(col).strip() for col in self.df.columns]
+		has_class_column = "Lớp" in df_columns
+		has_subject_column = "Môn học" in df_columns
+		
+		if has_class_column and has_subject_column:
+			self.format = "row_based"
+			frappe.logger().info("📋 Format: OLD (row-based) - Lớp, Môn học columns")
+		else:
+			self.format = "column_based"
+			frappe.logger().info("📋 Format: NEW (column-based) - class names as columns")
+		
+		self.logs.append(f"📋 Format: {self.format}")
 	
 	def _build_cache(self):
 		"""Build lookup cache"""
 		campus_id = self.metadata["campus_id"]
 		education_stage_id = self.metadata["education_stage_id"]
 		
-		# Cache classes
-		unique_classes = self.df["Lớp"].dropna().unique()
+		# Cache classes (different logic based on format)
+		if self.format == "row_based":
+			# OLD FORMAT: Get unique values from "Lớp" column
+			unique_classes = self.df["Lớp"].dropna().unique()
+		else:
+			# NEW FORMAT: Get class names from column headers (skip first 2: Thứ, Tiết)
+			df_columns = list(self.df.columns)
+			unique_classes = df_columns[2:]  # Class names start from 3rd column
+		
 		for title in unique_classes:
 			class_id = self._get_class_id(title, campus_id)
 			if class_id:
 				self.cache["classes"][title] = class_id
 		
-		# Cache subjects
-		unique_subjects = self.df["Môn học"].dropna().unique()
+		# Cache subjects (different logic based on format)
+		if self.format == "row_based":
+			# OLD FORMAT: Get unique values from "Môn học" column
+			unique_subjects = self.df["Môn học"].dropna().unique()
+		else:
+			# NEW FORMAT: Get unique subjects from all class columns
+			class_columns = list(self.cache["classes"].keys())
+			all_subjects = []
+			for col in class_columns:
+				if col in self.df.columns:
+					all_subjects.extend(self.df[col].dropna().unique())
+			unique_subjects = list(set(all_subjects))  # Remove duplicates
+		
 		for title in unique_subjects:
 			subject_id = self._get_subject_id(title, education_stage_id, campus_id)
 			if subject_id:
@@ -260,11 +293,18 @@ class TimetableImportExecutor:
 	
 	def _process_all_classes(self):
 		"""Process timetable for each class"""
+		if self.format == "row_based":
+			self._process_row_based_format()
+		else:
+			self._process_column_based_format()
+	
+	def _process_row_based_format(self):
+		"""Process OLD FORMAT (row-based): one row per period"""
 		# Group data by class
 		grouped = self.df.groupby("Lớp")
 		total_classes = len(grouped)
 		
-		frappe.logger().info(f"📚 Processing {total_classes} classes...")
+		frappe.logger().info(f"📚 Processing {total_classes} classes (row-based)...")
 		
 		for idx, (class_title, class_df) in enumerate(grouped, 1):
 			class_id = self.cache["classes"].get(class_title)
@@ -284,6 +324,63 @@ class TimetableImportExecutor:
 			self._process_class(class_id, class_title, class_df)
 			
 			frappe.logger().info(f"✅ Completed class {idx}/{total_classes}: {class_title}")
+	
+	def _process_column_based_format(self):
+		"""Process NEW FORMAT (column-based): classes as columns"""
+		class_columns = list(self.cache["classes"].keys())
+		total_classes = len(class_columns)
+		
+		frappe.logger().info(f"📚 Processing {total_classes} classes (column-based)...")
+		
+		for idx, class_title in enumerate(class_columns, 1):
+			class_id = self.cache["classes"].get(class_title)
+			
+			if not class_id:
+				self.logs.append(f"⚠️  Skipped class '{class_title}': not found in cache")
+				continue
+			
+			# Update progress before processing class
+			self._update_progress(
+				current=idx,
+				total=total_classes,
+				message=f"Đang xử lý lớp {class_title} ({idx}/{total_classes})",
+				current_class=class_title
+			)
+			
+			# Transform column data to row-based format for this class
+			class_df = self._transform_column_to_rows(class_title)
+			
+			if class_df is not None and not class_df.empty:
+				self._process_class(class_id, class_title, class_df)
+			
+			frappe.logger().info(f"✅ Completed class {idx}/{total_classes}: {class_title}")
+	
+	def _transform_column_to_rows(self, class_title: str) -> pd.DataFrame:
+		"""
+		Transform column-based data for one class into row-based format.
+		
+		Input (column-based):
+			Thứ | Tiết | 10AB1   | 10AB2
+			2   | 1    | Math    | English
+			2   | 2    | Science | Math
+		
+		Output for class "10AB1" (row-based):
+			Thứ | Tiết | Môn học
+			2   | 1    | Math
+			2   | 2    | Science
+		"""
+		if class_title not in self.df.columns:
+			return None
+		
+		# Create DataFrame with Thứ, Tiết, and subject from class column
+		transformed = self.df[["Thứ", "Tiết", class_title]].copy()
+		transformed.rename(columns={class_title: "Môn học"}, inplace=True)
+		
+		# Remove rows where subject is empty/null
+		transformed = transformed[transformed["Môn học"].notna()]
+		transformed = transformed[transformed["Môn học"].astype(str).str.strip() != ""]
+		
+		return transformed
 	
 	def _update_progress(self, current: int, total: int, message: str, current_class: str = ""):
 		"""Update progress in Redis cache for frontend polling"""
@@ -447,12 +544,24 @@ class TimetableImportExecutor:
 		"""Sync Student Subjects cho tất cả classes"""
 		campus_id = self.metadata["campus_id"]
 		
-		# Get unique (class, subject) pairs
-		unique_pairs = self.df[["Lớp", "Môn học"]].drop_duplicates()
+		# Get unique (class, subject) pairs - different logic based on format
+		if self.format == "row_based":
+			# OLD FORMAT: Get unique pairs from Lớp and Môn học columns
+			unique_pairs = self.df[["Lớp", "Môn học"]].drop_duplicates()
+			pairs_list = [(row["Lớp"], row["Môn học"]) for _, row in unique_pairs.iterrows()]
+		else:
+			# NEW FORMAT: Extract pairs from class columns
+			pairs_list = []
+			class_columns = list(self.cache["classes"].keys())
+			for class_title in class_columns:
+				if class_title in self.df.columns:
+					# Get unique subjects for this class
+					unique_subjects = self.df[class_title].dropna().unique()
+					for subject_title in unique_subjects:
+						if subject_title and str(subject_title).strip():
+							pairs_list.append((class_title, subject_title))
 		
-		for _, row in unique_pairs.iterrows():
-			class_title = row["Lớp"]
-			subject_title = row["Môn học"]
+		for class_title, subject_title in pairs_list:
 			
 			class_id = self.cache["classes"].get(class_title)
 			subject_id = self.cache["subjects"].get(subject_title)

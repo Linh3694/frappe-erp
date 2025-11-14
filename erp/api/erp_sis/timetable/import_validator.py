@@ -412,10 +412,12 @@ class TimetableImportValidator:
 					self.warnings.append(conflict)
 		
 		# Rule 3: Validate Subject Assignment exists for each class-subject pair
-		missing_assignments = self._check_subject_assignments()
-		if missing_assignments:
-			for msg in missing_assignments:
-				self.warnings.append(msg)
+		# Only check for OLD FORMAT (row-based) - NEW FORMAT handles this during execution
+		if self.format == "row_based":
+			missing_assignments = self._check_subject_assignments()
+			if missing_assignments:
+				for msg in missing_assignments:
+					self.warnings.append(msg)
 		
 		return True  # Business rule violations are warnings, not errors
 	
