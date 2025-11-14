@@ -531,7 +531,8 @@ class TimetableImportValidator:
 			}
 		
 		return {
-			"valid": valid,
+			"is_valid": valid,  # Changed from "valid" to "is_valid" for consistency with executor
+			"valid": valid,      # Keep for backward compatibility
 			"errors": self.errors,
 			"warnings": self.warnings,
 			"stats": stats
