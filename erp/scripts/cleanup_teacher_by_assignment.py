@@ -55,7 +55,7 @@ def cleanup_teacher_timetable_by_assignments(teacher_id: str, dry_run: bool = Tr
     
     print(f"✅ Teacher is assigned to {len(assigned_class_ids)} classes:")
     for class_id in assigned_class_ids:
-        class_title = frappe.db.get_value("SIS Class", class_id, "class_title")
+        class_title = frappe.db.get_value("SIS Class", class_id, "title")
         print(f"   - {class_id}: {class_title}")
     print()
     
@@ -65,14 +65,14 @@ def cleanup_teacher_timetable_by_assignments(teacher_id: str, dry_run: bool = Tr
         SELECT 
             tt.name,
             tt.class_id,
-            c.class_title,
+            c.title as class_title,
             tt.subject_id,
             tt.date,
             COUNT(*) as entry_count
         FROM `tabSIS Teacher Timetable` tt
         LEFT JOIN `tabSIS Class` c ON tt.class_id = c.name
         WHERE tt.teacher_id = %s
-        GROUP BY tt.class_id, c.class_title
+        GROUP BY tt.class_id, c.title
         ORDER BY tt.class_id
     """, (teacher_id,), as_dict=True)
     
