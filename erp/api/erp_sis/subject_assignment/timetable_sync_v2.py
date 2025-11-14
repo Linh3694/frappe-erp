@@ -81,7 +81,8 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	Args:
 		assignment: SIS Subject Assignment doc
 		replace_teacher_map: Optional dict {row_id: "teacher_1" or "teacher_2"}
-		                     Tells which teacher to replace when conflict
+		                     Can also use special key format for grouped conflicts:
+		                     {row_id: {"choice": "teacher_1", "apply_to": [row_id1, row_id2, ...]}}
 	
 	Performance: ~50ms cho 10 pattern rows
 	"""
@@ -93,6 +94,25 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	campus_id = assignment.campus_id
 	
 	debug_info.append(f"🔄 Syncing full_year assignment: teacher={teacher_id}, class={class_id}, subject={actual_subject_id}")
+	
+	# ✅ EXPAND replace_teacher_map if it contains grouped resolutions
+	# Frontend may send: {representative_row_id: "teacher_1"} with affected_row_ids in conflict
+	# We need to expand it to: {row_id1: "teacher_1", row_id2: "teacher_1", ...}
+	expanded_map = {}
+	for key, value in replace_teacher_map.items():
+		if isinstance(value, dict) and "choice" in value and "apply_to" in value:
+			# Grouped format: {row_id: {"choice": "teacher_1", "apply_to": [...]}}
+			choice = value["choice"]
+			for row_id in value["apply_to"]:
+				expanded_map[row_id] = choice
+		else:
+			# Simple format: {row_id: "teacher_1"}
+			expanded_map[key] = value
+	
+	replace_teacher_map = expanded_map
+	
+	if replace_teacher_map:
+		debug_info.append(f"📋 Replace teacher map has {len(replace_teacher_map)} entries")
 	
 	# COMPUTE: Find pattern rows
 	pattern_rows = find_pattern_rows(
@@ -230,19 +250,46 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 		
 		# Check if there are unresolved conflicts
 		if teacher_conflicts:
+			# Group conflicts by subject_id - user only needs to choose once per subject
+			# Then we'll apply the resolution to ALL rows for that subject
+			conflicts_grouped = {}
+			row_ids_by_subject = {}  # Map subject_id -> list of row_ids
+			
+			for conflict in teacher_conflicts:
+				subject_id = conflict["subject_id"]
+				
+				if subject_id not in conflicts_grouped:
+					# First conflict for this subject - use as representative
+					conflicts_grouped[subject_id] = conflict
+					row_ids_by_subject[subject_id] = []
+				
+				# Track all row_ids for this subject
+				row_ids_by_subject[subject_id].append(conflict["row_id"])
+			
+			# Convert to list and add row_ids info
+			grouped_conflicts = []
+			for subject_id, conflict in conflicts_grouped.items():
+				conflict["affected_row_ids"] = row_ids_by_subject[subject_id]
+				conflict["affected_row_count"] = len(row_ids_by_subject[subject_id])
+				grouped_conflicts.append(conflict)
+			
 			# Return conflicts to caller - caller handles rollback
 			frappe.logger().warning(
-				f"⚠️ DETECTED CONFLICTS: {len(teacher_conflicts)} conflicts detected. "
+				f"⚠️ DETECTED CONFLICTS: {len(teacher_conflicts)} total rows, "
+				f"grouped into {len(grouped_conflicts)} subject conflicts. "
 				f"Returning to caller for resolution."
 			)
 
-			debug_info.append(f"⚠️ Found {len(teacher_conflicts)} conflicts requiring user resolution")
+			debug_info.append(
+				f"⚠️ Found {len(teacher_conflicts)} conflict rows, "
+				f"grouped into {len(grouped_conflicts)} conflicts (by subject)"
+			)
 			
 			conflict_response = {
 				"success": False,
-				"message": f"Phát hiện {len(teacher_conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
+				"message": f"Phát hiện {len(grouped_conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
 				"error_type": "teacher_conflict",
-				"conflicts": teacher_conflicts,
+				"conflicts": grouped_conflicts,
 				"rows_updated": 0,
 				"rows_created": 0,
 				"debug_info": debug_info
