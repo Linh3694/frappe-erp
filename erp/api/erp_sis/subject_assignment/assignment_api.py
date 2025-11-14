@@ -381,6 +381,10 @@ def create_subject_assignment():
         global_start_date = data.get("start_date")
         global_end_date = data.get("end_date")
         
+        # Extract replace_teacher_map for conflict resolution
+        # Format: {row_id: "teacher_1" or "teacher_2"}
+        replace_teacher_map = data.get("replace_teacher_map") or {}
+        
         frappe.logger().info(f"CREATE DEBUG - Parsed values: teacher_id={teacher_id}, assignments={len(assignments)}")
         frappe.logger().info(f"CREATE DEBUG - Global params: application_type={global_application_type}, start_date={global_start_date}, end_date={global_end_date}")
         frappe.logger().info(f"CREATE DEBUG - Top-level params: application_type={data.get('application_type')}, start_date={data.get('start_date')}, end_date={data.get('end_date')}")
@@ -578,24 +582,57 @@ def create_subject_assignment():
                 }
             )
         
-        # OPTIMIZED: Batch sync timetable ONE time for all created assignments
+        # SYNC: Handle timetable sync for created assignments
         sync_summary = {"rows_updated": 0, "rows_skipped": 0}
         teacher_timetable_sync_summary = {"created": 0, "updated": 0, "errors": 0}
+        all_conflicts = []  # Collect conflicts from all assignments
+        
         if created_names and affected_classes:
-            try:
-                frappe.logger().info(f"🎯 BATCH SYNC - Starting for {len(created_names)} assignments, {len(affected_classes)} classes, {len(affected_subjects)} subjects")
-                sync_result = batch_sync_timetable_optimized(
-                    teacher_id=teacher_id,
-                    affected_classes=list(affected_classes),
-                    affected_subjects=list(affected_subjects),
-                    campus_id=campus_id
-                )
-                sync_summary = sync_result
-                frappe.logger().info(f"🎯 BATCH SYNC - Completed: {sync_summary}")
+            # ✅ V2: Use new sync logic that supports conflict detection
+            from .timetable_sync_v2 import sync_assignment_to_timetable
+            
+            for assignment_id in created_names:
+                try:
+                    frappe.logger().info(f"🔄 Syncing assignment {assignment_id}")
+                    sync_result = sync_assignment_to_timetable(
+                        assignment_id=assignment_id,
+                        replace_teacher_map=replace_teacher_map
+                    )
+                    
+                    # Check for conflicts
+                    if not sync_result.get("success") and sync_result.get("error_type") == "teacher_conflict":
+                        # Conflict detected!
+                        frappe.logger().warning(f"⚠️ Conflict detected for assignment {assignment_id}")
+                        conflicts = sync_result.get("conflicts", [])
+                        
+                        # Add assignment_id to each conflict for frontend tracking
+                        for conflict in conflicts:
+                            conflict["assignment_id"] = assignment_id
+                        
+                        all_conflicts.extend(conflicts)
+                    else:
+                        # Success - update counters
+                        sync_summary["rows_updated"] += sync_result.get("rows_updated", 0)
+                        sync_summary["rows_created"] = sync_summary.get("rows_created", 0) + sync_result.get("rows_created", 0)
+                        
+                except Exception as sync_error:
+                    frappe.log_error(f"Timetable sync failed for assignment {assignment_id}: {str(sync_error)}")
+                    frappe.logger().error(f"❌ Sync failed for {assignment_id}: {str(sync_error)}")
+            
+            # If there are conflicts, rollback and return conflict error
+            if all_conflicts:
+                frappe.db.rollback()
+                frappe.logger().warning(f"⚠️ Rolling back due to {len(all_conflicts)} conflicts")
                 
-            except Exception as sync_error:
-                frappe.log_error(f"Batch sync timetable failed: {str(sync_error)}")
-                frappe.logger().error(f"🎯 BATCH SYNC - Failed: {str(sync_error)}")
+                return {
+                    "success": False,
+                    "message": f"Phát hiện {len(all_conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
+                    "error_type": "teacher_conflict",
+                    "conflicts": all_conflicts,
+                    "created_assignments": created_names  # Frontend can use this to retry
+                }
+            
+            frappe.logger().info(f"✅ Timetable sync completed: {sync_summary}")
             
             # ✅ V2: ALWAYS sync Teacher Timetable when creating assignments
             # Even if rows_updated = 0 (e.g., new subject not in timetable pattern yet)

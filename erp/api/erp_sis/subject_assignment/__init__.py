@@ -100,6 +100,7 @@ def batch_update_teacher_assignments():
         teacher_id = data.get('teacher_id')
         assignments_v1 = data.get('assignments', [])
         deleted_assignment_ids = data.get('deleted_assignment_ids', [])
+        replace_teacher_map = data.get('replace_teacher_map', {})
         
         # Parse if string
         if isinstance(assignments_v1, str):
@@ -165,7 +166,11 @@ def batch_update_teacher_assignments():
                 assignments_v2.append(assignment_data)
         
         # Call V2 function directly with parameters (no request parsing)
-        result = batch_update_assignments(teacher_id=teacher_id, assignments=assignments_v2)
+        result = batch_update_assignments(
+            teacher_id=teacher_id, 
+            assignments=assignments_v2,
+            replace_teacher_map=replace_teacher_map
+        )
         
         if not result.get("success"):
             return result

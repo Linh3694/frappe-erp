@@ -20,12 +20,14 @@ from datetime import timedelta
 
 # ============= PUBLIC API =============
 
-def sync_assignment_to_timetable(assignment_id: str) -> Dict:
+def sync_assignment_to_timetable(assignment_id: str, replace_teacher_map: dict = None) -> Dict:
 	"""
 	Main entry point cho sync.
 	
 	Args:
 		assignment_id: ID của Subject Assignment cần sync
+		replace_teacher_map: Optional dict for resolving teacher conflicts
+		                     Format: {row_id: "teacher_1" or "teacher_2"}
 	
 	Returns:
 		{
@@ -33,7 +35,9 @@ def sync_assignment_to_timetable(assignment_id: str) -> Dict:
 			"rows_updated": int,
 			"rows_created": int,
 			"message": str,
-			"debug_info": List[str]
+			"debug_info": List[str],
+			"conflicts": list (if conflict detected),
+			"error_type": str (if error)
 		}
 	"""
 	try:
@@ -52,7 +56,7 @@ def sync_assignment_to_timetable(assignment_id: str) -> Dict:
 		if assignment.application_type == "full_year":
 			return sync_full_year_assignment(assignment)
 		else:
-			return sync_date_range_assignment(assignment)
+			return sync_date_range_assignment(assignment, replace_teacher_map=replace_teacher_map)
 			
 	except Exception as e:
 		frappe.log_error(f"Sync failed for assignment {assignment_id}: {str(e)}")
@@ -211,15 +215,32 @@ def sync_full_year_assignment(assignment) -> Dict:
 
 # ============= DATE RANGE SYNC =============
 
-def sync_date_range_assignment(assignment) -> Dict:
+def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> Dict:
 	"""
 	Sync from_date assignment: Create override rows.
 	
 	Logic:
 	1. Find pattern rows
 	2. Calculate dates trong range
-	3. Create/update override row cho mỗi date
-	4. KHÔNG touch pattern rows!
+	3. Check for conflicts (both teacher slots full)
+	4. If conflicts and no resolution → Return conflict error
+	5. If conflicts with resolution → Apply replacement
+	6. Create/update override rows
+	
+	Args:
+		assignment: SIS Subject Assignment doc
+		replace_teacher_map: Optional dict {row_id: "teacher_1" or "teacher_2"}
+		                     Tells which teacher to replace when conflict
+	
+	Returns:
+		{
+			"success": bool,
+			"message": str,
+			"rows_created": int,
+			"rows_updated": int,
+			"conflicts": list (if conflict detected),
+			"error_type": "teacher_conflict" (if conflict)
+		}
 	
 	Performance: ~200ms cho 50 override rows
 	"""
@@ -230,6 +251,7 @@ def sync_date_range_assignment(assignment) -> Dict:
 	campus_id = assignment.campus_id
 	start_date = assignment.start_date
 	end_date = assignment.end_date
+	replace_teacher_map = replace_teacher_map or {}
 	
 	debug_info.append(
 		f"🔄 Syncing from_date assignment: teacher={teacher_id}, class={class_id}, "
@@ -305,6 +327,7 @@ def sync_date_range_assignment(assignment) -> Dict:
 	# APPLY: Bulk create/update override rows
 	created_count = 0
 	updated_count = 0
+	conflicts = []  # Track conflicts for user resolution
 	
 	try:
 		frappe.db.begin()
@@ -325,22 +348,53 @@ def sync_date_range_assignment(assignment) -> Dict:
 			)
 			
 			if existing:
-				# ✅ FIX: Check if teacher is already assigned to this row
+				# Check if teacher is already assigned to this row
 				if existing.teacher_1_id == teacher_id or existing.teacher_2_id == teacher_id:
 					# Teacher already assigned, skip
 					continue
 				
-				# Update existing override
-				if not existing.teacher_1_id:
-					frappe.db.set_value(
-						"SIS Timetable Instance Row",
-						existing.name,
-						"teacher_1_id",
-						teacher_id,
-						update_modified=False
-					)
-					updated_count += 1
+				# Check if both teacher slots are full → CONFLICT!
+				if existing.teacher_1_id and existing.teacher_2_id:
+					# Both slots full - need user to choose who to replace
+					
+					# Check if user provided resolution for this conflict
+					if existing.name in replace_teacher_map:
+						# User chose which teacher to replace
+						replace_slot = replace_teacher_map[existing.name]  # "teacher_1" or "teacher_2"
+						
+						if replace_slot not in ["teacher_1", "teacher_2"]:
+							frappe.logger().error(f"Invalid replace_slot: {replace_slot} for row {existing.name}")
+							continue
+						
+						frappe.db.set_value(
+							"SIS Timetable Instance Row",
+							existing.name,
+							f"{replace_slot}_id",
+							teacher_id,
+							update_modified=False
+						)
+						updated_count += 1
+						debug_info.append(
+							f"✅ Replaced {replace_slot} on {date} - {pattern_row.timetable_column_id}"
+						)
+					else:
+						# No resolution provided → Add to conflicts list
+						conflicts.append({
+							"row_id": existing.name,
+							"date": str(date),
+							"day_of_week": pattern_row.day_of_week,
+							"period_id": pattern_row.timetable_column_id,
+							"period_name": pattern_row.period_name,
+							"subject_id": pattern_row.subject_id,
+							"teacher_1_id": existing.teacher_1_id,
+							"teacher_1_name": frappe.db.get_value("SIS Teacher", existing.teacher_1_id, "teacher_name"),
+							"teacher_2_id": existing.teacher_2_id,
+							"teacher_2_name": frappe.db.get_value("SIS Teacher", existing.teacher_2_id, "teacher_name"),
+							"new_teacher_id": teacher_id,
+							"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
+						})
 				elif not existing.teacher_2_id:
+					# teacher_2 is empty → Add as co-teacher
 					frappe.db.set_value(
 						"SIS Timetable Instance Row",
 						existing.name,
@@ -349,25 +403,56 @@ def sync_date_range_assignment(assignment) -> Dict:
 						update_modified=False
 					)
 					updated_count += 1
+				elif not existing.teacher_1_id:
+					# teacher_1 is empty (edge case) → Add to teacher_1
+					frappe.db.set_value(
+						"SIS Timetable Instance Row",
+						existing.name,
+						"teacher_1_id",
+						teacher_id,
+						update_modified=False
+					)
+					updated_count += 1
 			else:
-				# Create new override
+				# Create new override row
+				# Copy from pattern row but set teacher_2 as the new teacher
+				# teacher_1 will remain as pattern's teacher_1 (original teacher)
 				override_doc = frappe.get_doc({
 					"doctype": "SIS Timetable Instance Row",
 					"parent": pattern_row.parent,
 					"parenttype": "SIS Timetable Instance",
-					"parentfield": "weekly_pattern",
+					"parentfield": "date_overrides",  # ✅ FIX: Must be date_overrides, not weekly_pattern!
 					"date": date,
 					"day_of_week": pattern_row.day_of_week,
 					"timetable_column_id": pattern_row.timetable_column_id,
 					"period_priority": pattern_row.period_priority,
 					"period_name": pattern_row.period_name,
 					"subject_id": pattern_row.subject_id,
-					"teacher_1_id": teacher_id,
+					"teacher_1_id": pattern_row.teacher_1_id,  # ✅ FIX: Keep original teacher as teacher_1
+					"teacher_2_id": teacher_id,  # ✅ FIX: Add new teacher as teacher_2 (co-teaching)
 					"room_id": pattern_row.room_id
 				})
 				override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 				created_count += 1
 		
+		# Check if there are unresolved conflicts
+		if conflicts:
+			# Don't commit - rollback and return conflicts to user
+			frappe.db.rollback()
+			
+			debug_info.append(f"⚠️ Found {len(conflicts)} conflicts requiring user resolution")
+			
+			return {
+				"success": False,
+				"message": f"Phát hiện {len(conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
+				"error_type": "teacher_conflict",
+				"conflicts": conflicts,
+				"rows_created": 0,
+				"rows_updated": 0,
+				"debug_info": debug_info
+			}
+		
+		# No conflicts or all resolved → Commit changes
 		frappe.db.commit()
 		
 		debug_info.append(f"✅ Created {created_count} override rows")

@@ -92,7 +92,7 @@ def retry_on_deadlock(max_retries: int = 3, initial_delay: float = 0.1):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def batch_update_assignments(teacher_id=None, assignments=None):
+def batch_update_assignments(teacher_id=None, assignments=None, replace_teacher_map=None):
 	"""
 	Bulk update all assignments for a teacher.
 	
@@ -109,7 +109,9 @@ def batch_update_assignments(teacher_id=None, assignments=None):
 				"end_date": str (optional),
 				"action": "create" | "update" | "delete"
 			}
-		]
+		],
+		"replace_teacher_map": dict (optional, for resolving teacher conflicts)
+			Format: {row_id: "teacher_1" or "teacher_2"}
 	}
 	
 	Response:
@@ -145,7 +147,7 @@ def batch_update_assignments(teacher_id=None, assignments=None):
 			}
 		
 		# Call internal function
-		return _batch_update_assignments_internal(teacher_id, assignments)
+		return _batch_update_assignments_internal(teacher_id, assignments, replace_teacher_map)
 		
 	except Exception as e:
 		frappe.log_error(f"Batch update failed: {str(e)}")
@@ -155,11 +157,17 @@ def batch_update_assignments(teacher_id=None, assignments=None):
 		}
 
 
-def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict]) -> Dict:
+def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict], replace_teacher_map: dict = None) -> Dict:
 	"""
 	Internal function that does the actual work.
 	Can be called directly with parameters (no request parsing).
+	
+	Args:
+		teacher_id: Teacher ID
+		assignments: List of assignment dictionaries
+		replace_teacher_map: Optional dict for resolving teacher conflicts {row_id: "teacher_1" or "teacher_2"}
 	"""
+	replace_teacher_map = replace_teacher_map or {}
 	# PHASE 1: VALIDATE ALL
 	frappe.logger().info(f"🔍 Phase 1: Validating {len(assignments)} assignments")
 	
@@ -196,7 +204,19 @@ def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict])
 	# PHASE 3: SYNC TIMETABLE (Instance Rows)
 	frappe.logger().info(f"🔄 Phase 3: Syncing timetable instance rows")
 	
-	sync_result = sync_all_assignments(apply_result["assignment_ids"])
+	sync_result = sync_all_assignments(apply_result["assignment_ids"], replace_teacher_map)
+	
+	# Check for conflicts
+	if sync_result.get("conflicts"):
+		frappe.logger().warning(f"⚠️ Teacher conflicts detected: {len(sync_result['conflicts'])} conflicts")
+		# Rollback changes and return conflict error
+		frappe.db.rollback()
+		return {
+			"success": False,
+			"message": f"Phát hiện {len(sync_result['conflicts'])} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
+			"error_type": "teacher_conflict",
+			"conflicts": sync_result["conflicts"]
+		}
 	
 	frappe.logger().info(
 		f"✅ Phase 3: Timetable synced - "
@@ -671,34 +691,51 @@ def delete_assignment(assignment: Dict) -> Dict:
 
 # ============= SYNC PHASE =============
 
-def sync_all_assignments(assignment_ids: List[str]) -> Dict:
+def sync_all_assignments(assignment_ids: List[str], replace_teacher_map: dict = None) -> Dict:
 	"""
 	Sync timetable cho tất cả assignments.
+	
+	Args:
+		assignment_ids: List of assignment IDs to sync
+		replace_teacher_map: Optional dict for resolving teacher conflicts {row_id: "teacher_1" or "teacher_2"}
 	
 	Returns:
 		{
 			"synced": int,
 			"failed": int,
-			"details": List[str]
+			"details": List[str],
+			"conflicts": list (if any conflicts detected)
 		}
 	"""
+	replace_teacher_map = replace_teacher_map or {}
 	synced = 0
 	failed = 0
 	details = []
+	all_conflicts = []
 	
 	for assignment_id in assignment_ids:
 		try:
-			result = sync_assignment_to_timetable(assignment_id)
+			result = sync_assignment_to_timetable(assignment_id, replace_teacher_map)
 			
-			if result["success"]:
+			# Check for conflict
+			if not result["success"] and result.get("error_type") == "teacher_conflict":
+				# Conflict detected!
+				conflicts = result.get("conflicts", [])
+				# Add assignment_id to each conflict
+				for conflict in conflicts:
+					conflict["assignment_id"] = assignment_id
+				all_conflicts.extend(conflicts)
+				failed += 1
+				details.append(f"⚠ Conflict in {assignment_id}: {len(conflicts)} conflicts")
+			elif result["success"]:
 				synced += 1
 				details.append(
 					f"✓ Synced {assignment_id}: "
-					f"{result['rows_updated']}U + {result['rows_created']}C rows"
+					f"{result.get('rows_updated', 0)}U + {result.get('rows_created', 0)}C rows"
 				)
 			else:
 				failed += 1
-				details.append(f"✗ Failed to sync {assignment_id}: {result['message']}")
+				details.append(f"✗ Failed to sync {assignment_id}: {result.get('message', 'Unknown error')}")
 				
 		except Exception as e:
 			failed += 1
@@ -708,7 +745,8 @@ def sync_all_assignments(assignment_ids: List[str]) -> Dict:
 	return {
 		"synced": synced,
 		"failed": failed,
-		"details": details
+		"details": details,
+		"conflicts": all_conflicts
 	}
 
 
