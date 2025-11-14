@@ -15,6 +15,8 @@ Module structure:
 - utils.py: Utility functions
 """
 
+import frappe
+
 # Core CRUD APIs
 from .assignment_api import (
     get_all_subject_assignments,
@@ -69,6 +71,7 @@ from .batch_operations import (
 )
 
 # Backward compatibility wrapper
+@frappe.whitelist(allow_guest=False, methods=["POST"])
 def batch_update_teacher_assignments():
     """
     Backward compatibility wrapper for V2 batch_update_assignments.
