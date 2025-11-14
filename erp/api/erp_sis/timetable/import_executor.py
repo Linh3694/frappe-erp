@@ -137,7 +137,8 @@ class TimetableImportExecutor:
 				"message": f"Import complete: {self.stats['instances_created']} instances, "
 				           f"{self.stats['rows_created']} rows created",
 				"stats": self.stats,
-				"logs": self.logs
+				"logs": self._get_user_friendly_logs(),
+				"detailed_logs": self.logs  # Keep full logs for debugging if needed
 			}
 			
 		except Exception as e:
@@ -153,12 +154,17 @@ class TimetableImportExecutor:
 				message=f"Error: {str(e)}\n\nTraceback:\n{error_trace}"
 			)
 			
+			error_logs = self._get_user_friendly_logs() + [
+				f"❌ Lỗi: {str(e)}"
+			]
+			
 			return {
 				"success": False,
 				"message": f"Import failed: {str(e)}",
 				"error": str(e),
 				"stats": self.stats,
-				"logs": self.logs + [
+				"logs": error_logs,
+				"detailed_logs": self.logs + [
 					f"❌ CRITICAL ERROR: {str(e)}",
 					"",
 					"Traceback:",
@@ -780,6 +786,41 @@ class TimetableImportExecutor:
 		}
 		
 		return day_map.get(str(day_str).strip(), "mon")
+	
+	def _get_user_friendly_logs(self) -> List[str]:
+		"""
+		Generate clean, user-friendly logs for frontend display.
+		Filter out verbose processing details and keep only key milestones.
+		"""
+		friendly_logs = []
+		
+		# Summary logs only
+		for log in self.logs:
+			# Include these types of logs
+			if any(marker in log for marker in [
+				"📊 Loaded",          # File loading
+				"📋 Format:",         # Format detection
+				"👨‍🏫 Cached",         # Teacher cache
+				"🔧 Cache built:",    # Cache summary
+				"📝 Updated timetable:", # Timetable header
+				"📝 Created timetable:", # Timetable header
+				"👨‍🎓 Created/updated"  # Student subjects
+			]):
+				friendly_logs.append(log)
+			# Skip verbose class processing logs (contains "🏫 Processing class:")
+			elif "🏫 Processing class:" not in log and "  ✓ Created" not in log:
+				# Include any other important logs that don't match above patterns
+				if log and not log.startswith("  "):  # Skip indented detail logs
+					friendly_logs.append(log)
+		
+		# Add summary at the end
+		if self.stats["instances_created"] > 0 or self.stats["rows_created"] > 0:
+			friendly_logs.append(
+				f"✅ Đã xử lý thành công {self.stats['instances_created']} lớp học với "
+				f"{self.stats['rows_created']} tiết học"
+			)
+		
+		return friendly_logs
 
 
 # ============= API ENDPOINT =============
@@ -1130,7 +1171,8 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			"rows_created": rows,
 			"stats": exec_stats,
 			"warnings": validation_result.get('warnings', []) + execution_result.get('warnings', []),
-			"logs": execution_result.get('logs', []),
+			"logs": execution_result.get('logs', []),  # Now contains user-friendly logs
+			"detailed_logs": execution_result.get('detailed_logs', []),  # Full logs for debugging
 			"errors": execution_result.get('errors', []),
 			"debug": debug_info  # Add debug info to see what's happening
 		}
