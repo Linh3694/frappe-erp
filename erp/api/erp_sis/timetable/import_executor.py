@@ -1116,16 +1116,19 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		
 		frappe.logger().info(f"✅ Execution complete: success={execution_result.get('success')}")
 		
-		# Combine results
-		instances = execution_result.get('instances_created', 0)
-		rows = execution_result.get('rows_created', 0)
+		# Get stats from execution_result
+		exec_stats = execution_result.get('stats', {})
+		instances = exec_stats.get('instances_created', 0)
+		rows = exec_stats.get('rows_created', 0)
+		timetable_id = exec_stats.get('timetable_id')
 		
 		final_result = {
 			"success": execution_result.get('success', False),
 			"message": f"✅ Import thành công! Đã tạo {instances} lớp với {rows} tiết học",
-			"timetable_id": execution_result.get('timetable_id'),
+			"timetable_id": timetable_id,
 			"instances_created": instances,
 			"rows_created": rows,
+			"stats": exec_stats,
 			"warnings": validation_result.get('warnings', []) + execution_result.get('warnings', []),
 			"logs": execution_result.get('logs', []),
 			"errors": execution_result.get('errors', []),
