@@ -697,8 +697,10 @@ class TimetableImportExecutor:
 		"""
 		if not self.processed_instances:
 			self.logs.append("⚠️ No instances to sync")
+			frappe.logger().warning("⚠️ No instances to sync - processed_instances is empty")
 			return
 		
+		frappe.logger().info(f"🔄 Starting materialized view sync for {len(self.processed_instances)} instances")
 		self.logs.append(f"🔄 Syncing Teacher & Student Timetables for {len(self.processed_instances)} instances...")
 		
 		# Import function từ legacy để reuse
@@ -707,29 +709,56 @@ class TimetableImportExecutor:
 		# Sync cho tất cả instances vừa tạo/cập nhật
 		total_teacher_entries = 0
 		total_student_entries = 0
+		total_deleted = 0
 		
 		for instance_id, instance_data in self.processed_instances.items():
+			frappe.logger().info(f"📊 Syncing instance {instance_id}: class={instance_data['class_id']}, range={instance_data['start_date']} to {instance_data['end_date']}")
+			
 			try:
+				# Xóa Teacher & Student Timetable entries cũ cho instance này
+				# Để đảm bảo sync lại toàn bộ với range mới
+				deleted_teacher = frappe.db.sql("""
+					DELETE FROM `tabSIS Teacher Timetable`
+					WHERE timetable_instance_id = %s
+				""", (instance_id,))
+				
+				deleted_student = frappe.db.sql("""
+					DELETE FROM `tabSIS Student Timetable`
+					WHERE timetable_instance_id = %s
+				""", (instance_id,))
+				
+				total_deleted += (deleted_teacher or 0) + (deleted_student or 0)
+				frappe.logger().info(f"🗑️ Deleted old entries for {instance_id}")
+				
+				# Sync lại với range mới
 				teacher_count, student_count = sync_materialized_views_for_instance(
 					instance_id=instance_id,
 					class_id=instance_data["class_id"],
-					start_date=instance_data["start_date"],
-					end_date=instance_data["end_date"],
+					start_date=str(instance_data["start_date"]),
+					end_date=str(instance_data["end_date"]),
 					campus_id=self.metadata["campus_id"],
 					logs=self.logs
 				)
 				total_teacher_entries += teacher_count
 				total_student_entries += student_count
+				
+				frappe.logger().info(f"✅ Synced instance {instance_id}: {teacher_count} teacher entries, {student_count} student entries")
+				
 			except Exception as e:
-				self.logs.append(f"⚠️ Failed to sync materialized views for {instance_id}: {str(e)}")
-				frappe.logger().error(f"Failed to sync materialized views for {instance_id}: {str(e)}")
+				error_msg = f"⚠️ Failed to sync materialized views for {instance_id}: {str(e)}"
+				self.logs.append(error_msg)
+				frappe.logger().error(error_msg)
+				import traceback
+				frappe.logger().error(traceback.format_exc())
 		
-		self.logs.append(f"✅ Synced {total_teacher_entries} Teacher Timetable entries")
-		self.logs.append(f"✅ Synced {total_student_entries} Student Timetable entries")
+		summary_msg = f"✅ Synced {total_teacher_entries} Teacher Timetable entries, {total_student_entries} Student Timetable entries"
+		self.logs.append(summary_msg)
+		frappe.logger().info(summary_msg)
 		
 		# Update stats
 		self.stats["teacher_timetable_synced"] = total_teacher_entries
 		self.stats["student_timetable_synced"] = total_student_entries
+		self.stats["timetable_entries_deleted"] = total_deleted
 	
 	# ============= HELPER METHODS =============
 	
