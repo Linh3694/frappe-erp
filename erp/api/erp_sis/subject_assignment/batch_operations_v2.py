@@ -174,16 +174,19 @@ def validate_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 			errors.append(f"Assignment {idx}: Invalid action '{action}'")
 			continue
 		
-		# For update/delete, assignment_id must exist
+		# For update/delete, assignment_id must be provided
 		if action in ["update", "delete"]:
 			assignment_id = assignment.get("assignment_id")
 			if not assignment_id:
 				errors.append(f"Assignment {idx}: assignment_id required for {action}")
 				continue
 			
-			if not frappe.db.exists("SIS Subject Assignment", assignment_id):
-				errors.append(f"Assignment {idx}: Assignment {assignment_id} not found")
-				continue
+			# For update: assignment must exist (strict check)
+			# For delete: we'll skip if not exists (handled in delete_assignment function)
+			if action == "update":
+				if not frappe.db.exists("SIS Subject Assignment", assignment_id):
+					errors.append(f"Assignment {idx}: Assignment {assignment_id} not found")
+					continue
 		
 		# For create/update, validate fields
 		if action in ["create", "update"]:
@@ -377,6 +380,11 @@ def update_assignment(assignment: Dict) -> Dict:
 def delete_assignment(assignment: Dict) -> Dict:
 	"""Delete single assignment"""
 	assignment_id = assignment["assignment_id"]
+	
+	# Check if assignment exists before deleting
+	if not frappe.db.exists("SIS Subject Assignment", assignment_id):
+		frappe.logger().warning(f"Assignment {assignment_id} not found, skipping delete")
+		return {"assignment_id": assignment_id, "skipped": True}
 	
 	frappe.delete_doc(
 		"SIS Subject Assignment",
