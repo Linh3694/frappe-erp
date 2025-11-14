@@ -206,26 +206,53 @@ def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict])
 	# PHASE 4: SYNC TEACHER TIMETABLE (Materialized View)
 	frappe.logger().info(f"🔄 Phase 4: Syncing Teacher Timetable (materialized view)")
 	
-	teacher_timetable_result = sync_teacher_timetable_bulk(
-		teacher_id=teacher_id,
-		assignment_ids=apply_result["assignment_ids"]
-	)
+	teacher_timetable_result = {"created": 0, "errors": 0, "details": []}
+	try:
+		teacher_timetable_result = sync_teacher_timetable_bulk(
+			teacher_id=teacher_id,
+			assignment_ids=apply_result["assignment_ids"]
+		)
+		
+		frappe.logger().info(
+			f"✅ Phase 4: Teacher Timetable synced - "
+			f"Created: {teacher_timetable_result['created']}, "
+			f"Errors: {teacher_timetable_result['errors']}"
+		)
+	except Exception as tt_sync_error:
+		# CRITICAL: Don't crash entire operation if Teacher Timetable sync fails
+		# Frontend cần response để update UI
+		frappe.logger().error(
+			f"⚠️ Phase 4: Teacher Timetable sync failed (but assignments were saved): "
+			f"{str(tt_sync_error)}"
+		)
+		import traceback
+		frappe.logger().error(traceback.format_exc())
+		teacher_timetable_result = {
+			"created": 0,
+			"errors": 1,
+			"details": [f"⚠️ Teacher Timetable sync failed: {str(tt_sync_error)}"]
+		}
 	
-	frappe.logger().info(
-		f"✅ Phase 4: Teacher Timetable synced - "
-		f"Created: {teacher_timetable_result['created']}, "
-		f"Errors: {teacher_timetable_result['errors']}"
-	)
+	# GRACEFUL DEGRADATION: Return success nếu assignments đã save thành công
+	# (Teacher Timetable có thể sync sau bằng manual refresh hoặc background job)
+	has_teacher_timetable_errors = teacher_timetable_result["errors"] > 0
+	warning_msg = ""
+	if has_teacher_timetable_errors:
+		warning_msg = " (⚠️ Some Teacher Timetable entries may need manual refresh)"
 	
 	# Return summary
 	return {
-		"success": True,
-		"message": f"Batch update complete: {apply_result['stats']['created']}C, "
-		           f"{apply_result['stats']['updated']}U, {apply_result['stats']['deleted']}D",
+		"success": True,  # Success nếu assignments đã save
+		"message": (
+			f"Batch update complete: {apply_result['stats']['created']}C, "
+			f"{apply_result['stats']['updated']}U, {apply_result['stats']['deleted']}D"
+			f"{warning_msg}"
+		),
 		"stats": {
 			**apply_result["stats"],
 			"synced": sync_result["synced"],
-			"teacher_timetable_synced": teacher_timetable_result["created"]
+			"teacher_timetable_synced": teacher_timetable_result["created"],
+			"teacher_timetable_errors": teacher_timetable_result["errors"]
 		},
 		"details": apply_result["details"] + sync_result["details"] + teacher_timetable_result["details"]
 	}
@@ -527,7 +554,7 @@ def sync_all_assignments(assignment_ids: List[str]) -> Dict:
 	}
 
 
-@retry_on_deadlock(max_retries=3, initial_delay=0.1)
+@retry_on_deadlock(max_retries=5, initial_delay=0.2)
 def _sync_single_instance_with_retry(
 	instance_id: str,
 	class_id: str,
@@ -651,8 +678,13 @@ def sync_teacher_timetable_bulk(teacher_id: str, assignment_ids: List[str]) -> D
 				continue
 			
 			# Sync each instance for this class
-			for instance in instances:
+			for idx, instance in enumerate(instances):
 				try:
+					# Add small delay between instances to reduce concurrent writes
+					# (Giảm deadlock bằng cách tránh nhiều instances cùng write)
+					if idx > 0:
+						time.sleep(0.05)  # 50ms delay
+					
 					instance_id = instance.name
 					instance_start = instance.start_date or today
 					instance_end = instance.end_date or (today + timedelta(days=365))
@@ -685,21 +717,30 @@ def sync_teacher_timetable_bulk(teacher_id: str, assignment_ids: List[str]) -> D
 					
 				except frappe.QueryDeadlockError as deadlock_error:
 					# Deadlock persisted after all retries
+					# Continue với instances khác thay vì crash
 					errors += 1
 					error_msg = (
-						f"✗ Deadlock in instance {instance.name} after retries: "
-						f"{str(deadlock_error)}"
+						f"⚠️ Deadlock in instance {instance.name} after retries - SKIPPED"
 					)
 					details.append(error_msg)
-					frappe.logger().error(error_msg)
+					frappe.logger().error(
+						f"❌ Deadlock in instance {instance.name} after retries: "
+						f"{str(deadlock_error)}"
+					)
+					# Continue to next instance
+					continue
 					
 				except Exception as instance_error:
 					errors += 1
-					error_msg = f"✗ Error syncing instance {instance.name}: {str(instance_error)}"
+					error_msg = f"⚠️ Error syncing instance {instance.name} - SKIPPED"
 					details.append(error_msg)
-					frappe.logger().error(error_msg)
+					frappe.logger().error(
+						f"❌ Error syncing instance {instance.name}: {str(instance_error)}"
+					)
 					import traceback
 					frappe.logger().error(traceback.format_exc())
+					# Continue to next instance
+					continue
 		
 		frappe.db.commit()
 		
