@@ -878,6 +878,12 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 	if not user_id:
 		user_id = frappe.session.user
 	
+	# Set user context for background job (required for cache operations)
+	if user_id and user_id != "Guest":
+		frappe.set_user(user_id)
+	
+	frappe.logger().info(f"✅ User context set: {frappe.session.user}")
+	
 	try:
 		# Prepare metadata
 		metadata = {
@@ -984,7 +990,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			# Store result in cache for frontend polling
 			if job_id:
 				result_key = f"timetable_import_result_{user_id}"
-				frappe.cache().set_value(result_key, {
+				result_data = {
 					"success": False,
 					"errors": errors,
 					"warnings": warnings,
@@ -996,7 +1002,15 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 						"",
 						"Chi tiết lỗi:"
 					] + [f"  • {e}" for e in errors]
-				}, expires_in_sec=3600)
+				}
+				frappe.logger().info(f"💾 Saving validation failed result to cache: {result_key}")
+				try:
+					frappe.cache().set_value(result_key, result_data, expires_in_sec=3600)
+					frappe.logger().info(f"✅ Cache saved successfully")
+				except Exception as cache_error:
+					frappe.logger().error(f"❌ Failed to save to cache: {str(cache_error)}")
+					import traceback
+					frappe.logger().error(traceback.format_exc())
 			
 			return {
 				"success": False,
@@ -1099,7 +1113,18 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		# Store final result in cache
 		if job_id:
 			result_key = f"timetable_import_result_{user_id}"
-			frappe.cache().set_value(result_key, final_result, expires_in_sec=3600)
+			frappe.logger().info(f"💾 Saving final result to cache: {result_key}")
+			frappe.logger().info(f"📊 Result: success={final_result.get('success')}, instances={final_result.get('instances_created')}")
+			try:
+				frappe.cache().set_value(result_key, final_result, expires_in_sec=3600)
+				frappe.logger().info(f"✅ Cache saved successfully")
+				# Verify cache was saved
+				verify = frappe.cache().get_value(result_key)
+				frappe.logger().info(f"🔍 Verify cache: {verify is not None}")
+			except Exception as cache_error:
+				frappe.logger().error(f"❌ Failed to save to cache: {str(cache_error)}")
+				import traceback
+				frappe.logger().error(traceback.format_exc())
 		
 		if final_result['success']:
 			frappe.logger().info(f"🎉 Import completed successfully!")
