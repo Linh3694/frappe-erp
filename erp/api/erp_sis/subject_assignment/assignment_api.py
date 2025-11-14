@@ -563,6 +563,17 @@ def create_subject_assignment():
 
         frappe.db.commit()
         
+        # VALIDATION: If ALL assignments were skipped (all duplicates), return error
+        if len(created_names) == 0 and len(skipped_duplicates) > 0:
+            frappe.logger().info(f"❌ All {len(skipped_duplicates)} assignments already exist - returning validation error")
+            return validation_error_response(
+                message="Tất cả phân công đã tồn tại",
+                errors={
+                    "duplicate": [f"Tất cả {len(skipped_duplicates)} phân công đã tồn tại trong hệ thống"],
+                    "skipped_duplicates": skipped_duplicates
+                }
+            )
+        
         # OPTIMIZED: Batch sync timetable ONE time for all created assignments
         sync_summary = {"rows_updated": 0, "rows_skipped": 0}
         teacher_timetable_sync_summary = {"created": 0, "updated": 0, "errors": 0}
