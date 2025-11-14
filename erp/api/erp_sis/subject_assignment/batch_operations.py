@@ -522,13 +522,7 @@ def delete_assignment(assignment: Dict) -> Dict:
 	teacher_id = assignment_doc.teacher_id
 	class_id = assignment_doc.class_id
 	actual_subject_id = assignment_doc.actual_subject_id
-	
-	# Get subject_id from actual_subject
-	subject_id = frappe.db.get_value(
-		"SIS Subject",
-		{"actual_subject_id": actual_subject_id, "class_id": class_id},
-		"name"
-	)
+	campus_id = assignment_doc.campus_id
 	
 	# Get all timetable instances for this class
 	instances = frappe.db.get_all(
@@ -537,26 +531,35 @@ def delete_assignment(assignment: Dict) -> Dict:
 		pluck="name"
 	)
 	
+	# Get all subject_ids linked to this actual_subject_id in this campus
+	# (SIS Subject doesn't have class_id, it's education_stage level)
+	subject_ids = frappe.db.get_all(
+		"SIS Subject",
+		filters={"actual_subject_id": actual_subject_id, "campus_id": campus_id},
+		pluck="name"
+	)
+	
 	frappe.logger().info(
 		f"DELETE in batch: Deleting assignment {assignment_id} - "
-		f"teacher={teacher_id}, class={class_id}, subject={subject_id}"
+		f"teacher={teacher_id}, class={class_id}, "
+		f"actual_subject={actual_subject_id}, subjects={subject_ids}"
 	)
 	
 	# ✅ Step 1: Remove teacher from Timetable Instance Rows (Pattern Rows)
 	rows_updated = 0
 	override_rows_deleted = 0
-	if subject_id and instances:
+	if subject_ids and instances:
 		try:
 			# A. Update pattern rows (weekly recurring)
 			pattern_rows = frappe.db.sql("""
 				SELECT name, teacher_1_id, teacher_2_id
 				FROM `tabSIS Timetable Instance Row`
 				WHERE parent IN ({})
-				  AND subject_id = %s
+				  AND subject_id IN ({})
 				  AND (teacher_1_id = %s OR teacher_2_id = %s)
 				  AND parentfield = 'weekly_pattern'
-			""".format(','.join(['%s'] * len(instances))),
-			tuple(instances + [subject_id, teacher_id, teacher_id]), as_dict=True)
+			""".format(','.join(['%s'] * len(instances)), ','.join(['%s'] * len(subject_ids))),
+			tuple(instances + subject_ids + [teacher_id, teacher_id]), as_dict=True)
 			
 			# Remove teacher from each pattern row
 			for row in pattern_rows:
@@ -589,11 +592,11 @@ def delete_assignment(assignment: Dict) -> Dict:
 				SELECT name
 				FROM `tabSIS Timetable Instance Row`
 				WHERE parent IN ({})
-				  AND subject_id = %s
+				  AND subject_id IN ({})
 				  AND (teacher_1_id = %s OR teacher_2_id = %s)
 				  AND parentfield = 'date_overrides'
-			""".format(','.join(['%s'] * len(instances))),
-			tuple(instances + [subject_id, teacher_id, teacher_id]), as_dict=True)
+			""".format(','.join(['%s'] * len(instances)), ','.join(['%s'] * len(subject_ids))),
+			tuple(instances + subject_ids + [teacher_id, teacher_id]), as_dict=True)
 			
 			for override_row in override_rows:
 				frappe.delete_doc(
@@ -619,16 +622,16 @@ def delete_assignment(assignment: Dict) -> Dict:
 	
 	# ✅ Step 2: Delete Teacher Timetable entries (materialized view)
 	teacher_timetable_deleted = 0
-	if subject_id and instances:
+	if subject_ids and instances:
 		try:
 			teacher_timetable_deleted = frappe.db.sql("""
 				DELETE FROM `tabSIS Teacher Timetable`
 				WHERE teacher_id = %s
 				  AND class_id = %s
-				  AND subject_id = %s
+				  AND subject_id IN ({})
 				  AND timetable_instance_id IN ({})
-			""".format(','.join(['%s'] * len(instances))), 
-			tuple([teacher_id, class_id, subject_id] + instances))
+			""".format(','.join(['%s'] * len(subject_ids)), ','.join(['%s'] * len(instances))), 
+			tuple([teacher_id, class_id] + subject_ids + instances))
 			
 			frappe.logger().info(
 				f"DELETE in batch: Deleted {teacher_timetable_deleted or 0} "
