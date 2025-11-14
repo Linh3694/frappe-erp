@@ -109,6 +109,13 @@ def batch_update_teacher_assignments():
         if isinstance(deleted_assignment_ids, str):
             deleted_assignment_ids = json.loads(deleted_assignment_ids)
         
+        # Validate teacher_id
+        if not teacher_id:
+            return {
+                "success": False,
+                "message": "teacher_id is required"
+            }
+        
         # Transform V1 format to V2 format
         assignments_v2 = []
         
@@ -118,6 +125,9 @@ def batch_update_teacher_assignments():
                 "assignment_id": assignment_id,
                 "action": "delete"
             })
+        
+        # Get teacher campus once
+        teacher_campus = frappe.db.get_value("SIS Teacher", teacher_id, "campus_id")
         
         # Add create/update actions from V1 assignments
         # In V1, all items in assignments array are treated as "create or update if exists"
@@ -137,7 +147,7 @@ def batch_update_teacher_assignments():
                     "teacher_id": teacher_id,
                     "class_id": class_id,
                     "actual_subject_id": subject_id,
-                    "campus_id": frappe.db.get_value("SIS Teacher", teacher_id, "campus_id")
+                    "campus_id": teacher_campus
                 })
                 
                 assignment_data = {
@@ -156,17 +166,8 @@ def batch_update_teacher_assignments():
                 
                 assignments_v2.append(assignment_data)
         
-        # Create V2 request format
-        v2_data = {
-            "teacher_id": teacher_id,
-            "assignments": assignments_v2
-        }
-        
-        # Set request data for V2 function
-        frappe.request.data = json.dumps(v2_data).encode('utf-8')
-        
-        # Call V2 function
-        result = batch_update_assignments()
+        # Call V2 function directly with parameters (no request parsing)
+        result = batch_update_assignments(teacher_id=teacher_id, assignments=assignments_v2)
         
         if not result.get("success"):
             return result

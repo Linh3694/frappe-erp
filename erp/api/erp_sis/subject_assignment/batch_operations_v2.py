@@ -19,7 +19,7 @@ from .timetable_sync_v2 import sync_assignment_to_timetable
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def batch_update_assignments():
+def batch_update_assignments(teacher_id=None, assignments=None):
 	"""
 	Bulk update all assignments for a teacher.
 	
@@ -53,10 +53,11 @@ def batch_update_assignments():
 	}
 	"""
 	try:
-		# Parse request
-		data = frappe.parse_json(frappe.request.data or "{}")
-		teacher_id = data.get("teacher_id")
-		assignments = data.get("assignments", [])
+		# Parse request if parameters not provided
+		if teacher_id is None or assignments is None:
+			data = frappe.parse_json(frappe.request.data or "{}")
+			teacher_id = data.get("teacher_id")
+			assignments = data.get("assignments", [])
 		
 		if not teacher_id:
 			return {
@@ -70,60 +71,8 @@ def batch_update_assignments():
 				"message": "assignments list is required"
 			}
 		
-		# PHASE 1: VALIDATE ALL
-		frappe.logger().info(f"🔍 Phase 1: Validating {len(assignments)} assignments")
-		
-		validation_result = validate_all_assignments(teacher_id, assignments)
-		
-		if not validation_result["valid"]:
-			return {
-				"success": False,
-				"message": "Validation failed",
-				"errors": validation_result["errors"]
-			}
-		
-		frappe.logger().info(f"✅ Phase 1: All assignments valid")
-		
-		# PHASE 2: APPLY ALL (with transaction)
-		frappe.logger().info(f"🔨 Phase 2: Applying changes")
-		
-		apply_result = apply_all_assignments(teacher_id, assignments)
-		
-		if not apply_result["success"]:
-			return {
-				"success": False,
-				"message": "Failed to apply changes",
-				"error": apply_result["error"]
-			}
-		
-		frappe.logger().info(
-			f"✅ Phase 2: Changes applied - "
-			f"Created: {apply_result['stats']['created']}, "
-			f"Updated: {apply_result['stats']['updated']}, "
-			f"Deleted: {apply_result['stats']['deleted']}"
-		)
-		
-		# PHASE 3: SYNC TIMETABLE
-		frappe.logger().info(f"🔄 Phase 3: Syncing timetable")
-		
-		sync_result = sync_all_assignments(apply_result["assignment_ids"])
-		
-		frappe.logger().info(
-			f"✅ Phase 3: Timetable synced - "
-			f"Success: {sync_result['synced']}/{len(apply_result['assignment_ids'])}"
-		)
-		
-		# Return summary
-		return {
-			"success": True,
-			"message": f"Batch update complete: {apply_result['stats']['created']}C, "
-			           f"{apply_result['stats']['updated']}U, {apply_result['stats']['deleted']}D",
-			"stats": {
-				**apply_result["stats"],
-				"synced": sync_result["synced"]
-			},
-			"details": apply_result["details"] + sync_result["details"]
-		}
+		# Call internal function
+		return _batch_update_assignments_internal(teacher_id, assignments)
 		
 	except Exception as e:
 		frappe.log_error(f"Batch update failed: {str(e)}")
@@ -131,6 +80,67 @@ def batch_update_assignments():
 			"success": False,
 			"message": f"Critical error: {str(e)}"
 		}
+
+
+def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict]) -> Dict:
+	"""
+	Internal function that does the actual work.
+	Can be called directly with parameters (no request parsing).
+	"""
+	# PHASE 1: VALIDATE ALL
+	frappe.logger().info(f"🔍 Phase 1: Validating {len(assignments)} assignments")
+	
+	validation_result = validate_all_assignments(teacher_id, assignments)
+	
+	if not validation_result["valid"]:
+		return {
+			"success": False,
+			"message": "Validation failed",
+			"errors": validation_result["errors"]
+		}
+	
+	frappe.logger().info(f"✅ Phase 1: All assignments valid")
+	
+	# PHASE 2: APPLY ALL (with transaction)
+	frappe.logger().info(f"🔨 Phase 2: Applying changes")
+	
+	apply_result = apply_all_assignments(teacher_id, assignments)
+	
+	if not apply_result["success"]:
+		return {
+			"success": False,
+			"message": "Failed to apply changes",
+			"error": apply_result["error"]
+		}
+	
+	frappe.logger().info(
+		f"✅ Phase 2: Changes applied - "
+		f"Created: {apply_result['stats']['created']}, "
+		f"Updated: {apply_result['stats']['updated']}, "
+		f"Deleted: {apply_result['stats']['deleted']}"
+	)
+	
+	# PHASE 3: SYNC TIMETABLE
+	frappe.logger().info(f"🔄 Phase 3: Syncing timetable")
+	
+	sync_result = sync_all_assignments(apply_result["assignment_ids"])
+	
+	frappe.logger().info(
+		f"✅ Phase 3: Timetable synced - "
+		f"Success: {sync_result['synced']}/{len(apply_result['assignment_ids'])}"
+	)
+	
+	# Return summary
+	return {
+		"success": True,
+		"message": f"Batch update complete: {apply_result['stats']['created']}C, "
+		           f"{apply_result['stats']['updated']}U, {apply_result['stats']['deleted']}D",
+		"stats": {
+			**apply_result["stats"],
+			"synced": sync_result["synced"]
+		},
+		"details": apply_result["details"] + sync_result["details"]
+	}
 
 
 # ============= VALIDATION PHASE =============
