@@ -476,27 +476,103 @@ class TimetableImportExecutor:
 		self.logs.append(f"  ✓ Created {rows_created} pattern rows")
 	
 	def _create_or_get_instance(self, class_id: str) -> str:
-		"""Create or get timetable instance for class"""
+		"""
+		Create or get timetable instance for class.
+		
+		Date validation rules (Option 1: Conservative):
+		- ✅ ALLOW: Extend forward (end_date increases)
+		- ✅ ALLOW: Same range (no change)
+		- ✅ ALLOW: Shrink range (end_date decreases) with warning
+		- ❌ BLOCK: Backdate (start_date decreases) - STRICTLY FORBIDDEN
+		- ❌ BLOCK: Shift backward (start_date decreases even if end_date increases)
+		
+		This prevents conflicts with existing attendance data.
+		"""
 		timetable_id = self.stats["timetable_id"]
-		start_date = self.metadata["start_date"]
-		end_date = self.metadata["end_date"]
+		new_start_date = self.metadata["start_date"]
+		new_end_date = self.metadata["end_date"]
 		campus_id = self.metadata["campus_id"]
 		
-		# Check if instance exists
+		# Parse dates for comparison
+		from datetime import datetime
+		new_start = datetime.strptime(str(new_start_date), "%Y-%m-%d").date()
+		new_end = datetime.strptime(str(new_end_date), "%Y-%m-%d").date()
+		
+		# Find existing instance by timetable_id + class_id (ignore dates)
 		existing = frappe.db.get_value(
 			"SIS Timetable Instance",
 			{
 				"timetable_id": timetable_id,
-				"class_id": class_id,
-				"start_date": start_date,
-				"end_date": end_date
+				"class_id": class_id
 			},
-			"name"
+			["name", "start_date", "end_date"],
+			as_dict=True
 		)
 		
+		is_shrink = False  # Flag for deletion mode
+		
 		if existing:
+			# Parse existing dates
+			existing_start = existing.start_date
+			existing_end = existing.end_date
+			
+			if isinstance(existing_start, str):
+				existing_start = datetime.strptime(existing_start, "%Y-%m-%d").date()
+			if isinstance(existing_end, str):
+				existing_end = datetime.strptime(existing_end, "%Y-%m-%d").date()
+			
+			# VALIDATION: Check for forbidden date changes
+			if new_start < existing_start:
+				# ❌ BACKDATE - STRICTLY FORBIDDEN
+				raise Exception(
+					f"❌ Không được phép backdate thời khóa biểu!\n\n"
+					f"Lớp: {class_id}\n"
+					f"Ngày bắt đầu hiện tại: {existing_start.strftime('%d/%m/%Y')}\n"
+					f"Ngày bắt đầu mới: {new_start.strftime('%d/%m/%Y')}\n\n"
+					f"⚠️ Backdate có thể gây xung đột với dữ liệu điểm danh đã có.\n"
+					f"Chỉ được phép mở rộng thời khóa biểu về tương lai (tăng ngày kết thúc)."
+				)
+			
+			# Check date range changes
+			if new_start == existing_start and new_end == existing_end:
+				# Same range - just update rows
+				self.logs.append(f"  ℹ️ Lớp {class_id}: Cùng khoảng thời gian, cập nhật nội dung TKB")
+			elif new_end > existing_end:
+				# ✅ EXTEND FORWARD - Safe operation
+				self.logs.append(
+					f"  ✅ Lớp {class_id}: Mở rộng TKB từ {existing_end.strftime('%d/%m/%Y')} "
+					f"đến {new_end.strftime('%d/%m/%Y')}"
+				)
+				# Update instance dates
+				frappe.db.set_value(
+					"SIS Timetable Instance",
+					existing.name,
+					{
+						"start_date": new_start_date,
+						"end_date": new_end_date
+					}
+				)
+			elif new_end < existing_end:
+				# ⚠️ SHRINK - Allowed but with warning
+				days_lost = (existing_end - new_end).days
+				is_shrink = True  # Mark for cleanup deletion
+				self.logs.append(
+					f"  ⚠️ Lớp {class_id}: Thu hẹp TKB, mất {days_lost} ngày "
+					f"(từ {new_end.strftime('%d/%m/%Y')} đến {existing_end.strftime('%d/%m/%Y')})"
+				)
+				# Update instance dates
+				frappe.db.set_value(
+					"SIS Timetable Instance",
+					existing.name,
+					{
+						"start_date": new_start_date,
+						"end_date": new_end_date
+					}
+				)
+			
 			self.stats["instances_updated"] += 1
-			instance_id = existing
+			instance_id = existing.name
+			
 		else:
 			# Create new instance
 			instance_doc = frappe.get_doc({
@@ -504,20 +580,22 @@ class TimetableImportExecutor:
 				"timetable_id": timetable_id,
 				"class_id": class_id,
 				"campus_id": campus_id,
-				"start_date": start_date,
-				"end_date": end_date
+				"start_date": new_start_date,
+				"end_date": new_end_date
 			})
 			# Insert without validating mandatory fields (weekly_pattern will be added later)
 			instance_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 			
 			self.stats["instances_created"] += 1
 			instance_id = instance_doc.name
+			self.logs.append(f"  ✨ Lớp {class_id}: Tạo TKB mới từ {new_start.strftime('%d/%m/%Y')} đến {new_end.strftime('%d/%m/%Y')}")
 		
 		# Track this instance for materialized view sync
 		self.processed_instances[instance_id] = {
 			"class_id": class_id,
-			"start_date": start_date,
-			"end_date": end_date
+			"start_date": new_start_date,
+			"end_date": new_end_date,
+			"is_shrink": is_shrink  # Pass shrink flag to background job
 		}
 		
 		return instance_id
@@ -1066,9 +1144,14 @@ def sync_teacher_timetable_background(instances_data, campus_id, job_id=None):
 				except Exception as e:
 					frappe.logger().warning(f"Failed to update progress: {str(e)}")
 			
-			# SMART RANGE DELETION: Only delete entries in the new range
-			# This preserves entries outside the new range (e.g., 1/1-14/1 when new range is 15/1-28/2)
-			delete_entries_in_range(instance_id, start_date, end_date)
+			# Detect if this is a shrink operation by checking if it's an update
+			# (instance_info will have a flag if dates were changed during _create_or_get_instance)
+			is_shrink = instance_info.get("is_shrink", False)
+			
+			# SMART RANGE DELETION
+			# - Normal mode: Only delete entries in the new range (preserves old entries outside)
+			# - Shrink mode: Delete ALL entries (will regenerate only new range)
+			delete_entries_in_range(instance_id, start_date, end_date, delete_all_outside=is_shrink)
 			
 			# BULK SYNC: Use optimized engine (preload assignments, bulk insert)
 			teacher_count, student_count = sync_instance_bulk(

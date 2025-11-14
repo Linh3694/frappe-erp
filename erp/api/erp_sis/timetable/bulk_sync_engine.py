@@ -589,36 +589,62 @@ def sync_instance_bulk(instance_id: str, class_id: str, start_date: str,
 	return engine.sync()
 
 
-def delete_entries_in_range(instance_id: str, start_date: str, end_date: str):
+def delete_entries_in_range(instance_id: str, start_date: str, end_date: str, delete_all_outside: bool = False):
 	"""
 	Delete teacher and student timetable entries for a specific date range.
-	This enables smart range handling (keep old entries outside new range).
+	
+	Supports two modes:
+	1. Normal mode (delete_all_outside=False): Delete only entries WITHIN range
+	   - Used when extending forward or updating same range
+	   - Preserves entries outside new range
+	
+	2. Cleanup mode (delete_all_outside=True): Delete entries OUTSIDE range too
+	   - Used when shrinking range
+	   - Removes orphaned entries that are now invalid
 	
 	Args:
 		instance_id: SIS Timetable Instance ID
 		start_date: Start date (YYYY-MM-DD)
 		end_date: End date (YYYY-MM-DD)
+		delete_all_outside: If True, also delete entries outside the range (for shrinking)
 	"""
-	frappe.logger().info(f"🗑️ [BulkSync] Deleting entries for instance {instance_id} in range {start_date} to {end_date}")
+	frappe.logger().info(f"🗑️ [BulkSync] Deleting entries for instance {instance_id}")
+	frappe.logger().info(f"   Range: {start_date} to {end_date}, cleanup_mode={delete_all_outside}")
 	
-	# Delete teacher entries in range
-	teacher_deleted = frappe.db.sql("""
-		DELETE FROM `tabSIS Teacher Timetable`
-		WHERE timetable_instance_id = %s
-		  AND date BETWEEN %s AND %s
-	""", (instance_id, start_date, end_date))
-	
-	# Delete student entries in range
-	student_deleted = frappe.db.sql("""
-		DELETE FROM `tabSIS Student Timetable`
-		WHERE timetable_instance_id = %s
-		  AND date BETWEEN %s AND %s
-	""", (instance_id, start_date, end_date))
-	
-	frappe.logger().info(
-		f"✅ [BulkSync] Deleted {teacher_deleted or 0} teacher entries, "
-		f"{student_deleted or 0} student entries in range"
-	)
+	if delete_all_outside:
+		# SHRINK MODE: Delete ALL entries for this instance (will regenerate only new range)
+		teacher_deleted = frappe.db.sql("""
+			DELETE FROM `tabSIS Teacher Timetable`
+			WHERE timetable_instance_id = %s
+		""", (instance_id,))
+		
+		student_deleted = frappe.db.sql("""
+			DELETE FROM `tabSIS Student Timetable`
+			WHERE timetable_instance_id = %s
+		""", (instance_id,))
+		
+		frappe.logger().info(
+			f"✅ [BulkSync] Deleted ALL entries: {teacher_deleted or 0} teacher, "
+			f"{student_deleted or 0} student (shrink mode)"
+		)
+	else:
+		# NORMAL MODE: Delete only entries within new range
+		teacher_deleted = frappe.db.sql("""
+			DELETE FROM `tabSIS Teacher Timetable`
+			WHERE timetable_instance_id = %s
+			  AND date BETWEEN %s AND %s
+		""", (instance_id, start_date, end_date))
+		
+		student_deleted = frappe.db.sql("""
+			DELETE FROM `tabSIS Student Timetable`
+			WHERE timetable_instance_id = %s
+			  AND date BETWEEN %s AND %s
+		""", (instance_id, start_date, end_date))
+		
+		frappe.logger().info(
+			f"✅ [BulkSync] Deleted {teacher_deleted or 0} teacher entries, "
+			f"{student_deleted or 0} student entries in range"
+		)
 	
 	return (teacher_deleted or 0, student_deleted or 0)
 
