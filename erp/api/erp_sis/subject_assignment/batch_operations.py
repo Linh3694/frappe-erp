@@ -9,13 +9,86 @@ Nguyên tắc thiết kế:
 2. VALIDATE ALL → APPLY ALL pattern
 3. Rollback toàn bộ nếu có lỗi
 4. Detailed logging cho debugging
+5. Retry on deadlock với exponential backoff
 
 Performance: <1000ms cho 50 assignments
 """
 
 import frappe
-from typing import Dict, List, Optional
+import time
+from typing import Dict, List, Optional, Callable
+from functools import wraps
 from .timetable_sync_v2 import sync_assignment_to_timetable
+
+
+# ============= DEADLOCK RETRY DECORATOR =============
+
+def retry_on_deadlock(max_retries: int = 3, initial_delay: float = 0.1):
+	"""
+	Decorator to retry function on MySQL deadlock.
+	
+	Implements exponential backoff:
+	- 1st retry: 0.1s delay
+	- 2nd retry: 0.2s delay  
+	- 3rd retry: 0.4s delay
+	
+	Args:
+		max_retries: Maximum number of retry attempts
+		initial_delay: Initial delay in seconds (doubled after each retry)
+	"""
+	def decorator(func: Callable) -> Callable:
+		@wraps(func)
+		def wrapper(*args, **kwargs):
+			delay = initial_delay
+			last_error = None
+			
+			for attempt in range(max_retries + 1):
+				try:
+					if attempt > 0:
+						frappe.logger().info(
+							f"🔄 Retry attempt {attempt}/{max_retries} for {func.__name__} "
+							f"after {delay:.2f}s delay"
+						)
+						time.sleep(delay)
+						# Rollback any pending transaction before retry
+						frappe.db.rollback()
+					
+					result = func(*args, **kwargs)
+					
+					if attempt > 0:
+						frappe.logger().info(
+							f"✅ {func.__name__} succeeded on attempt {attempt + 1}"
+						)
+					
+					return result
+					
+				except frappe.QueryDeadlockError as e:
+					last_error = e
+					frappe.logger().warning(
+						f"⚠️ Deadlock in {func.__name__} (attempt {attempt + 1}/{max_retries + 1}): {str(e)}"
+					)
+					
+					if attempt < max_retries:
+						delay *= 2  # Exponential backoff
+					else:
+						frappe.logger().error(
+							f"❌ {func.__name__} failed after {max_retries + 1} attempts"
+						)
+						raise
+				
+				except Exception as e:
+					# Non-deadlock errors should not retry
+					frappe.logger().error(
+						f"❌ Non-retryable error in {func.__name__}: {str(e)}"
+					)
+					raise
+			
+			# Should never reach here, but just in case
+			if last_error:
+				raise last_error
+		
+		return wrapper
+	return decorator
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
@@ -454,6 +527,62 @@ def sync_all_assignments(assignment_ids: List[str]) -> Dict:
 	}
 
 
+@retry_on_deadlock(max_retries=3, initial_delay=0.1)
+def _sync_single_instance_with_retry(
+	instance_id: str,
+	class_id: str,
+	teacher_id: str,
+	sync_start,
+	sync_end,
+	campus_id: str
+) -> tuple:
+	"""
+	Internal function to sync a single instance with retry logic.
+	
+	Isolated for clean retry handling without affecting outer loop.
+	
+	Returns:
+		(teacher_count, deleted_count)
+	"""
+	from ..timetable.bulk_sync_engine import sync_instance_bulk
+	
+	frappe.logger().info(
+		f"🔄 Teacher Timetable Sync: instance={instance_id}, "
+		f"class={class_id}, teacher={teacher_id}, "
+		f"range={sync_start} to {sync_end}"
+	)
+	
+	# CRITICAL: Commit before sync to ensure bulk_sync sees fresh assignments
+	frappe.db.commit()
+	
+	# Delete old entries for this teacher in this range
+	deleted = frappe.db.sql("""
+		DELETE FROM `tabSIS Teacher Timetable`
+		WHERE timetable_instance_id = %s
+		  AND teacher_id = %s
+		  AND date BETWEEN %s AND %s
+	""", (instance_id, teacher_id, sync_start, sync_end))
+	
+	frappe.db.commit()
+	
+	# Regenerate using bulk sync engine
+	teacher_count, student_count = sync_instance_bulk(
+		instance_id=instance_id,
+		class_id=class_id,
+		start_date=str(sync_start),
+		end_date=str(sync_end),
+		campus_id=campus_id,
+		job_id=None
+	)
+	
+	frappe.logger().info(
+		f"✅ Teacher Timetable Sync: created {teacher_count} entries "
+		f"for instance {instance_id}"
+	)
+	
+	return (teacher_count, deleted or 0)
+
+
 def sync_teacher_timetable_bulk(teacher_id: str, assignment_ids: List[str]) -> Dict:
 	"""
 	Sync Teacher Timetable (materialized view) for all affected classes.
@@ -461,7 +590,8 @@ def sync_teacher_timetable_bulk(teacher_id: str, assignment_ids: List[str]) -> D
 	Strategy:
 	1. Get all affected classes from assignments
 	2. Call bulk sync engine ONCE per class (not per assignment!)
-	3. Return summary
+	3. Retry on deadlock với exponential backoff
+	4. Return summary
 	
 	Args:
 		teacher_id: Teacher ID
@@ -474,7 +604,6 @@ def sync_teacher_timetable_bulk(teacher_id: str, assignment_ids: List[str]) -> D
 			"details": List[str]
 		}
 	"""
-	from ..timetable.bulk_sync_engine import sync_instance_bulk
 	from datetime import timedelta
 	
 	created = 0
@@ -538,45 +667,31 @@ def sync_teacher_timetable_bulk(teacher_id: str, assignment_ids: List[str]) -> D
 					if assignment.latest_end:
 						sync_end = min(sync_end, assignment.latest_end)
 					
-					frappe.logger().info(
-						f"🔄 Teacher Timetable Sync: instance={instance_id}, "
-						f"class={class_id}, teacher={teacher_id}, "
-						f"range={sync_start} to {sync_end}"
-					)
-					
-					# CRITICAL: Commit before sync to ensure bulk_sync sees fresh assignments
-					frappe.db.commit()
-					
-					# Delete old entries for this teacher in this range
-					deleted = frappe.db.sql("""
-						DELETE FROM `tabSIS Teacher Timetable`
-						WHERE timetable_instance_id = %s
-						  AND teacher_id = %s
-						  AND date BETWEEN %s AND %s
-					""", (instance_id, teacher_id, sync_start, sync_end))
-					
-					frappe.db.commit()
-					
-					# Regenerate using bulk sync engine
-					teacher_count, student_count = sync_instance_bulk(
+					# Call isolated function with retry logic
+					teacher_count, deleted_count = _sync_single_instance_with_retry(
 						instance_id=instance_id,
 						class_id=class_id,
-						start_date=str(sync_start),
-						end_date=str(sync_end),
-						campus_id=campus_id,
-						job_id=None
+						teacher_id=teacher_id,
+						sync_start=sync_start,
+						sync_end=sync_end,
+						campus_id=campus_id
 					)
 					
 					created += teacher_count
 					details.append(
 						f"✓ Instance {instance_id}: {teacher_count} teacher entries created "
-						f"(deleted {deleted or 0} old)"
+						f"(deleted {deleted_count} old)"
 					)
 					
-					frappe.logger().info(
-						f"✅ Teacher Timetable Sync: created {teacher_count} entries "
-						f"for instance {instance_id}"
+				except frappe.QueryDeadlockError as deadlock_error:
+					# Deadlock persisted after all retries
+					errors += 1
+					error_msg = (
+						f"✗ Deadlock in instance {instance.name} after retries: "
+						f"{str(deadlock_error)}"
 					)
+					details.append(error_msg)
+					frappe.logger().error(error_msg)
 					
 				except Exception as instance_error:
 					errors += 1

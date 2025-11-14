@@ -222,11 +222,12 @@ __all__ = [
     'get_subjects_for_class',
     'get_my_subjects_for_class',
     
-    # Batch operations - V2
+    # Batch operations - V2 (with deadlock retry)
     'batch_update_assignments',
     'validate_all_assignments',
     'apply_all_assignments',
     'sync_all_assignments',
+    'sync_teacher_timetable_bulk',
     
     # Batch operations - V1 (backward compat - deprecated)
     'batch_update_teacher_assignments',

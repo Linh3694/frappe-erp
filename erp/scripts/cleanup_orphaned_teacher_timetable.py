@@ -442,3 +442,4 @@ if __name__ == "__main__":
     print("  from erp.scripts.cleanup_orphaned_teacher_timetable import cleanup_all")
     print("  cleanup_all(dry_run=True)")
 
+
