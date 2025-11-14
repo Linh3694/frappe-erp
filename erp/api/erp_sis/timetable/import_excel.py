@@ -195,7 +195,9 @@ def get_import_job_status():
         # Get job_id from query params
         job_id = frappe.form_dict.get("job_id") or frappe.request.args.get("job_id")
         
-        frappe.logger().info(f"📊 Poll Status: job_id={job_id}, user={frappe.session.user}")
+        frappe.logger().info(f"📊 Poll Status REQUEST: job_id={job_id}, user={frappe.session.user}")
+        frappe.logger().info(f"   form_dict: {frappe.form_dict}")
+        frappe.logger().info(f"   request.args: {dict(frappe.request.args)}")
         
         # Check for final result first
         result_key = f"timetable_import_result_{frappe.session.user}"
@@ -245,9 +247,11 @@ def get_import_job_status():
         
         # No result and no progress data yet - job just started or crashed
         frappe.logger().info(f"⏳ Returning 'starting' status - job may still be initializing")
-        return single_item_response({
+        frappe.logger().info(f"   Returning job_id={job_id} in response")
+        
+        response_data = {
             "status": "processing",
-            "job_id": job_id,
+            "job_id": job_id,  # Preserve job_id even if no progress yet
             "progress": {
                 "phase": "starting",
                 "current": 0,
@@ -256,7 +260,10 @@ def get_import_job_status():
                 "message": "Đang khởi động import job...",
                 "current_class": ""
             }
-        }, "Import starting")
+        }
+        
+        frappe.logger().info(f"   Response data: {response_data}")
+        return single_item_response(response_data, "Import starting")
     
     except Exception as e:
         frappe.logger().error(f"❌ Error in get_import_job_status: {str(e)}")
