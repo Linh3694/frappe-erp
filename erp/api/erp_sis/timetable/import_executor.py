@@ -50,6 +50,7 @@ class TimetableImportExecutor:
 		self.file_path = file_path
 		self.metadata = metadata
 		self.df = None
+		self.job_id = None  # Set by caller for progress tracking
 		
 		# Cache for lookups
 		self.cache = {
@@ -706,7 +707,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		# Update progress: Starting validation
 		if job_id:
 			try:
-				frappe.cache().set(
+				frappe.cache().set_value(
 					f"timetable_import_progress:{job_id}",
 					{
 						"phase": "validating",
@@ -783,7 +784,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		# Update progress: Starting execution
 		if job_id:
 			try:
-				frappe.cache().set(
+				frappe.cache().set_value(
 					f"timetable_import_progress:{job_id}",
 					{
 						"phase": "executing",

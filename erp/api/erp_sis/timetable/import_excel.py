@@ -173,43 +173,61 @@ def get_import_job_status():
     Get the status/result of timetable import background job.
     Frontend should poll this endpoint after submitting import.
     
+    Query params:
+        - job_id: Background job ID for progress tracking
+    
     Returns:
         - If completed: final result with success/error
-        - If processing: progress data with current/total/percentage
+        - If processing: progress data with current/total/percentage/message
     """
     try:
+        # Get job_id from query params
+        job_id = frappe.form_dict.get("job_id") or frappe.request.args.get("job_id")
+        
         # Check for final result first
         result_key = f"timetable_import_result_{frappe.session.user}"
         result = frappe.cache().get_value(result_key)
         
         if result:
-            # Clear cache after retrieval
-            frappe.cache().delete_value(result_key)
+            # Don't clear cache immediately - let frontend clear it
+            # frappe.cache().delete_value(result_key)
+            frappe.logger().info(f"📊 Import Status: Returning final result for user {frappe.session.user}")
             return single_item_response(result, "Import result retrieved")
         
         # Check for progress data (job still running)
-        # Try to get job_id from session or query params
-        job_id = frappe.form_dict.get("job_id")
-        
         if job_id:
             progress_key = f"timetable_import_progress:{job_id}"
             progress = frappe.cache().get_value(progress_key)
             
             if progress:
-                # Return progress data
+                frappe.logger().info(f"📊 Import Status: Progress {progress.get('percentage', 0)}% - {progress.get('message', 'Processing...')}")
+                
+                # Return progress data in format frontend expects
                 return single_item_response({
                     "status": "processing",
-                    "progress": progress,
-                    "message": progress.get("message", "Import đang xử lý...")
+                    "phase": progress.get("phase", "importing"),
+                    "current": progress.get("current", 0),
+                    "total": progress.get("total", 100),
+                    "percentage": progress.get("percentage", 0),
+                    "message": progress.get("message", "Đang xử lý..."),
+                    "current_class": progress.get("current_class", ""),
+                    "job_id": job_id
                 }, "Import in progress")
         
-        # No result and no progress data - still processing without progress updates yet
+        # No result and no progress data yet - job just started
+        frappe.logger().info(f"📊 Import Status: Job starting (no progress yet) - job_id={job_id}")
         return single_item_response({
             "status": "processing",
-            "message": "Import vẫn đang xử lý..."
-        }, "Import in progress")
+            "phase": "starting",
+            "current": 0,
+            "total": 100,
+            "percentage": 0,
+            "message": "Đang khởi động import job...",
+            "job_id": job_id
+        }, "Import starting")
     
     except Exception as e:
+        frappe.logger().error(f"❌ Error in get_import_job_status: {str(e)}")
         return error_response(f"Error retrieving import status: {str(e)}")
 
 
