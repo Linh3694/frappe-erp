@@ -217,11 +217,11 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 						"period_name": row.period_name,
 						"subject_id": row.subject_id,
 						"teacher_1_id": row.teacher_1_id,
-						"teacher_1_name": frappe.db.get_value("SIS Teacher", row.teacher_1_id, "teacher_name"),
+						"teacher_1_name": get_teacher_name(row.teacher_1_id),
 						"teacher_2_id": row.teacher_2_id,
-						"teacher_2_name": frappe.db.get_value("SIS Teacher", row.teacher_2_id, "teacher_name"),
+						"teacher_2_name": get_teacher_name(row.teacher_2_id),
 						"new_teacher_id": teacher_id,
-						"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
+						"new_teacher_name": get_teacher_name(teacher_id)
 					})
 					frappe.logger().warning(
 						f"⚠️ Added to conflicts list: {len(teacher_conflicts)} total conflicts"
@@ -476,11 +476,11 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							"period_name": pattern_row.period_name,
 							"subject_id": pattern_row.subject_id,
 							"teacher_1_id": existing.teacher_1_id,
-							"teacher_1_name": frappe.db.get_value("SIS Teacher", existing.teacher_1_id, "teacher_name"),
+							"teacher_1_name": get_teacher_name(existing.teacher_1_id),
 							"teacher_2_id": existing.teacher_2_id,
-							"teacher_2_name": frappe.db.get_value("SIS Teacher", existing.teacher_2_id, "teacher_name"),
+							"teacher_2_name": get_teacher_name(existing.teacher_2_id),
 							"new_teacher_id": teacher_id,
-							"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
+							"new_teacher_name": get_teacher_name(teacher_id)
 						})
 						frappe.logger().warning(
 							f"⚠️ FROM_DATE: Added existing override conflict: {len(conflicts)} total conflicts"
@@ -567,11 +567,11 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							"period_name": pattern_row.period_name,
 							"subject_id": pattern_row.subject_id,
 							"teacher_1_id": pattern_row.teacher_1_id,
-							"teacher_1_name": frappe.db.get_value("SIS Teacher", pattern_row.teacher_1_id, "teacher_name"),
+							"teacher_1_name": get_teacher_name(pattern_row.teacher_1_id),
 							"teacher_2_id": pattern_row.teacher_2_id,
-							"teacher_2_name": frappe.db.get_value("SIS Teacher", pattern_row.teacher_2_id, "teacher_name"),
+							"teacher_2_name": get_teacher_name(pattern_row.teacher_2_id),
 							"new_teacher_id": teacher_id,
-							"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
+							"new_teacher_name": get_teacher_name(teacher_id)
 						})
 						frappe.logger().warning(
 							f"⚠️ FROM_DATE: Added to conflicts list: {len(conflicts)} total conflicts"
@@ -843,6 +843,30 @@ def enqueue_materialized_view_sync(row_ids: List[str]):
 	except Exception as e:
 		frappe.log_error(f"Failed to enqueue materialized view sync: {str(e)}")
 		# Don't fail the main operation if enqueue fails
+
+
+def get_teacher_name(teacher_id: str) -> str:
+	"""
+	Get teacher's display name from User table.
+	
+	Args:
+		teacher_id: SIS Teacher ID
+		
+	Returns:
+		Teacher's full name or user_id as fallback
+	"""
+	try:
+		# Get user_id from SIS Teacher
+		user_id = frappe.db.get_value("SIS Teacher", teacher_id, "user_id")
+		if not user_id:
+			return teacher_id
+		
+		# Get full_name from User
+		full_name = frappe.db.get_value("User", user_id, "full_name")
+		return full_name or user_id
+	except Exception as e:
+		frappe.log_error(f"Failed to get teacher name for {teacher_id}: {str(e)}")
+		return teacher_id
 
 
 def detect_teacher_conflicts(teacher_id: str, target_rows: List, campus_id: str) -> List[Dict]:
