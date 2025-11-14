@@ -115,42 +115,42 @@ class TimetableImportExecutor:
 			except Exception as e:
 				raise Exception(f"Failed to create/update timetable header: {str(e)}")
 			
-		# Step 2: Process each class
-		try:
-			self._process_all_classes()
+			# Step 2: Process each class
+			try:
+				self._process_all_classes()
+			except Exception as e:
+				raise Exception(f"Failed to process classes: {str(e)}")
+			
+			# Step 3: Sync Student Subjects
+			try:
+				self._sync_student_subjects()
+			except Exception as e:
+				raise Exception(f"Failed to sync student subjects: {str(e)}")
+			
+			# Step 4: Sync Teacher Timetable và Student Timetable
+			try:
+				self._sync_materialized_views()
+			except Exception as e:
+				raise Exception(f"Failed to sync materialized views: {str(e)}")
+			
+			# Commit transaction
+			frappe.db.commit()
+			
+			frappe.logger().info(
+				f"✅ Import complete: {self.stats['instances_created']}I created, "
+				f"{self.stats['rows_created']}R created"
+			)
+			
+			return {
+				"success": True,
+				"message": f"Import complete: {self.stats['instances_created']} instances, "
+				           f"{self.stats['rows_created']} rows created",
+				"stats": self.stats,
+				"logs": self._get_user_friendly_logs(),
+				"detailed_logs": self.logs  # Keep full logs for debugging if needed
+			}
+			
 		except Exception as e:
-			raise Exception(f"Failed to process classes: {str(e)}")
-		
-		# Step 3: Sync Student Subjects
-		try:
-			self._sync_student_subjects()
-		except Exception as e:
-			raise Exception(f"Failed to sync student subjects: {str(e)}")
-		
-		# Step 4: Sync Teacher Timetable và Student Timetable
-		try:
-			self._sync_materialized_views()
-		except Exception as e:
-			raise Exception(f"Failed to sync materialized views: {str(e)}")
-		
-		# Commit transaction
-		frappe.db.commit()
-		
-		frappe.logger().info(
-			f"✅ Import complete: {self.stats['instances_created']}I created, "
-			f"{self.stats['rows_created']}R created"
-		)
-		
-		return {
-			"success": True,
-			"message": f"Import complete: {self.stats['instances_created']} instances, "
-			           f"{self.stats['rows_created']} rows created",
-			"stats": self.stats,
-			"logs": self._get_user_friendly_logs(),
-			"detailed_logs": self.logs  # Keep full logs for debugging if needed
-		}
-		
-	except Exception as e:
 			import traceback
 			error_trace = traceback.format_exc()
 			
