@@ -95,24 +95,23 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	
 	debug_info.append(f"🔄 Syncing full_year assignment: teacher={teacher_id}, class={class_id}, subject={actual_subject_id}")
 	
-	# ✅ EXPAND replace_teacher_map if it contains grouped resolutions
-	# Frontend may send: {representative_row_id: "teacher_1"} with affected_row_ids in conflict
-	# We need to expand it to: {row_id1: "teacher_1", row_id2: "teacher_1", ...}
-	expanded_map = {}
-	for key, value in replace_teacher_map.items():
-		if isinstance(value, dict) and "choice" in value and "apply_to" in value:
-			# Grouped format: {row_id: {"choice": "teacher_1", "apply_to": [...]}}
-			choice = value["choice"]
-			for row_id in value["apply_to"]:
-				expanded_map[row_id] = choice
-		else:
-			# Simple format: {row_id: "teacher_1"}
-			expanded_map[key] = value
+	# ✅ NEW APPROACH: Use subject_id as key instead of row_id
+	# This way resolution persists across rollback/retry cycles
+	# Format: {subject_id: "teacher_1" or "teacher_2"}
+	resolution_by_subject = {}
 	
-	replace_teacher_map = expanded_map
-	
+	# Check if replace_teacher_map uses subject_id or row_id format
 	if replace_teacher_map:
-		debug_info.append(f"📋 Replace teacher map has {len(replace_teacher_map)} entries")
+		# Try to detect format by checking if keys look like subject IDs
+		first_key = next(iter(replace_teacher_map.keys()))
+		if first_key.startswith("SIS_ACTUAL_SUBJECT-") or first_key.startswith("SIS-SUBJECT-"):
+			# Already subject_id format
+			resolution_by_subject = replace_teacher_map
+			debug_info.append(f"📋 Using subject-based resolution map: {len(resolution_by_subject)} subjects")
+		else:
+			# Legacy row_id format - keep for backward compatibility
+			debug_info.append(f"📋 Using row-based resolution map: {len(replace_teacher_map)} rows")
+			resolution_by_subject = {}  # Will use row-based logic below
 	
 	# COMPUTE: Find pattern rows
 	pattern_rows = find_pattern_rows(
@@ -207,11 +206,18 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 					f"trying to add teacher={teacher_id}"
 				)
 				
-				# Check if user provided resolution for this conflict
-				if row.name in replace_teacher_map:
-					# User chose which teacher to replace
-					replace_slot = replace_teacher_map[row.name]  # "teacher_1" or "teacher_2"
-					
+				# ✅ Check resolution by SUBJECT_ID first (persistent across retries)
+				replace_slot = None
+				if resolution_by_subject and row.subject_id in resolution_by_subject:
+					replace_slot = resolution_by_subject[row.subject_id]
+					frappe.logger().info(f"✅ Found subject-based resolution: {row.subject_id} → {replace_slot}")
+				elif row.name in replace_teacher_map:
+					# Legacy: check by row_id
+					replace_slot = replace_teacher_map[row.name]
+					frappe.logger().info(f"✅ Found row-based resolution: {row.name} → {replace_slot}")
+				
+				if replace_slot:
+					# User provided resolution
 					if replace_slot not in ["teacher_1", "teacher_2"]:
 						frappe.logger().error(f"Invalid replace_slot: {replace_slot} for row {row.name}")
 						continue
@@ -225,7 +231,7 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 					)
 					updated_count += 1
 					debug_info.append(
-						f"✅ Replaced {replace_slot} in row {row.name}"
+						f"✅ Replaced {replace_slot} in row {row.name} (subject: {row.subject_id})"
 					)
 				else:
 					# No resolution provided → Add to conflicts list
@@ -251,7 +257,8 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 		# Check if there are unresolved conflicts
 		if teacher_conflicts:
 			# Group conflicts by subject_id - user only needs to choose once per subject
-			# Then we'll apply the resolution to ALL rows for that subject
+			# ✅ KEY CHANGE: Use subject_id as conflict identifier (not row_id)
+			# This persists across rollback/retry cycles
 			conflicts_grouped = {}
 			row_ids_by_subject = {}  # Map subject_id -> list of row_ids
 			
@@ -260,6 +267,8 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 				
 				if subject_id not in conflicts_grouped:
 					# First conflict for this subject - use as representative
+					# ✅ Use subject_id as the conflict key
+					conflict["conflict_key"] = subject_id  # Use subject_id instead of row_id
 					conflicts_grouped[subject_id] = conflict
 					row_ids_by_subject[subject_id] = []
 				
@@ -389,22 +398,21 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 		f"subject={actual_subject_id}, dates={start_date} to {end_date}"
 	)
 	
-	# ✅ EXPAND replace_teacher_map if it contains grouped resolutions
-	expanded_map = {}
-	for key, value in replace_teacher_map.items():
-		if isinstance(value, dict) and "choice" in value and "apply_to" in value:
-			# Grouped format
-			choice = value["choice"]
-			for row_id in value["apply_to"]:
-				expanded_map[row_id] = choice
-		else:
-			# Simple format
-			expanded_map[key] = value
-	
-	replace_teacher_map = expanded_map
+	# ✅ NEW APPROACH: Use subject_id as key instead of row_id
+	# This way resolution persists across rollback/retry cycles
+	resolution_by_subject = {}
 	
 	if replace_teacher_map:
-		debug_info.append(f"📋 Replace teacher map has {len(replace_teacher_map)} entries")
+		# Try to detect format by checking if keys look like subject IDs
+		first_key = next(iter(replace_teacher_map.keys()))
+		if first_key.startswith("SIS_ACTUAL_SUBJECT-") or first_key.startswith("SIS-SUBJECT-"):
+			# Already subject_id format
+			resolution_by_subject = replace_teacher_map
+			debug_info.append(f"📋 Using subject-based resolution map: {len(resolution_by_subject)} subjects")
+		else:
+			# Legacy row_id format - keep for backward compatibility
+			debug_info.append(f"📋 Using row-based resolution map: {len(replace_teacher_map)} rows")
+			resolution_by_subject = {}  # Will use row-based logic below
 	
 	# VALIDATE dates
 	if not start_date:
@@ -511,11 +519,18 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						f"trying to add teacher={teacher_id}"
 					)
 					
-					# Check if user provided resolution for this conflict
-					if existing.name in replace_teacher_map:
-						# User chose which teacher to replace
-						replace_slot = replace_teacher_map[existing.name]  # "teacher_1" or "teacher_2"
-						
+					# ✅ Check resolution by SUBJECT_ID first (persistent across retries)
+					replace_slot = None
+					if resolution_by_subject and pattern_row.subject_id in resolution_by_subject:
+						replace_slot = resolution_by_subject[pattern_row.subject_id]
+						frappe.logger().info(f"✅ Found subject-based resolution: {pattern_row.subject_id} → {replace_slot}")
+					elif existing.name in replace_teacher_map:
+						# Legacy: check by row_id
+						replace_slot = replace_teacher_map[existing.name]
+						frappe.logger().info(f"✅ Found row-based resolution: {existing.name} → {replace_slot}")
+					
+					if replace_slot:
+						# User provided resolution
 						if replace_slot not in ["teacher_1", "teacher_2"]:
 							frappe.logger().error(f"Invalid replace_slot: {replace_slot} for row {existing.name}")
 							continue
@@ -529,7 +544,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						)
 						updated_count += 1
 						debug_info.append(
-							f"✅ Replaced {replace_slot} on {date} - {pattern_row.timetable_column_id}"
+							f"✅ Replaced {replace_slot} on {date} - {pattern_row.timetable_column_id} (subject: {pattern_row.subject_id})"
 						)
 					else:
 						# No resolution provided → Add to conflicts list
@@ -587,13 +602,20 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						f"trying to add teacher={teacher_id}"
 					)
 					
-					# Check if user provided resolution
-					# Note: We use a temporary key since override doesn't exist yet
-					temp_key = f"pattern_{pattern_row.name}_{date}"
-					if temp_key in replace_teacher_map:
-						# User chose which teacher to replace
-						replace_slot = replace_teacher_map[temp_key]
-						
+					# ✅ Check resolution by SUBJECT_ID first
+					replace_slot = None
+					if resolution_by_subject and pattern_row.subject_id in resolution_by_subject:
+						replace_slot = resolution_by_subject[pattern_row.subject_id]
+						frappe.logger().info(f"✅ Found subject-based resolution for new override: {pattern_row.subject_id} → {replace_slot}")
+					else:
+						# Legacy: check by temp key (pattern_row_id + date)
+						temp_key = f"pattern_{pattern_row.name}_{date}"
+						if temp_key in replace_teacher_map:
+							replace_slot = replace_teacher_map[temp_key]
+							frappe.logger().info(f"✅ Found temp key resolution: {temp_key} → {replace_slot}")
+					
+					if replace_slot:
+						# User provided resolution
 						if replace_slot not in ["teacher_1", "teacher_2"]:
 							frappe.logger().error(f"Invalid replace_slot: {replace_slot}")
 							continue
@@ -620,7 +642,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 						created_count += 1
 						debug_info.append(
-							f"✅ Created override with {replace_slot} replaced on {date}"
+							f"✅ Created override with {replace_slot} replaced on {date} (subject: {pattern_row.subject_id})"
 						)
 					else:
 						# No resolution provided → Add to conflicts list
@@ -667,6 +689,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 		if conflicts:
 			# Group conflicts by subject_id - user only needs to choose once per subject
 			# For date range assignments, conflicts may span multiple dates
+			# ✅ KEY CHANGE: Use subject_id as conflict identifier (not row_id)
 			conflicts_grouped = {}
 			row_ids_by_subject = {}  # Map subject_id -> list of row_ids
 			
@@ -675,6 +698,8 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 				
 				if subject_id not in conflicts_grouped:
 					# First conflict for this subject - use as representative
+					# ✅ Use subject_id as the conflict key
+					conflict["conflict_key"] = subject_id  # Use subject_id instead of row_id
 					conflicts_grouped[subject_id] = conflict
 					row_ids_by_subject[subject_id] = []
 				
