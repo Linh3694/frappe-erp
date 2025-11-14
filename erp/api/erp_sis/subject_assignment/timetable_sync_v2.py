@@ -360,7 +360,8 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 	Args:
 		assignment: SIS Subject Assignment doc
 		replace_teacher_map: Optional dict {row_id: "teacher_1" or "teacher_2"}
-		                     Tells which teacher to replace when conflict
+		                     Can also use special key format for grouped conflicts:
+		                     {row_id: {"choice": "teacher_1", "apply_to": [row_id1, row_id2, ...]}}
 	
 	Returns:
 		{
@@ -387,6 +388,23 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 		f"🔄 Syncing from_date assignment: teacher={teacher_id}, class={class_id}, "
 		f"subject={actual_subject_id}, dates={start_date} to {end_date}"
 	)
+	
+	# ✅ EXPAND replace_teacher_map if it contains grouped resolutions
+	expanded_map = {}
+	for key, value in replace_teacher_map.items():
+		if isinstance(value, dict) and "choice" in value and "apply_to" in value:
+			# Grouped format
+			choice = value["choice"]
+			for row_id in value["apply_to"]:
+				expanded_map[row_id] = choice
+		else:
+			# Simple format
+			expanded_map[key] = value
+	
+	replace_teacher_map = expanded_map
+	
+	if replace_teacher_map:
+		debug_info.append(f"📋 Replace teacher map has {len(replace_teacher_map)} entries")
 	
 	# VALIDATE dates
 	if not start_date:
@@ -647,19 +665,46 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 		
 		# Check if there are unresolved conflicts
 		if conflicts:
+			# Group conflicts by subject_id - user only needs to choose once per subject
+			# For date range assignments, conflicts may span multiple dates
+			conflicts_grouped = {}
+			row_ids_by_subject = {}  # Map subject_id -> list of row_ids
+			
+			for conflict in conflicts:
+				subject_id = conflict["subject_id"]
+				
+				if subject_id not in conflicts_grouped:
+					# First conflict for this subject - use as representative
+					conflicts_grouped[subject_id] = conflict
+					row_ids_by_subject[subject_id] = []
+				
+				# Track all row_ids for this subject
+				row_ids_by_subject[subject_id].append(conflict["row_id"])
+			
+			# Convert to list and add row_ids info
+			grouped_conflicts = []
+			for subject_id, conflict in conflicts_grouped.items():
+				conflict["affected_row_ids"] = row_ids_by_subject[subject_id]
+				conflict["affected_row_count"] = len(row_ids_by_subject[subject_id])
+				grouped_conflicts.append(conflict)
+			
 			# Return conflicts to caller - caller handles rollback
 			frappe.logger().warning(
-				f"⚠️ FROM_DATE: DETECTED CONFLICTS: {len(conflicts)} conflicts detected. "
+				f"⚠️ FROM_DATE: DETECTED CONFLICTS: {len(conflicts)} total rows, "
+				f"grouped into {len(grouped_conflicts)} subject conflicts. "
 				f"Returning to caller for resolution."
 			)
 			
-			debug_info.append(f"⚠️ Found {len(conflicts)} conflicts requiring user resolution")
+			debug_info.append(
+				f"⚠️ Found {len(conflicts)} conflict rows, "
+				f"grouped into {len(grouped_conflicts)} conflicts (by subject)"
+			)
 			
 			conflict_response = {
 				"success": False,
-				"message": f"Phát hiện {len(conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
+				"message": f"Phát hiện {len(grouped_conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
 				"error_type": "teacher_conflict",
-				"conflicts": conflicts,
+				"conflicts": grouped_conflicts,
 				"rows_created": 0,
 				"rows_updated": 0,
 				"debug_info": debug_info
