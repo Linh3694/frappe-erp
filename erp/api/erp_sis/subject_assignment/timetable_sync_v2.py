@@ -54,7 +54,7 @@ def sync_assignment_to_timetable(assignment_id: str, replace_teacher_map: dict =
 		
 		# ROUTE to appropriate sync function
 		if assignment.application_type == "full_year":
-			return sync_full_year_assignment(assignment)
+			return sync_full_year_assignment(assignment, replace_teacher_map=replace_teacher_map)
 		else:
 			return sync_date_range_assignment(assignment, replace_teacher_map=replace_teacher_map)
 			
@@ -68,18 +68,24 @@ def sync_assignment_to_timetable(assignment_id: str, replace_teacher_map: dict =
 
 # ============= FULL YEAR SYNC =============
 
-def sync_full_year_assignment(assignment) -> Dict:
+def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> Dict:
 	"""
 	Sync full_year assignment: Update pattern rows directly.
 	
-	Logic đơn giản:
+	Logic:
 	1. Find pattern rows cho class + subject
 	2. Detect conflicts (teacher dạy môn khác cùng giờ)
-	3. Update teacher_1_id hoặc teacher_2_id
-	4. Done!
+	3. Check if both teacher slots are full → CONFLICT!
+	4. Update teacher_1_id hoặc teacher_2_id (or replace based on user choice)
+	
+	Args:
+		assignment: SIS Subject Assignment doc
+		replace_teacher_map: Optional dict {row_id: "teacher_1" or "teacher_2"}
+		                     Tells which teacher to replace when conflict
 	
 	Performance: ~50ms cho 10 pattern rows
 	"""
+	replace_teacher_map = replace_teacher_map or {}
 	debug_info = []
 	teacher_id = assignment.teacher_id
 	class_id = assignment.class_id
@@ -114,6 +120,7 @@ def sync_full_year_assignment(assignment) -> Dict:
 	# APPLY: Update atomically
 	updated_count = 0
 	skipped_conflicts = 0
+	teacher_conflicts = []  # Track conflicts when both slots are full
 	
 	try:
 		frappe.db.begin()
@@ -165,8 +172,64 @@ def sync_full_year_assignment(assignment) -> Dict:
 				else:
 					debug_info.append(f"  ✓ Updated row {row.name}: teacher_2_id = {teacher_id}")
 			else:
-				debug_info.append(f"  ⏭️ Skipped row {row.name}: both slots full")
+				# Both teacher slots are full → CONFLICT!
+				
+				# Check if user provided resolution for this conflict
+				if row.name in replace_teacher_map:
+					# User chose which teacher to replace
+					replace_slot = replace_teacher_map[row.name]  # "teacher_1" or "teacher_2"
+					
+					if replace_slot not in ["teacher_1", "teacher_2"]:
+						frappe.logger().error(f"Invalid replace_slot: {replace_slot} for row {row.name}")
+						continue
+					
+					frappe.db.set_value(
+						"SIS Timetable Instance Row",
+						row.name,
+						f"{replace_slot}_id",
+						teacher_id,
+						update_modified=False
+					)
+					updated_count += 1
+					debug_info.append(
+						f"✅ Replaced {replace_slot} in row {row.name}"
+					)
+				else:
+					# No resolution provided → Add to conflicts list
+					teacher_conflicts.append({
+						"row_id": row.name,
+						"date": None,  # Pattern rows don't have date
+						"day_of_week": row.day_of_week,
+						"period_id": row.timetable_column_id,
+						"period_name": row.period_name,
+						"subject_id": row.subject_id,
+						"teacher_1_id": row.teacher_1_id,
+						"teacher_1_name": frappe.db.get_value("SIS Teacher", row.teacher_1_id, "teacher_name"),
+						"teacher_2_id": row.teacher_2_id,
+						"teacher_2_name": frappe.db.get_value("SIS Teacher", row.teacher_2_id, "teacher_name"),
+						"new_teacher_id": teacher_id,
+						"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
+					})
+					debug_info.append(f"  ⚠️ Conflict in row {row.name}: both slots full")
 		
+		# Check if there are unresolved conflicts
+		if teacher_conflicts:
+			# Don't commit - rollback and return conflicts to user
+			frappe.db.rollback()
+			
+			debug_info.append(f"⚠️ Found {len(teacher_conflicts)} conflicts requiring user resolution")
+			
+			return {
+				"success": False,
+				"message": f"Phát hiện {len(teacher_conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
+				"error_type": "teacher_conflict",
+				"conflicts": teacher_conflicts,
+				"rows_updated": 0,
+				"rows_created": 0,
+				"debug_info": debug_info
+			}
+		
+		# No conflicts or all resolved → Commit changes
 		frappe.db.commit()
 		
 		# Sync materialized view immediately for small updates (< 50 rows)
