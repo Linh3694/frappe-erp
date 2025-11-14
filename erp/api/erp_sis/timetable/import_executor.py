@@ -488,7 +488,8 @@ class TimetableImportExecutor:
 			"start_date": start_date,
 			"end_date": end_date
 		})
-		instance_doc.insert(ignore_permissions=True)
+		# Insert without validating mandatory fields (weekly_pattern will be added later)
+		instance_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 		
 		self.stats["instances_created"] += 1
 		return instance_doc.name
