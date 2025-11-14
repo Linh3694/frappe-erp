@@ -873,6 +873,8 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 	frappe.logger().info(f"📁 File: {file_path}")
 	frappe.logger().info(f"🏫 Campus: {campus_id}, Education Stage: {education_stage_id}")
 	frappe.logger().info(f"👤 User: {user_id}, Job ID: {job_id}")
+	frappe.logger().info(f"🌐 Site: {frappe.local.site}")
+	frappe.logger().info(f"🔑 Session user before: {frappe.session.user}")
 	
 	# Use provided user_id or fallback to session user
 	if not user_id:
@@ -883,6 +885,15 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		frappe.set_user(user_id)
 	
 	frappe.logger().info(f"✅ User context set: {frappe.session.user}")
+	
+	# Test cache immediately
+	try:
+		test_key = f"test_cache_{job_id}"
+		frappe.cache().set_value(test_key, {"test": "working"}, expires_in_sec=60)
+		verify_test = frappe.cache().get_value(test_key)
+		frappe.logger().info(f"🧪 Cache test: {verify_test is not None}")
+	except Exception as e:
+		frappe.logger().error(f"❌ Cache test failed: {str(e)}")
 	
 	try:
 		# Prepare metadata
