@@ -726,33 +726,73 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		# ============================================================
 		frappe.logger().info("📋 PHASE 1: Starting validation...")
 		
-		validator = TimetableImportValidator(file_path, metadata)
-		validation_result = validator.validate()
-		
-		frappe.logger().info(f"✅ Validation complete: valid={validation_result.get('is_valid')}")
+		try:
+			validator = TimetableImportValidator(file_path, metadata)
+			validation_result = validator.validate()
+			
+			frappe.logger().info(f"✅ Validation complete: valid={validation_result.get('is_valid')}")
+		except Exception as validation_error:
+			import traceback
+			error_trace = traceback.format_exc()
+			
+			frappe.logger().error(f"💥 CRITICAL: Validator crashed: {str(validation_error)}")
+			frappe.logger().error(f"Traceback:\n{error_trace}")
+			
+			frappe.log_error(
+				title="Timetable Validator Crashed",
+				message=f"File: {file_path}\n\nError: {str(validation_error)}\n\nTraceback:\n{error_trace}"
+			)
+			
+			validation_result = {
+				"is_valid": False,
+				"errors": [f"Validator crashed: {str(validation_error)}"],
+				"warnings": []
+			}
 		
 		# If validation failed, return errors immediately
 		if not validation_result.get('is_valid'):
-			error_count = len(validation_result.get('errors', []))
-			warning_count = len(validation_result.get('warnings', []))
+			errors = validation_result.get('errors', [])
+			warnings = validation_result.get('warnings', [])
+			error_count = len(errors)
+			warning_count = len(warnings)
 			
 			frappe.logger().error(f"❌ Validation failed: {error_count} errors, {warning_count} warnings")
+			
+			# Log each error for debugging
+			frappe.logger().error("=" * 80)
+			frappe.logger().error("VALIDATION ERRORS:")
+			for i, error in enumerate(errors, 1):
+				frappe.logger().error(f"  {i}. {error}")
+			
+			if warnings:
+				frappe.logger().warning("VALIDATION WARNINGS:")
+				for i, warning in enumerate(warnings, 1):
+					frappe.logger().warning(f"  {i}. {warning}")
+			frappe.logger().error("=" * 80)
+			
+			# Log to Frappe Error Log for admin review
+			frappe.log_error(
+				title="Timetable Import Validation Failed",
+				message=f"File: {file_path}\n\nErrors:\n" + "\n".join([f"- {e}" for e in errors]) + 
+				        f"\n\nWarnings:\n" + "\n".join([f"- {w}" for w in warnings])
+			)
 			
 			# Store result in cache for frontend polling
 			if job_id:
 				result_key = f"timetable_import_result_{frappe.session.user}"
 				frappe.cache().set_value(result_key, {
 					"success": False,
-					"errors": validation_result.get('errors', []),
-					"warnings": validation_result.get('warnings', []),
-					"phase": "validation_failed"
+					"errors": errors,
+					"warnings": warnings,
+					"phase": "validation_failed",
+					"message": f"Validation failed with {error_count} errors"
 				}, expires_in_sec=3600)
 			
 			return {
 				"success": False,
-				"errors": validation_result.get('errors', []),
-				"warnings": validation_result.get('warnings', []),
-				"logs": [f"❌ Validation failed with {error_count} errors"]
+				"errors": errors,
+				"warnings": warnings,
+				"logs": [f"❌ Validation failed with {error_count} errors"] + [f"  - {e}" for e in errors[:5]]  # First 5 errors
 			}
 		
 		frappe.logger().info(f"✅ Validation passed with {len(validation_result.get('warnings', []))} warnings")

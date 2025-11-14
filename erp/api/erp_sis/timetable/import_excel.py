@@ -125,6 +125,10 @@ def import_timetable():
             # Generate job ID for progress tracking
             import uuid
             job_id = f"timetable_import_{uuid.uuid4().hex[:8]}"
+            
+            frappe.logger().info(f"🚀 Starting import job with job_id: {job_id}")
+            
+            # Add job_id to import_data for background function
             import_data['job_id'] = job_id
             
             # Enqueue background job using NEW EXECUTOR (validator + executor pattern)
@@ -136,13 +140,19 @@ def import_timetable():
                 **import_data
             )
             
-            job_name = job.get_id() if hasattr(job, 'get_id') else job_id
+            # Use our job_id (not RQ job id) for consistency
+            actual_job_id = job_id
+            frappe.logger().info(f"✅ Job enqueued successfully. Job ID for tracking: {actual_job_id}")
             
             return single_item_response({
                 "status": "processing",
-                "job_id": job_name,
+                "job_id": actual_job_id,
                 "message": "Timetable import đang được xử lý trong background (NEW EXECUTOR)",
-                "logs": ["📤 Đã upload file thành công", f"⚙️ Background job started: {job_name}", "🚀 Using new validator + executor pattern"]
+                "logs": [
+                    "📤 Đã upload file thành công", 
+                    f"⚙️ Job ID: {actual_job_id}",
+                    "🚀 Using new validator + executor pattern"
+                ]
             }, "Timetable import job created")
         else:
             # No file uploaded, just validate metadata
@@ -184,14 +194,15 @@ def get_import_job_status():
         # Get job_id from query params
         job_id = frappe.form_dict.get("job_id") or frappe.request.args.get("job_id")
         
+        frappe.logger().info(f"📊 Poll Status: job_id={job_id}, user={frappe.session.user}")
+        
         # Check for final result first
         result_key = f"timetable_import_result_{frappe.session.user}"
         result = frappe.cache().get_value(result_key)
         
         if result:
+            frappe.logger().info(f"✅ Found final result: success={result.get('success')}")
             # Don't clear cache immediately - let frontend clear it
-            # frappe.cache().delete_value(result_key)
-            frappe.logger().info(f"📊 Import Status: Returning final result for user {frappe.session.user}")
             return single_item_response(result, "Import result retrieved")
         
         # Check for progress data (job still running)
@@ -199,8 +210,11 @@ def get_import_job_status():
             progress_key = f"timetable_import_progress:{job_id}"
             progress = frappe.cache().get_value(progress_key)
             
+            frappe.logger().info(f"🔍 Checking progress_key: {progress_key}")
+            frappe.logger().info(f"🔍 Progress data: {progress}")
+            
             if progress:
-                frappe.logger().info(f"📊 Import Status: Progress {progress.get('percentage', 0)}% - {progress.get('message', 'Processing...')}")
+                frappe.logger().info(f"📊 Progress {progress.get('percentage', 0)}%: {progress.get('message', 'Processing...')}")
                 
                 # Return progress data in format frontend expects
                 return single_item_response({
@@ -213,9 +227,13 @@ def get_import_job_status():
                     "current_class": progress.get("current_class", ""),
                     "job_id": job_id
                 }, "Import in progress")
+            else:
+                frappe.logger().warning(f"⚠️ No progress data found for job_id={job_id}")
+        else:
+            frappe.logger().warning(f"⚠️ No job_id provided in request")
         
-        # No result and no progress data yet - job just started
-        frappe.logger().info(f"📊 Import Status: Job starting (no progress yet) - job_id={job_id}")
+        # No result and no progress data yet - job just started or crashed
+        frappe.logger().info(f"⏳ Returning 'starting' status - job may still be initializing")
         return single_item_response({
             "status": "processing",
             "phase": "starting",
@@ -228,6 +246,8 @@ def get_import_job_status():
     
     except Exception as e:
         frappe.logger().error(f"❌ Error in get_import_job_status: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
         return error_response(f"Error retrieving import status: {str(e)}")
 
 
