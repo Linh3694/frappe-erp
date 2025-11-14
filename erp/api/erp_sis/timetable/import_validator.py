@@ -241,8 +241,18 @@ class TimetableImportValidator:
 			# NEW FORMAT: Class names are column headers
 			df_columns = [str(col).strip() for col in self.df.columns]
 			unique_classes = df_columns[2:]  # Skip "Thứ" and "Tiết"
-			# Subjects will be validated during execution (from cell values)
-			unique_subjects = []
+			
+			# Extract unique subjects from all class columns
+			unique_subjects = set()
+			for col in unique_classes:
+				if col in self.df.columns:
+					# Get all non-empty subjects from this class column
+					subjects = self.df[col].dropna().unique()
+					for subj in subjects:
+						subj_str = str(subj).strip()
+						if subj_str and subj_str != "":
+							unique_subjects.add(subj_str)
+			unique_subjects = list(unique_subjects)
 		
 		unique_periods = self.df["Tiết"].dropna().unique()
 		
@@ -398,26 +408,24 @@ class TimetableImportValidator:
 		"""Validate business logic rules"""
 		
 		# Rule 1: Check for schedule conflicts (same teacher, same period, same day)
-		if "Giáo viên" in self.df.columns:
+		if "Giáo viên" in self.df.columns and self.format == "row_based":
 			conflicts = self._check_teacher_conflicts()
 			if conflicts:
 				for conflict in conflicts:
 					self.warnings.append(conflict)
 		
 		# Rule 2: Check for room conflicts (if room column exists)
-		if "Phòng" in self.df.columns:
+		if "Phòng" in self.df.columns and self.format == "row_based":
 			conflicts = self._check_room_conflicts()
 			if conflicts:
 				for conflict in conflicts:
 					self.warnings.append(conflict)
 		
 		# Rule 3: Validate Subject Assignment exists for each class-subject pair
-		# Only check for OLD FORMAT (row-based) - NEW FORMAT handles this during execution
-		if self.format == "row_based":
-			missing_assignments = self._check_subject_assignments()
-			if missing_assignments:
-				for msg in missing_assignments:
-					self.warnings.append(msg)
+		missing_assignments = self._check_subject_assignments()
+		if missing_assignments:
+			for msg in missing_assignments:
+				self.warnings.append(msg)
 		
 		return True  # Business rule violations are warnings, not errors
 	
@@ -469,13 +477,28 @@ class TimetableImportValidator:
 		missing = []
 		campus_id = self.metadata["campus_id"]
 		
-		# Get unique (class, subject) pairs from Excel
-		unique_pairs = self.df[["Lớp", "Môn học"]].drop_duplicates()
+		# Get unique (class, subject) pairs from Excel based on format
+		pairs_list = []
 		
-		for _, row in unique_pairs.iterrows():
-			class_title = row["Lớp"]
-			subject_title = row["Môn học"]
-			
+		if self.format == "row_based":
+			# OLD FORMAT: Get pairs from Lớp and Môn học columns
+			unique_pairs = self.df[["Lớp", "Môn học"]].drop_duplicates()
+			pairs_list = [(row["Lớp"], row["Môn học"]) for _, row in unique_pairs.iterrows()]
+		else:
+			# NEW FORMAT: Extract pairs from class columns
+			class_columns = list(self.cache["classes"].keys())
+			pairs_set = set()
+			for class_title in class_columns:
+				if class_title in self.df.columns:
+					# Get unique subjects for this class
+					unique_subjects = self.df[class_title].dropna().unique()
+					for subject_title in unique_subjects:
+						subj_str = str(subject_title).strip()
+						if subj_str and subj_str != "":
+							pairs_set.add((class_title, subj_str))
+			pairs_list = list(pairs_set)
+		
+		for class_title, subject_title in pairs_list:
 			# Get IDs from cache
 			class_id = self.cache["classes"].get(class_title)
 			subject_id = self.cache["subjects"].get(subject_title)
