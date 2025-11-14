@@ -125,6 +125,12 @@ def sync_full_year_assignment(assignment) -> Dict:
 			row_key = f"{row.day_of_week}_{row.timetable_column_id}"
 			has_conflict = row_key in conflict_map
 			
+			# ✅ FIX: Check if teacher is already assigned to this row
+			# Tránh trường hợp assign cùng teacher vào cả teacher_1_id và teacher_2_id
+			if row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id:
+				debug_info.append(f"  ✓ Row {row.name}: teacher already assigned, skipping")
+				continue
+			
 			# Assign to first available slot
 			if not row.teacher_1_id:
 				frappe.db.set_value(
@@ -319,6 +325,11 @@ def sync_date_range_assignment(assignment) -> Dict:
 			)
 			
 			if existing:
+				# ✅ FIX: Check if teacher is already assigned to this row
+				if existing.teacher_1_id == teacher_id or existing.teacher_2_id == teacher_id:
+					# Teacher already assigned, skip
+					continue
+				
 				# Update existing override
 				if not existing.teacher_1_id:
 					frappe.db.set_value(
