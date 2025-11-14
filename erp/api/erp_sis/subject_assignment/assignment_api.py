@@ -569,8 +569,9 @@ def create_subject_assignment():
                     affected_classes.add(cid)
                 affected_subjects.add(sid)
 
-        frappe.db.commit()
-        
+        # NOTE: DON'T commit assignments here! Commit after sync succeeds
+        # frappe.db.commit()
+
         # VALIDATION: If ALL assignments were skipped (all duplicates), return error
         if len(created_names) == 0 and len(skipped_duplicates) > 0:
             frappe.logger().info(f"❌ All {len(skipped_duplicates)} assignments already exist - returning validation error")
@@ -704,6 +705,9 @@ def create_subject_assignment():
             response_message_parts.append(f"Teacher View: {total_synced} entries synced")
         
         response_message = ". ".join(response_message_parts) if response_message_parts else "Không có thay đổi"
+
+        # ✅ COMMIT: Only commit after successful sync
+        frappe.db.commit()
 
         if created_data and len(created_data) == 1:
             result = created_data[0]
