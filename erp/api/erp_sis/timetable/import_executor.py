@@ -293,18 +293,20 @@ class TimetableImportExecutor:
 		)
 		
 		if existing:
-			# Update existing
-			timetable_doc = frappe.get_doc("SIS Timetable", existing.name)
-			timetable_doc.title_vn = self.metadata.get("title_vn", existing.title_vn)
-			timetable_doc.title_en = self.metadata.get("title_en", existing.title_vn)
-			timetable_doc.start_date = self.metadata["start_date"]
-			timetable_doc.end_date = self.metadata["end_date"]
-			timetable_doc.save(ignore_permissions=True)
+			# Update existing - use db.set_value to avoid loading child tables
+			timetable_id = existing.name
 			
-			self.stats["timetable_id"] = timetable_doc.name
-			self.logs.append(f"📝 Updated timetable: {timetable_doc.name}")
+			frappe.db.set_value("SIS Timetable", timetable_id, {
+				"title_vn": self.metadata.get("title_vn", existing.title_vn),
+				"title_en": self.metadata.get("title_en", existing.title_vn),
+				"start_date": self.metadata["start_date"],
+				"end_date": self.metadata["end_date"]
+			})
+			
+			self.stats["timetable_id"] = timetable_id
+			self.logs.append(f"📝 Updated timetable: {timetable_id}")
 		else:
-			# Create new
+			# Create new - don't use get_doc to avoid child table issues
 			timetable_doc = frappe.get_doc({
 				"doctype": "SIS Timetable",
 				"title_vn": self.metadata["title_vn"],
@@ -315,6 +317,7 @@ class TimetableImportExecutor:
 				"start_date": self.metadata["start_date"],
 				"end_date": self.metadata["end_date"]
 			})
+			# Insert without loading child tables
 			timetable_doc.insert(ignore_permissions=True)
 			
 			self.stats["timetable_id"] = timetable_doc.name

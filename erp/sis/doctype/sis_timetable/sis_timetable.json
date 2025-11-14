@@ -25,9 +25,7 @@
   "start_date",
   "end_date",
   "upload_source",
-  "created_by",
-  "instances_section",
-  "instances"
+  "created_by"
  ],
  "fields": [
   {
@@ -94,19 +92,6 @@
    "label": "Created By",
    "options": "User",
    "read_only": 1
-  },
-  {
-   "fieldname": "instances_section",
-   "fieldtype": "Section Break",
-   "label": "Timetable Instances"
-  },
-  {
-   "fieldname": "instances",
-   "fieldtype": "Table",
-   "label": "Instances",
-   "options": "SIS Timetable Instance",
-   "read_only": 1,
-   "description": "Auto-generated instances per class after import"
   }
  ],
  "index_web_pages_for_search": 1,
