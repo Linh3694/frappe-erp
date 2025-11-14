@@ -101,6 +101,20 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
+ "indices": [
+  {
+   "unique": 1,
+   "fields": "teacher_id,class_id,actual_subject_id,campus_id"
+  },
+  {
+   "unique": 0,
+   "fields": "campus_id,class_id,actual_subject_id"
+  },
+  {
+   "unique": 0,
+   "fields": "teacher_id,campus_id"
+  }
+ ],
  "modified": "2025-09-17 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",

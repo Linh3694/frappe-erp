@@ -2,7 +2,20 @@
 # For license information, please see license.txt
 
 """
-Batch operations for Subject Assignment.
+⚠️ DEPRECATED - LEGACY V1 CODE ⚠️
+
+This file is deprecated and should be removed after batch_operations_v2.py
+has been running stable in production for 1-2 weeks.
+
+Migration Date: 2025-01-XX
+Delete After: 2025-02-XX (after confirming V2 stability)
+
+Current Status:
+- V2 is active (batch_operations_v2.py)
+- V1 is kept for backward compatibility only
+- All new code should use V2
+
+Batch operations for Subject Assignment (LEGACY).
 
 Xử lý các thao tác hàng loạt như batch update, bulk sync timetable.
 """

@@ -224,6 +224,22 @@ doc_events = {
 			"erp.common.user_hooks.trigger_room_webhooks"
 		]
 	},
+	# Cache Invalidation Hooks for Subject Assignment & Timetable
+	"SIS Subject Assignment": {
+		"after_insert": "erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
+		"on_update": "erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
+		"after_delete": "erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change"
+	},
+	"SIS Subject": {
+		"after_insert": "erp.api.erp_sis.utils.assignment_cache.on_subject_change",
+		"on_update": "erp.api.erp_sis.utils.assignment_cache.on_subject_change",
+		"after_delete": "erp.api.erp_sis.utils.assignment_cache.on_subject_change"
+	},
+	"SIS Timetable Instance Row": {
+		"after_insert": "erp.api.erp_sis.utils.assignment_cache.on_timetable_instance_row_change",
+		"on_update": "erp.api.erp_sis.utils.assignment_cache.on_timetable_instance_row_change",
+		"after_delete": "erp.api.erp_sis.utils.assignment_cache.on_timetable_instance_row_change"
+	},
 	"SIS Class": {
 		"on_update": [
 			"erp.api.erp_administrative.room.sync_class_room_assignment"

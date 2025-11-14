@@ -37,19 +37,66 @@ from .assignment_queries import (
     get_my_subjects_for_class
 )
 
-# Batch operations
-from .batch_operations import (
-    batch_update_teacher_assignments,
-    bulk_update_timetable_from_assignment
+# Batch operations - V2 (Migrated)
+from .batch_operations_v2 import (
+    batch_update_assignments,
+    validate_all_assignments,
+    apply_all_assignments,
+    sync_all_assignments
 )
 
-# Timetable sync (internal - not exposed as API)
+# Timetable sync - V2 (Migrated)
+from .timetable_sync_v2 import (
+    sync_assignment_to_timetable,
+    sync_full_year_assignment,
+    sync_date_range_assignment,
+    validate_assignment_for_sync,
+    find_pattern_rows,
+    get_subject_id_from_actual,
+    enqueue_materialized_view_sync,
+    batch_sync_assignments
+)
+
+# Legacy V1 imports for backward compatibility (deprecated - will be removed)
 from .timetable_sync import (
     batch_sync_timetable_optimized,
     sync_teacher_timetable_after_assignment,
     sync_timetable_from_date,
     sync_materialized_views_background
 )
+from .batch_operations import (
+    bulk_update_timetable_from_assignment
+)
+
+# Backward compatibility wrapper
+def batch_update_teacher_assignments():
+    """
+    Backward compatibility wrapper for V2 batch_update_assignments.
+    
+    Transforms V2 response format to match V1 format expected by frontend.
+    
+    DEPRECATED: This function will be removed in future versions.
+    Please use batch_update_assignments() directly.
+    """
+    result = batch_update_assignments()
+    
+    if not result.get("success"):
+        return result
+    
+    # Transform V2 response to V1 format
+    stats = result.get("stats", {})
+    return {
+        "success": True,
+        "message": result.get("message", ""),
+        "created_count": stats.get("created", 0),
+        "deleted_count": stats.get("deleted", 0),
+        "sync_summary": {
+            "rows_updated": stats.get("synced", 0),
+            "rows_skipped": 0,
+            "instances_checked": 0,
+            "message": result.get("message", "")
+        }
+    }
 
 # Date override handlers (internal)
 from .date_override_handler import (
@@ -81,15 +128,33 @@ __all__ = [
     'get_subjects_for_class',
     'get_my_subjects_for_class',
     
-    # Batch operations
+    # Batch operations - V2
+    'batch_update_assignments',
+    'validate_all_assignments',
+    'apply_all_assignments',
+    'sync_all_assignments',
+    
+    # Batch operations - V1 (backward compat - deprecated)
     'batch_update_teacher_assignments',
     'bulk_update_timetable_from_assignment',
     
-    # Internal functions (for use within module)
+    # Timetable sync - V2
+    'sync_assignment_to_timetable',
+    'sync_full_year_assignment',
+    'sync_date_range_assignment',
+    'validate_assignment_for_sync',
+    'find_pattern_rows',
+    'get_subject_id_from_actual',
+    'enqueue_materialized_view_sync',
+    'batch_sync_assignments',
+    
+    # Timetable sync - V1 (backward compat - deprecated)
     'batch_sync_timetable_optimized',
     'sync_teacher_timetable_after_assignment',
     'sync_timetable_from_date',
     'sync_materialized_views_background',
+    
+    # Internal functions
     'create_date_override_row',
     'calculate_dates_in_range',
     'delete_teacher_override_rows',

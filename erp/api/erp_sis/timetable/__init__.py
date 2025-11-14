@@ -2,60 +2,73 @@
 # For license information, please see license.txt
 
 """
-Timetable API - Backward Compatibility Wrapper
+Timetable API Module
 
-⚠️ REFACTORED: This file now imports from the modular timetable/ package.
+Organized timetable operations with clear separation of concerns.
 
-Legacy imports still work, but the code is now organized in:
-- timetable/columns.py - Column CRUD
-- timetable/weeks.py - Weekly queries
-- timetable/import_excel.py - Excel import
-- timetable/crud.py - Timetable CRUD
-- timetable/instance_rows.py - Instance operations
-- timetable/overrides.py - Date overrides
-- timetable/helpers.py - Utilities
-
-Date: 2025-01-14
-Migration: Completed
+Structure:
+- columns.py: Timetable column CRUD
+- weeks.py: Weekly timetable queries
+- import_excel.py: Excel import logic
+- crud.py: Timetable CRUD
+- instance_rows.py: Instance row operations
+- overrides.py: Date-specific overrides
+- helpers.py: Shared utility functions
 """
 
-# Re-export all functions from new modular structure
-from .timetable.columns import (
+# Timetable Column operations
+from .columns import (
     create_timetable_column,
     update_timetable_column,
     delete_timetable_column,
     get_education_stages_for_timetable_column
 )
 
-from .timetable.crud import (
+# Timetable CRUD operations
+from .crud import (
     get_timetables,
     get_timetable_detail,
     delete_timetable,
     test_class_week_api
 )
 
-from .timetable.import_excel import (
+# Excel import operations
+from .import_excel import (
     import_timetable,
     get_import_job_status,
     save_uploaded_file
 )
 
-from .timetable.weeks import (
+# Excel import execution (NEW - validator + executor pattern)
+from .import_executor import (
+    process_with_new_executor,
+    TimetableImportExecutor
+)
+
+from .import_validator import (
+    TimetableImportValidator
+)
+
+# Weekly queries
+from .weeks import (
     get_teacher_week,
     get_class_week
 )
 
-from .timetable.instance_rows import (
+# Instance row operations
+from .instance_rows import (
     get_instance_row_details,
     update_instance_row
 )
 
-from .timetable.overrides import (
+# Date-specific overrides
+from .overrides import (
     create_or_update_timetable_override,
     delete_timetable_override
 )
 
-from .timetable.helpers import (
+# Helper functions (not exposed as API but available for internal use)
+from .helpers import (
     format_time_for_html,
     _parse_iso_date,
     _add_days,
@@ -65,7 +78,6 @@ from .timetable.helpers import (
     _get_request_arg
 )
 
-# Export all for backward compatibility
 __all__ = [
     # Column operations
     "create_timetable_column",
@@ -84,6 +96,11 @@ __all__ = [
     "get_import_job_status",
     "save_uploaded_file",
     
+    # Import execution (NEW)
+    "process_with_new_executor",
+    "TimetableImportExecutor",
+    "TimetableImportValidator",
+    
     # Weekly queries
     "get_teacher_week",
     "get_class_week",
@@ -98,5 +115,11 @@ __all__ = [
     
     # Helper functions
     "format_time_for_html",
+    "_parse_iso_date",
+    "_add_days",
+    "_day_of_week_to_index",
+    "_build_entries",
+    "_apply_timetable_overrides",
+    "_get_request_arg",
 ]
 
