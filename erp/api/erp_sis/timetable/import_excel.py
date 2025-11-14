@@ -128,8 +128,9 @@ def import_timetable():
             
             frappe.logger().info(f"🚀 Starting import job with job_id: {job_id}")
             
-            # Add job_id to import_data for background function
+            # Add job_id and user_id to import_data for background function
             import_data['job_id'] = job_id
+            import_data['user_id'] = frappe.session.user  # Pass current user to background job
             
             # Enqueue background job using NEW EXECUTOR (validator + executor pattern)
             job = frappe.enqueue(

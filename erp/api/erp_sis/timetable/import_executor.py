@@ -845,7 +845,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
                                campus_id: str, school_year_id: str, 
                                education_stage_id: str, start_date: str, 
                                end_date: str, dry_run: bool = False, 
-                               job_id: str = None):
+                               job_id: str = None, user_id: str = None):
 	"""
 	New import process using validator + executor pattern.
 	
@@ -872,6 +872,11 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 	frappe.logger().info(f"🚀 NEW EXECUTOR: Starting timetable import (dry_run={dry_run})")
 	frappe.logger().info(f"📁 File: {file_path}")
 	frappe.logger().info(f"🏫 Campus: {campus_id}, Education Stage: {education_stage_id}")
+	frappe.logger().info(f"👤 User: {user_id}, Job ID: {job_id}")
+	
+	# Use provided user_id or fallback to session user
+	if not user_id:
+		user_id = frappe.session.user
 	
 	try:
 		# Prepare metadata
@@ -978,7 +983,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			
 			# Store result in cache for frontend polling
 			if job_id:
-				result_key = f"timetable_import_result_{frappe.session.user}"
+				result_key = f"timetable_import_result_{user_id}"
 				frappe.cache().set_value(result_key, {
 					"success": False,
 					"errors": errors,
@@ -1026,7 +1031,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			
 			# Store result in cache
 			if job_id:
-				result_key = f"timetable_import_result_{frappe.session.user}"
+				result_key = f"timetable_import_result_{user_id}"
 				frappe.cache().set_value(result_key, {
 					"success": True,
 					"dry_run": True,
@@ -1093,7 +1098,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		
 		# Store final result in cache
 		if job_id:
-			result_key = f"timetable_import_result_{frappe.session.user}"
+			result_key = f"timetable_import_result_{user_id}"
 			frappe.cache().set_value(result_key, final_result, expires_in_sec=3600)
 		
 		if final_result['success']:
@@ -1120,7 +1125,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		
 		# Store error in cache
 		if job_id:
-			result_key = f"timetable_import_result_{frappe.session.user}"
+			result_key = f"timetable_import_result_{user_id}"
 			frappe.cache().set_value(result_key, {
 				"success": False,
 				"errors": [f"Critical error: {str(e)}"],
