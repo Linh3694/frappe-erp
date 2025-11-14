@@ -863,15 +863,21 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		end_date: Timetable end date (YYYY-MM-DD)
 		dry_run: If True, only validate without creating records
 		job_id: Background job ID for progress tracking
+		user_id: User ID for cache key
 	
 	Returns:
 		dict: Result with success status, data, errors, and logs
 	"""
 	from .import_validator import TimetableImportValidator
 	
+	# IMPORTANT: Ensure site and DB connection are properly initialized
+	# This is critical for cache operations to work correctly
+	frappe.db.commit()  # Ensure any pending transactions are cleared
+	
 	# Collect debug info to return in response
 	debug_info = {
 		"site": frappe.local.site,
+		"site_hash": getattr(frappe.local, 'site_hash', None),
 		"user_id_param": user_id,
 		"session_user_before": frappe.session.user,
 		"job_id": job_id
@@ -1129,17 +1135,22 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		# IMPORTANT: Store final result in cache BEFORE returning
 		if job_id and user_id:
 			result_key = f"timetable_import_result_{user_id}"
-			debug_info["cache_key"] = result_key
+			debug_info["cache_key_plain"] = result_key
 			debug_info["will_save_to_cache"] = True
 			
 			try:
+				# Get Frappe's actual cache key format
+				frappe_cache_key = frappe.cache().make_key(result_key)
+				debug_info["cache_key_frappe"] = str(frappe_cache_key)
+				debug_info["site_at_save"] = frappe.local.site
+				
 				# Update debug info in result before saving
 				final_result["debug"] = debug_info
 				
 				# Save to cache
 				frappe.cache().set_value(result_key, final_result, expires_in_sec=3600)
 				
-				# Verify immediately
+				# Verify immediately with same context
 				verify = frappe.cache().get_value(result_key)
 				debug_info["cache_save_success"] = verify is not None
 				
@@ -1147,6 +1158,14 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 					debug_info["cache_verify"] = "✅ Data found in cache after save"
 				else:
 					debug_info["cache_verify"] = "❌ Data NOT found after save!"
+					# Try to get raw from Redis to debug
+					try:
+						import redis
+						r = redis.Redis.from_url(frappe.conf.redis_cache)
+						raw_exists = r.exists(frappe_cache_key)
+						debug_info["redis_raw_exists"] = bool(raw_exists)
+					except:
+						pass
 					
 			except Exception as cache_error:
 				debug_info["cache_save_error"] = str(cache_error)
