@@ -130,8 +130,9 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	teacher_conflicts = []  # Track conflicts when both slots are full
 	
 	try:
-		frappe.db.begin()
-		
+		# NOTE: Don't begin transaction here - caller manages transaction
+		# frappe.db.begin()
+
 		# Build conflict lookup map for fast checking
 		conflict_map = {}
 		for conflict in conflicts:
@@ -229,14 +230,12 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 		
 		# Check if there are unresolved conflicts
 		if teacher_conflicts:
-			# Don't commit - rollback and return conflicts to user
-			frappe.db.rollback()
-			
+			# Return conflicts to caller - caller handles rollback
 			frappe.logger().warning(
-				f"🚫 RETURNING CONFLICT ERROR: {len(teacher_conflicts)} conflicts detected. "
-				f"Rolling back transaction."
+				f"⚠️ DETECTED CONFLICTS: {len(teacher_conflicts)} conflicts detected. "
+				f"Returning to caller for resolution."
 			)
-			
+
 			debug_info.append(f"⚠️ Found {len(teacher_conflicts)} conflicts requiring user resolution")
 			
 			conflict_response = {
@@ -251,10 +250,8 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			
 			frappe.logger().info(f"🚫 Conflict response: {conflict_response}")
 			return conflict_response
-		
-		# No conflicts or all resolved → Commit changes
-		frappe.db.commit()
-		
+
+		# No conflicts or all resolved → Return success (caller handles commit)
 		# Sync materialized view immediately for small updates (< 50 rows)
 		# For larger updates, enqueue async to avoid blocking
 		if updated_count > 0:
@@ -290,8 +287,8 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 		}
 		
 	except Exception as e:
-		frappe.db.rollback()
-		debug_info.append(f"❌ Rollback: {str(e)}")
+		# Don't rollback - let caller handle transaction
+		debug_info.append(f"❌ Error: {str(e)}")
 		return {
 			"success": False,
 			"message": f"Sync failed: {str(e)}",
@@ -416,8 +413,9 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 	conflicts = []  # Track conflicts for user resolution
 	
 	try:
-		frappe.db.begin()
-		
+		# NOTE: Don't begin transaction here - caller manages transaction
+		# frappe.db.begin()
+
 		for date, pattern_row in override_specs:
 			# Check if override already exists
 			existing = frappe.db.get_value(
@@ -602,12 +600,10 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 		
 		# Check if there are unresolved conflicts
 		if conflicts:
-			# Don't commit - rollback and return conflicts to user
-			frappe.db.rollback()
-			
+			# Return conflicts to caller - caller handles rollback
 			frappe.logger().warning(
-				f"🚫 FROM_DATE: RETURNING CONFLICT ERROR: {len(conflicts)} conflicts detected. "
-				f"Rolling back transaction."
+				f"⚠️ FROM_DATE: DETECTED CONFLICTS: {len(conflicts)} conflicts detected. "
+				f"Returning to caller for resolution."
 			)
 			
 			debug_info.append(f"⚠️ Found {len(conflicts)} conflicts requiring user resolution")
@@ -624,10 +620,8 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 			
 			frappe.logger().info(f"🚫 FROM_DATE Conflict response: {conflict_response}")
 			return conflict_response
-		
-		# No conflicts or all resolved → Commit changes
-		frappe.db.commit()
-		
+
+		# No conflicts or all resolved → Return success (caller handles commit)
 		debug_info.append(f"✅ Created {created_count} override rows")
 		debug_info.append(f"✅ Updated {updated_count} override rows")
 		
@@ -662,8 +656,8 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 		}
 		
 	except Exception as e:
-		frappe.db.rollback()
-		debug_info.append(f"❌ Rollback: {str(e)}")
+		# Don't rollback - let caller handle transaction
+		debug_info.append(f"❌ Error: {str(e)}")
 		frappe.log_error(f"Date range sync failed: {str(e)}")
 		return {
 			"success": False,
