@@ -204,7 +204,13 @@ def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict])
 	)
 	
 	# PHASE 4: SYNC TEACHER TIMETABLE (Materialized View)
-	frappe.logger().info(f"🔄 Phase 4: Syncing Teacher Timetable (materialized view)")
+	# NOTE: Chỉ sync cho created/updated assignments, KHÔNG bao gồm deleted.
+	# Deleted assignments đã được cleanup trong Phase 2 (apply_all_assignments).
+	frappe.logger().info(
+		f"🔄 Phase 4: Syncing Teacher Timetable for "
+		f"{len(apply_result['assignment_ids'])} assignments "
+		f"({apply_result['stats']['deleted']} deleted assignments already cleaned up)"
+	)
 	
 	teacher_timetable_result = {"created": 0, "errors": 0, "details": []}
 	try:
@@ -425,7 +431,11 @@ def apply_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 			elif action == "delete":
 				result = delete_assignment(assignment)
 				stats["deleted"] += 1
-				details.append(f"✓ Deleted assignment {result['assignment_id']}")
+				tt_deleted = result.get("teacher_timetable_deleted", 0)
+				details.append(
+					f"✓ Deleted assignment {result['assignment_id']}"
+					f" (cleaned up {tt_deleted} timetable entries)"
+				)
 		
 		# Commit transaction
 		frappe.db.commit()
@@ -493,7 +503,11 @@ def update_assignment(assignment: Dict) -> Dict:
 
 
 def delete_assignment(assignment: Dict) -> Dict:
-	"""Delete single assignment"""
+	"""
+	Delete single assignment.
+	
+	CRITICAL: Also delete Teacher Timetable entries for this assignment.
+	"""
 	assignment_id = assignment["assignment_id"]
 	
 	# Check if assignment exists before deleting
@@ -501,6 +515,58 @@ def delete_assignment(assignment: Dict) -> Dict:
 		frappe.logger().warning(f"Assignment {assignment_id} not found, skipping delete")
 		return {"assignment_id": assignment_id, "skipped": True}
 	
+	# Get assignment details before deleting (for timetable cleanup)
+	assignment_doc = frappe.get_doc("SIS Subject Assignment", assignment_id)
+	teacher_id = assignment_doc.teacher_id
+	class_id = assignment_doc.class_id
+	actual_subject_id = assignment_doc.actual_subject_id
+	
+	# Get subject_id from actual_subject
+	subject_id = frappe.db.get_value(
+		"SIS Subject",
+		{"actual_subject_id": actual_subject_id, "class_id": class_id},
+		"name"
+	)
+	
+	# Get all timetable instances for this class
+	instances = frappe.db.get_all(
+		"SIS Timetable Instance",
+		filters={"class_id": class_id},
+		pluck="name"
+	)
+	
+	frappe.logger().info(
+		f"DELETE in batch: Deleting assignment {assignment_id} - "
+		f"teacher={teacher_id}, class={class_id}, subject={subject_id}"
+	)
+	
+	# ✅ Delete Teacher Timetable entries
+	teacher_timetable_deleted = 0
+	if subject_id and instances:
+		try:
+			teacher_timetable_deleted = frappe.db.sql("""
+				DELETE FROM `tabSIS Teacher Timetable`
+				WHERE teacher_id = %s
+				  AND class_id = %s
+				  AND subject_id = %s
+				  AND timetable_instance_id IN ({})
+			""".format(','.join(['%s'] * len(instances))), 
+			tuple([teacher_id, class_id, subject_id] + instances))
+			
+			frappe.logger().info(
+				f"DELETE in batch: Deleted {teacher_timetable_deleted or 0} "
+				f"Teacher Timetable entries"
+			)
+			frappe.db.commit()
+			
+		except Exception as tt_error:
+			frappe.logger().error(
+				f"DELETE in batch: Failed to delete Teacher Timetable: {str(tt_error)}"
+			)
+			import traceback
+			frappe.logger().error(traceback.format_exc())
+	
+	# Delete the assignment document
 	frappe.delete_doc(
 		"SIS Subject Assignment",
 		assignment_id,
@@ -508,7 +574,15 @@ def delete_assignment(assignment: Dict) -> Dict:
 		force=True
 	)
 	
-	return {"assignment_id": assignment_id}
+	frappe.logger().info(
+		f"DELETE in batch: Assignment {assignment_id} deleted, "
+		f"cleaned up {teacher_timetable_deleted or 0} timetable entries"
+	)
+	
+	return {
+		"assignment_id": assignment_id,
+		"teacher_timetable_deleted": teacher_timetable_deleted or 0
+	}
 
 
 # ============= SYNC PHASE =============
