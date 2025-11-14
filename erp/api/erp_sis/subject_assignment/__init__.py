@@ -39,12 +39,13 @@ from .assignment_queries import (
     get_my_subjects_for_class
 )
 
-# Batch operations - V2 (Migrated)
-from .batch_operations_v2 import (
+# Batch operations - V2 (Refactored & Optimized)
+from .batch_operations import (
     batch_update_assignments,
     validate_all_assignments,
     apply_all_assignments,
-    sync_all_assignments
+    sync_all_assignments,
+    sync_teacher_timetable_bulk
 )
 
 # Timetable sync - V2 (Migrated)
@@ -65,9 +66,6 @@ from .timetable_sync import (
     sync_teacher_timetable_after_assignment,
     sync_timetable_from_date,
     sync_materialized_views_background
-)
-from .batch_operations import (
-    bulk_update_timetable_from_assignment
 )
 
 # Backward compatibility wrapper
@@ -232,7 +230,6 @@ __all__ = [
     
     # Batch operations - V1 (backward compat - deprecated)
     'batch_update_teacher_assignments',
-    'bulk_update_timetable_from_assignment',
     
     # Timetable sync - V2
     'sync_assignment_to_timetable',

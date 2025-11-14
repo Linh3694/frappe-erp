@@ -20,6 +20,10 @@ from erp.utils.api_response import (
     not_found_response,
     forbidden_response
 )
+# V2 imports - optimized sync engine
+from .batch_operations import (
+    sync_teacher_timetable_bulk
+)
 from .timetable_sync import (
     batch_sync_timetable_optimized,
     sync_teacher_timetable_after_assignment,
@@ -589,32 +593,30 @@ def create_subject_assignment():
                 sync_summary = sync_result
                 frappe.logger().info(f"🎯 BATCH SYNC - Completed: {sync_summary}")
                 
-                # Sync Teacher Timetable (materialized view) after Instance Row sync
-                if sync_summary.get("rows_updated", 0) > 0:
-                    try:
-                        first_assignment_start_date = None
-                        first_assignment_end_date = None
-                        if created_names:
-                            first_assignment = frappe.get_doc("SIS Subject Assignment", created_names[0])
-                            first_assignment_start_date = getattr(first_assignment, 'start_date', None)
-                            first_assignment_end_date = getattr(first_assignment, 'end_date', None)
-                        
-                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Starting for teacher {teacher_id}, {len(affected_classes)} classes")
-                        teacher_sync_result = sync_teacher_timetable_after_assignment(
-                            teacher_id=teacher_id,
-                            affected_classes=list(affected_classes),
-                            campus_id=campus_id,
-                            assignment_start_date=first_assignment_start_date,
-                            assignment_end_date=first_assignment_end_date
-                        )
-                        teacher_timetable_sync_summary = teacher_sync_result
-                        frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC - Completed: {teacher_sync_result}")
-                    except Exception as teacher_sync_error:
-                        frappe.logger().error(f"🎯 TEACHER TIMETABLE SYNC - Failed: {str(teacher_sync_error)}")
-                        
             except Exception as sync_error:
                 frappe.log_error(f"Batch sync timetable failed: {str(sync_error)}")
                 frappe.logger().error(f"🎯 BATCH SYNC - Failed: {str(sync_error)}")
+            
+            # ✅ V2: ALWAYS sync Teacher Timetable when creating assignments
+            # Even if rows_updated = 0 (e.g., new subject not in timetable pattern yet)
+            # Teacher Timetable is a materialized view that should reflect ALL assignments
+            if created_names:
+                try:
+                    frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC V2 - Starting for teacher {teacher_id}, {len(created_names)} new assignments")
+                    teacher_timetable_result = sync_teacher_timetable_bulk(
+                        teacher_id=teacher_id,
+                        assignment_ids=created_names
+                    )
+                    teacher_timetable_sync_summary = {
+                        "created": teacher_timetable_result["created"],
+                        "updated": 0,
+                        "errors": teacher_timetable_result["errors"]
+                    }
+                    frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC V2 - Completed: {teacher_timetable_result}")
+                except Exception as teacher_sync_error:
+                    frappe.logger().error(f"🎯 TEACHER TIMETABLE SYNC V2 - Failed: {str(teacher_sync_error)}")
+                    import traceback
+                    frappe.logger().error(traceback.format_exc())
 
         # Auto-fix any existing SIS Subjects that don't have actual_subject_id linkage
         try:

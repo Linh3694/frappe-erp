@@ -120,14 +120,28 @@ def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict])
 		f"Deleted: {apply_result['stats']['deleted']}"
 	)
 	
-	# PHASE 3: SYNC TIMETABLE
-	frappe.logger().info(f"🔄 Phase 3: Syncing timetable")
+	# PHASE 3: SYNC TIMETABLE (Instance Rows)
+	frappe.logger().info(f"🔄 Phase 3: Syncing timetable instance rows")
 	
 	sync_result = sync_all_assignments(apply_result["assignment_ids"])
 	
 	frappe.logger().info(
 		f"✅ Phase 3: Timetable synced - "
 		f"Success: {sync_result['synced']}/{len(apply_result['assignment_ids'])}"
+	)
+	
+	# PHASE 4: SYNC TEACHER TIMETABLE (Materialized View)
+	frappe.logger().info(f"🔄 Phase 4: Syncing Teacher Timetable (materialized view)")
+	
+	teacher_timetable_result = sync_teacher_timetable_bulk(
+		teacher_id=teacher_id,
+		assignment_ids=apply_result["assignment_ids"]
+	)
+	
+	frappe.logger().info(
+		f"✅ Phase 4: Teacher Timetable synced - "
+		f"Created: {teacher_timetable_result['created']}, "
+		f"Errors: {teacher_timetable_result['errors']}"
 	)
 	
 	# Return summary
@@ -137,9 +151,10 @@ def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict])
 		           f"{apply_result['stats']['updated']}U, {apply_result['stats']['deleted']}D",
 		"stats": {
 			**apply_result["stats"],
-			"synced": sync_result["synced"]
+			"synced": sync_result["synced"],
+			"teacher_timetable_synced": teacher_timetable_result["created"]
 		},
-		"details": apply_result["details"] + sync_result["details"]
+		"details": apply_result["details"] + sync_result["details"] + teacher_timetable_result["details"]
 	}
 
 
@@ -435,6 +450,155 @@ def sync_all_assignments(assignment_ids: List[str]) -> Dict:
 	return {
 		"synced": synced,
 		"failed": failed,
+		"details": details
+	}
+
+
+def sync_teacher_timetable_bulk(teacher_id: str, assignment_ids: List[str]) -> Dict:
+	"""
+	Sync Teacher Timetable (materialized view) for all affected classes.
+	
+	Strategy:
+	1. Get all affected classes from assignments
+	2. Call bulk sync engine ONCE per class (not per assignment!)
+	3. Return summary
+	
+	Args:
+		teacher_id: Teacher ID
+		assignment_ids: List of assignment IDs that were created/updated
+	
+	Returns:
+		{
+			"created": int,
+			"errors": int,
+			"details": List[str]
+		}
+	"""
+	from ..timetable.bulk_sync_engine import sync_instance_bulk
+	from datetime import timedelta
+	
+	created = 0
+	errors = 0
+	details = []
+	
+	try:
+		# Get all assignments to extract affected classes
+		if not assignment_ids:
+			return {"created": 0, "errors": 0, "details": []}
+		
+		assignments = frappe.db.sql("""
+			SELECT DISTINCT 
+				class_id,
+				campus_id,
+				MIN(start_date) as earliest_start,
+				MAX(end_date) as latest_end
+			FROM `tabSIS Subject Assignment`
+			WHERE name IN ({})
+			GROUP BY class_id, campus_id
+		""".format(','.join(['%s'] * len(assignment_ids))), tuple(assignment_ids), as_dict=True)
+		
+		if not assignments:
+			return {"created": 0, "errors": 0, "details": ["No assignments found"]}
+		
+		today = frappe.utils.getdate()
+		
+		# For each affected class, sync its timetable instances
+		for assignment in assignments:
+			class_id = assignment.class_id
+			campus_id = assignment.campus_id
+			
+			# Get all active timetable instances for this class
+			instances = frappe.db.sql("""
+				SELECT name, class_id, start_date, end_date
+				FROM `tabSIS Timetable Instance`
+				WHERE campus_id = %s
+				  AND class_id = %s
+				  AND end_date >= %s
+				ORDER BY start_date
+			""", (campus_id, class_id, today), as_dict=True)
+			
+			if not instances:
+				details.append(f"⏭️ Class {class_id}: No active timetable instances")
+				continue
+			
+			# Sync each instance for this class
+			for instance in instances:
+				try:
+					instance_id = instance.name
+					instance_start = instance.start_date or today
+					instance_end = instance.end_date or (today + timedelta(days=365))
+					
+					# Determine sync range based on assignment dates
+					sync_start = instance_start
+					sync_end = instance_end
+					
+					# If assignment has specific dates, narrow the range
+					if assignment.earliest_start:
+						sync_start = max(sync_start, assignment.earliest_start)
+					if assignment.latest_end:
+						sync_end = min(sync_end, assignment.latest_end)
+					
+					frappe.logger().info(
+						f"🔄 Teacher Timetable Sync: instance={instance_id}, "
+						f"class={class_id}, teacher={teacher_id}, "
+						f"range={sync_start} to {sync_end}"
+					)
+					
+					# CRITICAL: Commit before sync to ensure bulk_sync sees fresh assignments
+					frappe.db.commit()
+					
+					# Delete old entries for this teacher in this range
+					deleted = frappe.db.sql("""
+						DELETE FROM `tabSIS Teacher Timetable`
+						WHERE timetable_instance_id = %s
+						  AND teacher_id = %s
+						  AND date BETWEEN %s AND %s
+					""", (instance_id, teacher_id, sync_start, sync_end))
+					
+					frappe.db.commit()
+					
+					# Regenerate using bulk sync engine
+					teacher_count, student_count = sync_instance_bulk(
+						instance_id=instance_id,
+						class_id=class_id,
+						start_date=str(sync_start),
+						end_date=str(sync_end),
+						campus_id=campus_id,
+						job_id=None
+					)
+					
+					created += teacher_count
+					details.append(
+						f"✓ Instance {instance_id}: {teacher_count} teacher entries created "
+						f"(deleted {deleted or 0} old)"
+					)
+					
+					frappe.logger().info(
+						f"✅ Teacher Timetable Sync: created {teacher_count} entries "
+						f"for instance {instance_id}"
+					)
+					
+				except Exception as instance_error:
+					errors += 1
+					error_msg = f"✗ Error syncing instance {instance.name}: {str(instance_error)}"
+					details.append(error_msg)
+					frappe.logger().error(error_msg)
+					import traceback
+					frappe.logger().error(traceback.format_exc())
+		
+		frappe.db.commit()
+		
+	except Exception as e:
+		errors += 1
+		error_msg = f"✗ Critical error in Teacher Timetable sync: {str(e)}"
+		details.append(error_msg)
+		frappe.logger().error(error_msg)
+		import traceback
+		frappe.logger().error(traceback.format_exc())
+	
+	return {
+		"created": created,
+		"errors": errors,
 		"details": details
 	}
 

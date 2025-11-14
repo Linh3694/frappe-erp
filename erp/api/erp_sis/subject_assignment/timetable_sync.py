@@ -804,6 +804,9 @@ def sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: l
                 
                 frappe.logger().info(f"🔄 Syncing instance {instance_id} for {class_id}: {actual_start} to {actual_end}")
                 
+                # CRITICAL: Commit any pending changes to ensure bulk sync sees fresh data
+                frappe.db.commit()
+                
                 # Delete existing entries for this teacher in the date range
                 # (Only delete entries for this specific teacher, not all entries)
                 deleted = frappe.db.sql("""
@@ -814,6 +817,7 @@ def sync_teacher_timetable_after_assignment(teacher_id: str, affected_classes: l
                 """, (instance_id, teacher_id, actual_start, actual_end))
                 
                 frappe.logger().info(f"  🗑️ Deleted {deleted or 0} old entries for teacher {teacher_id}")
+                frappe.db.commit()  # Commit deletion
                 
                 # Use bulk sync engine to regenerate entries
                 # This will only create entries for teachers with assignments
