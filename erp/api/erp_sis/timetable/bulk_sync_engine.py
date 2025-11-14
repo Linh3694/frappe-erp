@@ -30,7 +30,7 @@ class BulkSyncEngine:
 	"""
 	
 	def __init__(self, instance_id: str, class_id: str, start_date: str, 
-	             end_date: str, campus_id: str):
+	             end_date: str, campus_id: str, job_id: str = None):
 		"""
 		Initialize bulk sync engine.
 		
@@ -40,12 +40,14 @@ class BulkSyncEngine:
 			start_date: Start date (YYYY-MM-DD)
 			end_date: End date (YYYY-MM-DD)
 			campus_id: Campus ID
+			job_id: Job ID for progress tracking (optional)
 		"""
 		self.instance_id = instance_id
 		self.class_id = class_id
 		self.start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
 		self.end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
 		self.campus_id = campus_id
+		self.job_id = job_id
 		
 		# Caches
 		self.assignments_cache = {}  # {(class_id, actual_subject_id): set(teacher_ids)}
@@ -75,6 +77,28 @@ class BulkSyncEngine:
 			"chủ nhật": "sun", "cn": "sun"
 		}
 	
+	def _update_progress(self, message: str, percentage: int = None):
+		"""Update progress in cache for frontend polling."""
+		if not self.job_id:
+			return
+		
+		try:
+			progress_data = {
+				"phase": "syncing",
+				"message": message,
+				"class_id": self.class_id,
+				"percentage": percentage or 0
+			}
+			
+			frappe.cache().set_value(
+				f"timetable_import_progress:{self.job_id}",
+				progress_data,
+				expires_in_sec=7200
+			)
+			frappe.logger().info(f"📊 [BulkSync] Progress: {message}")
+		except Exception as e:
+			frappe.logger().warning(f"⚠️ Failed to update progress: {str(e)}")
+	
 	def sync(self) -> Tuple[int, int]:
 		"""
 		Execute bulk sync for teacher and student timetable.
@@ -83,8 +107,10 @@ class BulkSyncEngine:
 			(teacher_count, student_count): Number of entries created
 		"""
 		frappe.logger().info(f"🚀 [BulkSync] Starting for instance {self.instance_id}, class {self.class_id}")
+		self._update_progress(f"🔄 Đang sync lớp {self.class_id}...", 10)
 		
 		# Step 1: Preload all data
+		self._update_progress(f"📊 Đang tải dữ liệu cho lớp {self.class_id}...", 20)
 		self._preload_data()
 		
 		# Step 2: Get instance rows
@@ -102,22 +128,28 @@ class BulkSyncEngine:
 		frappe.logger().info(f"📅 [BulkSync] Generating entries for {len(all_weeks)} weeks")
 		
 		# Step 5: Prepare teacher entries
+		self._update_progress(f"👨‍🏫 Chuẩn bị teacher entries cho {self.class_id}...", 40)
 		teacher_entries = self._prepare_teacher_entries(pattern_rows, override_rows, all_weeks)
 		frappe.logger().info(f"👨‍🏫 [BulkSync] Prepared {len(teacher_entries)} teacher entries")
 		
 		# Step 6: Prepare student entries
+		self._update_progress(f"👨‍🎓 Chuẩn bị student entries cho {self.class_id}...", 60)
 		student_entries = self._prepare_student_entries(pattern_rows, override_rows, all_weeks)
 		frappe.logger().info(f"👨‍🎓 [BulkSync] Prepared {len(student_entries)} student entries")
 		
 		# Step 7: Bulk insert teacher entries
 		if teacher_entries:
+			self._update_progress(f"💾 Đang lưu {len(teacher_entries)} teacher entries...", 70)
 			self._bulk_insert_teacher_entries(teacher_entries)
 			self.stats["teacher_entries_created"] = len(teacher_entries)
 		
 		# Step 8: Bulk insert student entries
 		if student_entries:
+			self._update_progress(f"💾 Đang lưu {len(student_entries)} student entries...", 85)
 			self._bulk_insert_student_entries(student_entries)
 			self.stats["student_entries_created"] = len(student_entries)
+		
+		self._update_progress(f"✅ Hoàn thành sync lớp {self.class_id}", 100)
 		
 		frappe.logger().info(
 			f"✅ [BulkSync] Complete: {self.stats['teacher_entries_created']} teacher entries, "
@@ -538,7 +570,7 @@ class BulkSyncEngine:
 
 
 def sync_instance_bulk(instance_id: str, class_id: str, start_date: str, 
-                      end_date: str, campus_id: str) -> Tuple[int, int]:
+                      end_date: str, campus_id: str, job_id: str = None) -> Tuple[int, int]:
 	"""
 	Public API for bulk sync.
 	
@@ -548,11 +580,12 @@ def sync_instance_bulk(instance_id: str, class_id: str, start_date: str,
 		start_date: Start date (YYYY-MM-DD)
 		end_date: End date (YYYY-MM-DD)
 		campus_id: Campus ID
+		job_id: Job ID for progress tracking (optional)
 	
 	Returns:
 		(teacher_count, student_count): Number of entries created
 	"""
-	engine = BulkSyncEngine(instance_id, class_id, start_date, end_date, campus_id)
+	engine = BulkSyncEngine(instance_id, class_id, start_date, end_date, campus_id, job_id)
 	return engine.sync()
 
 

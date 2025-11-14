@@ -713,7 +713,8 @@ class TimetableImportExecutor:
 				timeout=3600,
 				is_async=True,
 				instances_data=list(self.processed_instances.items()),
-				campus_id=self.metadata["campus_id"]
+				campus_id=self.metadata["campus_id"],
+				job_id=self.job_id  # Pass job_id for progress tracking
 			)
 			self.logs.append("✅ Background sync job đã được tạo")
 		except Exception as e:
@@ -1001,12 +1002,17 @@ def execute_timetable_import():
 		}
 
 
-def sync_teacher_timetable_background(instances_data, campus_id):
+def sync_teacher_timetable_background(instances_data, campus_id, job_id=None):
 	"""
 	Background job to sync teacher timetable after import.
 	This runs separately so import completes quickly.
 	
 	Uses optimized bulk sync engine for 10x performance improvement.
+	
+	Args:
+		instances_data: List of (instance_id, instance_info) tuples
+		campus_id: Campus ID
+		job_id: Job ID for progress tracking (optional)
 	"""
 	frappe.logger().info(f"🔄 Background sync starting for {len(instances_data)} instances")
 	
@@ -1014,14 +1020,51 @@ def sync_teacher_timetable_background(instances_data, campus_id):
 	
 	total_teacher = 0
 	total_student = 0
+	total_instances = len(instances_data)
 	
-	for instance_id, instance_info in instances_data:
+	# Update initial progress
+	if job_id:
+		try:
+			frappe.cache().set_value(
+				f"timetable_import_progress:{job_id}",
+				{
+					"phase": "syncing",
+					"current": 0,
+					"total": total_instances,
+					"percentage": 0,
+					"message": f"🔄 Bắt đầu sync {total_instances} lớp..."
+				},
+				expires_in_sec=7200
+			)
+		except Exception as e:
+			frappe.logger().warning(f"Failed to update progress: {str(e)}")
+	
+	for idx, (instance_id, instance_info) in enumerate(instances_data, 1):
 		try:
 			start_date = str(instance_info["start_date"])
 			end_date = str(instance_info["end_date"])
 			class_id = instance_info["class_id"]
 			
-			frappe.logger().info(f"📊 Syncing instance {instance_id}: {class_id}, {start_date} to {end_date}")
+			frappe.logger().info(f"📊 Syncing instance {idx}/{total_instances}: {class_id}")
+			
+			# Update overall progress
+			if job_id:
+				try:
+					percentage = int((idx / total_instances) * 100)
+					frappe.cache().set_value(
+						f"timetable_import_progress:{job_id}",
+						{
+							"phase": "syncing",
+							"current": idx,
+							"total": total_instances,
+							"percentage": percentage,
+							"message": f"🔄 Đang sync lớp {class_id} ({idx}/{total_instances})...",
+							"current_class": class_id
+						},
+						expires_in_sec=7200
+					)
+				except Exception as e:
+					frappe.logger().warning(f"Failed to update progress: {str(e)}")
 			
 			# SMART RANGE DELETION: Only delete entries in the new range
 			# This preserves entries outside the new range (e.g., 1/1-14/1 when new range is 15/1-28/2)
@@ -1033,7 +1076,8 @@ def sync_teacher_timetable_background(instances_data, campus_id):
 				class_id=class_id,
 				start_date=start_date,
 				end_date=end_date,
-				campus_id=campus_id
+				campus_id=campus_id,
+				job_id=job_id  # Pass job_id for progress tracking
 			)
 			
 			total_teacher += teacher_count
@@ -1045,6 +1089,23 @@ def sync_teacher_timetable_background(instances_data, campus_id):
 			frappe.logger().error(f"Failed to sync {instance_id}: {str(e)}")
 			import traceback
 			frappe.logger().error(traceback.format_exc())
+	
+	# Mark as complete
+	if job_id:
+		try:
+			frappe.cache().set_value(
+				f"timetable_import_progress:{job_id}",
+				{
+					"phase": "completed",
+					"current": total_instances,
+					"total": total_instances,
+					"percentage": 100,
+					"message": f"✅ Hoàn thành sync {total_instances} lớp!"
+				},
+				expires_in_sec=7200
+			)
+		except Exception as e:
+			frappe.logger().warning(f"Failed to update final progress: {str(e)}")
 	
 	frappe.logger().info(f"✅ Background sync complete: {total_teacher}T + {total_student}S")
 	frappe.db.commit()
