@@ -92,22 +92,37 @@ class TimetableImportExecutor:
 		
 		try:
 			# Load Excel
-			self._load_excel()
+			try:
+				self._load_excel()
+			except Exception as e:
+				raise Exception(f"Failed to load Excel file: {str(e)}")
 			
 			# Build cache
-			self._build_cache()
+			try:
+				self._build_cache()
+			except Exception as e:
+				raise Exception(f"Failed to build cache: {str(e)}")
 			
 			# Start transaction
 			frappe.db.begin()
 			
 			# Step 1: Create/update Timetable header
-			self._create_or_update_timetable_header()
+			try:
+				self._create_or_update_timetable_header()
+			except Exception as e:
+				raise Exception(f"Failed to create/update timetable header: {str(e)}")
 			
 			# Step 2: Process each class
-			self._process_all_classes()
+			try:
+				self._process_all_classes()
+			except Exception as e:
+				raise Exception(f"Failed to process classes: {str(e)}")
 			
 			# Step 3: Sync Student Subjects
-			self._sync_student_subjects()
+			try:
+				self._sync_student_subjects()
+			except Exception as e:
+				raise Exception(f"Failed to sync student subjects: {str(e)}")
 			
 			# Commit transaction
 			frappe.db.commit()
@@ -126,15 +141,29 @@ class TimetableImportExecutor:
 			}
 			
 		except Exception as e:
+			import traceback
+			error_trace = traceback.format_exc()
+			
 			frappe.db.rollback()
-			frappe.log_error(f"Import execution failed: {str(e)}")
+			frappe.logger().error(f"💥 EXECUTOR CRASH: {str(e)}")
+			frappe.logger().error(f"Traceback:\n{error_trace}")
+			
+			frappe.log_error(
+				title="Timetable Import Executor Failed",
+				message=f"Error: {str(e)}\n\nTraceback:\n{error_trace}"
+			)
 			
 			return {
 				"success": False,
-				"message": "Import failed",
+				"message": f"Import failed: {str(e)}",
 				"error": str(e),
 				"stats": self.stats,
-				"logs": self.logs + [f"❌ Rollback: {str(e)}"]
+				"logs": self.logs + [
+					f"❌ CRITICAL ERROR: {str(e)}",
+					"",
+					"Traceback:",
+					*error_trace.split('\n')[-10:]  # Last 10 lines of traceback
+				]
 			}
 	
 	# ============= EXECUTION STEPS =============
