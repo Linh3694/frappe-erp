@@ -70,8 +70,9 @@ def sync_full_year_assignment(assignment) -> Dict:
 	
 	Logic đơn giản:
 	1. Find pattern rows cho class + subject
-	2. Update teacher_1_id hoặc teacher_2_id
-	3. Done!
+	2. Detect conflicts (teacher dạy môn khác cùng giờ)
+	3. Update teacher_1_id hoặc teacher_2_id
+	4. Done!
 	
 	Performance: ~50ms cho 10 pattern rows
 	"""
@@ -99,13 +100,31 @@ def sync_full_year_assignment(assignment) -> Dict:
 	
 	debug_info.append(f"📋 Found {len(pattern_rows)} pattern rows to update")
 	
+	# CHECK: Detect conflicts với môn khác của teacher
+	conflicts = detect_teacher_conflicts(teacher_id, pattern_rows, campus_id)
+	if conflicts:
+		debug_info.append(f"⚠️ Found {len(conflicts)} potential conflicts:")
+		for conflict in conflicts:
+			debug_info.append(f"  - {conflict['day']}/{conflict['period']}: Already teaching {conflict['subject']} in {conflict['class']}")
+	
 	# APPLY: Update atomically
 	updated_count = 0
+	skipped_conflicts = 0
 	
 	try:
 		frappe.db.begin()
 		
+		# Build conflict lookup map for fast checking
+		conflict_map = {}
+		for conflict in conflicts:
+			key = f"{conflict['day']}_{conflict['period']}"
+			conflict_map[key] = conflict
+		
 		for row in pattern_rows:
+			# Check if this row has conflict
+			row_key = f"{row.day_of_week}_{row.timetable_column_id}"
+			has_conflict = row_key in conflict_map
+			
 			# Assign to first available slot
 			if not row.teacher_1_id:
 				frappe.db.set_value(
@@ -116,7 +135,11 @@ def sync_full_year_assignment(assignment) -> Dict:
 					update_modified=False
 				)
 				updated_count += 1
-				debug_info.append(f"  ✓ Updated row {row.name}: teacher_1_id = {teacher_id}")
+				if has_conflict:
+					conflict_info = conflict_map[row_key]
+					debug_info.append(f"  ⚠️ Updated row {row.name}: teacher_1_id = {teacher_id} (CONFLICT with {conflict_info['subject']} in {conflict_info['class']})")
+				else:
+					debug_info.append(f"  ✓ Updated row {row.name}: teacher_1_id = {teacher_id}")
 			elif not row.teacher_2_id:
 				frappe.db.set_value(
 					"SIS Timetable Instance Row",
@@ -126,23 +149,48 @@ def sync_full_year_assignment(assignment) -> Dict:
 					update_modified=False
 				)
 				updated_count += 1
-				debug_info.append(f"  ✓ Updated row {row.name}: teacher_2_id = {teacher_id}")
+				if has_conflict:
+					conflict_info = conflict_map[row_key]
+					debug_info.append(f"  ⚠️ Updated row {row.name}: teacher_2_id = {teacher_id} (CONFLICT with {conflict_info['subject']} in {conflict_info['class']})")
+				else:
+					debug_info.append(f"  ✓ Updated row {row.name}: teacher_2_id = {teacher_id}")
 			else:
 				debug_info.append(f"  ⏭️ Skipped row {row.name}: both slots full")
 		
 		frappe.db.commit()
 		
-		# Enqueue materialized view sync (async)
+		# Sync materialized view immediately for small updates (< 50 rows)
+		# For larger updates, enqueue async to avoid blocking
 		if updated_count > 0:
-			enqueue_materialized_view_sync([r.name for r in pattern_rows])
-			debug_info.append(f"⏰ Enqueued materialized view sync for {updated_count} rows")
+			row_ids = [r.name for r in pattern_rows]
+			if len(row_ids) <= 50:
+				# Sync immediately for better UX
+				try:
+					from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
+					sync_for_rows(row_ids)
+					debug_info.append(f"✅ Synced materialized view immediately for {updated_count} rows")
+				except Exception as sync_err:
+					frappe.log_error(f"Immediate sync failed: {str(sync_err)}")
+					# Fallback to async if immediate sync fails
+					enqueue_materialized_view_sync(row_ids)
+					debug_info.append(f"⏰ Fallback to async sync for {updated_count} rows")
+			else:
+				# Large update - use async to avoid blocking
+				enqueue_materialized_view_sync(row_ids)
+				debug_info.append(f"⏰ Enqueued async materialized view sync for {updated_count} rows")
+		
+		# Build message with conflict warning if any
+		message = f"Updated {updated_count} pattern rows"
+		if conflicts:
+			message += f" (⚠️ {len(conflicts)} conflicts detected - teacher may be teaching different subjects at the same time)"
 		
 		return {
 			"success": True,
 			"rows_updated": updated_count,
 			"rows_created": 0,
-			"message": f"Updated {updated_count} pattern rows",
-			"debug_info": debug_info
+			"message": message,
+			"debug_info": debug_info,
+			"conflicts": conflicts  # Return conflicts for frontend to display
 		}
 		
 	except Exception as e:
@@ -314,11 +362,27 @@ def sync_date_range_assignment(assignment) -> Dict:
 		debug_info.append(f"✅ Created {created_count} override rows")
 		debug_info.append(f"✅ Updated {updated_count} override rows")
 		
-		# Enqueue materialized view sync (async)
+		# Sync materialized view immediately for small updates (< 50 rows)
+		# For larger updates, enqueue async to avoid blocking
 		if created_count > 0 or updated_count > 0:
 			override_row_names = [spec[1].name for spec in override_specs]
-			enqueue_materialized_view_sync(override_row_names)
-			debug_info.append(f"⏰ Enqueued materialized view sync")
+			total_changes = created_count + updated_count
+			
+			if total_changes <= 50:
+				# Sync immediately for better UX
+				try:
+					from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
+					sync_for_rows(override_row_names)
+					debug_info.append(f"✅ Synced materialized view immediately for {total_changes} changes")
+				except Exception as sync_err:
+					frappe.log_error(f"Immediate sync failed: {str(sync_err)}")
+					# Fallback to async if immediate sync fails
+					enqueue_materialized_view_sync(override_row_names)
+					debug_info.append(f"⏰ Fallback to async sync for {total_changes} changes")
+			else:
+				# Large update - use async to avoid blocking
+				enqueue_materialized_view_sync(override_row_names)
+				debug_info.append(f"⏰ Enqueued async materialized view sync for {total_changes} changes")
 		
 		return {
 			"success": True,
@@ -516,6 +580,104 @@ def enqueue_materialized_view_sync(row_ids: List[str]):
 	except Exception as e:
 		frappe.log_error(f"Failed to enqueue materialized view sync: {str(e)}")
 		# Don't fail the main operation if enqueue fails
+
+
+def detect_teacher_conflicts(teacher_id: str, target_rows: List, campus_id: str) -> List[Dict]:
+	"""
+	Detect conflicts: teacher đang dạy môn khác cùng giờ.
+	
+	Args:
+		teacher_id: Teacher ID cần check
+		target_rows: Danh sách rows sẽ được assign
+		campus_id: Campus ID
+	
+	Returns:
+		List of conflicts với format:
+		[
+			{
+				"day": "monday",
+				"period": "period-1",
+				"subject": "Toán",
+				"class": "2A3",
+				"row_id": "..."
+			}
+		]
+	"""
+	conflicts = []
+	
+	if not target_rows:
+		return conflicts
+	
+	# Build list of (day, period) từ target rows
+	target_slots = set()
+	for row in target_rows:
+		slot = (row.day_of_week, row.timetable_column_id)
+		target_slots.add(slot)
+	
+	# Query existing assignments của teacher trong cùng slots
+	for day, period in target_slots:
+		try:
+			# Query rows where teacher is already assigned
+			existing_rows = frappe.get_all(
+				"SIS Timetable Instance Row",
+				fields=["name", "subject_id", "parent", "day_of_week", "timetable_column_id"],
+				filters={
+					"day_of_week": day,
+					"timetable_column_id": period,
+					"date": ["is", "not set"]  # Only pattern rows (no date = pattern)
+				},
+				or_filters=[
+					{"teacher_1_id": teacher_id},
+					{"teacher_2_id": teacher_id}
+				],
+				limit=10
+			)
+			
+			for existing in existing_rows:
+				# Get subject title
+				subject_title = "Unknown"
+				if existing.subject_id:
+					subject_info = frappe.db.get_value(
+						"SIS Subject",
+						existing.subject_id,
+						["title", "actual_subject_id"],
+						as_dict=True
+					)
+					if subject_info:
+						subject_title = subject_info.title or subject_info.actual_subject_id or "Unknown"
+				
+				# Get class from instance
+				class_title = "Unknown"
+				if existing.parent:
+					class_id = frappe.db.get_value("SIS Timetable Instance", existing.parent, "class_id")
+					if class_id:
+						class_info = frappe.db.get_value("SIS Class", class_id, "title")
+						class_title = class_info or class_id
+				
+				# Check if this existing row is in target_rows (same subject = not conflict)
+				is_same_subject = False
+				for target_row in target_rows:
+					if (target_row.day_of_week == day and 
+						target_row.timetable_column_id == period and
+						target_row.subject_id == existing.subject_id):
+						is_same_subject = True
+						break
+				
+				# Only add to conflicts if different subject
+				if not is_same_subject:
+					conflicts.append({
+						"day": day,
+						"period": period,
+						"subject": subject_title,
+						"class": class_title,
+						"row_id": existing.name
+					})
+					
+		except Exception as e:
+			frappe.log_error(f"Error detecting conflict for {day}/{period}: {str(e)}")
+			continue
+	
+	return conflicts
 
 
 # ============= BATCH OPERATIONS =============
