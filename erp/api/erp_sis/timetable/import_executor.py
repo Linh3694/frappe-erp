@@ -90,100 +90,100 @@ class TimetableImportExecutor:
 				"logs": List[str],
 				"error": str (if failed)
 			}
-	"""
-	frappe.logger().info(f"🚀 Starting import execution for {self.file_path}")
-	
-	try:
-		# Load Excel
+		"""
+		frappe.logger().info(f"🚀 Starting import execution for {self.file_path}")
+		
 		try:
-			self._load_excel()
+			# Load Excel
+			try:
+				self._load_excel()
+			except Exception as e:
+				raise Exception(f"Failed to load Excel file: {str(e)}")
+			
+			# Build cache
+			try:
+				self._build_cache()
+			except Exception as e:
+				raise Exception(f"Failed to build cache: {str(e)}")
+			
+			# Start transaction
+			frappe.db.begin()
+			
+			# Step 1: Create/update Timetable header
+			try:
+				self._create_or_update_timetable_header()
+			except Exception as e:
+				raise Exception(f"Failed to create/update timetable header: {str(e)}")
+			
+			# Step 2: Process each class
+			try:
+				self._process_all_classes()
+			except Exception as e:
+				raise Exception(f"Failed to process classes: {str(e)}")
+			
+			# Step 3: Sync Student Subjects
+			try:
+				self._sync_student_subjects()
+			except Exception as e:
+				raise Exception(f"Failed to sync student subjects: {str(e)}")
+			
+			# Step 4: Sync Teacher Timetable và Student Timetable
+			# OPTIMIZATION: Skip sync during import, run as background job instead
+			# Teacher timetable will be synced by subject assignment or manual trigger
+			try:
+				# Queue background job for async sync
+				self._queue_async_sync()
+			except Exception as e:
+				frappe.logger().warning(f"Failed to queue async sync: {str(e)}")
+				# Don't fail import if sync queueing fails
+			
+			# Commit transaction
+			frappe.db.commit()
+			
+			frappe.logger().info(
+				f"✅ Import complete: {self.stats['instances_created']}I created, "
+				f"{self.stats['rows_created']}R created"
+			)
+			
+			return {
+				"success": True,
+				"message": f"Import complete: {self.stats['instances_created']} instances, "
+				           f"{self.stats['rows_created']} rows created",
+				"stats": self.stats,
+				"logs": self._get_user_friendly_logs(),
+				"detailed_logs": self.logs  # Keep full logs for debugging if needed
+			}
+			
 		except Exception as e:
-			raise Exception(f"Failed to load Excel file: {str(e)}")
-		
-		# Build cache
-		try:
-			self._build_cache()
-		except Exception as e:
-			raise Exception(f"Failed to build cache: {str(e)}")
-		
-		# Start transaction
-		frappe.db.begin()
-		
-		# Step 1: Create/update Timetable header
-		try:
-			self._create_or_update_timetable_header()
-		except Exception as e:
-			raise Exception(f"Failed to create/update timetable header: {str(e)}")
-		
-		# Step 2: Process each class
-		try:
-			self._process_all_classes()
-		except Exception as e:
-			raise Exception(f"Failed to process classes: {str(e)}")
-		
-		# Step 3: Sync Student Subjects
-		try:
-			self._sync_student_subjects()
-		except Exception as e:
-			raise Exception(f"Failed to sync student subjects: {str(e)}")
-		
-		# Step 4: Sync Teacher Timetable và Student Timetable
-		# OPTIMIZATION: Skip sync during import, run as background job instead
-		# Teacher timetable will be synced by subject assignment or manual trigger
-		try:
-			# Queue background job for async sync
-			self._queue_async_sync()
-		except Exception as e:
-			frappe.logger().warning(f"Failed to queue async sync: {str(e)}")
-			# Don't fail import if sync queueing fails
-		
-		# Commit transaction
-		frappe.db.commit()
-		
-		frappe.logger().info(
-			f"✅ Import complete: {self.stats['instances_created']}I created, "
-			f"{self.stats['rows_created']}R created"
-		)
-		
-		return {
-			"success": True,
-			"message": f"Import complete: {self.stats['instances_created']} instances, "
-			           f"{self.stats['rows_created']} rows created",
-			"stats": self.stats,
-			"logs": self._get_user_friendly_logs(),
-			"detailed_logs": self.logs  # Keep full logs for debugging if needed
-		}
-		
-	except Exception as e:
-		import traceback
-		error_trace = traceback.format_exc()
-		
-		frappe.db.rollback()
-		frappe.logger().error(f"💥 EXECUTOR CRASH: {str(e)}")
-		frappe.logger().error(f"Traceback:\n{error_trace}")
-		
-		frappe.log_error(
-			title="Timetable Import Executor Failed",
-			message=f"Error: {str(e)}\n\nTraceback:\n{error_trace}"
-		)
-		
-		error_logs = self._get_user_friendly_logs() + [
-			f"❌ Lỗi: {str(e)}"
-		]
-		
-		return {
-			"success": False,
-			"message": f"Import failed: {str(e)}",
-			"error": str(e),
-			"stats": self.stats,
-			"logs": error_logs,
-			"detailed_logs": self.logs + [
-				f"❌ CRITICAL ERROR: {str(e)}",
-				"",
-				"Traceback:",
-				*error_trace.split('\n')[-10:]  # Last 10 lines of traceback
+			import traceback
+			error_trace = traceback.format_exc()
+			
+			frappe.db.rollback()
+			frappe.logger().error(f"💥 EXECUTOR CRASH: {str(e)}")
+			frappe.logger().error(f"Traceback:\n{error_trace}")
+			
+			frappe.log_error(
+				title="Timetable Import Executor Failed",
+				message=f"Error: {str(e)}\n\nTraceback:\n{error_trace}"
+			)
+			
+			error_logs = self._get_user_friendly_logs() + [
+				f"❌ Lỗi: {str(e)}"
 			]
-		}
+			
+			return {
+				"success": False,
+				"message": f"Import failed: {str(e)}",
+				"error": str(e),
+				"stats": self.stats,
+				"logs": error_logs,
+				"detailed_logs": self.logs + [
+					f"❌ CRITICAL ERROR: {str(e)}",
+					"",
+					"Traceback:",
+					*error_trace.split('\n')[-10:]  # Last 10 lines of traceback
+				]
+			}
 	
 	# ============= EXECUTION STEPS =============
 	
