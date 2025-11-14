@@ -262,15 +262,54 @@ class TimetableImportExecutor:
 		"""Process timetable for each class"""
 		# Group data by class
 		grouped = self.df.groupby("Lớp")
+		total_classes = len(grouped)
 		
-		for class_title, class_df in grouped:
+		frappe.logger().info(f"📚 Processing {total_classes} classes...")
+		
+		for idx, (class_title, class_df) in enumerate(grouped, 1):
 			class_id = self.cache["classes"].get(class_title)
 			
 			if not class_id:
 				self.logs.append(f"⚠️  Skipped class '{class_title}': not found in cache")
 				continue
 			
+			# Update progress before processing class
+			self._update_progress(
+				current=idx,
+				total=total_classes,
+				message=f"Đang xử lý lớp {class_title} ({idx}/{total_classes})",
+				current_class=class_title
+			)
+			
 			self._process_class(class_id, class_title, class_df)
+			
+			frappe.logger().info(f"✅ Completed class {idx}/{total_classes}: {class_title}")
+	
+	def _update_progress(self, current: int, total: int, message: str, current_class: str = ""):
+		"""Update progress in Redis cache for frontend polling"""
+		if not self.job_id:
+			return
+		
+		try:
+			percentage = int((current / total) * 100) if total > 0 else 0
+			progress_data = {
+				"phase": "importing",
+				"current": current,
+				"total": total,
+				"percentage": percentage,
+				"message": message,
+				"current_class": current_class
+			}
+			
+			frappe.cache().set_value(
+				f"timetable_import_progress:{self.job_id}",
+				progress_data,
+				expires_in_sec=7200
+			)
+			
+			frappe.logger().info(f"📊 Progress: {percentage}% - {message}")
+		except Exception as e:
+			frappe.logger().warning(f"⚠️  Failed to update progress: {str(e)}")
 	
 	def _process_class(self, class_id: str, class_title: str, class_df: pd.DataFrame):
 		"""Process timetable for a single class"""
@@ -726,6 +765,24 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		# ============================================================
 		frappe.logger().info("📋 PHASE 1: Starting validation...")
 		
+		# Update progress: validation starting
+		if job_id:
+			try:
+				frappe.cache().set_value(
+					f"timetable_import_progress:{job_id}",
+					{
+						"phase": "validating",
+						"current": 0,
+						"total": 100,
+						"percentage": 10,
+						"message": "🔍 Đang kiểm tra cấu trúc file Excel...",
+						"current_class": ""
+					},
+					expires_in_sec=7200
+				)
+			except Exception:
+				pass
+		
 		try:
 			validator = TimetableImportValidator(file_path, metadata)
 			validation_result = validator.validate()
@@ -785,7 +842,13 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 					"errors": errors,
 					"warnings": warnings,
 					"phase": "validation_failed",
-					"message": f"Validation failed with {error_count} errors"
+					"message": f"❌ Kiểm tra dữ liệu thất bại: {error_count} lỗi được tìm thấy",
+					"logs": [
+						"📋 Kiểm tra file Excel...",
+						f"❌ Tìm thấy {error_count} lỗi, {warning_count} cảnh báo",
+						"",
+						"Chi tiết lỗi:"
+					] + [f"  • {e}" for e in errors]
 				}, expires_in_sec=3600)
 			
 			return {
@@ -796,6 +859,24 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			}
 		
 		frappe.logger().info(f"✅ Validation passed with {len(validation_result.get('warnings', []))} warnings")
+		
+		# Update progress: validation succeeded
+		if job_id:
+			try:
+				frappe.cache().set_value(
+					f"timetable_import_progress:{job_id}",
+					{
+						"phase": "validated",
+						"current": 0,
+						"total": 100,
+						"percentage": 20,
+						"message": "✅ Kiểm tra thành công! Đang chuẩn bị import...",
+						"current_class": ""
+					},
+					expires_in_sec=7200
+				)
+			except Exception:
+				pass
 		
 		# If dry run, return validation preview
 		if dry_run:
@@ -827,11 +908,12 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 				frappe.cache().set_value(
 					f"timetable_import_progress:{job_id}",
 					{
-						"phase": "executing",
+						"phase": "importing",
 						"current": 0,
 						"total": 100,
-						"percentage": 10,
-						"message": "Bắt đầu import dữ liệu..."
+						"percentage": 25,
+						"message": "🚀 Bắt đầu import thời khóa biểu...",
+						"current_class": ""
 					},
 					expires_in_sec=7200
 				)
@@ -853,11 +935,15 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		frappe.logger().info(f"✅ Execution complete: success={execution_result.get('success')}")
 		
 		# Combine results
+		instances = execution_result.get('instances_created', 0)
+		rows = execution_result.get('rows_created', 0)
+		
 		final_result = {
 			"success": execution_result.get('success', False),
+			"message": f"✅ Import thành công! Đã tạo {instances} lớp với {rows} tiết học",
 			"timetable_id": execution_result.get('timetable_id'),
-			"instances_created": execution_result.get('instances_created', 0),
-			"rows_created": execution_result.get('rows_created', 0),
+			"instances_created": instances,
+			"rows_created": rows,
 			"warnings": validation_result.get('warnings', []) + execution_result.get('warnings', []),
 			"logs": execution_result.get('logs', []),
 			"errors": execution_result.get('errors', [])

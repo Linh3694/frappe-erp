@@ -54,6 +54,7 @@ class TimetableImportValidator:
 		self.errors = []
 		self.warnings = []
 		self.df = None
+		self.format = None  # Will be set to "row_based" or "column_based" during validation
 		
 		# Cache for lookups
 		self.cache = {
@@ -158,36 +159,64 @@ class TimetableImportValidator:
 			return False
 	
 	def _validate_excel_structure(self) -> bool:
-		"""Validate Excel has required columns"""
-		required_columns = [
-			"Lớp",  # Class
-			"Môn học",  # Subject
-			"Giáo viên",  # Teacher (optional if using Subject Assignment)
-			"Thứ",  # Day of week
-			"Tiết"  # Period
-		]
+		"""
+		Validate Excel has required columns.
 		
+		Supports 2 formats:
+		1. OLD FORMAT (row-based): "Thứ", "Tiết", "Lớp", "Môn học", "Giáo viên"
+		2. NEW FORMAT (column-based): "Thứ", "Tiết", then class names as columns
+		"""
 		# Normalize column names
-		df_columns = [col.strip() for col in self.df.columns]
+		df_columns = [str(col).strip() for col in self.df.columns]
 		
-		missing_columns = []
-		for col in required_columns:
-			# Skip teacher column if it's optional
-			if col == "Giáo viên":
-				continue
-			
+		frappe.logger().info(f"📋 Excel columns: {df_columns[:10]}...")  # First 10 columns
+		
+		# Check required columns that BOTH formats must have
+		required_base_columns = ["Thứ", "Tiết"]
+		
+		missing_base = []
+		for col in required_base_columns:
 			if col not in df_columns:
-				missing_columns.append(col)
+				missing_base.append(col)
 		
-		if missing_columns:
-			self.errors.append(f"Missing required columns: {', '.join(missing_columns)}")
+		if missing_base:
+			self.errors.append(f"Missing required columns: {', '.join(missing_base)}")
+			frappe.logger().error(f"❌ Missing base columns: {missing_base}")
 			return False
 		
-		return True
+		# Detect format
+		has_class_column = "Lớp" in df_columns
+		has_subject_column = "Môn học" in df_columns
+		
+		if has_class_column and has_subject_column:
+			# OLD FORMAT (row-based)
+			self.format = "row_based"
+			frappe.logger().info("✅ Detected OLD FORMAT (row-based)")
+			return True
+		else:
+			# NEW FORMAT (column-based) - columns after "Thứ" and "Tiết" are class names
+			self.format = "column_based"
+			frappe.logger().info("✅ Detected NEW FORMAT (column-based)")
+			
+			# Check we have at least one class column (after Thứ and Tiết)
+			if len(df_columns) < 3:
+				self.errors.append("No class columns found after 'Thứ' and 'Tiết'")
+				return False
+			
+			# Columns 3+ should be class names
+			class_columns = df_columns[2:]  # Skip first 2 (Thứ, Tiết)
+			frappe.logger().info(f"📚 Found {len(class_columns)} class columns: {class_columns[:5]}...")
+			
+			return True
 	
 	def _validate_data_integrity(self) -> bool:
 		"""Validate data integrity (no NaN in required fields)"""
-		required_fields = ["Lớp", "Môn học", "Thứ", "Tiết"]
+		if self.format == "row_based":
+			# OLD FORMAT: Check Lớp, Môn học
+			required_fields = ["Lớp", "Môn học", "Thứ", "Tiết"]
+		else:
+			# NEW FORMAT: Only check Thứ, Tiết (class columns can have empty cells)
+			required_fields = ["Thứ", "Tiết"]
 		
 		for field in required_fields:
 			if field not in self.df.columns:
@@ -205,8 +234,16 @@ class TimetableImportValidator:
 		education_stage_id = self.metadata["education_stage_id"]
 		
 		# Get unique values from Excel
-		unique_classes = self.df["Lớp"].dropna().unique()
-		unique_subjects = self.df["Môn học"].dropna().unique()
+		if self.format == "row_based":
+			unique_classes = self.df["Lớp"].dropna().unique()
+			unique_subjects = self.df["Môn học"].dropna().unique()
+		else:
+			# NEW FORMAT: Class names are column headers
+			df_columns = [str(col).strip() for col in self.df.columns]
+			unique_classes = df_columns[2:]  # Skip "Thứ" and "Tiết"
+			# Subjects will be validated during execution (from cell values)
+			unique_subjects = []
+		
 		unique_periods = self.df["Tiết"].dropna().unique()
 		
 		# Teacher column might not exist

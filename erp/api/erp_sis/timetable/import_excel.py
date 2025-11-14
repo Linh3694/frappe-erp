@@ -216,16 +216,18 @@ def get_import_job_status():
             if progress:
                 frappe.logger().info(f"📊 Progress {progress.get('percentage', 0)}%: {progress.get('message', 'Processing...')}")
                 
-                # Return progress data in format frontend expects
+                # Return progress data in format frontend expects (nested under 'progress' key)
                 return single_item_response({
                     "status": "processing",
-                    "phase": progress.get("phase", "importing"),
-                    "current": progress.get("current", 0),
-                    "total": progress.get("total", 100),
-                    "percentage": progress.get("percentage", 0),
-                    "message": progress.get("message", "Đang xử lý..."),
-                    "current_class": progress.get("current_class", ""),
-                    "job_id": job_id
+                    "job_id": job_id,
+                    "progress": {
+                        "phase": progress.get("phase", "importing"),
+                        "current": progress.get("current", 0),
+                        "total": progress.get("total", 100),
+                        "percentage": progress.get("percentage", 0),
+                        "message": progress.get("message", "Đang xử lý..."),
+                        "current_class": progress.get("current_class", "")
+                    }
                 }, "Import in progress")
             else:
                 frappe.logger().warning(f"⚠️ No progress data found for job_id={job_id}")
@@ -236,12 +238,15 @@ def get_import_job_status():
         frappe.logger().info(f"⏳ Returning 'starting' status - job may still be initializing")
         return single_item_response({
             "status": "processing",
-            "phase": "starting",
-            "current": 0,
-            "total": 100,
-            "percentage": 0,
-            "message": "Đang khởi động import job...",
-            "job_id": job_id
+            "job_id": job_id,
+            "progress": {
+                "phase": "starting",
+                "current": 0,
+                "total": 100,
+                "percentage": 0,
+                "message": "Đang khởi động import job...",
+                "current_class": ""
+            }
         }, "Import starting")
     
     except Exception as e:
