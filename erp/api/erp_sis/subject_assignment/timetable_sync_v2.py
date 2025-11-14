@@ -414,26 +414,89 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 					)
 					updated_count += 1
 			else:
-				# Create new override row
-				# Copy from pattern row but set teacher_2 as the new teacher
-				# teacher_1 will remain as pattern's teacher_1 (original teacher)
-				override_doc = frappe.get_doc({
-					"doctype": "SIS Timetable Instance Row",
-					"parent": pattern_row.parent,
-					"parenttype": "SIS Timetable Instance",
-					"parentfield": "date_overrides",  # ✅ FIX: Must be date_overrides, not weekly_pattern!
-					"date": date,
-					"day_of_week": pattern_row.day_of_week,
-					"timetable_column_id": pattern_row.timetable_column_id,
-					"period_priority": pattern_row.period_priority,
-					"period_name": pattern_row.period_name,
-					"subject_id": pattern_row.subject_id,
-					"teacher_1_id": pattern_row.teacher_1_id,  # ✅ FIX: Keep original teacher as teacher_1
-					"teacher_2_id": teacher_id,  # ✅ FIX: Add new teacher as teacher_2 (co-teaching)
-					"room_id": pattern_row.room_id
-				})
-				override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
-				created_count += 1
+				# No existing override row - need to create one
+				
+				# Check if teacher is already in pattern row (skip if yes)
+				if pattern_row.teacher_1_id == teacher_id or pattern_row.teacher_2_id == teacher_id:
+					# Teacher already assigned in pattern, skip
+					continue
+				
+				# Check if pattern row already has 2 teachers → CONFLICT!
+				if pattern_row.teacher_1_id and pattern_row.teacher_2_id:
+					# Pattern row already has 2 teachers - conflict!
+					
+					# Check if user provided resolution
+					# Note: We use a temporary key since override doesn't exist yet
+					temp_key = f"pattern_{pattern_row.name}_{date}"
+					if temp_key in replace_teacher_map:
+						# User chose which teacher to replace
+						replace_slot = replace_teacher_map[temp_key]
+						
+						if replace_slot not in ["teacher_1", "teacher_2"]:
+							frappe.logger().error(f"Invalid replace_slot: {replace_slot}")
+							continue
+						
+						# Create override with replacement
+						teacher_1 = teacher_id if replace_slot == "teacher_1" else pattern_row.teacher_1_id
+						teacher_2 = teacher_id if replace_slot == "teacher_2" else pattern_row.teacher_2_id
+						
+						override_doc = frappe.get_doc({
+							"doctype": "SIS Timetable Instance Row",
+							"parent": pattern_row.parent,
+							"parenttype": "SIS Timetable Instance",
+							"parentfield": "date_overrides",
+							"date": date,
+							"day_of_week": pattern_row.day_of_week,
+							"timetable_column_id": pattern_row.timetable_column_id,
+							"period_priority": pattern_row.period_priority,
+							"period_name": pattern_row.period_name,
+							"subject_id": pattern_row.subject_id,
+							"teacher_1_id": teacher_1,
+							"teacher_2_id": teacher_2,
+							"room_id": pattern_row.room_id
+						})
+						override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+						created_count += 1
+						debug_info.append(
+							f"✅ Created override with {replace_slot} replaced on {date}"
+						)
+					else:
+						# No resolution provided → Add to conflicts list
+						conflicts.append({
+							"row_id": temp_key,  # Use temp key for pattern-based conflicts
+							"date": str(date),
+							"day_of_week": pattern_row.day_of_week,
+							"period_id": pattern_row.timetable_column_id,
+							"period_name": pattern_row.period_name,
+							"subject_id": pattern_row.subject_id,
+							"teacher_1_id": pattern_row.teacher_1_id,
+							"teacher_1_name": frappe.db.get_value("SIS Teacher", pattern_row.teacher_1_id, "teacher_name"),
+							"teacher_2_id": pattern_row.teacher_2_id,
+							"teacher_2_name": frappe.db.get_value("SIS Teacher", pattern_row.teacher_2_id, "teacher_name"),
+							"new_teacher_id": teacher_id,
+							"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
+						})
+				else:
+					# Pattern row has room - create override with co-teaching
+					# Copy from pattern row but set teacher_2 as the new teacher
+					# teacher_1 will remain as pattern's teacher_1 (original teacher)
+					override_doc = frappe.get_doc({
+						"doctype": "SIS Timetable Instance Row",
+						"parent": pattern_row.parent,
+						"parenttype": "SIS Timetable Instance",
+						"parentfield": "date_overrides",  # ✅ Must be date_overrides, not weekly_pattern!
+						"date": date,
+						"day_of_week": pattern_row.day_of_week,
+						"timetable_column_id": pattern_row.timetable_column_id,
+						"period_priority": pattern_row.period_priority,
+						"period_name": pattern_row.period_name,
+						"subject_id": pattern_row.subject_id,
+						"teacher_1_id": pattern_row.teacher_1_id,  # Keep original teacher as teacher_1
+						"teacher_2_id": teacher_id,  # Add new teacher as teacher_2 (co-teaching)
+						"room_id": pattern_row.room_id
+					})
+					override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+					created_count += 1
 		
 		# Check if there are unresolved conflicts
 		if conflicts:
