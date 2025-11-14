@@ -1126,23 +1126,34 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			"debug": debug_info  # Add debug info to see what's happening
 		}
 		
-		# Store final result in cache
-		if job_id:
+		# IMPORTANT: Store final result in cache BEFORE returning
+		if job_id and user_id:
 			result_key = f"timetable_import_result_{user_id}"
 			debug_info["cache_key"] = result_key
+			debug_info["will_save_to_cache"] = True
+			
 			try:
+				# Update debug info in result before saving
+				final_result["debug"] = debug_info
+				
+				# Save to cache
 				frappe.cache().set_value(result_key, final_result, expires_in_sec=3600)
-				# Verify cache was saved
+				
+				# Verify immediately
 				verify = frappe.cache().get_value(result_key)
 				debug_info["cache_save_success"] = verify is not None
+				
 				if verify:
-					debug_info["cache_verify"] = "Data found in cache after save"
+					debug_info["cache_verify"] = "✅ Data found in cache after save"
 				else:
-					debug_info["cache_verify"] = "Data NOT found in cache after save!"
+					debug_info["cache_verify"] = "❌ Data NOT found after save!"
+					
 			except Exception as cache_error:
 				debug_info["cache_save_error"] = str(cache_error)
 				import traceback
-				debug_info["cache_save_traceback"] = traceback.format_exc()
+				debug_info["cache_save_traceback"] = traceback.format_exc()[:500]
+		else:
+			debug_info["cache_skip_reason"] = f"job_id={job_id}, user_id={user_id}"
 		
 		if final_result['success']:
 			frappe.logger().info(f"🎉 Import completed successfully!")
