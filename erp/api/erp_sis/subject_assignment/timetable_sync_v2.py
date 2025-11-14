@@ -110,6 +110,13 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	
 	debug_info.append(f"📋 Found {len(pattern_rows)} pattern rows to update")
 	
+	# DEBUG: Log teacher slots in pattern rows
+	for i, row in enumerate(pattern_rows[:3]):  # Log first 3 rows for debugging
+		frappe.logger().info(
+			f"DEBUG Pattern Row {i+1}: {row.name} - "
+			f"teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}"
+		)
+	
 	# CHECK: Detect conflicts với môn khác của teacher
 	conflicts = detect_teacher_conflicts(teacher_id, pattern_rows, campus_id)
 	if conflicts:
@@ -173,6 +180,11 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 					debug_info.append(f"  ✓ Updated row {row.name}: teacher_2_id = {teacher_id}")
 			else:
 				# Both teacher slots are full → CONFLICT!
+				frappe.logger().warning(
+					f"⚠️ CONFLICT DETECTED in row {row.name}: "
+					f"teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}, "
+					f"trying to add teacher={teacher_id}"
+				)
 				
 				# Check if user provided resolution for this conflict
 				if row.name in replace_teacher_map:
@@ -210,6 +222,9 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 						"new_teacher_id": teacher_id,
 						"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
 					})
+					frappe.logger().warning(
+						f"⚠️ Added to conflicts list: {len(teacher_conflicts)} total conflicts"
+					)
 					debug_info.append(f"  ⚠️ Conflict in row {row.name}: both slots full")
 		
 		# Check if there are unresolved conflicts
@@ -217,9 +232,14 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			# Don't commit - rollback and return conflicts to user
 			frappe.db.rollback()
 			
+			frappe.logger().warning(
+				f"🚫 RETURNING CONFLICT ERROR: {len(teacher_conflicts)} conflicts detected. "
+				f"Rolling back transaction."
+			)
+			
 			debug_info.append(f"⚠️ Found {len(teacher_conflicts)} conflicts requiring user resolution")
 			
-			return {
+			conflict_response = {
 				"success": False,
 				"message": f"Phát hiện {len(teacher_conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
 				"error_type": "teacher_conflict",
@@ -228,6 +248,9 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 				"rows_created": 0,
 				"debug_info": debug_info
 			}
+			
+			frappe.logger().info(f"🚫 Conflict response: {conflict_response}")
+			return conflict_response
 		
 		# No conflicts or all resolved → Commit changes
 		frappe.db.commit()
@@ -419,6 +442,11 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 				# Check if both teacher slots are full → CONFLICT!
 				if existing.teacher_1_id and existing.teacher_2_id:
 					# Both slots full - need user to choose who to replace
+					frappe.logger().warning(
+						f"⚠️ FROM_DATE CONFLICT: Existing override {existing.name} on {date} - "
+						f"teacher_1={existing.teacher_1_id}, teacher_2={existing.teacher_2_id}, "
+						f"trying to add teacher={teacher_id}"
+					)
 					
 					# Check if user provided resolution for this conflict
 					if existing.name in replace_teacher_map:
@@ -456,6 +484,9 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							"new_teacher_id": teacher_id,
 							"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
 						})
+						frappe.logger().warning(
+							f"⚠️ FROM_DATE: Added existing override conflict: {len(conflicts)} total conflicts"
+						)
 				elif not existing.teacher_2_id:
 					# teacher_2 is empty → Add as co-teacher
 					frappe.db.set_value(
@@ -487,6 +518,11 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 				# Check if pattern row already has 2 teachers → CONFLICT!
 				if pattern_row.teacher_1_id and pattern_row.teacher_2_id:
 					# Pattern row already has 2 teachers - conflict!
+					frappe.logger().warning(
+						f"⚠️ FROM_DATE CONFLICT: Pattern row {pattern_row.name} on {date} - "
+						f"teacher_1={pattern_row.teacher_1_id}, teacher_2={pattern_row.teacher_2_id}, "
+						f"trying to add teacher={teacher_id}"
+					)
 					
 					# Check if user provided resolution
 					# Note: We use a temporary key since override doesn't exist yet
@@ -539,6 +575,9 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							"new_teacher_id": teacher_id,
 							"new_teacher_name": frappe.db.get_value("SIS Teacher", teacher_id, "teacher_name")
 						})
+						frappe.logger().warning(
+							f"⚠️ FROM_DATE: Added to conflicts list: {len(conflicts)} total conflicts"
+						)
 				else:
 					# Pattern row has room - create override with co-teaching
 					# Copy from pattern row but set teacher_2 as the new teacher
@@ -566,9 +605,14 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 			# Don't commit - rollback and return conflicts to user
 			frappe.db.rollback()
 			
+			frappe.logger().warning(
+				f"🚫 FROM_DATE: RETURNING CONFLICT ERROR: {len(conflicts)} conflicts detected. "
+				f"Rolling back transaction."
+			)
+			
 			debug_info.append(f"⚠️ Found {len(conflicts)} conflicts requiring user resolution")
 			
-			return {
+			conflict_response = {
 				"success": False,
 				"message": f"Phát hiện {len(conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
 				"error_type": "teacher_conflict",
@@ -577,6 +621,9 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 				"rows_updated": 0,
 				"debug_info": debug_info
 			}
+			
+			frappe.logger().info(f"🚫 FROM_DATE Conflict response: {conflict_response}")
+			return conflict_response
 		
 		# No conflicts or all resolved → Commit changes
 		frappe.db.commit()
