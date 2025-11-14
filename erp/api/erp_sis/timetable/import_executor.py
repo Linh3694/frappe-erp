@@ -869,12 +869,13 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 	"""
 	from .import_validator import TimetableImportValidator
 	
-	frappe.logger().info(f"🚀 NEW EXECUTOR: Starting timetable import (dry_run={dry_run})")
-	frappe.logger().info(f"📁 File: {file_path}")
-	frappe.logger().info(f"🏫 Campus: {campus_id}, Education Stage: {education_stage_id}")
-	frappe.logger().info(f"👤 User: {user_id}, Job ID: {job_id}")
-	frappe.logger().info(f"🌐 Site: {frappe.local.site}")
-	frappe.logger().info(f"🔑 Session user before: {frappe.session.user}")
+	# Collect debug info to return in response
+	debug_info = {
+		"site": frappe.local.site,
+		"user_id_param": user_id,
+		"session_user_before": frappe.session.user,
+		"job_id": job_id
+	}
 	
 	# Use provided user_id or fallback to session user
 	if not user_id:
@@ -884,16 +885,18 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 	if user_id and user_id != "Guest":
 		frappe.set_user(user_id)
 	
-	frappe.logger().info(f"✅ User context set: {frappe.session.user}")
+	debug_info["session_user_after"] = frappe.session.user
 	
 	# Test cache immediately
+	cache_test_result = None
 	try:
 		test_key = f"test_cache_{job_id}"
 		frappe.cache().set_value(test_key, {"test": "working"}, expires_in_sec=60)
 		verify_test = frappe.cache().get_value(test_key)
-		frappe.logger().info(f"🧪 Cache test: {verify_test is not None}")
+		cache_test_result = verify_test is not None
+		debug_info["cache_test"] = "PASS" if cache_test_result else "FAIL"
 	except Exception as e:
-		frappe.logger().error(f"❌ Cache test failed: {str(e)}")
+		debug_info["cache_test"] = f"ERROR: {str(e)}"
 	
 	try:
 		# Prepare metadata
@@ -1012,7 +1015,8 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 						f"❌ Tìm thấy {error_count} lỗi, {warning_count} cảnh báo",
 						"",
 						"Chi tiết lỗi:"
-					] + [f"  • {e}" for e in errors]
+					] + [f"  • {e}" for e in errors],
+					"debug": debug_info
 				}
 				frappe.logger().info(f"💾 Saving validation failed result to cache: {result_key}")
 				try:
@@ -1118,7 +1122,8 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			"rows_created": rows,
 			"warnings": validation_result.get('warnings', []) + execution_result.get('warnings', []),
 			"logs": execution_result.get('logs', []),
-			"errors": execution_result.get('errors', [])
+			"errors": execution_result.get('errors', []),
+			"debug": debug_info  # Add debug info to see what's happening
 		}
 		
 		# Store final result in cache
@@ -1165,7 +1170,8 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			frappe.cache().set_value(result_key, {
 				"success": False,
 				"errors": [f"Critical error: {str(e)}"],
-				"logs": ["💥 Import failed with critical error"]
+				"logs": ["💥 Import failed with critical error"],
+				"debug": debug_info
 			}, expires_in_sec=3600)
 		
 		return {
