@@ -132,10 +132,8 @@ class BulkSyncEngine:
 		teacher_entries = self._prepare_teacher_entries(pattern_rows, override_rows, all_weeks)
 		frappe.logger().info(f"👨‍🏫 [BulkSync] Prepared {len(teacher_entries)} teacher entries")
 		
-		# Step 6: Prepare student entries
-		self._update_progress(f"👨‍🎓 Chuẩn bị student entries cho {self.class_id}...", 60)
-		student_entries = self._prepare_student_entries(pattern_rows, override_rows, all_weeks)
-		frappe.logger().info(f"👨‍🎓 [BulkSync] Prepared {len(student_entries)} student entries")
+		# Step 6: REMOVED - Student Timetable sync disabled (not used, wastes 50% performance)
+		# Student Timetable không được dùng trong hệ thống, chỉ tốn resources
 		
 		# Step 7: Bulk insert teacher entries
 		if teacher_entries:
@@ -143,20 +141,15 @@ class BulkSyncEngine:
 			self._bulk_insert_teacher_entries(teacher_entries)
 			self.stats["teacher_entries_created"] = len(teacher_entries)
 		
-		# Step 8: Bulk insert student entries
-		if student_entries:
-			self._update_progress(f"💾 Đang lưu {len(student_entries)} student entries...", 85)
-			self._bulk_insert_student_entries(student_entries)
-			self.stats["student_entries_created"] = len(student_entries)
-		
 		self._update_progress(f"✅ Hoàn thành sync lớp {self.class_id}", 100)
 		
 		frappe.logger().info(
-			f"✅ [BulkSync] Complete: {self.stats['teacher_entries_created']} teacher entries, "
-			f"{self.stats['student_entries_created']} student entries"
+			f"✅ [BulkSync] Complete: {self.stats['teacher_entries_created']} teacher entries "
+			f"(Student Timetable sync disabled)"
 		)
 		
-		return self.stats["teacher_entries_created"], self.stats["student_entries_created"]
+		# Return (teacher_count, 0) - student_count always 0
+		return self.stats["teacher_entries_created"], 0
 	
 	def _preload_data(self):
 		"""Preload all required data into memory."""
@@ -361,6 +354,19 @@ class BulkSyncEngine:
 	                             override_rows: List[Dict], 
 	                             all_weeks: List[date]) -> List[Dict]:
 		"""
+		DISABLED: Student Timetable sync removed (not used, wastes 50% performance).
+		
+		Student Timetable table không được dùng trong hệ thống:
+		- Frontend không hiển thị
+		- Backend APIs không query
+		- Parent Portal query trực tiếp từ Timetable Pattern
+		
+		Keeping function signature for compatibility but returns empty list.
+		"""
+		return []
+		
+		# OLD CODE BELOW - DISABLED
+		"""
 		Prepare all student timetable entries in memory.
 		
 		Returns:
@@ -523,6 +529,14 @@ class BulkSyncEngine:
 		frappe.logger().info(f"✅ [BulkSync] Teacher entries inserted successfully")
 	
 	def _bulk_insert_student_entries(self, entries: List[Dict]):
+		"""
+		DISABLED: Student Timetable sync removed (not used, wastes 50% performance).
+		
+		Keeping function signature for compatibility but does nothing.
+		"""
+		return
+		
+		# OLD CODE BELOW - DISABLED
 		"""Bulk insert student timetable entries using raw SQL."""
 		if not entries:
 			return
@@ -591,7 +605,9 @@ def sync_instance_bulk(instance_id: str, class_id: str, start_date: str,
 
 def delete_entries_in_range(instance_id: str, start_date: str, end_date: str, delete_all_outside: bool = False):
 	"""
-	Delete teacher and student timetable entries for a specific date range.
+	Delete teacher timetable entries for a specific date range.
+	
+	NOTE: Student Timetable sync has been disabled (not used, wastes 50% performance).
 	
 	Supports two modes:
 	1. Normal mode (delete_all_outside=False): Delete only entries WITHIN range
@@ -608,43 +624,30 @@ def delete_entries_in_range(instance_id: str, start_date: str, end_date: str, de
 		end_date: End date (YYYY-MM-DD)
 		delete_all_outside: If True, also delete entries outside the range (for shrinking)
 	"""
-	frappe.logger().info(f"🗑️ [BulkSync] Deleting entries for instance {instance_id}")
+	frappe.logger().info(f"🗑️ [BulkSync] Deleting Teacher Timetable entries for instance {instance_id}")
 	frappe.logger().info(f"   Range: {start_date} to {end_date}, cleanup_mode={delete_all_outside}")
 	
 	if delete_all_outside:
-		# SHRINK MODE: Delete ALL entries for this instance (will regenerate only new range)
+		# SHRINK MODE: Delete ALL Teacher Timetable entries for this instance
 		teacher_deleted = frappe.db.sql("""
 			DELETE FROM `tabSIS Teacher Timetable`
 			WHERE timetable_instance_id = %s
 		""", (instance_id,))
 		
-		student_deleted = frappe.db.sql("""
-			DELETE FROM `tabSIS Student Timetable`
-			WHERE timetable_instance_id = %s
-		""", (instance_id,))
-		
 		frappe.logger().info(
-			f"✅ [BulkSync] Deleted ALL entries: {teacher_deleted or 0} teacher, "
-			f"{student_deleted or 0} student (shrink mode)"
+			f"✅ [BulkSync] Deleted ALL entries: {teacher_deleted or 0} teacher (shrink mode)"
 		)
 	else:
-		# NORMAL MODE: Delete only entries within new range
+		# NORMAL MODE: Delete only Teacher Timetable entries within new range
 		teacher_deleted = frappe.db.sql("""
 			DELETE FROM `tabSIS Teacher Timetable`
 			WHERE timetable_instance_id = %s
 			  AND date BETWEEN %s AND %s
 		""", (instance_id, start_date, end_date))
 		
-		student_deleted = frappe.db.sql("""
-			DELETE FROM `tabSIS Student Timetable`
-			WHERE timetable_instance_id = %s
-			  AND date BETWEEN %s AND %s
-		""", (instance_id, start_date, end_date))
-		
 		frappe.logger().info(
-			f"✅ [BulkSync] Deleted {teacher_deleted or 0} teacher entries, "
-			f"{student_deleted or 0} student entries in range"
+			f"✅ [BulkSync] Deleted {teacher_deleted or 0} teacher entries in range"
 		)
 	
-	return (teacher_deleted or 0, student_deleted or 0)
+	return (teacher_deleted or 0, 0)  # Return (teacher_count, 0) - student always 0
 

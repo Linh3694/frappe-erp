@@ -1240,40 +1240,9 @@ def delete_subject_assignment(assignment_id=None):
                     import traceback
                     frappe.logger().error(traceback.format_exc())
                 
-                # ✅ FIX: Update Student Timetable entries to remove this teacher
+                # DISABLED: Student Timetable sync removed (not used, wastes 50% performance)
                 student_timetable_updated = 0
-                try:
-                    frappe.logger().info(f"DELETE SYNC - Updating Student Timetable entries to remove teacher={assignment_doc.teacher_id}")
-                    
-                    # Update Student Timetable: Remove teacher_1_id or teacher_2_id
-                    # First, update teacher_1_id
-                    student_tt_rows = frappe.db.sql("""
-                        SELECT name, teacher_1_id, teacher_2_id
-                        FROM `tabSIS Student Timetable`
-                        WHERE class_id = %s
-                          AND subject_id IN ({})
-                          AND timetable_instance_id IN ({})
-                          AND (teacher_1_id = %s OR teacher_2_id = %s)
-                    """.format(
-                        ','.join(['%s'] * len(subject_ids)),
-                        ','.join(['%s'] * len(instance_ids))
-                    ), tuple([assignment_doc.class_id] + subject_ids + instance_ids + [assignment_doc.teacher_id, assignment_doc.teacher_id]), as_dict=True)
-                    
-                    for row in student_tt_rows:
-                        if row.teacher_1_id == assignment_doc.teacher_id:
-                            frappe.db.set_value("SIS Student Timetable", row.name, "teacher_1_id", None, update_modified=False)
-                            student_timetable_updated += 1
-                        if row.teacher_2_id == assignment_doc.teacher_id:
-                            frappe.db.set_value("SIS Student Timetable", row.name, "teacher_2_id", None, update_modified=False)
-                            student_timetable_updated += 1
-                    
-                    frappe.logger().info(f"DELETE SYNC - Updated {student_timetable_updated} Student Timetable entries")
-                    frappe.db.commit()
-                    
-                except Exception as student_tt_error:
-                    frappe.logger().error(f"DELETE SYNC - Failed to update Student Timetable: {str(student_tt_error)}")
-                    import traceback
-                    frappe.logger().error(traceback.format_exc())
+                # Student Timetable không được dùng trong hệ thống, bỏ qua việc update
                 
                 sync_summary = {
                     "rows_updated": updated_count,
