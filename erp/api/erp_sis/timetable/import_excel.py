@@ -202,8 +202,16 @@ def get_import_job_status():
         
         if result:
             frappe.logger().info(f"✅ Found final result: success={result.get('success')}")
+            
+            # Add status field for frontend
+            result_with_status = dict(result)
+            result_with_status['status'] = 'completed' if result.get('success') else 'failed'
+            result_with_status['job_id'] = job_id
+            
+            frappe.logger().info(f"📤 Returning final result with status={result_with_status['status']}")
+            
             # Don't clear cache immediately - let frontend clear it
-            return single_item_response(result, "Import result retrieved")
+            return single_item_response(result_with_status, "Import result retrieved")
         
         # Check for progress data (job still running)
         if job_id:
