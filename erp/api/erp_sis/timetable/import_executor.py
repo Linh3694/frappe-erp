@@ -72,6 +72,9 @@ class TimetableImportExecutor:
 			"student_subjects_created": 0
 		}
 		
+		# Track processed instances for materialized view sync
+		self.processed_instances = {}  # {instance_id: {class_id, start_date, end_date}}
+		
 		# Logs
 		self.logs = []
 	
@@ -112,36 +115,42 @@ class TimetableImportExecutor:
 			except Exception as e:
 				raise Exception(f"Failed to create/update timetable header: {str(e)}")
 			
-			# Step 2: Process each class
-			try:
-				self._process_all_classes()
-			except Exception as e:
-				raise Exception(f"Failed to process classes: {str(e)}")
-			
-			# Step 3: Sync Student Subjects
-			try:
-				self._sync_student_subjects()
-			except Exception as e:
-				raise Exception(f"Failed to sync student subjects: {str(e)}")
-			
-			# Commit transaction
-			frappe.db.commit()
-			
-			frappe.logger().info(
-				f"✅ Import complete: {self.stats['instances_created']}I created, "
-				f"{self.stats['rows_created']}R created"
-			)
-			
-			return {
-				"success": True,
-				"message": f"Import complete: {self.stats['instances_created']} instances, "
-				           f"{self.stats['rows_created']} rows created",
-				"stats": self.stats,
-				"logs": self._get_user_friendly_logs(),
-				"detailed_logs": self.logs  # Keep full logs for debugging if needed
-			}
-			
+		# Step 2: Process each class
+		try:
+			self._process_all_classes()
 		except Exception as e:
+			raise Exception(f"Failed to process classes: {str(e)}")
+		
+		# Step 3: Sync Student Subjects
+		try:
+			self._sync_student_subjects()
+		except Exception as e:
+			raise Exception(f"Failed to sync student subjects: {str(e)}")
+		
+		# Step 4: Sync Teacher Timetable và Student Timetable
+		try:
+			self._sync_materialized_views()
+		except Exception as e:
+			raise Exception(f"Failed to sync materialized views: {str(e)}")
+		
+		# Commit transaction
+		frappe.db.commit()
+		
+		frappe.logger().info(
+			f"✅ Import complete: {self.stats['instances_created']}I created, "
+			f"{self.stats['rows_created']}R created"
+		)
+		
+		return {
+			"success": True,
+			"message": f"Import complete: {self.stats['instances_created']} instances, "
+			           f"{self.stats['rows_created']} rows created",
+			"stats": self.stats,
+			"logs": self._get_user_friendly_logs(),
+			"detailed_logs": self.logs  # Keep full logs for debugging if needed
+		}
+		
+	except Exception as e:
 			import traceback
 			error_trace = traceback.format_exc()
 			
@@ -483,22 +492,31 @@ class TimetableImportExecutor:
 		
 		if existing:
 			self.stats["instances_updated"] += 1
-			return existing
+			instance_id = existing
+		else:
+			# Create new instance
+			instance_doc = frappe.get_doc({
+				"doctype": "SIS Timetable Instance",
+				"timetable_id": timetable_id,
+				"class_id": class_id,
+				"campus_id": campus_id,
+				"start_date": start_date,
+				"end_date": end_date
+			})
+			# Insert without validating mandatory fields (weekly_pattern will be added later)
+			instance_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+			
+			self.stats["instances_created"] += 1
+			instance_id = instance_doc.name
 		
-		# Create new instance
-		instance_doc = frappe.get_doc({
-			"doctype": "SIS Timetable Instance",
-			"timetable_id": timetable_id,
+		# Track this instance for materialized view sync
+		self.processed_instances[instance_id] = {
 			"class_id": class_id,
-			"campus_id": campus_id,
 			"start_date": start_date,
 			"end_date": end_date
-		})
-		# Insert without validating mandatory fields (weekly_pattern will be added later)
-		instance_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+		}
 		
-		self.stats["instances_created"] += 1
-		return instance_doc.name
+		return instance_id
 	
 	def _delete_old_pattern_rows(self, instance_id: str):
 		"""Delete old pattern rows (date=NULL) for instance"""
@@ -672,6 +690,47 @@ class TimetableImportExecutor:
 		
 		return created
 	
+	def _sync_materialized_views(self):
+		"""
+		Sync SIS Teacher Timetable và SIS Student Timetable sau khi import.
+		Đảm bảo teacher timetable được cập nhật với range mới.
+		"""
+		if not self.processed_instances:
+			self.logs.append("⚠️ No instances to sync")
+			return
+		
+		self.logs.append(f"🔄 Syncing Teacher & Student Timetables for {len(self.processed_instances)} instances...")
+		
+		# Import function từ legacy để reuse
+		from .excel_import_legacy import sync_materialized_views_for_instance
+		
+		# Sync cho tất cả instances vừa tạo/cập nhật
+		total_teacher_entries = 0
+		total_student_entries = 0
+		
+		for instance_id, instance_data in self.processed_instances.items():
+			try:
+				teacher_count, student_count = sync_materialized_views_for_instance(
+					instance_id=instance_id,
+					class_id=instance_data["class_id"],
+					start_date=instance_data["start_date"],
+					end_date=instance_data["end_date"],
+					campus_id=self.metadata["campus_id"],
+					logs=self.logs
+				)
+				total_teacher_entries += teacher_count
+				total_student_entries += student_count
+			except Exception as e:
+				self.logs.append(f"⚠️ Failed to sync materialized views for {instance_id}: {str(e)}")
+				frappe.logger().error(f"Failed to sync materialized views for {instance_id}: {str(e)}")
+		
+		self.logs.append(f"✅ Synced {total_teacher_entries} Teacher Timetable entries")
+		self.logs.append(f"✅ Synced {total_student_entries} Student Timetable entries")
+		
+		# Update stats
+		self.stats["teacher_timetable_synced"] = total_teacher_entries
+		self.stats["student_timetable_synced"] = total_student_entries
+	
 	# ============= HELPER METHODS =============
 	
 	def _get_class_id(self, title: str, campus_id: str) -> Optional[str]:
@@ -804,7 +863,9 @@ class TimetableImportExecutor:
 				"🔧 Cache built:",    # Cache summary
 				"📝 Updated timetable:", # Timetable header
 				"📝 Created timetable:", # Timetable header
-				"👨‍🎓 Created/updated"  # Student subjects
+				"👨‍🎓 Created/updated",  # Student subjects
+				"🔄 Syncing",         # Materialized view sync
+				"✅ Synced"           # Sync results
 			]):
 				friendly_logs.append(log)
 			# Skip verbose class processing logs (contains "🏫 Processing class:")
