@@ -192,12 +192,25 @@ def get_import_job_status():
         - If processing: progress data with current/total/percentage/message
     """
     try:
-        # Get job_id from query params
-        job_id = frappe.form_dict.get("job_id") or frappe.request.args.get("job_id")
+        # Get job_id from query params - try ALL possible sources
+        job_id = None
+        
+        # Try request.args (Werkzeug ImmutableMultiDict for GET params)
+        if hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+            job_id = frappe.request.args.get("job_id")
+        
+        # Try form_dict (Frappe's parsed form data)
+        if not job_id and hasattr(frappe, 'form_dict'):
+            job_id = frappe.form_dict.get("job_id")
+        
+        # Try local.form_dict (alternative location)
+        if not job_id and hasattr(frappe, 'local') and hasattr(frappe.local, 'form_dict'):
+            job_id = frappe.local.form_dict.get("job_id")
         
         frappe.logger().info(f"📊 Poll Status REQUEST: job_id={job_id}, user={frappe.session.user}")
-        frappe.logger().info(f"   form_dict: {frappe.form_dict}")
-        frappe.logger().info(f"   request.args: {dict(frappe.request.args)}")
+        frappe.logger().info(f"   request.args: {dict(frappe.request.args) if hasattr(frappe, 'request') and hasattr(frappe.request, 'args') else 'N/A'}")
+        frappe.logger().info(f"   form_dict: {frappe.form_dict if hasattr(frappe, 'form_dict') else 'N/A'}")
+        frappe.logger().info(f"   local.form_dict: {frappe.local.form_dict if hasattr(frappe, 'local') and hasattr(frappe.local, 'form_dict') else 'N/A'}")
         
         # Check for final result first
         result_key = f"timetable_import_result_{frappe.session.user}"
