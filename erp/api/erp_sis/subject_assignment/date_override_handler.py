@@ -70,11 +70,22 @@ def create_date_override_row(instance_id, pattern_row, specific_date, teacher_id
             "period_priority": period_priority,
             "period_name": period_name,
             "subject_id": pattern_row.get("subject_id"),
-            "room_id": pattern_row.get("room_id"),
-            # Assign teachers
-            "teacher_1_id": override_teacher_1,
-            "teacher_2_id": override_teacher_2
+            "room_id": pattern_row.get("room_id")
         })
+        
+        # Populate teachers child table
+        # Collect all teachers (new teacher + pattern teachers)
+        teachers_to_assign = []
+        if override_teacher_1:
+            teachers_to_assign.append(override_teacher_1)
+        if override_teacher_2 and override_teacher_2 != override_teacher_1:
+            teachers_to_assign.append(override_teacher_2)
+        
+        for idx, teacher_id_val in enumerate(teachers_to_assign):
+            override_doc.append("teachers", {
+                "teacher_id": teacher_id_val,
+                "sort_order": idx
+            })
         
         override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
         frappe.logger().info(f"✅ Created override row {override_doc.name} for date {specific_date} with teacher_1={override_teacher_1}, teacher_2={override_teacher_2}")

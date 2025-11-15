@@ -375,13 +375,24 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							frappe.logger().error(f"Invalid replace_slot: {replace_slot} for row {existing.name}")
 							continue
 						
-						frappe.db.set_value(
-							"SIS Timetable Instance Row",
-							existing.name,
-							f"{replace_slot}_id",
-							teacher_id,
-							update_modified=False
-						)
+						# Update child table instead of old fields
+						existing_doc = frappe.get_doc("SIS Timetable Instance Row", existing.name)
+						# Clear existing teachers child table
+						existing_doc.teachers = []
+						# Add teachers based on resolution
+						if replace_slot == "teacher_1":
+							# Replace teacher_1 with new teacher, keep teacher_2
+							if teacher_id:
+								existing_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 0})
+							if existing.teacher_2_id:
+								existing_doc.append("teachers", {"teacher_id": existing.teacher_2_id, "sort_order": 1})
+						else:  # replace_slot == "teacher_2"
+							# Keep teacher_1, replace teacher_2 with new teacher
+							if existing.teacher_1_id:
+								existing_doc.append("teachers", {"teacher_id": existing.teacher_1_id, "sort_order": 0})
+							if teacher_id:
+								existing_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 1})
+						existing_doc.save(ignore_permissions=True)
 						updated_count += 1
 						debug_info.append(
 							f"✅ Replaced {replace_slot} on {date} - {pattern_row.timetable_column_id} (subject: {pattern_row.subject_id})"
@@ -407,23 +418,23 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						)
 				elif not existing.teacher_2_id:
 					# teacher_2 is empty → Add as co-teacher
-					frappe.db.set_value(
-						"SIS Timetable Instance Row",
-						existing.name,
-						"teacher_2_id",
-						teacher_id,
-						update_modified=False
-					)
+					# Update child table instead of old fields
+					existing_doc = frappe.get_doc("SIS Timetable Instance Row", existing.name)
+					existing_doc.append("teachers", {
+						"teacher_id": teacher_id,
+						"sort_order": len(existing_doc.teachers)
+					})
+					existing_doc.save(ignore_permissions=True)
 					updated_count += 1
 				elif not existing.teacher_1_id:
 					# teacher_1 is empty (edge case) → Add to teacher_1
-					frappe.db.set_value(
-						"SIS Timetable Instance Row",
-						existing.name,
-						"teacher_1_id",
-						teacher_id,
-						update_modified=False
-					)
+					# Update child table instead of old fields
+					existing_doc = frappe.get_doc("SIS Timetable Instance Row", existing.name)
+					existing_doc.append("teachers", {
+						"teacher_id": teacher_id,
+						"sort_order": len(existing_doc.teachers)
+					})
+					existing_doc.save(ignore_permissions=True)
 					updated_count += 1
 			else:
 				# No existing override row - need to create one
@@ -475,10 +486,15 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							"period_priority": pattern_row.period_priority,
 							"period_name": pattern_row.period_name,
 							"subject_id": pattern_row.subject_id,
-							"teacher_1_id": teacher_1,
-							"teacher_2_id": teacher_2,
 							"room_id": pattern_row.room_id
 						})
+						
+						# Populate teachers child table
+						if teacher_1:
+							override_doc.append("teachers", {"teacher_id": teacher_1, "sort_order": 0})
+						if teacher_2 and teacher_2 != teacher_1:
+							override_doc.append("teachers", {"teacher_id": teacher_2, "sort_order": 1})
+						
 						override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 						created_count += 1
 						debug_info.append(
@@ -505,8 +521,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						)
 				else:
 					# Pattern row has room - create override with co-teaching
-					# Copy from pattern row but set teacher_2 as the new teacher
-					# teacher_1 will remain as pattern's teacher_1 (original teacher)
+					# Copy from pattern row but add new teacher as co-teacher
 					override_doc = frappe.get_doc({
 						"doctype": "SIS Timetable Instance Row",
 						"parent": pattern_row.parent,
@@ -518,10 +533,13 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						"period_priority": pattern_row.period_priority,
 						"period_name": pattern_row.period_name,
 						"subject_id": pattern_row.subject_id,
-						"teacher_1_id": pattern_row.teacher_1_id,  # Keep original teacher as teacher_1
-						"teacher_2_id": teacher_id,  # Add new teacher as teacher_2 (co-teaching)
 						"room_id": pattern_row.room_id
 					})
+					
+					# Populate teachers child table (keep original + add new)
+					if pattern_row.teacher_1_id:
+						override_doc.append("teachers", {"teacher_id": pattern_row.teacher_1_id, "sort_order": 0})
+					override_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 1})
 					override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 					created_count += 1
 		
