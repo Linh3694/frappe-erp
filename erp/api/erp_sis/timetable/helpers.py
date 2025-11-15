@@ -254,6 +254,7 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 "day_of_week": r.get("day_of_week"),
                 "timetable_column_id": r.get("timetable_column_id"),
                 "period_priority": col.get("period_priority"),
+                "subject_id": r.get("subject_id") or "",  # ✅ Include subject_id for edit modal
                 "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
                 "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
                 "class_id": r.get("class_id"),
@@ -288,6 +289,7 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 "day_of_week": r.get("day_of_week"),
                 "timetable_column_id": r.get("timetable_column_id"),
                 "period_priority": col.get("period_priority"),
+                "subject_id": r.get("subject_id") or "",  # ✅ Include subject_id for edit modal
                 "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
                 "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
                 "class_id": r.get("class_id"),
