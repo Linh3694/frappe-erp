@@ -636,9 +636,6 @@ class TimetableImportExecutor:
 			actual_subject_id = frappe.db.get_value("SIS Subject", subject_id, "actual_subject_id")
 			teachers = self._get_teachers_for_class_subject(class_id, actual_subject_id)
 			
-			teacher_1_id = teachers[0] if len(teachers) > 0 else None
-			teacher_2_id = teachers[1] if len(teachers) > 1 else None
-			
 			# Get period details
 			period_info = frappe.db.get_value(
 				"SIS Timetable Column",
@@ -669,10 +666,16 @@ class TimetableImportExecutor:
 				"period_priority": period_info.period_priority,
 				"period_name": period_info.period_name,
 				"subject_id": subject_id,
-				"teacher_1_id": teacher_1_id,
-				"teacher_2_id": teacher_2_id,
 				"room_id": room_id
 			})
+			
+			# Populate teachers child table
+			for idx, teacher_id in enumerate(teachers):
+				row_doc.append("teachers", {
+					"teacher_id": teacher_id,
+					"sort_order": idx
+				})
+			
 			row_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 			
 			rows_created += 1
