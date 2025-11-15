@@ -32,7 +32,7 @@ def get_teacher_week():
     - day_of_week (mon..sun)
     - timetable_column_id (link to SIS Timetable Column)
     - subject_id / subject_title
-    - teacher_1_id / teacher_2_id
+    - teacher_names (from teachers child table)
     - class_id
     """
     try:
@@ -182,10 +182,10 @@ def get_teacher_week():
             frappe.logger().info(f"✅ TIMETABLE: Total {len(rows)} entries from Teacher Timetable")
             
             # Map to structure expected by downstream code
-            # Teacher Timetable already has teacher_id, treat as teacher_1_id for compatibility
+            # Teacher Timetable already has teacher_id - mark for later use
             for row in rows:
-                row["teacher_1_id"] = row.get("teacher_id")
                 row["parent"] = row.get("timetable_instance_id")  # For compatibility with instance lookup
+                # Keep teacher_id as-is, will be used in enrich section
                 
         except Exception as query_error:
             frappe.logger().error(f"❌ TIMETABLE: Query failed: {str(query_error)}")
@@ -221,12 +221,13 @@ def get_teacher_week():
                     for ts in ts_rows:
                         timetable_subject_title_map[ts.name] = ts.title_vn or ts.title_en or ""
 
-            # Get row IDs to query teachers from child table
+            # Get row IDs to query teachers from child table (for Instance Rows)
+            # Also collect teacher_id from rows that come from Teacher Timetable view
             row_ids = [r.get("name") for r in rows if r.get("name")]
             row_teachers_map = {}  # row_id -> list of teacher_ids
             
             if row_ids:
-                # Query child table for teachers
+                # Query child table for teachers (only applies to Instance Rows)
                 teacher_children = frappe.get_all(
                     "SIS Timetable Instance Row Teacher",
                     fields=["parent", "teacher_id", "sort_order"],
@@ -240,6 +241,12 @@ def get_teacher_week():
                     if row_id not in row_teachers_map:
                         row_teachers_map[row_id] = []
                     row_teachers_map[row_id].append(child.teacher_id)
+            
+            # For rows from Teacher Timetable view, they have teacher_id directly
+            for r in rows:
+                if r.get("teacher_id") and r.get("name") not in row_teachers_map:
+                    # This row is from Teacher Timetable view, use teacher_id directly
+                    row_teachers_map[r.get("name")] = [r.get("teacher_id")]
             
             # Get unique teacher IDs and build display name map
             teacher_ids = list(set(tid for tids in row_teachers_map.values() for tid in tids))
@@ -426,8 +433,6 @@ def get_class_week():
                     "date",  # ✅ ADD: Support date-specific override rows
                     "timetable_column_id",
                     "subject_id",
-                    "teacher_1_id",
-                    "teacher_2_id",
                 ],
                 filters=row_filters,
                 order_by="day_of_week asc",
@@ -435,16 +440,6 @@ def get_class_week():
             
             # 🔍 DEBUG: Log rows for troubleshooting
             frappe.logger().info(f"📊 get_class_week: Found {len(rows)} rows for class {class_id}")
-            if rows:
-                # Log rows with teacher assignments
-                rows_with_teachers = [r for r in rows if r.get("teacher_1_id") or r.get("teacher_2_id")]
-                frappe.logger().info(f"📊 get_class_week: {len(rows_with_teachers)} rows have teachers assigned")
-                # Log first few rows with subject SIS-SUBJECT-35402 (Toán)
-                math_rows = [r for r in rows if r.get("subject_id") == "SIS-SUBJECT-35402"]
-                if math_rows:
-                    frappe.logger().info(f"📊 get_class_week: Found {len(math_rows)} rows for subject SIS-SUBJECT-35402")
-                    for r in math_rows[:3]:
-                        frappe.logger().info(f"  - Row {r.name}: teacher_1={r.get('teacher_1_id')}, teacher_2={r.get('teacher_2_id')}, day={r.get('day_of_week')}")
             # Fallback: some rows may have been created via explicit link field
             if not rows:
                 alt_rows = frappe.get_all(
@@ -456,8 +451,6 @@ def get_class_week():
                         "date",  # ✅ ADD: Support date-specific override rows
                         "timetable_column_id",
                         "subject_id",
-                        "teacher_1_id",
-                        "teacher_2_id",
                     ],
                     filters={"parent_timetable_instance": ["in", instance_ids]},
                     order_by="day_of_week asc",
@@ -470,7 +463,7 @@ def get_class_week():
             if not rows:
                 placeholders = ",".join(["%s"] * len(instance_ids))
                 sql = f"""
-                    SELECT name, parent_timetable_instance, day_of_week, date, timetable_column_id, subject_id, teacher_1_id, teacher_2_id
+                    SELECT name, parent_timetable_instance, day_of_week, date, timetable_column_id, subject_id
                     FROM `tabSIS Timetable Instance Row`
                     WHERE parent_timetable_instance IN ({placeholders})
                 """
