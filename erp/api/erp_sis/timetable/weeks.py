@@ -34,9 +34,10 @@ def get_teacher_week():
     - subject_id / subject_title
     - teacher_names (from teachers child table)
     - class_id
+    
+    ⚡ Performance: Cached for 5 minutes per teacher/week/stage
     """
     try:
-        frappe.logger().info("🏫 TIMETABLE: get_teacher_week called")
         # Get parameters from frappe request
         teacher_id = frappe.local.form_dict.get("teacher_id") or frappe.request.args.get("teacher_id")
         week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
@@ -47,6 +48,23 @@ def get_teacher_week():
             return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
         if not week_start:
             return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
+
+        # ⚡ CACHE: Check Redis cache first (5 min TTL)
+        campus_id = get_current_campus_from_context()
+        cache_key = f"teacher_week:{teacher_id}:{week_start}:{week_end or 'default'}:{education_stage or 'none'}:{campus_id or 'none'}"
+        
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for teacher_week {teacher_id} (week {week_start})")
+                return list_response(
+                    data=cached_data,
+                    message="Class week fetched successfully (cached)"
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+        
+        frappe.logger().info(f"❌ Cache MISS for teacher_week {teacher_id} (week {week_start}) - fetching from DB")
 
         ws = _parse_iso_date(week_start)
 
@@ -358,6 +376,13 @@ def get_teacher_week():
                 for dup in duplicates[:3]:  # Log first 3
                     frappe.logger().warning(f"  - Duplicate: {dup.get('date')} / {dup.get('class_id')} / {dup.get('subject_title')}")
         
+        # ⚡ CACHE: Store result in Redis (5 min = 300 sec)
+        try:
+            frappe.cache().set_value(cache_key, entries_with_overrides, expires_in_sec=300)
+            frappe.logger().info(f"✅ Cached teacher_week for {teacher_id} (key: {cache_key})")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
+        
         return list_response(entries_with_overrides, "Teacher week fetched successfully")
     except Exception as e:
 
@@ -366,7 +391,10 @@ def get_teacher_week():
 
 @frappe.whitelist(allow_guest=False)
 def get_class_week():
-    """Return class weekly timetable entries."""
+    """Return class weekly timetable entries.
+    
+    ⚡ Performance: Cached for 5 minutes per class/week
+    """
     try:
         # Get parameters from frappe request
         class_id = frappe.local.form_dict.get("class_id") or frappe.request.args.get("class_id")
@@ -377,6 +405,23 @@ def get_class_week():
             return validation_error_response("Validation failed", {"class_id": ["Class is required"]})
         if not week_start:
             return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
+
+        # ⚡ CACHE: Check Redis cache first (5 min TTL)
+        campus_id = get_current_campus_from_context()
+        cache_key = f"class_week:{class_id}:{week_start}:{week_end or 'default'}:{campus_id or 'none'}"
+        
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for class_week {class_id} (week {week_start})")
+                return list_response(
+                    data=cached_data,
+                    message="Class week fetched successfully (cached)"
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+        
+        frappe.logger().info(f"❌ Cache MISS for class_week {class_id} (week {week_start}) - fetching from DB")
 
         ws = _parse_iso_date(week_start)
         we = _parse_iso_date(week_end) if week_end else _add_days(ws, 6)
@@ -641,6 +686,13 @@ def get_class_week():
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
         entries_with_overrides = _apply_timetable_overrides(entries, "Class", class_id, ws, we)
+        
+        # ⚡ CACHE: Store result in Redis (5 min = 300 sec)
+        try:
+            frappe.cache().set_value(cache_key, entries_with_overrides, expires_in_sec=300)
+            frappe.logger().info(f"✅ Cached class_week for {class_id} (key: {cache_key})")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
         
         return list_response(entries_with_overrides, "Class week fetched successfully")
     except Exception as e:

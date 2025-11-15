@@ -999,49 +999,48 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
             
             # PRIORITY 1: Try Teacher Timetable (materialized view - fastest)
             try:
-                # Query with date filter for current week
-                teacher_timetable_classes = frappe.get_all(
-                    "SIS Teacher Timetable",
-                    fields=["class_id"],
-                    filters={
-                        "teacher_id": teacher_name,
-                        "date": ["between", [week_start, week_end]]
-                    },
-                    distinct=True,
-                    limit=1000
-                ) or []
+                # ⚡ Use SQL DISTINCT for better performance
+                teaching_class_ids_sql = frappe.db.sql("""
+                    SELECT DISTINCT class_id
+                    FROM `tabSIS Teacher Timetable`
+                    WHERE teacher_id = %s
+                        AND date BETWEEN %s AND %s
+                    LIMIT 100
+                """, (teacher_name, week_start, week_end), as_dict=False)
                 
-                for record in teacher_timetable_classes:
-                    if record.class_id:
-                        teaching_class_ids.add(record.class_id)
+                for (class_id,) in teaching_class_ids_sql:
+                    if class_id:
+                        teaching_class_ids.add(class_id)
                 
-                frappe.logger().info(f"Teacher Timetable: Found {len(teacher_timetable_classes)} class records for current week")
+                frappe.logger().info(f"Teacher Timetable: Found {len(teaching_class_ids_sql)} classes for current week")
                 
             except Exception as e:
                 frappe.logger().warning(f"Teacher Timetable query failed: {str(e)} - falling back to other methods")
             
             # PRIORITY 2: Subject Assignment (for long-term assignments)
-            subject_assignments = frappe.get_all(
-                "SIS Subject Assignment",
-                fields=["class_id"],
-                filters={
-                    "teacher_id": teacher_name,
-                    "campus_id": campus_id or "campus-1"
-                },
-                limit=1000
-            ) or []
-            
-            assignment_class_count = len(teaching_class_ids)
-            for assignment in subject_assignments:
-                if assignment.class_id and school_year_id:
-                    # Verify class belongs to current school year
-                    class_year = frappe.db.get_value("SIS Class", assignment.class_id, "school_year_id")
-                    if class_year == school_year_id:
-                        teaching_class_ids.add(assignment.class_id)
-                elif assignment.class_id:
-                    teaching_class_ids.add(assignment.class_id)
-            
-            frappe.logger().info(f"Subject Assignment: Added {len(teaching_class_ids) - assignment_class_count} classes from {len(subject_assignments)} assignments")
+            try:
+                # ⚡ Use SQL DISTINCT for better performance
+                assignment_class_ids_sql = frappe.db.sql("""
+                    SELECT DISTINCT class_id
+                    FROM `tabSIS Subject Assignment`
+                    WHERE teacher_id = %s
+                        AND campus_id = %s
+                    LIMIT 100
+                """, (teacher_name, campus_id or "campus-1"), as_dict=False)
+                
+                assignment_class_count = len(teaching_class_ids)
+                for (class_id,) in assignment_class_ids_sql:
+                    if class_id and school_year_id:
+                        # Verify class belongs to current school year
+                        class_year = frappe.db.get_value("SIS Class", class_id, "school_year_id")
+                        if class_year == school_year_id:
+                            teaching_class_ids.add(class_id)
+                    elif class_id:
+                        teaching_class_ids.add(class_id)
+                
+                frappe.logger().info(f"Subject Assignment: Added {len(teaching_class_ids) - assignment_class_count} classes")
+            except Exception as e:
+                frappe.logger().warning(f"Subject Assignment query failed: {str(e)}")
             
             # PRIORITY 3: Custom Timetable Overrides (for special events/cell-level edits)
             try:
@@ -1168,45 +1167,65 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
                 order_by="title asc"
             )
 
-        # 3. Enhance with teacher information (reuse existing logic)
-        def enhance_classes_with_teacher_info(classes):
-            enhanced = []
-            for class_data in classes:
-                enhanced_class = class_data.copy()
-                
-                # Get homeroom teacher details
-                if class_data.get("homeroom_teacher"):
-                    teacher_info = frappe.get_all(
-                        "SIS Teacher",
-                        fields=["user_id"],
-                        filters={"name": class_data["homeroom_teacher"]},
-                        limit=1
-                    )
-                    if teacher_info and teacher_info[0].get("user_id"):
-                        enhanced_class["homeroom_teacher_info"] = enrich_teacher_info(
-                            teacher_info[0]["user_id"],
-                            class_data["homeroom_teacher"]
-                        )
-
-                # Get vice homeroom teacher details  
-                if class_data.get("vice_homeroom_teacher"):
-                    teacher_info = frappe.get_all(
-                        "SIS Teacher",
-                        fields=["user_id"],
-                        filters={"name": class_data["vice_homeroom_teacher"]},
-                        limit=1
-                    )
-                    if teacher_info and teacher_info[0].get("user_id"):
-                        enhanced_class["vice_homeroom_teacher_info"] = enrich_teacher_info(
-                            teacher_info[0]["user_id"],
-                            class_data["vice_homeroom_teacher"]
-                        )
-                
-                enhanced.append(enhanced_class)
-            return enhanced
-
-        homeroom_classes = enhance_classes_with_teacher_info(homeroom_classes)
-        teaching_classes = enhance_classes_with_teacher_info(teaching_classes)
+        # 3. ⚡ OPTIMIZED: Batch fetch teacher info to avoid N+1 queries
+        # Collect all unique teacher IDs first
+        all_teacher_ids = set()
+        for cls in homeroom_classes + teaching_classes:
+            if cls.get("homeroom_teacher"):
+                all_teacher_ids.add(cls["homeroom_teacher"])
+            if cls.get("vice_homeroom_teacher"):
+                all_teacher_ids.add(cls["vice_homeroom_teacher"])
+        
+        # Batch fetch all teachers and users in ONE query each
+        teacher_user_map = {}
+        user_info_map = {}
+        
+        if all_teacher_ids:
+            # Fetch all teachers
+            teachers = frappe.get_all(
+                "SIS Teacher",
+                fields=["name", "user_id"],
+                filters={"name": ["in", list(all_teacher_ids)]},
+                limit=500
+            )
+            
+            # Fetch all users
+            user_ids = [t.user_id for t in teachers if t.get("user_id")]
+            if user_ids:
+                users = frappe.get_all(
+                    "User",
+                    fields=["name", "full_name", "first_name", "middle_name", "last_name"],
+                    filters={"name": ["in", user_ids]},
+                    limit=500
+                )
+                for u in users:
+                    display = u.get("full_name")
+                    if not display:
+                        parts = [u.get("first_name"), u.get("middle_name"), u.get("last_name")]
+                        display = " ".join([p for p in parts if p]) or u.get("name")
+                    user_info_map[u.name] = {
+                        "user_id": u.name,
+                        "full_name": display,
+                        "name": u.name
+                    }
+            
+            # Build teacher -> user map
+            for t in teachers:
+                if t.get("user_id") and t.user_id in user_info_map:
+                    teacher_user_map[t.name] = user_info_map[t.user_id]
+        
+        # Enhance classes (now just lookup, no queries!)
+        for cls in homeroom_classes:
+            if cls.get("homeroom_teacher") and cls["homeroom_teacher"] in teacher_user_map:
+                cls["homeroom_teacher_info"] = teacher_user_map[cls["homeroom_teacher"]]
+            if cls.get("vice_homeroom_teacher") and cls["vice_homeroom_teacher"] in teacher_user_map:
+                cls["vice_homeroom_teacher_info"] = teacher_user_map[cls["vice_homeroom_teacher"]]
+        
+        for cls in teaching_classes:
+            if cls.get("homeroom_teacher") and cls["homeroom_teacher"] in teacher_user_map:
+                cls["homeroom_teacher_info"] = teacher_user_map[cls["homeroom_teacher"]]
+            if cls.get("vice_homeroom_teacher") and cls["vice_homeroom_teacher"] in teacher_user_map:
+                cls["vice_homeroom_teacher_info"] = teacher_user_map[cls["vice_homeroom_teacher"]]
 
         frappe.logger().info(f"Teacher classes fetched: {len(homeroom_classes)} homeroom, {len(teaching_classes)} teaching for user {teacher_user_id}")
         
