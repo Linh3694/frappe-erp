@@ -221,8 +221,30 @@ def get_teacher_week():
                     for ts in ts_rows:
                         timetable_subject_title_map[ts.name] = ts.title_vn or ts.title_en or ""
 
-            teacher_ids = list({tid for r in rows for tid in [r.get("teacher_1_id"), r.get("teacher_2_id")] if tid})
+            # Get row IDs to query teachers from child table
+            row_ids = [r.get("name") for r in rows if r.get("name")]
+            row_teachers_map = {}  # row_id -> list of teacher_ids
+            
+            if row_ids:
+                # Query child table for teachers
+                teacher_children = frappe.get_all(
+                    "SIS Timetable Instance Row Teacher",
+                    fields=["parent", "teacher_id", "sort_order"],
+                    filters={"parent": ["in", row_ids]},
+                    order_by="parent asc, sort_order asc"
+                )
+                
+                # Group by parent (row_id)
+                for child in teacher_children:
+                    row_id = child.parent
+                    if row_id not in row_teachers_map:
+                        row_teachers_map[row_id] = []
+                    row_teachers_map[row_id].append(child.teacher_id)
+            
+            # Get unique teacher IDs and build display name map
+            teacher_ids = list(set(tid for tids in row_teachers_map.values() for tid in tids))
             teacher_user_map = {}
+            
             if teacher_ids:
                 teachers = frappe.get_all(
                     "SIS Teacher",
@@ -245,6 +267,7 @@ def get_teacher_week():
                 for t in teachers:
                     teacher_user_map[t.name] = user_display_map.get(t.get("user_id")) or t.get("user_id") or t.get("name")
 
+            # Enrich rows with subject titles and teacher names
             for r in rows:
                 # Prefer Timetable Subject title if linked via SIS Subject
                 subj_id = r.get("subject_id")
@@ -252,11 +275,11 @@ def get_teacher_week():
                 ts_title = timetable_subject_title_map.get(ts_id) if ts_id else None
                 default_title = subject_title_map.get(subj_id) or r.get("subject_title") or r.get("subject_name") or ""
                 r["subject_title"] = ts_title or default_title
-                teacher_names_list = []
-                if r.get("teacher_1_id"):
-                    teacher_names_list.append(teacher_user_map.get(r.get("teacher_1_id")) or "")
-                if r.get("teacher_2_id"):
-                    teacher_names_list.append(teacher_user_map.get(r.get("teacher_2_id")) or "")
+                
+                # Build teacher_names from child table
+                row_id = r.get("name")
+                teacher_ids_for_row = row_teachers_map.get(row_id, [])
+                teacher_names_list = [teacher_user_map.get(tid) for tid in teacher_ids_for_row if tid in teacher_user_map]
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
 
             # Enrich with room information for Teacher Timetable data
@@ -464,7 +487,6 @@ def get_class_week():
         # 4) Enrich subject_title and teacher_names
         try:
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
-            teacher_ids = list({tid for r in rows for tid in [r.get("teacher_1_id"), r.get("teacher_2_id")] if tid})
 
             subject_title_map = {}
             timetable_subject_by_subject = {}
@@ -489,7 +511,30 @@ def get_class_week():
                     for ts in ts_rows:
                         timetable_subject_title_map[ts.name] = ts.title_vn or ts.title_en or ""
 
+            # Get row IDs to query teachers from child table
+            row_ids = [r.get("name") for r in rows if r.get("name")]
+            row_teachers_map = {}  # row_id -> list of teacher_ids
+            
+            if row_ids:
+                # Query child table for teachers
+                teacher_children = frappe.get_all(
+                    "SIS Timetable Instance Row Teacher",
+                    fields=["parent", "teacher_id", "sort_order"],
+                    filters={"parent": ["in", row_ids]},
+                    order_by="parent asc, sort_order asc"
+                )
+                
+                # Group by parent (row_id)
+                for child in teacher_children:
+                    row_id = child.parent
+                    if row_id not in row_teachers_map:
+                        row_teachers_map[row_id] = []
+                    row_teachers_map[row_id].append(child.teacher_id)
+            
+            # Get unique teacher IDs and build display name map
+            teacher_ids = list(set(tid for tids in row_teachers_map.values() for tid in tids))
             teacher_user_map = {}
+            
             if teacher_ids:
                 teachers = frappe.get_all(
                     "SIS Teacher",
@@ -512,17 +557,18 @@ def get_class_week():
                 for t in teachers:
                     teacher_user_map[t.name] = user_display_map.get(t.get("user_id")) or t.get("user_id") or t.get("name")
 
+            # Enrich rows with subject titles and teacher names
             for r in rows:
                 subj_id = r.get("subject_id")
                 ts_id = timetable_subject_by_subject.get(subj_id)
                 ts_title = timetable_subject_title_map.get(ts_id) if ts_id else None
                 default_title = subject_title_map.get(subj_id) or r.get("subject_title") or r.get("subject_name") or ""
                 r["subject_title"] = ts_title or default_title
-                teacher_names_list = []
-                if r.get("teacher_1_id"):
-                    teacher_names_list.append(teacher_user_map.get(r.get("teacher_1_id")) or "")
-                if r.get("teacher_2_id"):
-                    teacher_names_list.append(teacher_user_map.get(r.get("teacher_2_id")) or "")
+                
+                # Build teacher_names from child table
+                row_id = r.get("name")
+                teacher_ids_for_row = row_teachers_map.get(row_id, [])
+                teacher_names_list = [teacher_user_map.get(tid) for tid in teacher_ids_for_row if tid in teacher_user_map]
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
 
             # Enrich with room information

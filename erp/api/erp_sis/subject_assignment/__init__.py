@@ -60,13 +60,7 @@ from .timetable_sync_v2 import (
     batch_sync_assignments
 )
 
-# Legacy V1 imports for backward compatibility (deprecated - will be removed)
-from .timetable_sync import (
-    batch_sync_timetable_optimized,
-    sync_teacher_timetable_after_assignment,
-    sync_timetable_from_date,
-    sync_materialized_views_background
-)
+# Legacy V1 has been removed - all code migrated to V2
 
 # Backward compatibility wrapper
 @frappe.whitelist(allow_guest=False, methods=["POST"])
@@ -246,12 +240,6 @@ __all__ = [
     'get_subject_id_from_actual',
     'enqueue_materialized_view_sync',
     'batch_sync_assignments',
-    
-    # Timetable sync - V1 (backward compat - deprecated)
-    'batch_sync_timetable_optimized',
-    'sync_teacher_timetable_after_assignment',
-    'sync_timetable_from_date',
-    'sync_materialized_views_background',
     
     # Internal functions
     'create_date_override_row',

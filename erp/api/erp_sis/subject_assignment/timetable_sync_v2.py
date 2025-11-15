@@ -70,50 +70,31 @@ def sync_assignment_to_timetable(assignment_id: str, replace_teacher_map: dict =
 
 def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> Dict:
 	"""
-	Sync full_year assignment: Update pattern rows directly.
+	Sync full_year assignment: Update pattern rows with ALL teachers for this class+subject.
 	
-	Logic:
+	NEW LOGIC (Unlimited Teachers):
 	1. Find pattern rows cho class + subject
-	2. Detect conflicts (teacher dạy môn khác cùng giờ)
-	3. Check if both teacher slots are full → CONFLICT!
-	4. Update teacher_1_id hoặc teacher_2_id (or replace based on user choice)
+	2. Find ALL assignments for this class + subject (not just current one)
+	3. Clear existing teachers child table
+	4. Insert ALL teachers from ALL assignments into child table
+	
+	NO MORE CONFLICTS: Since we support unlimited teachers, no conflict detection needed.
 	
 	Args:
 		assignment: SIS Subject Assignment doc
-		replace_teacher_map: Optional dict {row_id: "teacher_1" or "teacher_2"}
-		                     Can also use special key format for grouped conflicts:
-		                     {row_id: {"choice": "teacher_1", "apply_to": [row_id1, row_id2, ...]}}
+		replace_teacher_map: DEPRECATED - no longer used (kept for backward compatibility)
 	
-	Performance: ~50ms cho 10 pattern rows
+	Performance: ~100ms cho 10 pattern rows
 	"""
-	replace_teacher_map = replace_teacher_map or {}
 	debug_info = []
 	teacher_id = assignment.teacher_id
 	class_id = assignment.class_id
 	actual_subject_id = assignment.actual_subject_id
 	campus_id = assignment.campus_id
 	
-	debug_info.append(f"🔄 Syncing full_year assignment: teacher={teacher_id}, class={class_id}, subject={actual_subject_id}")
+	debug_info.append(f"🔄 Syncing full_year assignment: class={class_id}, subject={actual_subject_id}")
 	
-	# ✅ NEW APPROACH: Use subject_id as key instead of row_id
-	# This way resolution persists across rollback/retry cycles
-	# Format: {subject_id: "teacher_1" or "teacher_2"}
-	resolution_by_subject = {}
-	
-	# Check if replace_teacher_map uses subject_id or row_id format
-	if replace_teacher_map:
-		# Try to detect format by checking if keys look like subject IDs
-		first_key = next(iter(replace_teacher_map.keys()))
-		if first_key.startswith("SIS_ACTUAL_SUBJECT-") or first_key.startswith("SIS-SUBJECT-"):
-			# Already subject_id format
-			resolution_by_subject = replace_teacher_map
-			debug_info.append(f"📋 Using subject-based resolution map: {len(resolution_by_subject)} subjects")
-		else:
-			# Legacy row_id format - keep for backward compatibility
-			debug_info.append(f"📋 Using row-based resolution map: {len(replace_teacher_map)} rows")
-			resolution_by_subject = {}  # Will use row-based logic below
-	
-	# COMPUTE: Find pattern rows
+	# STEP 1: Find pattern rows
 	pattern_rows = find_pattern_rows(
 		class_id=class_id,
 		actual_subject_id=actual_subject_id,
@@ -127,219 +108,90 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			"debug_info": debug_info + ["❌ No pattern rows found"]
 		}
 	
-	debug_info.append(f"📋 Found {len(pattern_rows)} pattern rows to update")
+	debug_info.append(f"📋 Found {len(pattern_rows)} pattern rows to sync")
 	
-	# DEBUG: Log teacher slots in pattern rows
-	for i, row in enumerate(pattern_rows[:3]):  # Log first 3 rows for debugging
-		frappe.logger().info(
-			f"DEBUG Pattern Row {i+1}: {row.name} - "
-			f"teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}"
-		)
+	# STEP 2: Get ALL assignments for this class + subject
+	all_assignments = frappe.get_all(
+		"SIS Subject Assignment",
+		fields=["name", "teacher_id"],
+		filters={
+			"class_id": class_id,
+			"actual_subject_id": actual_subject_id,
+			"campus_id": campus_id,
+			"application_type": "full_year"
+		},
+		order_by="creation asc"
+	)
 	
-	# CHECK: Detect conflicts với môn khác của teacher
-	conflicts = detect_teacher_conflicts(teacher_id, pattern_rows, campus_id)
-	if conflicts:
-		debug_info.append(f"⚠️ Found {len(conflicts)} potential conflicts:")
-		for conflict in conflicts:
-			debug_info.append(f"  - {conflict['day']}/{conflict['period']}: Already teaching {conflict['subject']} in {conflict['class']}")
+	if not all_assignments:
+		debug_info.append("⚠️ No assignments found")
+		return {
+			"success": False,
+			"message": "No assignments found for this class/subject",
+			"debug_info": debug_info
+		}
 	
-	# APPLY: Update atomically
+	teacher_ids = [a.teacher_id for a in all_assignments if a.teacher_id]
+	debug_info.append(f"👥 Found {len(teacher_ids)} teachers from {len(all_assignments)} assignments")
+	
+	if not teacher_ids:
+		debug_info.append("⚠️ No teachers found")
+		return {
+			"success": False,
+			"message": "No teachers found in assignments",
+			"debug_info": debug_info
+		}
+	
+	# STEP 3: Update each pattern row with ALL teachers
 	updated_count = 0
-	skipped_conflicts = 0
-	teacher_conflicts = []  # Track conflicts when both slots are full
 	
 	try:
-		# NOTE: Don't begin transaction here - caller manages transaction
-		# frappe.db.begin()
-
-		# Build conflict lookup map for fast checking
-		conflict_map = {}
-		for conflict in conflicts:
-			key = f"{conflict['day']}_{conflict['period']}"
-			conflict_map[key] = conflict
-		
 		for row in pattern_rows:
-			# Check if this row has conflict
-			row_key = f"{row.day_of_week}_{row.timetable_column_id}"
-			has_conflict = row_key in conflict_map
+			# Get full document to update child table
+			row_doc = frappe.get_doc("SIS Timetable Instance Row", row.name)
 			
-			# ✅ FIX: Check if teacher is already assigned to this row
-			# Tránh trường hợp assign cùng teacher vào cả teacher_1_id và teacher_2_id
-			if row.teacher_1_id == teacher_id or row.teacher_2_id == teacher_id:
-				debug_info.append(f"  ✓ Row {row.name}: teacher already assigned, skipping")
-				continue
+			# Clear existing teachers child table
+			row_doc.teachers = []
 			
-			# Assign to first available slot
-			if not row.teacher_1_id:
-				frappe.db.set_value(
-					"SIS Timetable Instance Row",
-					row.name,
-					"teacher_1_id",
-					teacher_id,
-					update_modified=False
-				)
-				updated_count += 1
-				if has_conflict:
-					conflict_info = conflict_map[row_key]
-					debug_info.append(f"  ⚠️ Updated row {row.name}: teacher_1_id = {teacher_id} (CONFLICT with {conflict_info['subject']} in {conflict_info['class']})")
-				else:
-					debug_info.append(f"  ✓ Updated row {row.name}: teacher_1_id = {teacher_id}")
-			elif not row.teacher_2_id:
-				frappe.db.set_value(
-					"SIS Timetable Instance Row",
-					row.name,
-					"teacher_2_id",
-					teacher_id,
-					update_modified=False
-				)
-				updated_count += 1
-				if has_conflict:
-					conflict_info = conflict_map[row_key]
-					debug_info.append(f"  ⚠️ Updated row {row.name}: teacher_2_id = {teacher_id} (CONFLICT with {conflict_info['subject']} in {conflict_info['class']})")
-				else:
-					debug_info.append(f"  ✓ Updated row {row.name}: teacher_2_id = {teacher_id}")
-			else:
-				# Both teacher slots are full → CONFLICT!
-				frappe.logger().warning(
-					f"⚠️ CONFLICT DETECTED in row {row.name}: "
-					f"teacher_1={row.teacher_1_id}, teacher_2={row.teacher_2_id}, "
-					f"trying to add teacher={teacher_id}"
-				)
-				
-				# ✅ Check resolution by SUBJECT_ID first (persistent across retries)
-				replace_slot = None
-				if resolution_by_subject and row.subject_id in resolution_by_subject:
-					replace_slot = resolution_by_subject[row.subject_id]
-					frappe.logger().info(f"✅ Found subject-based resolution: {row.subject_id} → {replace_slot}")
-				elif row.name in replace_teacher_map:
-					# Legacy: check by row_id
-					replace_slot = replace_teacher_map[row.name]
-					frappe.logger().info(f"✅ Found row-based resolution: {row.name} → {replace_slot}")
-				
-				if replace_slot:
-					# User provided resolution
-					if replace_slot not in ["teacher_1", "teacher_2"]:
-						frappe.logger().error(f"Invalid replace_slot: {replace_slot} for row {row.name}")
-						continue
-					
-					frappe.db.set_value(
-						"SIS Timetable Instance Row",
-						row.name,
-						f"{replace_slot}_id",
-						teacher_id,
-						update_modified=False
-					)
-					updated_count += 1
-					debug_info.append(
-						f"✅ Replaced {replace_slot} in row {row.name} (subject: {row.subject_id})"
-					)
-				else:
-					# No resolution provided → Add to conflicts list
-					teacher_conflicts.append({
-						"row_id": row.name,
-						"date": None,  # Pattern rows don't have date
-						"day_of_week": row.day_of_week,
-						"period_id": row.timetable_column_id,
-						"period_name": row.period_name,
-						"subject_id": row.subject_id,
-						"teacher_1_id": row.teacher_1_id,
-						"teacher_1_name": get_teacher_name(row.teacher_1_id),
-						"teacher_2_id": row.teacher_2_id,
-						"teacher_2_name": get_teacher_name(row.teacher_2_id),
-						"new_teacher_id": teacher_id,
-						"new_teacher_name": get_teacher_name(teacher_id)
-					})
-					frappe.logger().warning(
-						f"⚠️ Added to conflicts list: {len(teacher_conflicts)} total conflicts"
-					)
-					debug_info.append(f"  ⚠️ Conflict in row {row.name}: both slots full")
+			# Add ALL teachers from assignments
+			for idx, tid in enumerate(teacher_ids, start=1):
+				row_doc.append("teachers", {
+					"teacher_id": tid,
+					"sort_order": idx
+				})
+			
+			# Save the document
+			row_doc.save(ignore_permissions=True)
+			updated_count += 1
+			
+			debug_info.append(f"  ✓ Updated row {row.name}: {len(teacher_ids)} teachers")
 		
-		# Check if there are unresolved conflicts
-		if teacher_conflicts:
-			# Group conflicts by subject_id - user only needs to choose once per subject
-			# ✅ KEY CHANGE: Use subject_id as conflict identifier (not row_id)
-			# This persists across rollback/retry cycles
-			conflicts_grouped = {}
-			row_ids_by_subject = {}  # Map subject_id -> list of row_ids
-			
-			for conflict in teacher_conflicts:
-				subject_id = conflict["subject_id"]
-				
-				if subject_id not in conflicts_grouped:
-					# First conflict for this subject - use as representative
-					# ✅ Use subject_id as the conflict key
-					conflict["conflict_key"] = subject_id  # Use subject_id instead of row_id
-					conflicts_grouped[subject_id] = conflict
-					row_ids_by_subject[subject_id] = []
-				
-				# Track all row_ids for this subject
-				row_ids_by_subject[subject_id].append(conflict["row_id"])
-			
-			# Convert to list and add row_ids info
-			grouped_conflicts = []
-			for subject_id, conflict in conflicts_grouped.items():
-				conflict["affected_row_ids"] = row_ids_by_subject[subject_id]
-				conflict["affected_row_count"] = len(row_ids_by_subject[subject_id])
-				grouped_conflicts.append(conflict)
-			
-			# Return conflicts to caller - caller handles rollback
-			frappe.logger().warning(
-				f"⚠️ DETECTED CONFLICTS: {len(teacher_conflicts)} total rows, "
-				f"grouped into {len(grouped_conflicts)} subject conflicts. "
-				f"Returning to caller for resolution."
-			)
-
-			debug_info.append(
-				f"⚠️ Found {len(teacher_conflicts)} conflict rows, "
-				f"grouped into {len(grouped_conflicts)} conflicts (by subject)"
-			)
-			
-			conflict_response = {
-				"success": False,
-				"message": f"Phát hiện {len(grouped_conflicts)} xung đột giáo viên. Vui lòng chọn giáo viên để thay thế.",
-				"error_type": "teacher_conflict",
-				"conflicts": grouped_conflicts,
-				"rows_updated": 0,
-				"rows_created": 0,
-				"debug_info": debug_info
-			}
-			
-			frappe.logger().info(f"🚫 Conflict response: {conflict_response}")
-			return conflict_response
-
-		# No conflicts or all resolved → Return success (caller handles commit)
-		# Sync materialized view immediately for small updates (< 50 rows)
-		# For larger updates, enqueue async to avoid blocking
+		# Sync materialized view
 		if updated_count > 0:
 			row_ids = [r.name for r in pattern_rows]
 			if len(row_ids) <= 50:
-				# Sync immediately for better UX
+				# Sync immediately for small updates
 				try:
 					from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
 					sync_for_rows(row_ids)
-					debug_info.append(f"✅ Synced materialized view immediately for {updated_count} rows")
-				except Exception as sync_err:
-					frappe.log_error(f"Immediate sync failed: {str(sync_err)}")
-					# Fallback to async if immediate sync fails
-					enqueue_materialized_view_sync(row_ids)
-					debug_info.append(f"⏰ Fallback to async sync for {updated_count} rows")
+					debug_info.append(f"✅ Synced materialized view immediately")
+				except Exception as mat_view_error:
+					debug_info.append(f"⚠️ Materialized view sync failed: {str(mat_view_error)}")
 			else:
-				# Large update - use async to avoid blocking
+				# Enqueue for async processing
 				enqueue_materialized_view_sync(row_ids)
-				debug_info.append(f"⏰ Enqueued async materialized view sync for {updated_count} rows")
+				debug_info.append(f"📤 Enqueued materialized view sync")
 		
-		# Build message with conflict warning if any
-		message = f"Updated {updated_count} pattern rows"
-		if conflicts:
-			message += f" (⚠️ {len(conflicts)} conflicts detected - teacher may be teaching different subjects at the same time)"
+		frappe.logger().info(f"✅ Synced {updated_count} pattern rows with {len(teacher_ids)} teachers")
+		
+		message = f"Successfully synced {updated_count} rows with {len(teacher_ids)} teachers"
 		
 		return {
 			"success": True,
 			"rows_updated": updated_count,
 			"rows_created": 0,
 			"message": message,
-			"debug_info": debug_info,
-			"conflicts": conflicts  # Return conflicts for frontend to display
+			"debug_info": debug_info
 		}
 		
 	except Exception as e:
@@ -356,31 +208,19 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 
 def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> Dict:
 	"""
-	Sync from_date assignment: Create override rows.
+	Sync from_date assignment: Create override rows with ALL teachers.
 	
-	Logic:
+	NEW LOGIC (Unlimited Teachers):
 	1. Find pattern rows
-	2. Calculate dates trong range
-	3. Check for conflicts (both teacher slots full)
-	4. If conflicts and no resolution → Return conflict error
-	5. If conflicts with resolution → Apply replacement
-	6. Create/update override rows
+	2. Calculate dates trong range  
+	3. Get ALL assignments for class + subject
+	4. Create/update override rows with ALL teachers in child table
+	
+	NO MORE CONFLICTS: Since we support unlimited teachers, no conflict detection needed.
 	
 	Args:
 		assignment: SIS Subject Assignment doc
-		replace_teacher_map: Optional dict {row_id: "teacher_1" or "teacher_2"}
-		                     Can also use special key format for grouped conflicts:
-		                     {row_id: {"choice": "teacher_1", "apply_to": [row_id1, row_id2, ...]}}
-	
-	Returns:
-		{
-			"success": bool,
-			"message": str,
-			"rows_created": int,
-			"rows_updated": int,
-			"conflicts": list (if conflict detected),
-			"error_type": "teacher_conflict" (if conflict)
-		}
+		replace_teacher_map: DEPRECATED - no longer used
 	
 	Performance: ~200ms cho 50 override rows
 	"""
@@ -986,102 +826,7 @@ def get_teacher_name(teacher_id: str) -> str:
 		return teacher_id
 
 
-def detect_teacher_conflicts(teacher_id: str, target_rows: List, campus_id: str) -> List[Dict]:
-	"""
-	Detect conflicts: teacher đang dạy môn khác cùng giờ.
-	
-	Args:
-		teacher_id: Teacher ID cần check
-		target_rows: Danh sách rows sẽ được assign
-		campus_id: Campus ID
-	
-	Returns:
-		List of conflicts với format:
-		[
-			{
-				"day": "monday",
-				"period": "period-1",
-				"subject": "Toán",
-				"class": "2A3",
-				"row_id": "..."
-			}
-		]
-	"""
-	conflicts = []
-	
-	if not target_rows:
-		return conflicts
-	
-	# Build list of (day, period) từ target rows
-	target_slots = set()
-	for row in target_rows:
-		slot = (row.day_of_week, row.timetable_column_id)
-		target_slots.add(slot)
-	
-	# Query existing assignments của teacher trong cùng slots
-	for day, period in target_slots:
-		try:
-			# Query rows where teacher is already assigned
-			existing_rows = frappe.get_all(
-				"SIS Timetable Instance Row",
-				fields=["name", "subject_id", "parent", "day_of_week", "timetable_column_id"],
-				filters={
-					"day_of_week": day,
-					"timetable_column_id": period,
-					"date": ["is", "not set"]  # Only pattern rows (no date = pattern)
-				},
-				or_filters=[
-					{"teacher_1_id": teacher_id},
-					{"teacher_2_id": teacher_id}
-				],
-				limit=10
-			)
-			
-			for existing in existing_rows:
-				# Get subject title
-				subject_title = "Unknown"
-				if existing.subject_id:
-					subject_info = frappe.db.get_value(
-						"SIS Subject",
-						existing.subject_id,
-						["title", "actual_subject_id"],
-						as_dict=True
-					)
-					if subject_info:
-						subject_title = subject_info.title or subject_info.actual_subject_id or "Unknown"
-				
-				# Get class from instance
-				class_title = "Unknown"
-				if existing.parent:
-					class_id = frappe.db.get_value("SIS Timetable Instance", existing.parent, "class_id")
-					if class_id:
-						class_info = frappe.db.get_value("SIS Class", class_id, "title")
-						class_title = class_info or class_id
-				
-				# Check if this existing row is in target_rows (same subject = not conflict)
-				is_same_subject = False
-				for target_row in target_rows:
-					if (target_row.day_of_week == day and 
-						target_row.timetable_column_id == period and
-						target_row.subject_id == existing.subject_id):
-						is_same_subject = True
-						break
-				
-				# Only add to conflicts if different subject
-				if not is_same_subject:
-					conflicts.append({
-						"day": day,
-						"period": period,
-						"subject": subject_title,
-						"class": class_title,
-						"row_id": existing.name
-					})
-					
-		except Exception as e:
-			frappe.log_error(f"Error detecting conflict for {day}/{period}: {str(e)}")
-			continue
-	
-	return conflicts
+# detect_teacher_conflicts function removed - no longer needed with unlimited teachers support
 
 
 # ============= BATCH OPERATIONS =============

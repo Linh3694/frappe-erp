@@ -24,6 +24,7 @@
   "period_priority",
   "period_name",
   "subject_id",
+  "teachers",
   "teacher_1_id",
   "teacher_2_id",
   "room_id"
@@ -84,17 +85,31 @@
    "reqd": 1
   },
   {
+   "fieldname": "teachers",
+   "fieldtype": "Table",
+   "label": "Teachers",
+   "options": "SIS Timetable Instance Row Teacher",
+   "description": "List of teachers assigned to this timetable slot (unlimited)"
+  },
+  {
    "fieldname": "teacher_1_id",
    "fieldtype": "Link",
-   "label": "Teacher 1",
+   "label": "Teacher 1 (DEPRECATED)",
    "options": "SIS Teacher",
-   "reqd": 1
+   "reqd": 0,
+   "hidden": 1,
+   "read_only": 1,
+   "description": "DEPRECATED: Use 'teachers' child table instead. Will be removed after migration."
   },
   {
    "fieldname": "teacher_2_id",
    "fieldtype": "Link",
-   "label": "Teacher 2",
-   "options": "SIS Teacher"
+   "label": "Teacher 2 (DEPRECATED)",
+   "options": "SIS Teacher",
+   "reqd": 0,
+   "hidden": 1,
+   "read_only": 1,
+   "description": "DEPRECATED: Use 'teachers' child table instead. Will be removed after migration."
   },
   {
    "fieldname": "room_id",
@@ -124,7 +139,7 @@
    "fields": "teacher_2_id"
   }
  ],
- "modified": "2025-11-03 17:00:00.000000",
+ "modified": "2025-11-15 21:45:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Timetable Instance Row",

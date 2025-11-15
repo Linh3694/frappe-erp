@@ -24,10 +24,9 @@ from erp.utils.api_response import (
 from .batch_operations import (
     sync_teacher_timetable_bulk
 )
-from .timetable_sync import (
-    batch_sync_timetable_optimized,
-    sync_teacher_timetable_after_assignment,
-    sync_timetable_from_date
+from .timetable_sync_v2 import (
+    sync_assignment_to_timetable,
+    batch_sync_assignments
 )
 from .date_override_handler import delete_teacher_override_rows
 from .utils import fix_subject_linkages
@@ -1023,35 +1022,10 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
 
             debug_info['save_successful'] = True
             
-            # Auto-sync timetable after update
+            # Auto-sync timetable after update (V2)
             try:
-                sync_data = {
-                    "assignment_id": assignment_doc.name,
-                    "old_teacher_id": old_teacher_id,
-                    "new_teacher_id": new_teacher_id,
-                    "class_id": assignment_doc.class_id,
-                    "actual_subject_id": assignment_doc.actual_subject_id,
-                    "start_date": new_start_date,
-                    "end_date": new_end_date
-                }
-                
-                sync_result = sync_timetable_from_date(sync_data, assignment_doc.modified)
+                sync_result = sync_assignment_to_timetable(assignment_doc.name)
                 debug_info['sync_result'] = sync_result
-                
-                # Also sync Teacher Timetable
-                if sync_result and sync_result.get('summary', {}).get('rows_updated', 0) > 0:
-                    try:
-                        affected_classes = [assignment_doc.class_id] if assignment_doc.class_id else []
-                        teacher_sync_result = sync_teacher_timetable_after_assignment(
-                            teacher_id=new_teacher_id,
-                            affected_classes=affected_classes,
-                            campus_id=campus_id,
-                            assignment_start_date=new_start_date,
-                            assignment_end_date=new_end_date
-                        )
-                        debug_info['teacher_timetable_sync'] = teacher_sync_result
-                    except Exception as teacher_sync_error:
-                        debug_info['teacher_timetable_sync_error'] = str(teacher_sync_error)
                 
             except Exception as sync_error:
                 frappe.log_error(f"Auto-sync timetable failed for updated assignment {assignment_id}: {str(sync_error)}")
