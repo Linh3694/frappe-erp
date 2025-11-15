@@ -891,16 +891,37 @@ class TimetableImportExecutor:
 		return class_id
 	
 	def _get_subject_id(self, title: str, education_stage_id: str, campus_id: str) -> Optional[str]:
-		"""Get SIS Subject ID from title"""
-		# Find Timetable Subject
-		ts_id = frappe.db.get_value(
-			"SIS Timetable Subject",
-			{"title_vn": title},
-			"name"
-		)
+		"""Get SIS Subject ID from title with normalized matching"""
+		# ✅ FIX: Use case-insensitive search with SQL to avoid mismatch
+		# Some database records have different casing (e.g. "Câu lạc bộ/Clubs" vs "CÂU LẠC BỘ/CLUBS")
+		# ✅ CRITICAL: Filter by education_stage_id and campus_id to avoid cross-stage/campus conflicts
+		normalized_title = title.strip().lower()
 		
-		if not ts_id:
+		# Find Timetable Subject with normalized comparison + education_stage + campus
+		ts_results = frappe.db.sql("""
+			SELECT name, title_vn
+			FROM `tabSIS Timetable Subject`
+			WHERE LOWER(TRIM(title_vn)) = %s
+				AND (education_stage_id = %s OR education_stage_id IS NULL)
+				AND campus_id = %s
+			ORDER BY education_stage_id DESC
+			LIMIT 1
+		""", (normalized_title, education_stage_id, campus_id), as_dict=True)
+		
+		if not ts_results:
+			# Fallback: Try without education_stage filter (for legacy data)
+			ts_results = frappe.db.sql("""
+				SELECT name, title_vn
+				FROM `tabSIS Timetable Subject`
+				WHERE LOWER(TRIM(title_vn)) = %s
+					AND campus_id = %s
+				LIMIT 1
+			""", (normalized_title, campus_id), as_dict=True)
+		
+		if not ts_results:
 			return None
+		
+		ts_id = ts_results[0].name
 		
 		# Find SIS Subject
 		subject_id = frappe.db.get_value(
