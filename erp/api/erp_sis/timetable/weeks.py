@@ -418,25 +418,52 @@ def get_class_week():
 
         # 2) Load child rows belonging to these instances
         try:
-            # Prefer standard child table linkage to avoid relying on custom link field
-            row_filters = {
+            # Query both pattern rows (weekly_pattern) and override rows (date_overrides)
+            # We need to query separately because parentfield is different
+            pattern_filters = {
                 "parent": ["in", instance_ids],
                 "parenttype": "SIS Timetable Instance",
                 "parentfield": "weekly_pattern",
             }
-            rows = frappe.get_all(
+            override_filters = {
+                "parent": ["in", instance_ids],
+                "parenttype": "SIS Timetable Instance",
+                "parentfield": "date_overrides",
+            }
+            
+            # Query pattern rows
+            pattern_rows = frappe.get_all(
                 "SIS Timetable Instance Row",
                 fields=[
                     "name",
                     "parent",
                     "day_of_week",
-                    "date",  # ✅ ADD: Support date-specific override rows
+                    "date",
                     "timetable_column_id",
                     "subject_id",
                 ],
-                filters=row_filters,
+                filters=pattern_filters,
                 order_by="day_of_week asc",
             )
+            
+            # Query override rows
+            override_rows = frappe.get_all(
+                "SIS Timetable Instance Row",
+                fields=[
+                    "name",
+                    "parent",
+                    "day_of_week",
+                    "date",
+                    "timetable_column_id",
+                    "subject_id",
+                ],
+                filters=override_filters,
+                order_by="date asc, day_of_week asc",
+            )
+            
+            # Combine both
+            rows = pattern_rows + override_rows
+            frappe.logger().info(f"📊 get_class_week: Found {len(pattern_rows)} pattern rows + {len(override_rows)} override rows = {len(rows)} total rows")
             
             # 🔍 DEBUG: Log rows for troubleshooting
             frappe.logger().info(f"📊 get_class_week: Found {len(rows)} rows for class {class_id}")

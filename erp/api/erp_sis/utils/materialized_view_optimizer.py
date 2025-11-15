@@ -38,8 +38,7 @@ def sync_for_rows(row_ids: List[str]):
 	rows = frappe.db.sql("""
 		SELECT 
 			r.name, r.parent, r.date, r.day_of_week,
-			r.timetable_column_id, r.subject_id,
-			r.teacher_1_id, r.teacher_2_id, r.room_id,
+			r.timetable_column_id, r.subject_id, r.room_id,
 			i.class_id, i.start_date, i.end_date, i.campus_id
 		FROM `tabSIS Timetable Instance Row` r
 		INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
@@ -47,6 +46,28 @@ def sync_for_rows(row_ids: List[str]):
 	""".format(','.join(['%s'] * len(row_ids))),
 	tuple(row_ids),
 	as_dict=True)
+	
+	# Get teachers from child table for each row
+	teacher_map = {}  # row_id -> list of teacher_ids
+	if rows:
+		row_names = [r.name for r in rows]
+		teacher_children = frappe.db.sql("""
+			SELECT parent, teacher_id
+			FROM `tabSIS Timetable Instance Row Teacher`
+			WHERE parent IN ({})
+			ORDER BY parent ASC, sort_order ASC
+		""".format(','.join(['%s'] * len(row_names))),
+		tuple(row_names),
+		as_dict=True)
+		
+		for child in teacher_children:
+			if child.parent not in teacher_map:
+				teacher_map[child.parent] = []
+			teacher_map[child.parent].append(child.teacher_id)
+	
+	# Attach teachers to rows
+	for row in rows:
+		row['teachers'] = teacher_map.get(row.name, [])
 	
 	if not rows:
 		frappe.logger().info("⚠️  No rows found to sync")
@@ -94,8 +115,9 @@ def sync_teacher_timetable_for_rows(rows: List[Dict]) -> int:
 				row.end_date
 			)
 		
-		# Create entries for each teacher
-		for teacher_id in [row.teacher_1_id, row.teacher_2_id]:
+		# Create entries for each teacher (from child table)
+		teachers = row.get('teachers', [])
+		for teacher_id in teachers:
 			if not teacher_id:
 				continue
 			
