@@ -897,33 +897,46 @@ class TimetableImportExecutor:
 		# ✅ CRITICAL: Filter by education_stage_id and campus_id to avoid cross-stage/campus conflicts
 		normalized_title = title.strip().lower()
 		
-		# Find Timetable Subject with normalized comparison + education_stage + campus
+		# Priority 1: Find Timetable Subject with EXACT education_stage match
 		ts_results = frappe.db.sql("""
-			SELECT name, title_vn
+			SELECT name, title_vn, education_stage_id
 			FROM `tabSIS Timetable Subject`
 			WHERE LOWER(TRIM(title_vn)) = %s
-				AND (education_stage_id = %s OR education_stage_id IS NULL)
+				AND education_stage_id = %s
 				AND campus_id = %s
-			ORDER BY education_stage_id DESC
 			LIMIT 1
 		""", (normalized_title, education_stage_id, campus_id), as_dict=True)
 		
+		# Priority 2: Find with NULL education_stage (legacy/generic subjects)
 		if not ts_results:
-			# Fallback: Try without education_stage filter (for legacy data)
 			ts_results = frappe.db.sql("""
-				SELECT name, title_vn
+				SELECT name, title_vn, education_stage_id
 				FROM `tabSIS Timetable Subject`
 				WHERE LOWER(TRIM(title_vn)) = %s
+					AND education_stage_id IS NULL
 					AND campus_id = %s
 				LIMIT 1
 			""", (normalized_title, campus_id), as_dict=True)
 		
 		if not ts_results:
+			# Log warning for debugging
+			frappe.logger().warning(
+				f"⚠️  Timetable Subject not found: title='{title}' (normalized='{normalized_title}'), "
+				f"stage={education_stage_id}, campus={campus_id}"
+			)
 			return None
 		
 		ts_id = ts_results[0].name
+		ts_stage = ts_results[0].education_stage_id
 		
-		# Find SIS Subject
+		# Log match for debugging
+		frappe.logger().info(
+			f"✅ Matched Timetable Subject: {ts_id} ('{ts_results[0].title_vn}', stage={ts_stage}) "
+			f"for '{title}' in stage={education_stage_id}"
+		)
+		
+		# Find SIS Subject that links to this Timetable Subject
+		# MUST match education_stage to avoid cross-stage conflicts
 		subject_id = frappe.db.get_value(
 			"SIS Subject",
 			{
@@ -933,6 +946,12 @@ class TimetableImportExecutor:
 			},
 			"name"
 		)
+		
+		if not subject_id:
+			frappe.logger().warning(
+				f"⚠️  SIS Subject not found linking to Timetable Subject {ts_id} "
+				f"for stage={education_stage_id}, campus={campus_id}"
+			)
 		
 		return subject_id
 	
