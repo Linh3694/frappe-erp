@@ -902,6 +902,8 @@ def update_class(class_id: str = None):
 def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None):
     """Get classes where teacher is homeroom teacher or teaching (based on timetable).
     This is optimized to avoid fetching all classes and filtering client-side.
+    
+    ⚡ Performance: Cached for 5 minutes per teacher/week
     """
     try:
         # Get teacher_user_id from current user if not provided
@@ -924,6 +926,28 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
 
         # Get current campus
         campus_id = get_current_campus_from_context()
+        
+        # ⚡ CACHE: Check Redis cache first (5 min TTL)
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        day = now.weekday()
+        monday = now - timedelta(days=day)
+        week_start = monday.strftime('%Y-%m-%d')
+        
+        cache_key = f"teacher_classes:{teacher_user_id}:{school_year_id}:{campus_id}:{week_start}"
+        
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for {teacher_user_id} (week {week_start})")
+                return success_response(
+                    data=cached_data,
+                    message="Teacher classes fetched successfully (cached)"
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+        
+        frappe.logger().info(f"❌ Cache MISS for {teacher_user_id} (week {week_start}) - fetching from DB")
         
         # 1. Get homeroom classes (where teacher is homeroom_teacher or vice_homeroom_teacher)
         # First get teacher record to find teacher name from user_id
@@ -963,13 +987,8 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
             )
 
         # 2. Get teaching classes using optimized multi-source approach
-        from datetime import datetime, timedelta
-        now = datetime.now()
-        day = now.weekday()  # Monday = 0, Sunday = 6
-        monday = now - timedelta(days=day)
+        # (week_start already calculated above for cache key)
         sunday = monday + timedelta(days=6)
-        
-        week_start = monday.strftime('%Y-%m-%d')
         week_end = sunday.strftime('%Y-%m-%d')
         
         frappe.logger().info(f"Getting teaching classes for user {teacher_user_id} (week {week_start} to {week_end})")
@@ -1191,6 +1210,7 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
 
         frappe.logger().info(f"Teacher classes fetched: {len(homeroom_classes)} homeroom, {len(teaching_classes)} teaching for user {teacher_user_id}")
         
+        # Build result (week_start, week_end already calculated above)
         result = {
             "homeroom_classes": homeroom_classes,
             "teaching_classes": teaching_classes,
@@ -1198,6 +1218,13 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
             "school_year_id": school_year_id,
             "week_range": {"start": week_start, "end": week_end}
         }
+        
+        # ⚡ CACHE: Store result in Redis (5 min = 300 sec)
+        try:
+            frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+            frappe.logger().info(f"✅ Cached result for {teacher_user_id} (key: {cache_key})")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
 
         return success_response(
             data=result,
