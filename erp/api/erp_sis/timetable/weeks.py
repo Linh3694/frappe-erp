@@ -580,10 +580,20 @@ def get_class_week():
             # Enrich rows with subject titles and teacher names
             for r in rows:
                 subj_id = r.get("subject_id")
+                
+                # Debug logging for override rows without subject_id
+                if r.get("date") and not subj_id:
+                    frappe.logger().warning(f"⚠️  Override row {r.get('name')} missing subject_id!")
+                
                 ts_id = timetable_subject_by_subject.get(subj_id)
                 ts_title = timetable_subject_title_map.get(ts_id) if ts_id else None
                 default_title = subject_title_map.get(subj_id) or r.get("subject_title") or r.get("subject_name") or ""
                 r["subject_title"] = ts_title or default_title
+                
+                # If still no subject_title, mark it clearly for debugging
+                if not r["subject_title"]:
+                    r["subject_title"] = f"[Missing Subject] Row: {r.get('name')}"
+                    frappe.logger().warning(f"⚠️  Row {r.get('name')} has no subject_title after enrich")
                 
                 # Build teacher_names from child table
                 row_id = r.get("name")
