@@ -15,7 +15,7 @@ from erp.utils.api_response import success_response, error_response, validation_
 
 
 @frappe.whitelist(allow_guest=False)
-def get_teacher_classes_optimized(teacher_user_id: str = None, school_year_id: str = None):
+def get_teacher_classes_optimized():
     """
     ⚡ OPTIMIZED: Get teacher classes with 1-2 SQL queries instead of 10+
     
@@ -24,6 +24,10 @@ def get_teacher_classes_optimized(teacher_user_id: str = None, school_year_id: s
     Performance: ~100-200ms (vs 500-800ms original)
     """
     try:
+        # Get parameters from frappe request (same as original endpoint)
+        teacher_user_id = frappe.local.form_dict.get("teacher_user_id") or frappe.request.args.get("teacher_user_id")
+        school_year_id = frappe.local.form_dict.get("school_year_id") or frappe.request.args.get("school_year_id")
+        
         # Get teacher_user_id from current user if not provided
         if not teacher_user_id:
             teacher_user_id = frappe.session.user
@@ -245,7 +249,7 @@ def get_teacher_classes_optimized(teacher_user_id: str = None, school_year_id: s
 
 
 @frappe.whitelist(allow_guest=False)
-def get_teacher_week_optimized(teacher_id: str = None, week_start: str = None, week_end: str = None, education_stage: str = None):
+def get_teacher_week_optimized():
     """
     ⚡ OPTIMIZED: Get teacher weekly timetable with 1 SQL query instead of 6+
     
@@ -254,6 +258,12 @@ def get_teacher_week_optimized(teacher_id: str = None, week_start: str = None, w
     Performance: ~100-200ms (vs 500-800ms original)
     """
     try:
+        # Get parameters from frappe request (same as original endpoint)
+        teacher_id = frappe.local.form_dict.get("teacher_id") or frappe.request.args.get("teacher_id")
+        week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
+        week_end = frappe.local.form_dict.get("week_end") or frappe.request.args.get("week_end")
+        education_stage = frappe.local.form_dict.get("education_stage") or frappe.request.args.get("education_stage")
+        
         if not teacher_id:
             return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
         if not week_start:
@@ -296,8 +306,7 @@ def get_teacher_week_optimized(teacher_id: str = None, week_start: str = None, w
             return success_response(data=[], message="No teacher record found")
         
         # Build education_stage filter
-        education_stage_filter = ""
-        education_stage_params = {}
+        valid_column_ids = []
         if education_stage:
             # Get valid timetable columns for this education stage
             column_filters = {"education_stage_id": education_stage}
@@ -311,15 +320,30 @@ def get_teacher_week_optimized(teacher_id: str = None, week_start: str = None, w
             )
             
             if not valid_columns:
+                frappe.logger().warning(f"No timetable columns found for education_stage={education_stage}")
                 return success_response(data=[], message="No timetable columns found for this education stage")
             
             valid_column_ids = [col.name for col in valid_columns]
-            # Use SQL IN clause
-            placeholders = ', '.join(['%s'] * len(valid_column_ids))
-            education_stage_filter = f"AND tt.timetable_column_id IN ({placeholders})"
-            education_stage_params = {"column_ids": valid_column_ids}
+            frappe.logger().info(f"Found {len(valid_column_ids)} columns for education_stage={education_stage}")
         
         # ⚡ SINGLE MEGA QUERY: Get everything with JOINs
+        # Build WHERE clause with proper parameter handling
+        where_clauses = [
+            "tt.teacher_id = %(teacher_name)s",
+            "tt.date BETWEEN %(week_start)s AND %(week_end)s"
+        ]
+        
+        params = {
+            "teacher_name": teacher_name,
+            "week_start": week_start,
+            "week_end": week_end
+        }
+        
+        # Add education_stage filter if needed
+        if valid_column_ids:
+            where_clauses.append("tt.timetable_column_id IN %(column_ids)s")
+            params["column_ids"] = valid_column_ids
+        
         entries_sql = """
             SELECT 
                 tt.name,
@@ -344,30 +368,16 @@ def get_teacher_week_optimized(teacher_id: str = None, week_start: str = None, w
             LEFT JOIN `tabSIS Timetable Instance Row` row ON tt.timetable_instance_row_id = row.name
             LEFT JOIN `tabSIS Timetable Instance Row Teacher` rt ON row.name = rt.parent
             LEFT JOIN `tabSIS Teacher` t ON rt.teacher_id = t.name
-            WHERE tt.teacher_id = %(teacher_name)s
-                AND tt.date BETWEEN %(week_start)s AND %(week_end)s
-                {education_stage_filter}
-            GROUP BY tt.name
+            WHERE {where_clause}
+            GROUP BY tt.name, tt.date, tt.day_of_week, tt.timetable_column_id, tt.class_id, 
+                     tt.subject_id, tt.room_id, s.title, ts.title_vn, ts.title_en, 
+                     c.title, r.name, r.room_type
             ORDER BY tt.date ASC, tt.day_of_week ASC
-        """.format(education_stage_filter=education_stage_filter)
-        
-        # Prepare params
-        params = {
-            "teacher_name": teacher_name,
-            "week_start": week_start,
-            "week_end": week_end
-        }
+        """.format(where_clause=" AND ".join(where_clauses))
         
         # Execute query
-        if education_stage_filter:
-            # For IN clause, we need to pass values directly
-            entries = frappe.db.sql(
-                entries_sql,
-                tuple([teacher_name, week_start, week_end] + education_stage_params.get("column_ids", [])),
-                as_dict=True
-            )
-        else:
-            entries = frappe.db.sql(entries_sql, params, as_dict=True)
+        frappe.logger().info(f"Executing SQL with params: teacher={teacher_name}, week={week_start} to {week_end}, columns={len(valid_column_ids)}")
+        entries = frappe.db.sql(entries_sql, params, as_dict=True)
         
         # Process entries: Use timetable_subject title if available, otherwise subject title
         for entry in entries:
