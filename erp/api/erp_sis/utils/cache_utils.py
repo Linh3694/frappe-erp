@@ -29,9 +29,19 @@ def clear_teacher_dashboard_cache():
 	- teacher_week:* (legacy endpoint)
 	- teacher_week_v2:* (optimized endpoint)
 	- class_week:* (class timetable)
+	
+	Returns:
+		dict: {
+			"success": bool,
+			"total_deleted": int,
+			"details": list[str],  # Chi tiết từng pattern
+			"error": str (nếu có lỗi)
+		}
 	"""
+	logs = []
 	try:
 		cache = frappe.cache()
+		logs.append("🗑️ Starting cache clear for teacher dashboard")
 		
 		cache_patterns = [
 			"teacher_classes:*",
@@ -42,6 +52,7 @@ def clear_teacher_dashboard_cache():
 		]
 		
 		total_deleted = 0
+		pattern_results = []
 		
 		for pattern in cache_patterns:
 			try:
@@ -54,41 +65,58 @@ def clear_teacher_dashboard_cache():
 					if keys_to_delete:
 						deleted_count = redis_conn.delete(*keys_to_delete)
 						total_deleted += deleted_count
-						frappe.logger().info(
-							f"✅ Cache Clear: Deleted {deleted_count} keys matching '{pattern}'"
-						)
+						msg = f"✅ Deleted {deleted_count} keys matching '{pattern}'"
+						logs.append(msg)
+						pattern_results.append({"pattern": pattern, "deleted": deleted_count})
+					else:
+						msg = f"ℹ️ No keys found for pattern '{pattern}'"
+						logs.append(msg)
+						pattern_results.append({"pattern": pattern, "deleted": 0})
 				else:
 					# Fallback: Try direct delete (may not work with wildcard)
 					try:
 						cache.delete_key(pattern)
 						total_deleted += 1
-						frappe.logger().info(f"✅ Cache Clear: Deleted key '{pattern}' (fallback method)")
-					except:
-						pass
+						msg = f"✅ Deleted key '{pattern}' (fallback method)"
+						logs.append(msg)
+						pattern_results.append({"pattern": pattern, "deleted": 1, "method": "fallback"})
+					except Exception as fallback_error:
+						msg = f"⚠️ Fallback delete failed for '{pattern}': {str(fallback_error)}"
+						logs.append(msg)
+						pattern_results.append({"pattern": pattern, "deleted": 0, "error": str(fallback_error)})
 						
 			except Exception as pattern_error:
-				frappe.logger().warning(
-					f"⚠️ Cache Clear: Failed to clear pattern '{pattern}': {pattern_error}"
-				)
+				msg = f"⚠️ Failed to clear pattern '{pattern}': {str(pattern_error)}"
+				logs.append(msg)
+				pattern_results.append({"pattern": pattern, "error": str(pattern_error)})
 		
 		if total_deleted > 0:
-			frappe.logger().info(
-				f"✅ Cache Clear: Successfully cleared {total_deleted} cache keys for teacher dashboard"
-			)
+			summary = f"✅ Successfully cleared {total_deleted} cache keys for teacher dashboard"
 		else:
-			frappe.logger().info(
-				"ℹ️ Cache Clear: No cache keys found to clear (might be empty or already cleared)"
-			)
+			summary = "ℹ️ No cache keys found to clear (might be empty or already cleared)"
+		
+		logs.append(summary)
+		
+		# Also log to frappe logger for server-side debugging
+		frappe.logger().info(f"Cache Clear: {summary}")
 		
 		return {
 			"success": True,
-			"total_deleted": total_deleted
+			"total_deleted": total_deleted,
+			"details": logs,
+			"patterns": pattern_results,
+			"summary": summary
 		}
 		
 	except Exception as e:
-		frappe.logger().error(f"❌ Cache Clear: Failed to clear teacher dashboard cache: {str(e)}")
+		error_msg = f"❌ Failed to clear teacher dashboard cache: {str(e)}"
+		logs.append(error_msg)
+		frappe.logger().error(error_msg)
+		
 		return {
 			"success": False,
+			"total_deleted": 0,
+			"details": logs,
 			"error": str(e)
 		}
 

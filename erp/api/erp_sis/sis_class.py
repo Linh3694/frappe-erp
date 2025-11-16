@@ -794,11 +794,14 @@ def update_class(class_id: str = None):
         frappe.db.commit()
         
         # ⚡ CLEAR CACHE: Invalidate teacher classes cache after class update
-        clear_teacher_dashboard_cache()
+        cache_result = clear_teacher_dashboard_cache()
         
         # Return updated data with teacher information
         updated_doc = frappe.get_doc("SIS Class", class_id)
         response_data = updated_doc.as_dict()
+        
+        # Add cache clear info to response
+        response_data["_cache_cleared"] = cache_result
 
         # Add homeroom teacher info
         if response_data.get("homeroom_teacher"):
