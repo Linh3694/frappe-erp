@@ -17,6 +17,7 @@ def _clear_teacher_classes_cache():
     """Clear Redis cache for get_teacher_classes API after class changes."""
     try:
         cache = frappe.cache()
+        frappe.logger().info("🗑️ Starting cache clear for teacher classes...")
         
         # ⚡ Clear cache using Redis pattern matching (wildcard support)
         # Frappe cache uses Redis backend, so we can use Redis commands directly
@@ -28,26 +29,34 @@ def _clear_teacher_classes_cache():
             "class_week:*"
         ]
         
+        total_deleted = 0
         for pattern in cache_patterns:
             try:
                 # Get Redis connection from frappe cache
                 redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
+                
+                # 🔍 DEBUG: Log Redis connection type
+                frappe.logger().info(f"🔍 Redis connection type: {type(redis_conn).__name__}")
                 
                 # Use SCAN to find and delete keys matching pattern
                 if hasattr(redis_conn, 'scan_iter'):
                     keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
                     if keys_to_delete:
                         redis_conn.delete(*keys_to_delete)
+                        total_deleted += len(keys_to_delete)
                         frappe.logger().info(f"✅ Deleted {len(keys_to_delete)} cache keys matching '{pattern}'")
+                    else:
+                        frappe.logger().info(f"ℹ️ No cache keys found matching '{pattern}'")
                 else:
+                    frappe.logger().warning(f"⚠️ Redis connection does not support scan_iter, trying fallback for '{pattern}'")
                     # Fallback: Try direct delete (may not work with wildcard)
                     cache.delete_key(pattern)
             except Exception as pattern_error:
-                frappe.logger().warning(f"Failed to clear pattern '{pattern}': {pattern_error}")
+                frappe.logger().warning(f"❌ Failed to clear pattern '{pattern}': {pattern_error}")
         
-        frappe.logger().info("✅ Cleared all teacher/timetable caches after class change")
+        frappe.logger().info(f"✅ Cache clear complete: {total_deleted} total keys deleted")
     except Exception as cache_error:
-        frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+        frappe.logger().warning(f"❌ Cache clear failed (non-critical): {cache_error}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -778,6 +787,11 @@ def update_class(class_id: str = None):
         for key in ["title", "short_title", "campus_id", "school_year_id", "education_grade", "academic_program", "homeroom_teacher", "vice_homeroom_teacher", "room"]:
             if data.get(key) is not None:
                 update_data[key] = data.get(key)
+        
+        # 🔍 DEBUG: Log homeroom teacher changes
+        if "homeroom_teacher" in update_data or "vice_homeroom_teacher" in update_data:
+            frappe.logger().info(f"🔄 Updating class {class_id} - homeroom_teacher: '{update_data.get('homeroom_teacher', 'NOT_SET')}' (type: {type(update_data.get('homeroom_teacher', 'NOT_SET')).__name__})")
+            frappe.logger().info(f"🔄 Updating class {class_id} - vice_homeroom_teacher: '{update_data.get('vice_homeroom_teacher', 'NOT_SET')}' (type: {type(update_data.get('vice_homeroom_teacher', 'NOT_SET')).__name__})")
         
         # Handle class_type separately to avoid validation issues
         raw_class_type = (data.get("class_type") or "").strip()
