@@ -786,7 +786,16 @@ def update_class(class_id: str = None):
         update_data = {}
         for key in ["title", "short_title", "campus_id", "school_year_id", "education_grade", "academic_program", "homeroom_teacher", "vice_homeroom_teacher", "room"]:
             if data.get(key) is not None:
-                update_data[key] = data.get(key)
+                value = data.get(key)
+                
+                # ⚡ FIX: Convert empty string to None for Link fields
+                # When user selects "Không chọn" in frontend, it sends empty string ''
+                # But Frappe Link fields need None to clear the value
+                if key in ["homeroom_teacher", "vice_homeroom_teacher", "room"] and value == '':
+                    value = None
+                    frappe.logger().info(f"🔄 Converting empty string to None for {key}")
+                
+                update_data[key] = value
         
         # 🔍 DEBUG: Log homeroom teacher changes
         if "homeroom_teacher" in update_data or "vice_homeroom_teacher" in update_data:
