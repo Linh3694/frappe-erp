@@ -286,9 +286,9 @@ def get_teacher_classes_optimized():
                         "vice_homeroom_teacher_user_id", "vice_homeroom_teacher_user_name"]:
                 cls.pop(key, None)
         
-        # Deduplicate: Remove teaching classes that are also homeroom classes
-        homeroom_ids = {c["name"] for c in homeroom_classes}
-        teaching_classes = [c for c in teaching_classes if c["name"] not in homeroom_ids]
+        # ✅ NO DEDUPLICATION: Show class in BOTH sections if teacher is both homeroom AND teaching
+        # Example: If teacher is homeroom teacher of Class A and also teaches Math in Class A
+        #          → Show in homeroom section AND teaching section
         
         frappe.logger().info(f"Teacher classes fetched: {len(homeroom_classes)} homeroom, {len(teaching_classes)} teaching for user {teacher_user_id}")
         
