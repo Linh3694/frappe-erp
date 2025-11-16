@@ -169,6 +169,7 @@ def get_teacher_classes_optimized():
                 cls.pop(key, None)
         
         # ⚡ QUERY 2: Get teaching classes (DISTINCT from Teacher Timetable - fastest)
+        # Try materialized view first, fallback to Subject Assignment if empty
         teaching_sql = """
             SELECT DISTINCT
                 c.name,
@@ -215,6 +216,56 @@ def get_teacher_classes_optimized():
             },
             as_dict=True
         )
+        
+        # ⚡ FALLBACK: If Teacher Timetable is empty, query from Subject Assignment
+        if not teaching_classes:
+            frappe.logger().info(f"⚠️ Teacher Timetable empty for {teacher_name}, falling back to Subject Assignment")
+            
+            teaching_fallback_sql = """
+                SELECT DISTINCT
+                    c.name,
+                    c.title,
+                    c.short_title,
+                    c.campus_id,
+                    c.school_year_id,
+                    c.education_grade,
+                    c.academic_program,
+                    c.homeroom_teacher,
+                    c.vice_homeroom_teacher,
+                    c.room,
+                    c.class_type,
+                    c.creation,
+                    c.modified,
+                    t1.user_id as homeroom_teacher_user_id,
+                    u1.full_name as homeroom_teacher_user_name,
+                    t2.user_id as vice_homeroom_teacher_user_id,
+                    u2.full_name as vice_homeroom_teacher_user_name
+                FROM `tabSIS Subject Assignment` sa
+                INNER JOIN `tabSIS Class` c ON sa.class_id = c.name
+                LEFT JOIN `tabSIS Teacher` t1 ON c.homeroom_teacher = t1.name
+                LEFT JOIN `tabUser` u1 ON t1.user_id = u1.name
+                LEFT JOIN `tabSIS Teacher` t2 ON c.vice_homeroom_teacher = t2.name
+                LEFT JOIN `tabUser` u2 ON t2.user_id = u2.name
+                WHERE sa.teacher_id = %(teacher_name)s
+                    AND c.campus_id = %(campus_id)s
+                    {school_year_filter}
+                ORDER BY c.title ASC
+                LIMIT 100
+            """.format(
+                school_year_filter="AND c.school_year_id = %(school_year_id)s" if school_year_id else ""
+            )
+            
+            teaching_classes = frappe.db.sql(
+                teaching_fallback_sql,
+                {
+                    "teacher_name": teacher_name,
+                    "campus_id": campus_id,
+                    "school_year_id": school_year_id
+                },
+                as_dict=True
+            )
+            
+            frappe.logger().info(f"✅ Fallback found {len(teaching_classes)} teaching classes from Subject Assignment")
         
         # Process teaching classes to add teacher_info
         for cls in teaching_classes:
