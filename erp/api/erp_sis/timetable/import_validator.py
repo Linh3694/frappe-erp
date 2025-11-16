@@ -314,14 +314,34 @@ class TimetableImportValidator:
 	def _validate_subject_references(self, subject_titles: List[str], education_stage_id: str, campus_id: str):
 		"""Validate subject titles exist"""
 		for title in subject_titles:
-			# First try Timetable Subject
-			ts_id = frappe.db.get_value(
-				"SIS Timetable Subject",
-				{"title_vn": title},
-				"name"
-			)
+			# Normalize title for matching (strip and lowercase)
+			normalized_title = str(title).strip().lower()
 			
-			if ts_id:
+			# Find Timetable Subject with campus_id and education_stage_id filters
+			# Try with education_stage_id first
+			ts_results = frappe.db.sql("""
+				SELECT name, title_vn, education_stage_id
+				FROM `tabSIS Timetable Subject`
+				WHERE LOWER(TRIM(title_vn)) = %s
+					AND education_stage_id = %s
+					AND campus_id = %s
+				LIMIT 1
+			""", (normalized_title, education_stage_id, campus_id), as_dict=True)
+			
+			# If not found, try without education_stage_id (legacy subjects)
+			if not ts_results:
+				ts_results = frappe.db.sql("""
+					SELECT name, title_vn, education_stage_id
+					FROM `tabSIS Timetable Subject`
+					WHERE LOWER(TRIM(title_vn)) = %s
+						AND education_stage_id IS NULL
+						AND campus_id = %s
+					LIMIT 1
+				""", (normalized_title, campus_id), as_dict=True)
+			
+			if ts_results:
+				ts_id = ts_results[0].name
+				
 				# Then find SIS Subject linking to this Timetable Subject
 				subject_id = frappe.db.get_value(
 					"SIS Subject",
@@ -335,16 +355,30 @@ class TimetableImportValidator:
 				
 				if subject_id:
 					self.cache["subjects"][title] = subject_id
+					frappe.logger().info(
+						f"✅ Validated subject '{title}' → TS:{ts_id} → SIS:{subject_id}"
+					)
 				else:
 					# CRITICAL ERROR: No SIS Subject mapping found
 					self.errors.append(
-						f"Subject mapping missing: '{title}' (Timetable Subject found, "
-						f"but no SIS Subject for this education stage). "
+						f"Subject mapping missing: '{title}' (Timetable Subject {ts_id} found, "
+						f"but no SIS Subject for education stage {education_stage_id}). "
 						f"Please create SIS Subject mapping first."
+					)
+					frappe.logger().error(
+						f"❌ Subject mapping missing: title='{title}', ts_id={ts_id}, "
+						f"stage={education_stage_id}, campus={campus_id}"
 					)
 			else:
 				# No Timetable Subject found
-				self.errors.append(f"Timetable Subject not found: '{title}'")
+				self.errors.append(
+					f"Timetable Subject not found: '{title}' (campus: {campus_id}, "
+					f"education stage: {education_stage_id})"
+				)
+				frappe.logger().error(
+					f"❌ Timetable Subject not found: title='{title}', "
+					f"campus={campus_id}, stage={education_stage_id}"
+				)
 	
 	def _validate_teacher_references(self, teacher_names: List[str], campus_id: str):
 		"""Validate teacher names exist"""

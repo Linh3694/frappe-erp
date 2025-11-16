@@ -1384,7 +1384,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 				"warnings": []
 			}
 		
-		# If validation failed, return errors immediately
+		# If validation failed, return errors immediately - STOP PROCESSING
 		if not validation_result.get('is_valid'):
 			errors = validation_result.get('errors', [])
 			warnings = validation_result.get('warnings', [])
@@ -1392,6 +1392,7 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			warning_count = len(warnings)
 			
 			frappe.logger().error(f"❌ Validation failed: {error_count} errors, {warning_count} warnings")
+			frappe.logger().error("🛑 STOPPING IMPORT - Validation errors must be fixed first")
 			
 			# Log each error for debugging
 			frappe.logger().error("=" * 80)
@@ -1413,10 +1414,12 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			)
 			
 			# Store result in cache for frontend polling
+			# This is CRITICAL - FE needs to poll this to show errors
 			if job_id:
 				result_key = f"timetable_import_result_{user_id}"
 				result_data = {
 					"success": False,
+					"status": "failed",  # Add explicit status for FE
 					"errors": errors,
 					"warnings": warnings,
 					"phase": "validation_failed",
@@ -1432,14 +1435,24 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 				frappe.logger().info(f"💾 Saving validation failed result to cache: {result_key}")
 				try:
 					frappe.cache().set_value(result_key, result_data, expires_in_sec=3600)
-					frappe.logger().info(f"✅ Cache saved successfully")
+					# Verify cache was set
+					verify = frappe.cache().get_value(result_key)
+					if verify:
+						frappe.logger().info(f"✅ Cache saved and verified successfully")
+					else:
+						frappe.logger().error(f"❌ Cache verification failed - data not found after set")
 				except Exception as cache_error:
 					frappe.logger().error(f"❌ Failed to save to cache: {str(cache_error)}")
 					import traceback
 					frappe.logger().error(traceback.format_exc())
+			else:
+				frappe.logger().warning("⚠️ No job_id provided - cannot cache result for FE polling")
 			
+			# IMPORTANT: Return immediately - do NOT continue to execution phase
+			frappe.logger().info("🛑 Returning validation errors to caller - import STOPPED")
 			return {
 				"success": False,
+				"status": "failed",
 				"errors": errors,
 				"warnings": warnings,
 				"logs": [f"❌ Validation failed with {error_count} errors"] + [f"  - {e}" for e in errors[:5]]  # First 5 errors
