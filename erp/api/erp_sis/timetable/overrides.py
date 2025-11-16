@@ -151,9 +151,26 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         # This ensures frontend gets fresh data after override
         clear_teacher_dashboard_cache()
         
-        # PRIORITY 3.5: Sync Teacher Timetable for date-specific override
-        # Note: Teacher timetable sync is temporarily disabled due to validation issues
-        # TODO: Fix Teacher Timetable validation or format compatibility
+        # ⚡ SYNC MATERIALIZED VIEW: Update Teacher Timetable for override
+        try:
+            # Sync Teacher Timetable for the affected date/teachers
+            _sync_teacher_timetable_for_override(
+                date=date,
+                timetable_column_id=timetable_column_id,
+                target_type=target_type,
+                target_id=target_id,
+                old_teacher_1_id=None,  # We don't track old values
+                old_teacher_2_id=None,
+                new_teacher_1_id=teacher_1_id,
+                new_teacher_2_id=teacher_2_id,
+                subject_id=subject_id,
+                room_id=room_id
+            )
+            frappe.logger().info(f"✅ Synced Teacher Timetable for override on {date}")
+        except Exception as sync_error:
+            # Don't fail the override if sync fails - log warning only
+            frappe.logger().warning(f"⚠️ Teacher Timetable sync failed for override: {str(sync_error)}")
+            frappe.log_error(f"Teacher Timetable sync failed: {str(sync_error)}", "Override Sync Warning")
         
         # Get subject and teacher names for response
         subject_title = ""
@@ -216,6 +233,18 @@ def delete_timetable_override(override_id: str = None):
                 "override_id": ["Override ID is required"]
             })
             
+        # ⚡ Get override details BEFORE deletion for sync
+        override_details = frappe.db.sql("""
+            SELECT date, timetable_column_id, target_type, target_id, teacher_1_id, teacher_2_id
+            FROM `tabTimetable_Date_Override`
+            WHERE name = %s AND created_by = %s
+        """, (override_id, frappe.session.user), as_dict=True)
+        
+        if not override_details:
+            return not_found_response("Timetable override not found or access denied")
+            
+        details = override_details[0]
+            
         # Delete from custom table
         deleted_count = frappe.db.sql("""
             DELETE FROM `tabTimetable_Date_Override`
@@ -228,7 +257,23 @@ def delete_timetable_override(override_id: str = None):
             # ⚡ CLEAR CACHE: Invalidate teacher dashboard cache after override deletion
             clear_teacher_dashboard_cache()
             
-            # TODO: Sync teacher timetable when deleting override
+            # ⚡ SYNC MATERIALIZED VIEW: Clear Teacher Timetable entries for deleted override
+            try:
+                _sync_teacher_timetable_for_override(
+                    date=str(details.date),
+                    timetable_column_id=details.timetable_column_id,
+                    target_type=details.target_type,
+                    target_id=details.target_id,
+                    old_teacher_1_id=details.teacher_1_id,
+                    old_teacher_2_id=details.teacher_2_id,
+                    new_teacher_1_id=None,  # Deleting means no new teachers
+                    new_teacher_2_id=None,
+                    subject_id=None,
+                    room_id=None
+                )
+                frappe.logger().info(f"✅ Synced Teacher Timetable after override deletion")
+            except Exception as sync_error:
+                frappe.logger().warning(f"⚠️ Teacher Timetable sync failed after override deletion: {str(sync_error)}")
             
             return single_item_response({"deleted": True}, "Timetable override deleted successfully")
         else:
