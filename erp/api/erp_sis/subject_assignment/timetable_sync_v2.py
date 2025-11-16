@@ -478,6 +478,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						override_doc = frappe.get_doc({
 							"doctype": "SIS Timetable Instance Row",
 							"parent": pattern_row.parent,
+							"parent_timetable_instance": pattern_row.parent,  # ✅ FIX: Set Link field to avoid validation error
 							"parenttype": "SIS Timetable Instance",
 							"parentfield": "date_overrides",
 							"date": date,
@@ -525,6 +526,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 					override_doc = frappe.get_doc({
 						"doctype": "SIS Timetable Instance Row",
 						"parent": pattern_row.parent,
+						"parent_timetable_instance": pattern_row.parent,  # ✅ FIX: Set Link field to avoid validation error
 						"parenttype": "SIS Timetable Instance",
 						"parentfield": "date_overrides",  # ✅ Must be date_overrides, not weekly_pattern!
 						"date": date,
