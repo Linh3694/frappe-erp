@@ -21,6 +21,19 @@ from functools import wraps
 from .timetable_sync_v2 import sync_assignment_to_timetable
 
 
+def _clear_teacher_classes_cache():
+	"""Clear Redis cache for get_teacher_classes API after batch operations."""
+	try:
+		frappe.cache().delete_key("teacher_classes:*")
+		frappe.cache().delete_key("teacher_classes_v2:*")  # Optimized API cache
+		frappe.cache().delete_key("teacher_week:*")
+		frappe.cache().delete_key("teacher_week_v2:*")  # Optimized API cache
+		frappe.cache().delete_key("class_week:*")
+		frappe.logger().info("✅ Cleared caches after batch operation")
+	except Exception as cache_error:
+		frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+
+
 # ============= DEADLOCK RETRY DECORATOR =============
 
 def retry_on_deadlock(max_retries: int = 3, initial_delay: float = 0.1):
@@ -461,6 +474,9 @@ def apply_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 		
 		# Commit transaction
 		frappe.db.commit()
+		
+		# ⚡ CLEAR CACHE: Invalidate caches after batch update
+		_clear_teacher_classes_cache()
 		
 		return {
 			"success": True,

@@ -14,6 +14,29 @@ from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import success_response, error_response, validation_error_response
 
 
+def clear_teacher_dashboard_cache():
+    """
+    Clear Redis cache for teacher dashboard APIs.
+    
+    Call this after:
+    - Creating/updating/deleting subject assignments
+    - Creating/updating/deleting classes
+    - Updating homeroom teachers
+    - Importing timetables
+    - Creating timetable overrides
+    """
+    try:
+        # Clear both v2 (optimized) and original API caches
+        frappe.cache().delete_key("teacher_classes_v2:*")
+        frappe.cache().delete_key("teacher_week_v2:*")
+        frappe.cache().delete_key("teacher_classes:*")
+        frappe.cache().delete_key("teacher_week:*")
+        frappe.cache().delete_key("class_week:*")
+        frappe.logger().info("✅ Cleared teacher dashboard caches")
+    except Exception as cache_error:
+        frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+
+
 @frappe.whitelist(allow_guest=False)
 def get_teacher_classes_optimized():
     """
@@ -99,10 +122,8 @@ def get_teacher_classes_optimized():
                 c.class_type,
                 c.creation,
                 c.modified,
-                t1.full_name as homeroom_teacher_name,
                 t1.user_id as homeroom_teacher_user_id,
                 u1.full_name as homeroom_teacher_user_name,
-                t2.full_name as vice_homeroom_teacher_name,
                 t2.user_id as vice_homeroom_teacher_user_id,
                 u2.full_name as vice_homeroom_teacher_user_name
             FROM `tabSIS Class` c
@@ -132,19 +153,19 @@ def get_teacher_classes_optimized():
         for cls in homeroom_classes:
             if cls.get("homeroom_teacher"):
                 cls["homeroom_teacher_info"] = {
-                    "name": cls.get("homeroom_teacher_name"),
+                    "name": cls.get("homeroom_teacher_user_name"),  # Use user full_name
                     "user_id": cls.get("homeroom_teacher_user_id"),
                     "user_name": cls.get("homeroom_teacher_user_name")
                 }
             if cls.get("vice_homeroom_teacher"):
                 cls["vice_homeroom_teacher_info"] = {
-                    "name": cls.get("vice_homeroom_teacher_name"),
+                    "name": cls.get("vice_homeroom_teacher_user_name"),  # Use user full_name
                     "user_id": cls.get("vice_homeroom_teacher_user_id"),
                     "user_name": cls.get("vice_homeroom_teacher_user_name")
                 }
             # Clean up temporary fields
-            for key in ["homeroom_teacher_name", "homeroom_teacher_user_id", "homeroom_teacher_user_name",
-                        "vice_homeroom_teacher_name", "vice_homeroom_teacher_user_id", "vice_homeroom_teacher_user_name"]:
+            for key in ["homeroom_teacher_user_id", "homeroom_teacher_user_name",
+                        "vice_homeroom_teacher_user_id", "vice_homeroom_teacher_user_name"]:
                 cls.pop(key, None)
         
         # ⚡ QUERY 2: Get teaching classes (DISTINCT from Teacher Timetable - fastest)
@@ -163,10 +184,8 @@ def get_teacher_classes_optimized():
                 c.class_type,
                 c.creation,
                 c.modified,
-                t1.full_name as homeroom_teacher_name,
                 t1.user_id as homeroom_teacher_user_id,
                 u1.full_name as homeroom_teacher_user_name,
-                t2.full_name as vice_homeroom_teacher_name,
                 t2.user_id as vice_homeroom_teacher_user_id,
                 u2.full_name as vice_homeroom_teacher_user_name
             FROM `tabSIS Teacher Timetable` tt
@@ -201,19 +220,19 @@ def get_teacher_classes_optimized():
         for cls in teaching_classes:
             if cls.get("homeroom_teacher"):
                 cls["homeroom_teacher_info"] = {
-                    "name": cls.get("homeroom_teacher_name"),
+                    "name": cls.get("homeroom_teacher_user_name"),  # Use user full_name
                     "user_id": cls.get("homeroom_teacher_user_id"),
                     "user_name": cls.get("homeroom_teacher_user_name")
                 }
             if cls.get("vice_homeroom_teacher"):
                 cls["vice_homeroom_teacher_info"] = {
-                    "name": cls.get("vice_homeroom_teacher_name"),
+                    "name": cls.get("vice_homeroom_teacher_user_name"),  # Use user full_name
                     "user_id": cls.get("vice_homeroom_teacher_user_id"),
                     "user_name": cls.get("vice_homeroom_teacher_user_name")
                 }
             # Clean up temporary fields
-            for key in ["homeroom_teacher_name", "homeroom_teacher_user_id", "homeroom_teacher_user_name",
-                        "vice_homeroom_teacher_name", "vice_homeroom_teacher_user_id", "vice_homeroom_teacher_user_name"]:
+            for key in ["homeroom_teacher_user_id", "homeroom_teacher_user_name",
+                        "vice_homeroom_teacher_user_id", "vice_homeroom_teacher_user_name"]:
                 cls.pop(key, None)
         
         # Deduplicate: Remove teaching classes that are also homeroom classes

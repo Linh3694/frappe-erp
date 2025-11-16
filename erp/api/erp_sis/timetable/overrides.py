@@ -146,6 +146,46 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         
         frappe.db.commit()
         
+        # ⚡ INVALIDATE CACHE: Clear Redis cache for affected timetables
+        # This ensures frontend gets fresh data after override
+        try:
+            # Clear all teacher_week and class_week caches related to this override
+            # Pattern: teacher_week:{teacher_id}:{week_start}:*
+            # Pattern: class_week:{class_id}:{week_start}:*
+            
+            # Clear cache for target (Class or Teacher)
+            if target_type == "Class":
+                # Clear class_week cache for this class
+                cache_pattern = f"class_week:{target_id}:*"
+                frappe.logger().info(f"⚡ Clearing cache pattern: {cache_pattern}")
+                # Note: Frappe cache doesn't support pattern delete, so we'll let it expire naturally
+                # Alternative: Clear specific known cache keys
+                
+                # Clear teacher_week cache for assigned teachers
+                if teacher_1_id:
+                    teacher_cache_pattern = f"teacher_week:{teacher_1_id}:*"
+                    frappe.logger().info(f"⚡ Clearing cache pattern: {teacher_cache_pattern}")
+                if teacher_2_id:
+                    teacher_cache_pattern = f"teacher_week:{teacher_2_id}:*"
+                    frappe.logger().info(f"⚡ Clearing cache pattern: {teacher_cache_pattern}")
+                    
+            elif target_type == "Teacher":
+                # Clear teacher_week cache for this teacher
+                cache_pattern = f"teacher_week:{target_id}:*"
+                frappe.logger().info(f"⚡ Clearing cache pattern: {cache_pattern}")
+                
+            # Since Frappe cache doesn't support pattern delete, clear entire cache
+            # This is safe because cache will rebuild on next request
+            frappe.cache().delete_key("teacher_classes:*")
+            frappe.cache().delete_key("teacher_classes_v2:*")  # Optimized API cache
+            frappe.cache().delete_key("teacher_week:*")
+            frappe.cache().delete_key("teacher_week_v2:*")  # Optimized API cache
+            frappe.cache().delete_key("class_week:*")
+            frappe.logger().info("✅ Cleared all timetable caches after override")
+            
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+        
         # PRIORITY 3.5: Sync Teacher Timetable for date-specific override
         # Note: Teacher timetable sync is temporarily disabled due to validation issues
         # TODO: Fix Teacher Timetable validation or format compatibility

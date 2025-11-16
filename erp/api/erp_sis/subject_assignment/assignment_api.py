@@ -32,6 +32,29 @@ from .date_override_handler import delete_teacher_override_rows
 from .utils import fix_subject_linkages
 
 
+def _clear_teacher_classes_cache(teacher_ids=None):
+    """
+    Clear Redis cache for get_teacher_classes API after assignment changes.
+    
+    Args:
+        teacher_ids: Optional list of specific teacher IDs to clear cache for
+    """
+    try:
+        # Clear all teacher_classes cache since it's affected by assignments
+        frappe.cache().delete_key("teacher_classes:*")
+        frappe.cache().delete_key("teacher_classes_v2:*")  # Optimized API cache
+        frappe.logger().info("✅ Cleared all teacher_classes caches after assignment change")
+        
+        # Also clear timetable caches as they might be affected
+        frappe.cache().delete_key("teacher_week:*")
+        frappe.cache().delete_key("teacher_week_v2:*")  # Optimized API cache
+        frappe.cache().delete_key("class_week:*")
+        frappe.logger().info("✅ Cleared timetable caches after assignment change")
+        
+    except Exception as cache_error:
+        frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_all_subject_assignments():
     """
@@ -710,6 +733,9 @@ def create_subject_assignment():
 
         # ✅ COMMIT: Only commit after successful sync
         frappe.db.commit()
+        
+        # ⚡ CLEAR CACHE: Invalidate teacher classes cache after assignment change
+        _clear_teacher_classes_cache()
 
         if created_data and len(created_data) == 1:
             result = created_data[0]
@@ -1019,6 +1045,9 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
             
             assignment_doc.save()
             frappe.db.commit()
+            
+            # ⚡ CLEAR CACHE: Invalidate teacher classes cache after assignment change
+            _clear_teacher_classes_cache()
 
             debug_info['save_successful'] = True
             
@@ -1282,6 +1311,9 @@ def delete_subject_assignment(assignment_id=None):
         # Delete the document
         frappe.delete_doc("SIS Subject Assignment", assignment_id)
         frappe.db.commit()
+        
+        # ⚡ CLEAR CACHE: Invalidate teacher classes cache after assignment deletion
+        _clear_teacher_classes_cache()
         
         message = "Subject assignment deleted successfully"
         if sync_summary:

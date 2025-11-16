@@ -13,6 +13,19 @@ from erp.utils.api_response import (
 )
 
 
+def _clear_teacher_classes_cache():
+    """Clear Redis cache for get_teacher_classes API after class changes."""
+    try:
+        frappe.cache().delete_key("teacher_classes:*")
+        frappe.cache().delete_key("teacher_classes_v2:*")  # Optimized API cache
+        frappe.cache().delete_key("teacher_week:*")
+        frappe.cache().delete_key("teacher_week_v2:*")  # Optimized API cache
+        frappe.cache().delete_key("class_week:*")
+        frappe.logger().info("✅ Cleared caches after class change")
+    except Exception as cache_error:
+        frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_classes(school_year_id: str = None, campus_id: str = None):
     """List all classes with optional filter by school_year_id and campus_id."""
@@ -590,6 +603,9 @@ def create_class():
         except Exception:
             pass
         frappe.db.commit()
+        
+        # ⚡ CLEAR CACHE: Invalidate teacher classes cache after class creation
+        _clear_teacher_classes_cache()
 
         # Enhance the response with teacher information
         response_data = doc.as_dict()
@@ -774,6 +790,9 @@ def update_class(class_id: str = None):
             frappe.db.set_value("SIS Class", class_id, "class_type", normalized_ct)
         
         frappe.db.commit()
+        
+        # ⚡ CLEAR CACHE: Invalidate teacher classes cache after class update
+        _clear_teacher_classes_cache()
         
         # Return updated data with teacher information
         updated_doc = frappe.get_doc("SIS Class", class_id)
@@ -1273,6 +1292,10 @@ def delete_class(class_id: str = None):
             return validation_error_response({"class_id": ["Class ID is required"]})
         frappe.delete_doc("SIS Class", class_id)
         frappe.db.commit()
+        
+        # ⚡ CLEAR CACHE: Invalidate teacher classes cache after class deletion
+        _clear_teacher_classes_cache()
+        
         return success_response(message="Class deleted successfully")
     except Exception as e:
         frappe.log_error(f"Error deleting class: {str(e)}")

@@ -21,6 +21,19 @@ from datetime import datetime, timedelta
 from ..utils.assignment_cache import get_subject_id_from_actual_cached
 
 
+def _clear_teacher_classes_cache():
+	"""Clear Redis cache for APIs after timetable import."""
+	try:
+		frappe.cache().delete_key("teacher_classes:*")
+		frappe.cache().delete_key("teacher_classes_v2:*")  # Optimized API cache
+		frappe.cache().delete_key("teacher_week:*")
+		frappe.cache().delete_key("teacher_week_v2:*")  # Optimized API cache
+		frappe.cache().delete_key("class_week:*")
+		frappe.logger().info("✅ Cleared caches after timetable import")
+	except Exception as cache_error:
+		frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+
+
 class TimetableImportExecutor:
 	"""
 	Execute timetable import after validation.
@@ -139,6 +152,9 @@ class TimetableImportExecutor:
 			
 			# Commit transaction
 			frappe.db.commit()
+			
+			# ⚡ CLEAR CACHE: Invalidate caches after timetable import
+			_clear_teacher_classes_cache()
 			
 			frappe.logger().info(
 				f"✅ Import complete: {self.stats['instances_created']}I created, "
