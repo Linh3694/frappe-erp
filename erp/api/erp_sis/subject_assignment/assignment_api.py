@@ -30,48 +30,7 @@ from .timetable_sync_v2 import (
 )
 from .date_override_handler import delete_teacher_override_rows
 from .utils import fix_subject_linkages
-
-
-def _clear_teacher_classes_cache(teacher_ids=None):
-    """
-    Clear Redis cache for get_teacher_classes API after assignment changes.
-    
-    Args:
-        teacher_ids: Optional list of specific teacher IDs to clear cache for
-    """
-    try:
-        cache = frappe.cache()
-        
-        # ⚡ Clear cache using Redis pattern matching (wildcard support)
-        cache_patterns = [
-            "teacher_classes:*",
-            "teacher_classes_v2:*",
-            "teacher_week:*",
-            "teacher_week_v2:*",
-            "class_week:*"
-        ]
-        
-        for pattern in cache_patterns:
-            try:
-                # Get Redis connection from frappe cache
-                redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
-                
-                # Use SCAN to find and delete keys matching pattern
-                if hasattr(redis_conn, 'scan_iter'):
-                    keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
-                    if keys_to_delete:
-                        redis_conn.delete(*keys_to_delete)
-                        frappe.logger().info(f"✅ Deleted {len(keys_to_delete)} cache keys matching '{pattern}'")
-                else:
-                    # Fallback: Try direct delete (may not work with wildcard)
-                    cache.delete_key(pattern)
-            except Exception as pattern_error:
-                frappe.logger().warning(f"Failed to clear pattern '{pattern}': {pattern_error}")
-        
-        frappe.logger().info("✅ Cleared all teacher/timetable caches after assignment change")
-        
-    except Exception as cache_error:
-        frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+from erp.api.erp_sis.utils.cache_utils import clear_teacher_dashboard_cache
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
@@ -754,7 +713,7 @@ def create_subject_assignment():
         frappe.db.commit()
         
         # ⚡ CLEAR CACHE: Invalidate teacher classes cache after assignment change
-        _clear_teacher_classes_cache()
+        clear_teacher_dashboard_cache()
 
         if created_data and len(created_data) == 1:
             result = created_data[0]
@@ -1066,7 +1025,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
             frappe.db.commit()
             
             # ⚡ CLEAR CACHE: Invalidate teacher classes cache after assignment change
-            _clear_teacher_classes_cache()
+            clear_teacher_dashboard_cache()
 
             debug_info['save_successful'] = True
             
@@ -1332,7 +1291,7 @@ def delete_subject_assignment(assignment_id=None):
         frappe.db.commit()
         
         # ⚡ CLEAR CACHE: Invalidate teacher classes cache after assignment deletion
-        _clear_teacher_classes_cache()
+        clear_teacher_dashboard_cache()
         
         message = "Subject assignment deleted successfully"
         if sync_summary:

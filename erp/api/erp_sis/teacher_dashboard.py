@@ -12,52 +12,7 @@ import frappe
 from datetime import datetime, timedelta
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import success_response, error_response, validation_error_response
-
-
-def clear_teacher_dashboard_cache():
-    """
-    Clear Redis cache for teacher dashboard APIs.
-    
-    Call this after:
-    - Creating/updating/deleting subject assignments
-    - Creating/updating/deleting classes
-    - Updating homeroom teachers
-    - Importing timetables
-    - Creating timetable overrides
-    """
-    try:
-        cache = frappe.cache()
-        
-        # ⚡ Clear cache using Redis pattern matching (wildcard support)
-        cache_patterns = [
-            "teacher_classes:*",
-            "teacher_classes_v2:*",
-            "teacher_week:*",
-            "teacher_week_v2:*",
-            "class_week:*"
-        ]
-        
-        for pattern in cache_patterns:
-            try:
-                # Get Redis connection from frappe cache
-                redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
-                
-                # Use SCAN to find and delete keys matching pattern
-                if hasattr(redis_conn, 'scan_iter'):
-                    keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
-                    if keys_to_delete:
-                        redis_conn.delete(*keys_to_delete)
-                        frappe.logger().info(f"✅ Deleted {len(keys_to_delete)} cache keys matching '{pattern}'")
-                else:
-                    # Fallback: Try direct delete (may not work with wildcard)
-                    cache.delete_key(pattern)
-            except Exception as pattern_error:
-                frappe.logger().warning(f"Failed to clear pattern '{pattern}': {pattern_error}")
-        
-        frappe.logger().info("✅ Cleared all teacher dashboard caches")
-        
-    except Exception as cache_error:
-        frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+from erp.api.erp_sis.utils.cache_utils import clear_teacher_dashboard_cache
 
 
 @frappe.whitelist(allow_guest=False)

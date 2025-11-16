@@ -11,52 +11,7 @@ from erp.utils.api_response import (
     not_found_response,
     forbidden_response
 )
-
-
-def _clear_teacher_classes_cache():
-    """Clear Redis cache for get_teacher_classes API after class changes."""
-    try:
-        cache = frappe.cache()
-        frappe.logger().info("🗑️ Starting cache clear for teacher classes...")
-        
-        # ⚡ Clear cache using Redis pattern matching (wildcard support)
-        # Frappe cache uses Redis backend, so we can use Redis commands directly
-        cache_patterns = [
-            "teacher_classes:*",
-            "teacher_classes_v2:*",
-            "teacher_week:*",
-            "teacher_week_v2:*",
-            "class_week:*"
-        ]
-        
-        total_deleted = 0
-        for pattern in cache_patterns:
-            try:
-                # Get Redis connection from frappe cache
-                redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
-                
-                # 🔍 DEBUG: Log Redis connection type
-                frappe.logger().info(f"🔍 Redis connection type: {type(redis_conn).__name__}")
-                
-                # Use SCAN to find and delete keys matching pattern
-                if hasattr(redis_conn, 'scan_iter'):
-                    keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
-                    if keys_to_delete:
-                        redis_conn.delete(*keys_to_delete)
-                        total_deleted += len(keys_to_delete)
-                        frappe.logger().info(f"✅ Deleted {len(keys_to_delete)} cache keys matching '{pattern}'")
-                    else:
-                        frappe.logger().info(f"ℹ️ No cache keys found matching '{pattern}'")
-                else:
-                    frappe.logger().warning(f"⚠️ Redis connection does not support scan_iter, trying fallback for '{pattern}'")
-                    # Fallback: Try direct delete (may not work with wildcard)
-                    cache.delete_key(pattern)
-            except Exception as pattern_error:
-                frappe.logger().warning(f"❌ Failed to clear pattern '{pattern}': {pattern_error}")
-        
-        frappe.logger().info(f"✅ Cache clear complete: {total_deleted} total keys deleted")
-    except Exception as cache_error:
-        frappe.logger().warning(f"❌ Cache clear failed (non-critical): {cache_error}")
+from erp.api.erp_sis.utils.cache_utils import clear_teacher_dashboard_cache
 
 
 @frappe.whitelist(allow_guest=False)
@@ -638,7 +593,7 @@ def create_class():
         frappe.db.commit()
         
         # ⚡ CLEAR CACHE: Invalidate teacher classes cache after class creation
-        _clear_teacher_classes_cache()
+        clear_teacher_dashboard_cache()
 
         # Enhance the response with teacher information
         response_data = doc.as_dict()
@@ -839,7 +794,7 @@ def update_class(class_id: str = None):
         frappe.db.commit()
         
         # ⚡ CLEAR CACHE: Invalidate teacher classes cache after class update
-        _clear_teacher_classes_cache()
+        clear_teacher_dashboard_cache()
         
         # Return updated data with teacher information
         updated_doc = frappe.get_doc("SIS Class", class_id)
@@ -1341,7 +1296,7 @@ def delete_class(class_id: str = None):
         frappe.db.commit()
         
         # ⚡ CLEAR CACHE: Invalidate teacher classes cache after class deletion
-        _clear_teacher_classes_cache()
+        clear_teacher_dashboard_cache()
         
         return success_response(message="Class deleted successfully")
     except Exception as e:

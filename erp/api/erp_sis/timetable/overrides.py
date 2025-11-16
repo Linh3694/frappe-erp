@@ -18,6 +18,7 @@ from erp.utils.api_response import (
     validation_error_response,
 )
 from .helpers import _get_request_arg
+from erp.api.erp_sis.utils.cache_utils import clear_teacher_dashboard_cache
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST", "PUT"])
@@ -148,39 +149,7 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         
         # ⚡ INVALIDATE CACHE: Clear Redis cache for affected timetables
         # This ensures frontend gets fresh data after override
-        try:
-            cache = frappe.cache()
-            
-            # ⚡ Clear cache using Redis pattern matching (wildcard support)
-            cache_patterns = [
-                "teacher_classes:*",
-                "teacher_classes_v2:*",
-                "teacher_week:*",
-                "teacher_week_v2:*",
-                "class_week:*"
-            ]
-            
-            for pattern in cache_patterns:
-                try:
-                    # Get Redis connection from frappe cache
-                    redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
-                    
-                    # Use SCAN to find and delete keys matching pattern
-                    if hasattr(redis_conn, 'scan_iter'):
-                        keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
-                        if keys_to_delete:
-                            redis_conn.delete(*keys_to_delete)
-                            frappe.logger().info(f"✅ Deleted {len(keys_to_delete)} cache keys matching '{pattern}'")
-                    else:
-                        # Fallback: Try direct delete (may not work with wildcard)
-                        cache.delete_key(pattern)
-                except Exception as pattern_error:
-                    frappe.logger().warning(f"Failed to clear pattern '{pattern}': {pattern_error}")
-            
-            frappe.logger().info("✅ Cleared all timetable caches after override")
-            
-        except Exception as cache_error:
-            frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
+        clear_teacher_dashboard_cache()
         
         # PRIORITY 3.5: Sync Teacher Timetable for date-specific override
         # Note: Teacher timetable sync is temporarily disabled due to validation issues
@@ -255,6 +224,9 @@ def delete_timetable_override(override_id: str = None):
         
         if deleted_count:
             frappe.db.commit()
+            
+            # ⚡ CLEAR CACHE: Invalidate teacher dashboard cache after override deletion
+            clear_teacher_dashboard_cache()
             
             # TODO: Sync teacher timetable when deleting override
             
