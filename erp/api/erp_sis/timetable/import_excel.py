@@ -218,7 +218,9 @@ def get_import_job_status():
             frappe.logger().info(f"   All request.args: {dict(frappe.request.args)}")
         
         # Check for final result first
-        result_key = f"timetable_import_result_{frappe.session.user}"
+        # Use job_id for cache key instead of user_id to avoid session mismatch
+        result_key = f"timetable_import_result_{job_id}" if job_id else f"timetable_import_result_{frappe.session.user}"
+        frappe.logger().info(f"🔍 Checking result_key: {result_key}")
         result = frappe.cache().get_value(result_key)
         
         if result:

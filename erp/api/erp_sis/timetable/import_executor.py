@@ -1415,8 +1415,9 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			
 			# Store result in cache for frontend polling
 			# This is CRITICAL - FE needs to poll this to show errors
+			# Use job_id as cache key (not user_id) to avoid session mismatch
 			if job_id:
-				result_key = f"timetable_import_result_{user_id}"
+				result_key = f"timetable_import_result_{job_id}"
 				result_data = {
 					"success": False,
 					"status": "failed",  # Add explicit status for FE
@@ -1433,12 +1434,14 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 					"debug": debug_info
 				}
 				frappe.logger().info(f"💾 Saving validation failed result to cache: {result_key}")
+				frappe.logger().info(f"   Cache key uses job_id (not user_id) to ensure FE polling matches")
 				try:
 					frappe.cache().set_value(result_key, result_data, expires_in_sec=3600)
 					# Verify cache was set
 					verify = frappe.cache().get_value(result_key)
 					if verify:
 						frappe.logger().info(f"✅ Cache saved and verified successfully")
+						frappe.logger().info(f"   FE should poll with job_id={job_id}")
 					else:
 						frappe.logger().error(f"❌ Cache verification failed - data not found after set")
 				except Exception as cache_error:
@@ -1482,9 +1485,9 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		if dry_run:
 			frappe.logger().info("🔍 DRY RUN mode - returning validation preview")
 			
-			# Store result in cache
+			# Store result in cache (use job_id as key)
 			if job_id:
-				result_key = f"timetable_import_result_{user_id}"
+				result_key = f"timetable_import_result_{job_id}"
 				frappe.cache().set_value(result_key, {
 					"success": True,
 					"dry_run": True,
@@ -1555,8 +1558,8 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 		}
 		
 		# IMPORTANT: Store final result in cache BEFORE returning
-		# FORCE save even if job_id/user_id might be missing
-		result_key = f"timetable_import_result_{user_id or 'unknown'}"
+		# Use job_id as cache key (consistent with validation error caching)
+		result_key = f"timetable_import_result_{job_id or 'unknown'}"
 		debug_info["cache_key_plain"] = result_key
 		debug_info["job_id_value"] = job_id
 		debug_info["user_id_value"] = user_id
@@ -1625,11 +1628,12 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			message=f"Error: {str(e)}\n\nTraceback:\n{error_trace}"
 		)
 		
-		# Store error in cache
+		# Store error in cache (use job_id as key)
 		if job_id:
-			result_key = f"timetable_import_result_{user_id}"
+			result_key = f"timetable_import_result_{job_id}"
 			frappe.cache().set_value(result_key, {
 				"success": False,
+				"status": "failed",
 				"errors": [f"Critical error: {str(e)}"],
 				"logs": ["💥 Import failed with critical error"],
 				"debug": debug_info
