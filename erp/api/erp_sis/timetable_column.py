@@ -54,7 +54,10 @@ def format_time_for_html(time_value):
 
 @frappe.whitelist(allow_guest=False)
 def get_all_timetable_columns():
-    """Get all timetable columns with basic information - SIMPLE VERSION"""
+    """Get all timetable columns with basic information - SIMPLE VERSION
+    
+    ⚡ Performance: Cached for 15 minutes (shared cache - master data)
+    """
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -72,6 +75,22 @@ def get_all_timetable_columns():
         if education_stage:
             filters["education_stage_id"] = education_stage
             print(f"🎯 BACKEND: filters after adding education_stage: {filters}")
+        
+        # ⚡ CACHE: Check Redis cache first (15 min TTL - shared cache for master data)
+        cache_key = f"schedules:{campus_id}:{education_stage or 'all'}"
+        
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for schedules {campus_id}/{education_stage or 'all'}")
+                return list_response(
+                    data=cached_data,
+                    message="Timetable columns fetched successfully (cached)"
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+        
+        frappe.logger().info(f"❌ Cache MISS for schedules {campus_id}/{education_stage or 'all'} - fetching from DB")
             
         timetables = frappe.get_all(
             "SIS Timetable Column",
@@ -95,6 +114,13 @@ def get_all_timetable_columns():
         for timetable in timetables:
             timetable["start_time"] = format_time_for_html(timetable.get("start_time"))
             timetable["end_time"] = format_time_for_html(timetable.get("end_time"))
+
+        # ⚡ CACHE: Store result in Redis (15 min = 900 sec)
+        try:
+            frappe.cache().set_value(cache_key, timetables, expires_in_sec=900)
+            frappe.logger().info(f"✅ Cached schedules for {campus_id}/{education_stage or 'all'}")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
 
         print(f"🎯 BACKEND: Returning {len(timetables)} timetable columns")
         return list_response(timetables, "Timetable columns fetched successfully")
@@ -420,6 +446,18 @@ def update_timetable_column():
         frappe.db.commit()
         frappe.logger().info(f"Update timetable column - Document saved and committed successfully")
         
+        # ⚡ CACHE: Clear schedules cache after update
+        try:
+            # Clear both specific education_stage cache and 'all' cache
+            education_stage_for_cache = timetable_column_doc.education_stage_id
+            cache_key_specific = f"schedules:{campus_id}:{education_stage_for_cache}"
+            cache_key_all = f"schedules:{campus_id}:all"
+            frappe.cache().delete_key(cache_key_specific)
+            frappe.cache().delete_key(cache_key_all)
+            frappe.logger().info(f"✅ Cleared schedules cache after update")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache clear failed: {cache_error}")
+        
         # Format time fields for HTML time input (HH:MM format)
         start_time_formatted = format_time_for_html(timetable_column_doc.start_time)
         end_time_formatted = format_time_for_html(timetable_column_doc.end_time)
@@ -499,8 +537,19 @@ def delete_timetable_column():
             return not_found_response("Timetable column not found")
 
         # Delete the document
+        education_stage_for_cache = timetable_column_doc.education_stage_id
         frappe.delete_doc("SIS Timetable Column", timetable_column_id)
         frappe.db.commit()
+        
+        # ⚡ CACHE: Clear schedules cache after delete
+        try:
+            cache_key_specific = f"schedules:{campus_id}:{education_stage_for_cache}"
+            cache_key_all = f"schedules:{campus_id}:all"
+            frappe.cache().delete_key(cache_key_specific)
+            frappe.cache().delete_key(cache_key_all)
+            frappe.logger().info(f"✅ Cleared schedules cache after delete")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache clear failed: {cache_error}")
 
         return success_response(message="Timetable column deleted successfully")
 
@@ -668,6 +717,16 @@ def create_timetable_column():
             frappe.db.commit()
 
             frappe.logger().info(f"Create timetable column - Record created successfully: {timetable_column_doc.name}")
+            
+            # ⚡ CACHE: Clear schedules cache after create
+            try:
+                cache_key_specific = f"schedules:{campus_id}:{education_stage_id}"
+                cache_key_all = f"schedules:{campus_id}:all"
+                frappe.cache().delete_key(cache_key_specific)
+                frappe.cache().delete_key(cache_key_all)
+                frappe.logger().info(f"✅ Cleared schedules cache after create")
+            except Exception as cache_error:
+                frappe.logger().warning(f"Cache clear failed: {cache_error}")
 
             # Return the created data - follow Education Stage pattern
             timetable_data = {

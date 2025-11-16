@@ -15,7 +15,10 @@ from erp.utils.api_response import (
 
 @frappe.whitelist(allow_guest=False)
 def get_all_education_stages():
-    """Get all education stages with basic information"""
+    """Get all education stages with basic information
+    
+    ⚡ Performance: Cached for 30 minutes (shared cache - master data)
+    """
     try:
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
@@ -25,6 +28,22 @@ def get_all_education_stages():
             campus_id = "campus-1"
         
         filters = {"campus_id": campus_id}
+        
+        # ⚡ CACHE: Check Redis cache first (30 min TTL - shared cache for master data)
+        cache_key = f"education_stages:all:{campus_id}"
+        
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for education_stages {campus_id}")
+                return list_response(
+                    data=cached_data,
+                    message="Education stages fetched successfully (cached)"
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+        
+        frappe.logger().info(f"❌ Cache MISS for education_stages {campus_id} - fetching from DB")
             
         education_stages = frappe.get_all(
             "SIS Education Stage",
@@ -40,6 +59,13 @@ def get_all_education_stages():
             filters=filters,
             order_by="title_vn asc"
         )
+        
+        # ⚡ CACHE: Store result in Redis (30 min = 1800 sec)
+        try:
+            frappe.cache().set_value(cache_key, education_stages, expires_in_sec=1800)
+            frappe.logger().info(f"✅ Cached education_stages for {campus_id}")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
         
         return list_response(
             data=education_stages,
@@ -197,6 +223,14 @@ def create_education_stage():
         })
         
         stage_doc.insert(ignore_permissions=True)
+        
+        # ⚡ CACHE: Clear education stages cache after create
+        try:
+            cache_key = f"education_stages:all:{campus_id}"
+            frappe.cache().delete_key(cache_key)
+            frappe.logger().info(f"✅ Cleared education_stages cache after create")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache clear failed: {cache_error}")
 
         return single_item_response(
             data=stage_doc.as_dict(),
@@ -283,6 +317,14 @@ def update_education_stage():
         
         stage_doc.save(ignore_permissions=True)
         
+        # ⚡ CACHE: Clear education stages cache after update
+        try:
+            cache_key = f"education_stages:all:{stage_doc.campus_id}"
+            frappe.cache().delete_key(cache_key)
+            frappe.logger().info(f"✅ Cleared education_stages cache after update")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache clear failed: {cache_error}")
+        
         return single_item_response(
             data=stage_doc.as_dict(),
             message="Education stage updated successfully"
@@ -348,7 +390,16 @@ def delete_education_stage():
         # before deleting
         
         # Delete the stage
+        campus_for_cache = stage_doc.campus_id
         frappe.delete_doc("SIS Education Stage", stage_id, ignore_permissions=True)
+        
+        # ⚡ CACHE: Clear education stages cache after delete
+        try:
+            cache_key = f"education_stages:all:{campus_for_cache}"
+            frappe.cache().delete_key(cache_key)
+            frappe.logger().info(f"✅ Cleared education_stages cache after delete")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache clear failed: {cache_error}")
         
         return success_response(
             message="Education stage deleted successfully"

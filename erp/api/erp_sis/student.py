@@ -383,6 +383,8 @@ def get_student_data():
 def batch_get_students():
     """Get multiple students by IDs in a single request
     
+    ⚡ Performance: Cached for 15 minutes (master data)
+    
     Request body:
     {
         "student_ids": ["STU-001", "STU-002", ...]
@@ -430,15 +432,43 @@ def batch_get_students():
                 message="No students requested"
             )
         
-        frappe.logger().info(f"🔍 [Backend] batch_get_students: Fetching {len(student_ids)} students")
+        # ⚡ CACHE: Try to get from individual student caches first (15 min TTL - master data)
+        cached_students = {}
+        missing_ids = []
+        
+        try:
+            cache = frappe.cache()
+            for sid in student_ids:
+                cache_key = f"student:{sid}"
+                cached = cache.get_value(cache_key)
+                if cached:
+                    cached_students[sid] = cached
+                else:
+                    missing_ids.append(sid)
+            
+            if cached_students:
+                frappe.logger().info(f"✅ Cache HIT for {len(cached_students)}/{len(student_ids)} students")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+            missing_ids = student_ids  # Fetch all if cache fails
+        
+        if not missing_ids:
+            # All students from cache
+            return success_response(
+                data=list(cached_students.values()),
+                message=f"Successfully fetched {len(cached_students)} students (all from cache)"
+            )
+        
+        frappe.logger().info(f"❌ Cache MISS for {len(missing_ids)} students - fetching from DB")
+        frappe.logger().info(f"🔍 [Backend] batch_get_students: Fetching {len(missing_ids)} students from DB")
         
         # Get current user's campus (for permission check)
         campus_id = get_current_campus_from_context()
         
-        # Batch query all students by IDs
+        # Batch query only missing students by IDs
         students = frappe.get_all(
             "CRM Student",
-            filters={"name": ["in", student_ids]},
+            filters={"name": ["in", missing_ids]},
             fields=[
                 "name",
                 "student_name", 
@@ -499,9 +529,21 @@ def batch_get_students():
                 # Don't fail the whole request if photo loading fails
                 frappe.logger().warning(f"⚠️ [Backend] Failed to load photos: {str(photo_error)}")
         
+        # ⚡ CACHE: Store individual students in cache (15 min = 900 sec)
+        try:
+            for student in students:
+                cache_key = f"student:{student['name']}"
+                cache.set_value(cache_key, student, expires_in_sec=900)
+            frappe.logger().info(f"✅ Cached {len(students)} students individually")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
+        
+        # Combine cached and freshly fetched students
+        all_students = list(cached_students.values()) + students
+        
         return success_response(
-            data=students,
-            message=f"Successfully fetched {len(students)} students"
+            data=all_students,
+            message=f"Successfully fetched {len(all_students)} students ({len(cached_students)} from cache, {len(students)} from DB)"
         )
         
     except Exception as e:

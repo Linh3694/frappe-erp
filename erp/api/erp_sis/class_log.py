@@ -15,6 +15,10 @@ def _get_body():
 
 @frappe.whitelist(allow_guest=False)
 def get_class_log_options(education_stage=None):
+    """Get class log options (master data)
+    
+    ⚡ Performance: Cached for 30 minutes (shared cache - master data)
+    """
     try:
         if not education_stage and getattr(frappe, 'request', None):
             education_stage = frappe.request.args.get('education_stage')
@@ -22,6 +26,23 @@ def get_class_log_options(education_stage=None):
         filters = {"is_active": 1}
         if education_stage:
             filters["education_stage"] = education_stage
+        
+        # ⚡ CACHE: Check Redis cache first (30 min TTL - shared cache for master data)
+        cache_key = f"class_log_options:{education_stage or 'all'}"
+        
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for class_log_options {education_stage or 'all'}")
+                return success_response(
+                    data=cached_data,
+                    message="Options fetched (cached)",
+                    meta={"backend_logs": {"count": sum(len(v) for v in cached_data.values()), "cached": True}}
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+        
+        frappe.logger().info(f"❌ Cache MISS for class_log_options {education_stage or 'all'} - fetching from DB")
 
         rows = frappe.get_all(
             "SIS Class Log Score",
@@ -35,6 +56,13 @@ def get_class_log_options(education_stage=None):
             t = (r.get('type') or '').lower()
             if t in grouped:
                 grouped[t].append(r)
+        
+        # ⚡ CACHE: Store result in Redis (30 min = 1800 sec)
+        try:
+            frappe.cache().set_value(cache_key, grouped, expires_in_sec=1800)
+            frappe.logger().info(f"✅ Cached class_log_options for {education_stage or 'all'}")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
 
         meta = {"backend_logs": {"count": len(rows)}}
         return success_response(data=grouped, message="Options fetched", meta=meta)
@@ -45,6 +73,10 @@ def get_class_log_options(education_stage=None):
 
 @frappe.whitelist(allow_guest=False)
 def get_class_log(timetable_instance=None, class_id=None, date=None, period=None):
+    """Get class log data for a specific period
+    
+    ⚡ Performance: Cached for 10 minutes (user-specific)
+    """
     try:
         if not timetable_instance and getattr(frappe, 'request', None):
             timetable_instance = frappe.request.args.get('timetable_instance')
@@ -68,6 +100,24 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             if not inst_row:
                 return error_response(message="No timetable instance found for class/date", code="INSTANCE_NOT_FOUND")
             timetable_instance = inst_row[0]['name']
+        
+        # ⚡ CACHE: Check Redis cache first (10 min TTL - user-specific)
+        # Use class_id+date+period as key (more stable than timetable_instance)
+        cache_key = f"class_log:{class_id}:{date}:{period or 'none'}"
+        
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for class_log {class_id}/{date}/{period or 'none'}")
+                return success_response(
+                    data=cached_data,
+                    message="Class log fetched (cached)",
+                    meta={"class_id": cached_data.get("subject", {}).get("class_id"), "backend_logs": {"cached": True}}
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+        
+        frappe.logger().info(f"❌ Cache MISS for class_log {class_id}/{date}/{period or 'none'} - fetching from DB")
 
         # Ensure subject record exists for this instance
         filters = {"timetable_instance_id": timetable_instance}
@@ -149,6 +199,14 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             },
             "students": student_logs
         }
+        
+        # ⚡ CACHE: Store result in Redis (10 min = 600 sec)
+        try:
+            frappe.cache().set_value(cache_key, data, expires_in_sec=600)
+            frappe.logger().info(f"✅ Cached class_log for {class_id}/{date}/{period or 'none'}")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
+        
         meta = {"class_id": class_id, "backend_logs": {"subject_created": not bool(subject_rows), "prefilled_from_class_students": not bool(subject_rows) or len(student_logs) == 0}}
         return success_response(data=data, message="Class log fetched", meta=meta)
     except Exception as e:
@@ -257,6 +315,27 @@ def save_class_log():
                 upserts += 1
 
         frappe.db.commit()
+        
+        # ⚡ CACHE: Clear class log cache after save (both single and batch)
+        try:
+            # Clear single period cache
+            cache_key = f"class_log:{class_id}:{date}:{period or 'none'}"
+            frappe.cache().delete_key(cache_key)
+            
+            # Clear batch cache - use wildcard pattern
+            cache = frappe.cache()
+            redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
+            if hasattr(redis_conn, 'scan_iter'):
+                batch_pattern = f"*class_logs_batch:{class_id}:{date}:*"
+                batch_keys = list(redis_conn.scan_iter(match=batch_pattern, count=100))
+                if batch_keys:
+                    redis_conn.delete(*batch_keys)
+                    frappe.logger().info(f"✅ Cleared {len(batch_keys)} batch cache keys for {class_id}/{date}")
+            
+            frappe.logger().info(f"✅ Cleared class_log cache after save: {class_id}/{date}/{period or 'none'}")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache clear failed: {cache_error}")
+        
         meta = {"class_id": class_id, "backend_logs": {"inserted": upserts, "total": len(items)}}
         return success_response(message=f"Saved class log ({upserts} inserted)", meta=meta)
     except Exception as e:
@@ -269,6 +348,8 @@ def save_class_log():
 def batch_get_class_logs():
     """
     Get class logs for multiple periods in a single request
+    
+    ⚡ Performance: Cached for 10 minutes (user-specific)
     
     POST body:
     {
@@ -301,6 +382,25 @@ def batch_get_class_logs():
                 code="MISSING_PARAMS"
             )
         
+        # ⚡ CACHE: Check Redis cache first (10 min TTL - user-specific)
+        # Hash periods list for stable cache key
+        import hashlib
+        import json
+        periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
+        cache_key = f"class_logs_batch:{class_id}:{date}:periods_{periods_hash}"
+        
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for batch_class_logs {class_id}/{date} ({len(periods)} periods)")
+                return success_response(
+                    data=cached_data,
+                    message=f"Fetched class logs for {len(periods)} periods (cached)"
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+        
+        frappe.logger().info(f"❌ Cache MISS for batch_class_logs {class_id}/{date} - fetching from DB")
         frappe.logger().info(f"📅 [Backend] Getting class logs for {len(periods)} periods")
         
         # Get timetable instance for this class/date
@@ -403,6 +503,13 @@ def batch_get_class_logs():
                 }
         
         frappe.logger().info(f"✅ [Backend] Returning logs for {len(result)} periods")
+        
+        # ⚡ CACHE: Store result in Redis (10 min = 600 sec)
+        try:
+            frappe.cache().set_value(cache_key, result, expires_in_sec=600)
+            frappe.logger().info(f"✅ Cached batch_class_logs for {class_id}/{date}")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
         
         return success_response(
             data=result,

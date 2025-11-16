@@ -30,6 +30,8 @@ def _get_json_body():
 def get_class_attendance(class_id=None, date=None, period=None):
 	"""Return attendance records for a class on a date and period.
 	Params may be provided in query string or function args.
+	
+	⚡ Performance: Cached for 5 minutes (critical real-time data)
 	"""
 	try:
 		if not class_id:
@@ -41,6 +43,22 @@ def get_class_attendance(class_id=None, date=None, period=None):
 
 		if not class_id or not date or not period:
 			return error_response(message="Missing required parameters: class_id, date, period", code="MISSING_PARAMETERS")
+		
+		# ⚡ CACHE: Check Redis cache first (5 min TTL - critical real-time data)
+		cache_key = f"attendance:{class_id}:{date}:{period}"
+		
+		try:
+			cached_data = frappe.cache().get_value(cache_key)
+			if cached_data:
+				frappe.logger().info(f"✅ Cache HIT for attendance {class_id}/{date}/{period}")
+				return success_response(
+					data=cached_data,
+					message="Attendance fetched successfully (cached)"
+				)
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache read failed: {cache_error}")
+		
+		frappe.logger().info(f"❌ Cache MISS for attendance {class_id}/{date}/{period} - fetching from DB")
 
 		rows = frappe.get_all(
 			"SIS Class Attendance",
@@ -53,6 +71,14 @@ def get_class_attendance(class_id=None, date=None, period=None):
 				"name", "student_id", "student_code", "student_name", "class_id", "date", "period", "status", "remarks",
 			]
 		)
+		
+		# ⚡ CACHE: Store result in Redis (5 min = 300 sec)
+		try:
+			frappe.cache().set_value(cache_key, rows, expires_in_sec=300)
+			frappe.logger().info(f"✅ Cached attendance for {class_id}/{date}/{period}")
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache write failed: {cache_error}")
+		
 		return success_response(data=rows, message="Attendance fetched successfully")
 	except Exception as e:
 		frappe.log_error(f"get_class_attendance error: {str(e)}")
@@ -62,6 +88,8 @@ def get_class_attendance(class_id=None, date=None, period=None):
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def batch_get_class_attendance(class_id=None, date=None, periods=None):
 	"""Get attendance for multiple periods in a single request.
+	
+	⚡ Performance: Cached for 5 minutes (critical real-time data)
 	
 	Request body:
 	{
@@ -101,6 +129,24 @@ def batch_get_class_attendance(class_id=None, date=None, periods=None):
 		if not isinstance(periods, list) or not periods:
 			return error_response(message="periods must be a non-empty array", code="INVALID_PERIODS")
 		
+		# ⚡ CACHE: Check Redis cache first (5 min TTL - critical real-time data)
+		# Hash periods list for stable cache key
+		import hashlib
+		periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
+		cache_key = f"attendance_batch:{class_id}:{date}:periods_{periods_hash}"
+		
+		try:
+			cached_data = frappe.cache().get_value(cache_key)
+			if cached_data:
+				frappe.logger().info(f"✅ Cache HIT for batch_attendance {class_id}/{date} ({len(periods)} periods)")
+				return success_response(
+					data=cached_data,
+					message="Batch attendance fetched successfully (cached)"
+				)
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache read failed: {cache_error}")
+		
+		frappe.logger().info(f"❌ Cache MISS for batch_attendance {class_id}/{date} - fetching from DB")
 		frappe.logger().info(f"🔍 [Backend] batch_get_class_attendance: class={class_id}, date={date}, periods={len(periods)}")
 		
 		# Batch query all periods at once
@@ -128,6 +174,13 @@ def batch_get_class_attendance(class_id=None, date=None, periods=None):
 				result[period].append(row)
 		
 		frappe.logger().info(f"✅ [Backend] batch_get_class_attendance: Found {len(rows)} total records across {len(periods)} periods")
+		
+		# ⚡ CACHE: Store result in Redis (5 min = 300 sec)
+		try:
+			frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+			frappe.logger().info(f"✅ Cached batch_attendance for {class_id}/{date}")
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache write failed: {cache_error}")
 		
 		return success_response(data=result, message="Batch attendance fetched successfully")
 	except Exception as e:
@@ -262,6 +315,35 @@ def save_class_attendance(items=None, overwrite=None):
 				upserts += 1
 
 		frappe.db.commit()
+		
+		# ⚡ CACHE: Clear attendance cache after save (both single and batch)
+		try:
+			cache = frappe.cache()
+			redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
+			
+			if hasattr(redis_conn, 'scan_iter'):
+				# Clear all affected cache keys
+				cache_cleared = 0
+				for item in valid_items:
+					class_id = item['class_id']
+					date = item['date']
+					period = item['period']
+					
+					# Clear single period cache
+					single_key = f"attendance:{class_id}:{date}:{period}"
+					cache.delete_key(single_key)
+					
+					# Clear batch cache patterns for this class/date
+					batch_pattern = f"*attendance_batch:{class_id}:{date}:*"
+					batch_keys = list(redis_conn.scan_iter(match=batch_pattern, count=100))
+					if batch_keys:
+						redis_conn.delete(*batch_keys)
+						cache_cleared += len(batch_keys)
+				
+				frappe.logger().info(f"✅ Cleared attendance cache after save ({cache_cleared} batch keys)")
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache clear failed: {cache_error}")
+		
 		return success_response(message=f"Saved attendance ({upserts} inserted, {updates} updated)")
 	except Exception as e:
 		frappe.db.rollback()

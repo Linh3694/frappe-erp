@@ -205,6 +205,129 @@ def clear_all_assignment_cache():
 		return {"success": False, "error": str(e)}
 
 
+def clear_cache_pattern(pattern):
+	"""
+	Clear all Redis keys matching a pattern.
+	
+	Args:
+		pattern: Redis pattern (e.g., "*attendance:CLASS-001:*")
+	
+	Returns:
+		int: Number of keys deleted
+	"""
+	try:
+		cache = frappe.cache()
+		redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
+		
+		if hasattr(redis_conn, 'scan_iter'):
+			keys = list(redis_conn.scan_iter(match=pattern, count=100))
+			if keys:
+				deleted = redis_conn.delete(*keys)
+				frappe.logger().info(f"✅ Cleared {deleted} keys matching pattern '{pattern}'")
+				return deleted
+			return 0
+		return 0
+	except Exception as e:
+		frappe.logger().error(f"Failed to clear pattern {pattern}: {e}")
+		return 0
+
+
+def clear_attendance_cache(class_id, date):
+	"""
+	Clear all attendance cache for a class/date.
+	
+	Args:
+		class_id: SIS Class ID
+		date: Date string (YYYY-MM-DD)
+	"""
+	try:
+		patterns = [
+			f"*attendance:{class_id}:{date}:*",
+			f"*attendance_batch:{class_id}:{date}:*",
+			f"*event_attendance:{class_id}:{date}:*"
+		]
+		total_deleted = 0
+		for pattern in patterns:
+			deleted = clear_cache_pattern(pattern)
+			total_deleted += deleted
+		
+		frappe.logger().info(f"✅ Cleared {total_deleted} attendance cache keys for {class_id}/{date}")
+		return total_deleted
+	except Exception as e:
+		frappe.logger().error(f"Failed to clear attendance cache: {e}")
+		return 0
+
+
+def clear_class_log_cache(class_id, date):
+	"""
+	Clear class log cache for a class/date.
+	
+	Args:
+		class_id: SIS Class ID
+		date: Date string (YYYY-MM-DD)
+	"""
+	try:
+		patterns = [
+			f"*class_log:{class_id}:{date}:*",
+			f"*class_logs_batch:{class_id}:{date}:*"
+		]
+		total_deleted = 0
+		for pattern in patterns:
+			deleted = clear_cache_pattern(pattern)
+			total_deleted += deleted
+		
+		frappe.logger().info(f"✅ Cleared {total_deleted} class log cache keys for {class_id}/{date}")
+		return total_deleted
+	except Exception as e:
+		frappe.logger().error(f"Failed to clear class log cache: {e}")
+		return 0
+
+
+def clear_student_cache(student_id=None):
+	"""
+	Clear student cache.
+	
+	Args:
+		student_id: Specific student ID or None to clear all
+	"""
+	try:
+		if student_id:
+			cache_key = f"student:{student_id}"
+			frappe.cache().delete_key(cache_key)
+			frappe.logger().info(f"✅ Cleared cache for student {student_id}")
+			return 1
+		else:
+			deleted = clear_cache_pattern("*student:*")
+			frappe.logger().info(f"✅ Cleared {deleted} student cache keys")
+			return deleted
+	except Exception as e:
+		frappe.logger().error(f"Failed to clear student cache: {e}")
+		return 0
+
+
+def clear_master_data_cache():
+	"""
+	Clear all master data caches (schedules, education stages, classes, subjects).
+	Use this after bulk updates to master data.
+	"""
+	try:
+		patterns = [
+			"*schedules:*",
+			"*education_stages:*",
+			"*class_log_options:*"
+		]
+		total_deleted = 0
+		for pattern in patterns:
+			deleted = clear_cache_pattern(pattern)
+			total_deleted += deleted
+		
+		frappe.logger().info(f"✅ Cleared {total_deleted} master data cache keys")
+		return total_deleted
+	except Exception as e:
+		frappe.logger().error(f"Failed to clear master data cache: {e}")
+		return 0
+
+
 # Backward compatibility aliases
 _clear_teacher_classes_cache = clear_teacher_dashboard_cache
 clear_teacher_classes_cache = clear_teacher_dashboard_cache
