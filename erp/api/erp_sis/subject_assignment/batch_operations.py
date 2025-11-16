@@ -24,12 +24,36 @@ from .timetable_sync_v2 import sync_assignment_to_timetable
 def _clear_teacher_classes_cache():
 	"""Clear Redis cache for get_teacher_classes API after batch operations."""
 	try:
-		frappe.cache().delete_key("teacher_classes:*")
-		frappe.cache().delete_key("teacher_classes_v2:*")  # Optimized API cache
-		frappe.cache().delete_key("teacher_week:*")
-		frappe.cache().delete_key("teacher_week_v2:*")  # Optimized API cache
-		frappe.cache().delete_key("class_week:*")
-		frappe.logger().info("✅ Cleared caches after batch operation")
+		cache = frappe.cache()
+		
+		# ⚡ Clear cache using Redis pattern matching (wildcard support)
+		cache_patterns = [
+			"teacher_classes:*",
+			"teacher_classes_v2:*",
+			"teacher_week:*",
+			"teacher_week_v2:*",
+			"class_week:*"
+		]
+		
+		for pattern in cache_patterns:
+			try:
+				# Get Redis connection from frappe cache
+				redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
+				
+				# Use SCAN to find and delete keys matching pattern
+				if hasattr(redis_conn, 'scan_iter'):
+					keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
+					if keys_to_delete:
+						redis_conn.delete(*keys_to_delete)
+						frappe.logger().info(f"✅ Deleted {len(keys_to_delete)} cache keys matching '{pattern}'")
+				else:
+					# Fallback: Try direct delete (may not work with wildcard)
+					cache.delete_key(pattern)
+			except Exception as pattern_error:
+				frappe.logger().warning(f"Failed to clear pattern '{pattern}': {pattern_error}")
+		
+		frappe.logger().info("✅ Cleared all teacher/timetable caches after batch operation")
+		
 	except Exception as cache_error:
 		frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
 

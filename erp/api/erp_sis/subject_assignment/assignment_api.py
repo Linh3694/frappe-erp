@@ -40,16 +40,35 @@ def _clear_teacher_classes_cache(teacher_ids=None):
         teacher_ids: Optional list of specific teacher IDs to clear cache for
     """
     try:
-        # Clear all teacher_classes cache since it's affected by assignments
-        frappe.cache().delete_key("teacher_classes:*")
-        frappe.cache().delete_key("teacher_classes_v2:*")  # Optimized API cache
-        frappe.logger().info("✅ Cleared all teacher_classes caches after assignment change")
+        cache = frappe.cache()
         
-        # Also clear timetable caches as they might be affected
-        frappe.cache().delete_key("teacher_week:*")
-        frappe.cache().delete_key("teacher_week_v2:*")  # Optimized API cache
-        frappe.cache().delete_key("class_week:*")
-        frappe.logger().info("✅ Cleared timetable caches after assignment change")
+        # ⚡ Clear cache using Redis pattern matching (wildcard support)
+        cache_patterns = [
+            "teacher_classes:*",
+            "teacher_classes_v2:*",
+            "teacher_week:*",
+            "teacher_week_v2:*",
+            "class_week:*"
+        ]
+        
+        for pattern in cache_patterns:
+            try:
+                # Get Redis connection from frappe cache
+                redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
+                
+                # Use SCAN to find and delete keys matching pattern
+                if hasattr(redis_conn, 'scan_iter'):
+                    keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
+                    if keys_to_delete:
+                        redis_conn.delete(*keys_to_delete)
+                        frappe.logger().info(f"✅ Deleted {len(keys_to_delete)} cache keys matching '{pattern}'")
+                else:
+                    # Fallback: Try direct delete (may not work with wildcard)
+                    cache.delete_key(pattern)
+            except Exception as pattern_error:
+                frappe.logger().warning(f"Failed to clear pattern '{pattern}': {pattern_error}")
+        
+        frappe.logger().info("✅ Cleared all teacher/timetable caches after assignment change")
         
     except Exception as cache_error:
         frappe.logger().warning(f"Cache clear failed (non-critical): {cache_error}")
