@@ -43,12 +43,15 @@ def clear_teacher_dashboard_cache():
 		cache = frappe.cache()
 		logs.append("🗑️ Starting cache clear for teacher dashboard")
 		
+		# ⚠️ IMPORTANT: Frappe adds site hash prefix to cache keys
+		# Real key format: _2e0c5564d1360251|teacher_classes:xxx
+		# So we need to use *teacher_classes:* pattern (not teacher_classes:*)
 		cache_patterns = [
-			"teacher_classes:*",
-			"teacher_classes_v2:*",
-			"teacher_week:*",
-			"teacher_week_v2:*",
-			"class_week:*"
+			"*teacher_classes:*",
+			"*teacher_classes_v2:*",
+			"*teacher_week:*",
+			"*teacher_week_v2:*",
+			"*class_week:*"
 		]
 		
 		total_deleted = 0
