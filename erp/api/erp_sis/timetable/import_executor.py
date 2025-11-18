@@ -2176,3 +2176,114 @@ def sync_all_subject_assignments(campus_id=None, dry_run=False):
 		frappe.logger().error(f"❌ sync_all_subject_assignments error: {str(e)}")
 		return error_response(f"Sync failed: {str(e)}")
 
+
+@frappe.whitelist(allow_guest=False)
+def clean_failed_assignments():
+	"""
+	🧹 UTILITY: Xóa tất cả Subject Assignments không sync được.
+	
+	Use case: Clean data sau khi migration để hệ thống stable.
+	
+	Returns:
+		{
+			"success": bool,
+			"message": str,
+			"stats": {
+				"total": int,
+				"failed": int,
+				"deleted": int
+			}
+		}
+	
+	Usage:
+		# From bench console:
+		from erp.api.erp_sis.timetable.import_executor import clean_failed_assignments
+		result = clean_failed_assignments()
+		print(result)
+	"""
+	from erp.api.erp_sis.subject_assignment.timetable_sync_v2 import sync_assignment_to_timetable
+	from erp.utils.api_response import single_item_response, error_response
+	
+	try:
+		frappe.logger().info("🧹 Starting clean_failed_assignments")
+		
+		# Get all assignments
+		all_assignments = frappe.get_all(
+			"SIS Subject Assignment",
+			fields=["name"],
+			limit_page_length=999999
+		)
+		
+		print(f"\n📋 Found {len(all_assignments)} Subject Assignments")
+		print(f"🔍 Checking which ones can't sync...\n")
+		
+		failed_assignments = []
+		
+		# Test sync for each (without actually syncing)
+		for idx, assignment in enumerate(all_assignments, 1):
+			if idx % 100 == 0:
+				print(f"📊 Progress: {idx}/{len(all_assignments)} - Failed: {len(failed_assignments)}")
+			
+			try:
+				result = sync_assignment_to_timetable(assignment_id=assignment.name)
+				
+				if not result["success"]:
+					failed_assignments.append(assignment.name)
+					
+			except Exception as e:
+				failed_assignments.append(assignment.name)
+		
+		print(f"\n📊 Scan complete:")
+		print(f"  Total: {len(all_assignments)}")
+		print(f"  Can sync: {len(all_assignments) - len(failed_assignments)}")
+		print(f"  Failed: {len(failed_assignments)}")
+		
+		if len(failed_assignments) == 0:
+			print("\n✅ No failed assignments to clean!")
+			return single_item_response(
+				{"total": len(all_assignments), "failed": 0, "deleted": 0},
+				"No failed assignments found"
+			)
+		
+		# Delete failed assignments
+		print(f"\n🗑️  Deleting {len(failed_assignments)} failed assignments...")
+		deleted = 0
+		
+		for idx, name in enumerate(failed_assignments, 1):
+			try:
+				frappe.delete_doc("SIS Subject Assignment", name, force=True, ignore_permissions=True)
+				deleted += 1
+				
+				if idx % 100 == 0:
+					print(f"  Deleted: {idx}/{len(failed_assignments)}")
+					frappe.db.commit()
+					
+			except Exception as e:
+				frappe.logger().error(f"Failed to delete {name}: {str(e)}")
+		
+		# Final commit
+		frappe.db.commit()
+		
+		print(f"\n✅ Cleanup complete!")
+		print(f"  Deleted: {deleted}/{len(failed_assignments)} failed assignments")
+		print(f"  Remaining: {len(all_assignments) - deleted} valid assignments")
+		
+		frappe.logger().info(f"✅ clean_failed_assignments complete: deleted {deleted} assignments")
+		
+		return single_item_response(
+			{
+				"total": len(all_assignments),
+				"failed": len(failed_assignments),
+				"deleted": deleted,
+				"remaining": len(all_assignments) - deleted
+			},
+			f"Deleted {deleted} failed assignments, {len(all_assignments) - deleted} remaining"
+		)
+		
+	except Exception as e:
+		import traceback
+		error_trace = traceback.format_exc()
+		frappe.log_error(f"clean_failed_assignments failed: {error_trace}")
+		frappe.logger().error(f"❌ clean_failed_assignments error: {str(e)}")
+		return error_response(f"Cleanup failed: {str(e)}")
+
