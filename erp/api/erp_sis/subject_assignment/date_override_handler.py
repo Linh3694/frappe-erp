@@ -81,14 +81,22 @@ def create_date_override_row(instance_id, pattern_row, specific_date, teacher_id
         if override_teacher_2 and override_teacher_2 != override_teacher_1:
             teachers_to_assign.append(override_teacher_2)
         
+        # ✅ FIX: Insert document FIRST to get name, THEN append child table
+        # This ensures child rows have valid parent reference
+        override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+        
+        # Now that doc has name, append teachers child table
         for idx, teacher_id_val in enumerate(teachers_to_assign):
             override_doc.append("teachers", {
                 "teacher_id": teacher_id_val,
                 "sort_order": idx
             })
         
-        override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
-        frappe.logger().info(f"✅ Created override row {override_doc.name} for date {specific_date} with teacher_1={override_teacher_1}, teacher_2={override_teacher_2}")
+        # Save to persist child table changes
+        if teachers_to_assign:
+            override_doc.save(ignore_permissions=True)
+        
+        frappe.logger().info(f"✅ Created override row {override_doc.name} for date {specific_date} with {len(teachers_to_assign)} teachers: {teachers_to_assign}")
         return override_doc.name
         
     except Exception as e:

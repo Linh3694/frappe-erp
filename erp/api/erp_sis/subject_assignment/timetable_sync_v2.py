@@ -153,6 +153,9 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			# Clear existing teachers child table
 			row_doc.teachers = []
 			
+			# ✅ Save first to ensure parent reference exists
+			row_doc.save(ignore_permissions=True)
+			
 			# Add ALL teachers from assignments
 			for idx, tid in enumerate(teacher_ids, start=1):
 				row_doc.append("teachers", {
@@ -160,8 +163,9 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 					"sort_order": idx
 				})
 			
-			# Save the document
-			row_doc.save(ignore_permissions=True)
+			# Save the document with new child table entries
+			if teacher_ids:
+				row_doc.save(ignore_permissions=True)
 			updated_count += 1
 			
 			debug_info.append(f"  ✓ Updated row {row.name}: {len(teacher_ids)} teachers")
