@@ -824,29 +824,35 @@ class TimetableImportExecutor:
 	
 	def _queue_async_sync(self):
 		"""
-		Queue teacher timetable sync as background job instead of blocking import.
-		This makes import 10x faster.
+		⚡ SYNC DIRECTLY (not background) to ensure teacher timetable is immediately available.
+		Background jobs were getting stuck - synchronous execution is more reliable.
 		"""
 		if not self.processed_instances:
 			return
 		
-		frappe.logger().info(f"📤 Queueing async sync for {len(self.processed_instances)} instances")
-		self.logs.append(f"📤 Teacher Timetable sẽ được sync trong background...")
+		frappe.logger().info(f"🔄 Starting SYNCHRONOUS sync for {len(self.processed_instances)} instances")
+		self.logs.append(f"🔄 Đang sync Teacher Timetable...")
 		
-		# Enqueue sync job
+		# Call sync function DIRECTLY instead of enqueue
 		try:
-			frappe.enqueue(
-				method='erp.api.erp_sis.timetable.import_executor.sync_teacher_timetable_background',
-				queue='long',
-				timeout=3600,
-				is_async=True,
+			# Pass progress_callback to update progress in real-time
+			def sync_progress_callback(progress):
+				if self.progress_callback:
+					self.progress_callback(progress)
+			
+			# Call directly (not enqueue!)
+			sync_teacher_timetable_background(
 				instances_data=list(self.processed_instances.items()),
 				campus_id=self.metadata["campus_id"],
-				job_id=self.job_id  # Pass job_id for progress tracking
+				job_id=self.job_id,
+				progress_callback=sync_progress_callback
 			)
-			self.logs.append("✅ Background sync job đã được tạo")
+			self.logs.append("✅ Teacher Timetable sync hoàn tất")
+			frappe.logger().info("✅ Synchronous teacher timetable sync completed")
 		except Exception as e:
-			frappe.logger().error(f"Failed to enqueue sync: {str(e)}")
+			error_msg = f"Failed to sync teacher timetable: {str(e)}"
+			frappe.logger().error(error_msg)
+			self.logs.append(f"⚠️ {error_msg}")
 	
 	def _sync_materialized_views(self):
 		"""
@@ -1212,10 +1218,9 @@ def execute_timetable_import():
 		}
 
 
-def sync_teacher_timetable_background(instances_data, campus_id, job_id=None):
+def sync_teacher_timetable_background(instances_data, campus_id, job_id=None, progress_callback=None):
 	"""
-	Background job to sync teacher timetable after import.
-	This runs separately so import completes quickly.
+	Sync teacher timetable after import (now runs synchronously for reliability).
 	
 	Uses optimized bulk sync engine for 10x performance improvement.
 	
@@ -1223,8 +1228,9 @@ def sync_teacher_timetable_background(instances_data, campus_id, job_id=None):
 		instances_data: List of (instance_id, instance_info) tuples
 		campus_id: Campus ID
 		job_id: Job ID for progress tracking (optional)
+		progress_callback: Optional callback function for real-time progress (synchronous mode)
 	"""
-	frappe.logger().info(f"🔄 Background sync starting for {len(instances_data)} instances")
+	frappe.logger().info(f"🔄 Teacher timetable sync starting for {len(instances_data)} instances")
 	
 	from .bulk_sync_engine import sync_instance_bulk, delete_entries_in_range
 	
@@ -1233,21 +1239,31 @@ def sync_teacher_timetable_background(instances_data, campus_id, job_id=None):
 	total_instances = len(instances_data)
 	
 	# Update initial progress
+	progress_data = {
+		"phase": "syncing",
+		"current": 0,
+		"total": total_instances,
+		"percentage": 0,
+		"message": f"🔄 Bắt đầu sync {total_instances} lớp..."
+	}
+	
+	# Call progress callback if available (synchronous mode)
+	if progress_callback:
+		try:
+			progress_callback(progress_data)
+		except Exception as e:
+			frappe.logger().warning(f"Progress callback failed: {str(e)}")
+	
+	# Also save to cache if job_id available (backward compatibility)
 	if job_id:
 		try:
 			frappe.cache().set_value(
 				f"timetable_import_progress:{job_id}",
-				{
-					"phase": "syncing",
-					"current": 0,
-					"total": total_instances,
-					"percentage": 0,
-					"message": f"🔄 Bắt đầu sync {total_instances} lớp..."
-				},
+				progress_data,
 				expires_in_sec=7200
 			)
 		except Exception as e:
-			frappe.logger().warning(f"Failed to update progress: {str(e)}")
+			frappe.logger().warning(f"Failed to update progress cache: {str(e)}")
 	
 	for idx, (instance_id, instance_info) in enumerate(instances_data, 1):
 		try:
@@ -1258,23 +1274,33 @@ def sync_teacher_timetable_background(instances_data, campus_id, job_id=None):
 			frappe.logger().info(f"📊 Syncing instance {idx}/{total_instances}: {class_id}")
 			
 			# Update overall progress
+			percentage = int((idx / total_instances) * 100)
+			progress_data = {
+				"phase": "syncing",
+				"current": idx,
+				"total": total_instances,
+				"percentage": percentage,
+				"message": f"🔄 Đang sync lớp {class_id} ({idx}/{total_instances})...",
+				"current_class": class_id
+			}
+			
+			# Call progress callback if available (synchronous mode)
+			if progress_callback:
+				try:
+					progress_callback(progress_data)
+				except Exception as e:
+					frappe.logger().warning(f"Progress callback failed: {str(e)}")
+			
+			# Also save to cache if job_id available (backward compatibility)
 			if job_id:
 				try:
-					percentage = int((idx / total_instances) * 100)
 					frappe.cache().set_value(
 						f"timetable_import_progress:{job_id}",
-						{
-							"phase": "syncing",
-							"current": idx,
-							"total": total_instances,
-							"percentage": percentage,
-							"message": f"🔄 Đang sync lớp {class_id} ({idx}/{total_instances})...",
-							"current_class": class_id
-						},
+						progress_data,
 						expires_in_sec=7200
 					)
 				except Exception as e:
-					frappe.logger().warning(f"Failed to update progress: {str(e)}")
+					frappe.logger().warning(f"Failed to update progress cache: {str(e)}")
 			
 			# Detect if this is a shrink operation by checking if it's an update
 			# (instance_info will have a flag if dates were changed during _create_or_get_instance)
