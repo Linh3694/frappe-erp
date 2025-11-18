@@ -1352,6 +1352,108 @@ def sync_teacher_timetable_background(instances_data, campus_id, job_id=None, pr
 	frappe.db.commit()
 
 
+@frappe.whitelist(allow_guest=False)
+def resync_all_teacher_timetables(campus_id=None):
+	"""
+	🔄 UTILITY: Resync tất cả Teacher Timetables từ existing Timetable Instances.
+	
+	Use case: Khi Teacher Timetable table bị rỗng do background job stuck.
+	
+	Args:
+		campus_id: Optional campus filter (defaults to current campus)
+	
+	Returns:
+		{
+			"success": bool,
+			"message": str,
+			"stats": {
+				"instances_processed": int,
+				"teacher_entries": int,
+				"student_entries": int
+			}
+		}
+	"""
+	from erp.api.erp_sis.utils.response import success_response, error_response
+	from .bulk_sync_engine import sync_instance_bulk
+	
+	try:
+		# Get current campus if not specified
+		if not campus_id:
+			from erp.api.erp_sis.utils.campus import get_current_campus_from_context
+			campus_id = get_current_campus_from_context()
+			if not campus_id:
+				return error_response("No campus specified and cannot determine current campus")
+		
+		frappe.logger().info(f"🔄 Starting full Teacher Timetable resync for campus: {campus_id}")
+		
+		# Get all active Timetable Instances for campus
+		instances = frappe.get_all(
+			"SIS Timetable Instance",
+			filters={"campus_id": campus_id},
+			fields=["name", "class_id", "start_date", "end_date"],
+			order_by="modified DESC"
+		)
+		
+		if not instances:
+			return success_response(
+				data={"instances_processed": 0, "teacher_entries": 0, "student_entries": 0},
+				message=f"No timetable instances found for campus {campus_id}"
+			)
+		
+		frappe.logger().info(f"📊 Found {len(instances)} instances to sync")
+		
+		total_teacher = 0
+		total_student = 0
+		processed = 0
+		
+		# Sync each instance
+		for idx, inst in enumerate(instances, 1):
+			try:
+				frappe.logger().info(f"🔄 Syncing {idx}/{len(instances)}: {inst.class_id}")
+				
+				teacher_count, student_count = sync_instance_bulk(
+					instance_id=inst.name,
+					class_id=inst.class_id,
+					start_date=str(inst.start_date),
+					end_date=str(inst.end_date),
+					campus_id=campus_id
+				)
+				
+				total_teacher += teacher_count
+				total_student += student_count
+				processed += 1
+				
+				# Commit after each instance to avoid long transactions
+				frappe.db.commit()
+				
+				if idx % 10 == 0:
+					frappe.logger().info(f"📊 Progress: {idx}/{len(instances)} - {total_teacher} teacher entries so far")
+					
+			except Exception as inst_error:
+				frappe.logger().error(f"❌ Failed to sync instance {inst.name}: {str(inst_error)}")
+				# Continue with next instance
+				continue
+		
+		frappe.logger().info(f"✅ Resync complete: {processed}/{len(instances)} instances, {total_teacher} teacher entries, {total_student} student entries")
+		
+		return success_response(
+			data={
+				"instances_processed": processed,
+				"instances_total": len(instances),
+				"teacher_entries": total_teacher,
+				"student_entries": total_student
+			},
+			message=f"Resync complete: {processed} instances processed, {total_teacher} teacher entries created"
+		)
+		
+	except Exception as e:
+		import traceback
+		error_trace = traceback.format_exc()
+		frappe.log_error(f"Resync all failed: {error_trace}")
+		frappe.logger().error(f"❌ Resync error: {str(e)}")
+		return error_response(f"Resync failed: {str(e)}")
+
+
 def process_with_new_executor(file_path: str, title_vn: str, title_en: str, 
                                campus_id: str, school_year_id: str, 
                                education_stage_id: str, start_date: str, 
