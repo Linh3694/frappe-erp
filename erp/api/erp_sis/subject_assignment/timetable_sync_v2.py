@@ -816,24 +816,25 @@ def calculate_dates_for_day(
 
 def enqueue_materialized_view_sync(row_ids: List[str]):
 	"""
-	Enqueue background job để sync materialized views.
+	⚡ Sync materialized views DIRECTLY (no background job).
 	
-	This is async to avoid blocking the main request.
+	Background jobs were getting stuck - synchronous execution is more reliable.
+	Function renamed from enqueue_* but kept for backward compatibility.
 	"""
 	if not row_ids:
 		return
 	
 	try:
-		frappe.enqueue(
-			method='erp.api.erp_sis.utils.materialized_view_optimizer.sync_for_rows',
-			queue='short',
-			timeout=300,
-			is_async=True,
-			row_ids=row_ids
-		)
+		# Import and call directly instead of enqueue
+		from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
+		
+		frappe.logger().info(f"🔄 Starting SYNCHRONOUS materialized view sync for {len(row_ids)} rows")
+		sync_for_rows(row_ids)
+		frappe.logger().info(f"✅ Materialized view sync completed for {len(row_ids)} rows")
 	except Exception as e:
-		frappe.log_error(f"Failed to enqueue materialized view sync: {str(e)}")
-		# Don't fail the main operation if enqueue fails
+		frappe.log_error(f"Failed to sync materialized views: {str(e)}")
+		# Don't fail the main operation if sync fails
+		frappe.logger().warning(f"⚠️ Materialized view sync failed: {str(e)}")
 
 
 def get_teacher_name(teacher_id: str) -> str:
