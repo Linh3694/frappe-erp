@@ -62,6 +62,7 @@ def create_date_override_row(instance_id, pattern_row, specific_date, teacher_id
         override_doc = frappe.get_doc({
             "doctype": "SIS Timetable Instance Row",
             "parent": instance_id,
+            "parent_timetable_instance": instance_id,  # ✅ FIX: Set required Link field
             "parenttype": "SIS Timetable Instance",
             "parentfield": "weekly_pattern",
             "day_of_week": pattern_row.get("day_of_week"),
