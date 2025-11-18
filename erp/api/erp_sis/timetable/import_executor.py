@@ -1379,7 +1379,7 @@ def resync_all_teacher_timetables(campus_id=None):
 	try:
 		# Get current campus if not specified
 		if not campus_id:
-			from erp.api.erp_sis.utils.campus import get_current_campus_from_context
+			from erp.utils.campus_utils import get_current_campus_from_context
 			campus_id = get_current_campus_from_context()
 			if not campus_id:
 				return error_response("No campus specified and cannot determine current campus")
@@ -1436,14 +1436,14 @@ def resync_all_teacher_timetables(campus_id=None):
 		
 		frappe.logger().info(f"✅ Resync complete: {processed}/{len(instances)} instances, {total_teacher} teacher entries, {total_student} student entries")
 		
-		return success_response(
-			data={
+		return single_item_response(
+			{
 				"instances_processed": processed,
 				"instances_total": len(instances),
 				"teacher_entries": total_teacher,
 				"student_entries": total_student
 			},
-			message=f"Resync complete: {processed} instances processed, {total_teacher} teacher entries created"
+			f"Resync complete: {processed} instances processed, {total_teacher} teacher entries created"
 		)
 		
 	except Exception as e:
