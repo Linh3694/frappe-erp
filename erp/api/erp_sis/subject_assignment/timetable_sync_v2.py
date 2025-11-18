@@ -150,6 +150,11 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			# Get full document to update child table
 			row_doc = frappe.get_doc("SIS Timetable Instance Row", row.name)
 			
+			# ⚡ FIX: Set parent_timetable_instance to avoid validation error
+			# "Giá trị mất tích: Parent Timetable Instance"
+			if not row_doc.parent_timetable_instance:
+				row_doc.parent_timetable_instance = row_doc.parent
+			
 			# Clear existing teachers child table
 			row_doc.teachers = []
 			
