@@ -2019,3 +2019,160 @@ def execute_import_synchronous(file_path: str, metadata: Dict, progress_callback
 			"stats": {}
 		}
 
+
+@frappe.whitelist(allow_guest=False)
+def sync_all_subject_assignments(campus_id=None, dry_run=False):
+	"""
+	🔄 UTILITY: Sync tất cả Subject Assignments vào Teacher Timetable.
+	
+	Use case: Chạy từ bench console để migrate/resync data.
+	
+	Args:
+		campus_id: Optional campus filter (defaults to all)
+		dry_run: If True, only validate without syncing
+	
+	Returns:
+		{
+			"success": bool,
+			"message": str,
+			"stats": {
+				"total": int,
+				"success": int,
+				"errors": int,
+				"teacher_timetable_entries": int
+			},
+			"errors": List[str]  # First 20 errors
+		}
+	
+	Usage:
+		# From bench console:
+		from erp.api.erp_sis.timetable.import_executor import sync_all_subject_assignments
+		result = sync_all_subject_assignments()
+		print(result)
+	"""
+	from erp.api.erp_sis.subject_assignment.timetable_sync_v2 import sync_assignment_to_timetable
+	from erp.utils.api_response import single_item_response, error_response
+	
+	try:
+		frappe.logger().info(f"🔄 Starting sync_all_subject_assignments (dry_run={dry_run})")
+		
+		# Get all assignments (optionally filter by campus)
+		filters = {}
+		if campus_id:
+			filters["campus_id"] = campus_id
+		
+		all_assignments = frappe.get_all(
+			"SIS Subject Assignment",
+			filters=filters,
+			fields=["name", "teacher_id", "class_id", "actual_subject_id"],
+			limit_page_length=999999,
+			order_by="modified DESC"
+		)
+		
+		if not all_assignments:
+			return single_item_response(
+				{"total": 0, "success": 0, "errors": 0, "teacher_timetable_entries": 0},
+				"No assignments found"
+			)
+		
+		frappe.logger().info(f"📊 Found {len(all_assignments)} assignments to sync")
+		print(f"\n📋 Found {len(all_assignments)} Subject Assignments")
+		
+		if dry_run:
+			print(f"🔍 DRY RUN mode - will only validate")
+		
+		success_count = 0
+		error_count = 0
+		errors = []
+		
+		# Sync each assignment
+		for idx, assignment in enumerate(all_assignments, 1):
+			try:
+				if idx % 50 == 0:
+					print(f"📊 Progress: {idx}/{len(all_assignments)} - Success: {success_count}, Errors: {error_count}")
+					frappe.logger().info(f"Progress: {idx}/{len(all_assignments)}")
+				
+				if dry_run:
+					# Just validate, don't sync
+					from erp.api.erp_sis.subject_assignment.timetable_sync_v2 import validate_assignment_for_sync
+					doc = frappe.get_doc("SIS Subject Assignment", assignment.name)
+					validation = validate_assignment_for_sync(
+						actual_subject_id=doc.actual_subject_id,
+						class_id=doc.class_id,
+						assignment_type=doc.application_type or "full_year",
+						teacher_id=doc.teacher_id,
+						date_from=doc.start_date,
+						date_to=doc.end_date
+					)
+					if validation["success"]:
+						success_count += 1
+					else:
+						error_count += 1
+						if len(errors) < 20:
+							errors.append(f"{assignment.name}: {validation.get('message')}")
+				else:
+					# Actually sync
+					result = sync_assignment_to_timetable(assignment_id=assignment.name)
+					
+					if result["success"]:
+						success_count += 1
+					else:
+						error_count += 1
+						error_msg = result.get("message", "Unknown error")
+						if len(errors) < 20:
+							errors.append(f"{assignment.name}: {error_msg}")
+						frappe.logger().warning(f"Sync failed for {assignment.name}: {error_msg}")
+				
+				# Commit every 100 assignments to avoid long transactions
+				if idx % 100 == 0 and not dry_run:
+					frappe.db.commit()
+					
+			except Exception as e:
+				error_count += 1
+				error_str = str(e)
+				if len(errors) < 20:
+					errors.append(f"{assignment.name}: {error_str}")
+				frappe.logger().error(f"Exception for {assignment.name}: {error_str}")
+				continue
+		
+		# Final commit
+		if not dry_run:
+			frappe.db.commit()
+		
+		# Check Teacher Timetable count
+		tt_count = frappe.db.count("SIS Teacher Timetable")
+		
+		print(f"\n✅ Sync complete:")
+		print(f"  Total: {len(all_assignments)}")
+		print(f"  Success: {success_count}")
+		print(f"  Errors: {error_count}")
+		print(f"  Teacher Timetable entries: {tt_count}")
+		
+		if errors:
+			print(f"\n❌ Sample errors (first 20):")
+			for err in errors:
+				print(f"  - {err}")
+		
+		frappe.logger().info(
+			f"✅ sync_all_subject_assignments complete: "
+			f"{success_count} success, {error_count} errors, {tt_count} TT entries"
+		)
+		
+		return single_item_response(
+			{
+				"total": len(all_assignments),
+				"success": success_count,
+				"errors": error_count,
+				"teacher_timetable_entries": tt_count,
+				"error_list": errors
+			},
+			f"Sync complete: {success_count}/{len(all_assignments)} successful"
+		)
+		
+	except Exception as e:
+		import traceback
+		error_trace = traceback.format_exc()
+		frappe.log_error(f"sync_all_subject_assignments failed: {error_trace}")
+		frappe.logger().error(f"❌ sync_all_subject_assignments error: {str(e)}")
+		return error_response(f"Sync failed: {str(e)}")
+
