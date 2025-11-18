@@ -164,17 +164,24 @@ def import_timetable():
             # Return result immediately
             if result.get('success'):
                 stats = result.get('stats', {})
-                instances = stats.get('instances_created', 0)
-                rows = stats.get('rows_created', 0)
+                instances_created = result.get('instances_created', 0)
+                instances_updated = result.get('instances_updated', 0)
+                total_instances = result.get('total_instances_processed', instances_created + instances_updated)
+                rows = result.get('rows_created', 0)
                 
-                frappe.logger().info(f"✅ IMPORT SUCCESS: {instances} instances, {rows} rows created")
+                frappe.logger().info(
+                    f"✅ IMPORT SUCCESS: {instances_created} created, {instances_updated} updated, "
+                    f"{rows} rows created"
+                )
                 
                 return single_item_response({
                     "status": "completed",
                     "success": True,
-                    "message": result.get('message', f'Import thành công! {instances} lớp, {rows} tiết học'),
+                    "message": result.get('message', 'Import thành công!'),
                     "timetable_id": result.get('timetable_id'),
-                    "instances_created": instances,
+                    "instances_created": instances_created,
+                    "instances_updated": instances_updated,
+                    "total_instances_processed": total_instances,
                     "rows_created": rows,
                     "stats": stats,
                     "logs": result.get('logs', []),

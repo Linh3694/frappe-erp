@@ -1819,8 +1819,22 @@ def execute_import_synchronous(file_path: str, metadata: Dict, progress_callback
 		
 		# Get stats from execution_result
 		exec_stats = execution_result.get('stats', {})
-		instances = exec_stats.get('instances_created', 0)
+		instances_created = exec_stats.get('instances_created', 0)
+		instances_updated = exec_stats.get('instances_updated', 0)
 		rows = exec_stats.get('rows_created', 0)
+		
+		# Build smart message based on what actually happened
+		total_instances = instances_created + instances_updated
+		if instances_created > 0 and instances_updated > 0:
+			instance_msg = f"Đã tạo {instances_created} và cập nhật {instances_updated} lớp"
+		elif instances_created > 0:
+			instance_msg = f"Đã tạo {instances_created} lớp"
+		elif instances_updated > 0:
+			instance_msg = f"Đã cập nhật {instances_updated} lớp"
+		else:
+			instance_msg = "Không có lớp nào được xử lý"
+		
+		success_message = f"✅ Import thành công! {instance_msg} với {rows} tiết học"
 		
 		# Final progress
 		if progress_callback:
@@ -1829,15 +1843,17 @@ def execute_import_synchronous(file_path: str, metadata: Dict, progress_callback
 				"current": 100,
 				"total": 100,
 				"percentage": 100,
-				"message": f"✅ Import thành công! Đã tạo {instances} lớp với {rows} tiết học",
+				"message": success_message,
 				"current_class": ""
 			})
 		
 		return {
 			"success": execution_result.get('success', False),
-			"message": f"✅ Import thành công! Đã tạo {instances} lớp với {rows} tiết học",
+			"message": success_message,
 			"timetable_id": exec_stats.get('timetable_id'),
-			"instances_created": instances,
+			"instances_created": instances_created,
+			"instances_updated": instances_updated,
+			"total_instances_processed": total_instances,
 			"rows_created": rows,
 			"stats": exec_stats,
 			"warnings": validation_result.get('warnings', []) + execution_result.get('warnings', []),
