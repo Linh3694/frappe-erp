@@ -469,70 +469,22 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							replace_slot = replace_teacher_map[temp_key]
 							frappe.logger().info(f"✅ Found temp key resolution: {temp_key} → {replace_slot}")
 					
-					if replace_slot:
-						# User provided resolution
-						if replace_slot not in ["teacher_1", "teacher_2"]:
-							frappe.logger().error(f"Invalid replace_slot: {replace_slot}")
-							continue
-						
-						# Create override with replacement
-						teacher_1 = teacher_id if replace_slot == "teacher_1" else pattern_row.teacher_1_id
-						teacher_2 = teacher_id if replace_slot == "teacher_2" else pattern_row.teacher_2_id
-						
-						override_doc = frappe.get_doc({
-							"doctype": "SIS Timetable Instance Row",
-							"parent": pattern_row.parent,
-							"parent_timetable_instance": pattern_row.parent,  # ✅ FIX: Set Link field to avoid validation error
-							"parenttype": "SIS Timetable Instance",
-							"parentfield": "date_overrides",
-							"date": date,
-							"day_of_week": pattern_row.day_of_week,
-							"timetable_column_id": pattern_row.timetable_column_id,
-							"period_priority": pattern_row.period_priority,
-							"period_name": pattern_row.period_name,
-							"subject_id": pattern_row.subject_id,
-							"room_id": pattern_row.room_id
-						})
-						
-						# Populate teachers child table
-						if teacher_1:
-							override_doc.append("teachers", {"teacher_id": teacher_1, "sort_order": 0})
-						if teacher_2 and teacher_2 != teacher_1:
-							override_doc.append("teachers", {"teacher_id": teacher_2, "sort_order": 1})
-						
-						override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
-						created_count += 1
-						debug_info.append(
-							f"✅ Created override with {replace_slot} replaced on {date} (subject: {pattern_row.subject_id})"
-						)
-					else:
-						# No resolution provided → Add to conflicts list
-						conflicts.append({
-							"row_id": temp_key,  # Use temp key for pattern-based conflicts
-							"date": str(date),
-							"day_of_week": pattern_row.day_of_week,
-							"period_id": pattern_row.timetable_column_id,
-							"period_name": pattern_row.period_name,
-							"subject_id": pattern_row.subject_id,
-							"teacher_1_id": pattern_row.teacher_1_id,
-							"teacher_1_name": get_teacher_name(pattern_row.teacher_1_id),
-							"teacher_2_id": pattern_row.teacher_2_id,
-							"teacher_2_name": get_teacher_name(pattern_row.teacher_2_id),
-							"new_teacher_id": teacher_id,
-							"new_teacher_name": get_teacher_name(teacher_id)
-						})
-						frappe.logger().warning(
-							f"⚠️ FROM_DATE: Added to conflicts list: {len(conflicts)} total conflicts"
-						)
-				else:
-					# Pattern row has room - create override with co-teaching
-					# Copy from pattern row but add new teacher as co-teacher
+				if replace_slot:
+					# User provided resolution
+					if replace_slot not in ["teacher_1", "teacher_2"]:
+						frappe.logger().error(f"Invalid replace_slot: {replace_slot}")
+						continue
+					
+					# Create override with replacement
+					teacher_1 = teacher_id if replace_slot == "teacher_1" else pattern_row.teacher_1_id
+					teacher_2 = teacher_id if replace_slot == "teacher_2" else pattern_row.teacher_2_id
+					
 					override_doc = frappe.get_doc({
 						"doctype": "SIS Timetable Instance Row",
 						"parent": pattern_row.parent,
 						"parent_timetable_instance": pattern_row.parent,  # ✅ FIX: Set Link field to avoid validation error
 						"parenttype": "SIS Timetable Instance",
-						"parentfield": "date_overrides",  # ✅ Must be date_overrides, not weekly_pattern!
+						"parentfield": "date_overrides",
 						"date": date,
 						"day_of_week": pattern_row.day_of_week,
 						"timetable_column_id": pattern_row.timetable_column_id,
@@ -542,12 +494,70 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						"room_id": pattern_row.room_id
 					})
 					
-					# Populate teachers child table (keep original + add new)
-					if pattern_row.teacher_1_id:
-						override_doc.append("teachers", {"teacher_id": pattern_row.teacher_1_id, "sort_order": 0})
-					override_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 1})
+					# ✅ FIX: Insert first to get name
 					override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+					
+					# Populate teachers child table
+					if teacher_1:
+						override_doc.append("teachers", {"teacher_id": teacher_1, "sort_order": 0})
+					if teacher_2 and teacher_2 != teacher_1:
+						override_doc.append("teachers", {"teacher_id": teacher_2, "sort_order": 1})
+					
+					# Save to persist child table
+					if teacher_1 or teacher_2:
+						override_doc.save(ignore_permissions=True)
 					created_count += 1
+					debug_info.append(
+						f"✅ Created override with {replace_slot} replaced on {date} (subject: {pattern_row.subject_id})"
+					)
+				else:
+					# No resolution provided → Add to conflicts list
+					conflicts.append({
+						"row_id": temp_key,  # Use temp key for pattern-based conflicts
+						"date": str(date),
+						"day_of_week": pattern_row.day_of_week,
+						"period_id": pattern_row.timetable_column_id,
+						"period_name": pattern_row.period_name,
+						"subject_id": pattern_row.subject_id,
+						"teacher_1_id": pattern_row.teacher_1_id,
+						"teacher_1_name": get_teacher_name(pattern_row.teacher_1_id),
+						"teacher_2_id": pattern_row.teacher_2_id,
+						"teacher_2_name": get_teacher_name(pattern_row.teacher_2_id),
+						"new_teacher_id": teacher_id,
+						"new_teacher_name": get_teacher_name(teacher_id)
+					})
+				frappe.logger().warning(
+					f"⚠️ FROM_DATE: Added to conflicts list: {len(conflicts)} total conflicts"
+				)
+		else:
+				# Pattern row has room - create override with co-teaching
+				# Copy from pattern row but add new teacher as co-teacher
+				override_doc = frappe.get_doc({
+					"doctype": "SIS Timetable Instance Row",
+					"parent": pattern_row.parent,
+					"parent_timetable_instance": pattern_row.parent,  # ✅ FIX: Set Link field to avoid validation error
+					"parenttype": "SIS Timetable Instance",
+					"parentfield": "date_overrides",  # ✅ Must be date_overrides, not weekly_pattern!
+					"date": date,
+					"day_of_week": pattern_row.day_of_week,
+					"timetable_column_id": pattern_row.timetable_column_id,
+					"period_priority": pattern_row.period_priority,
+					"period_name": pattern_row.period_name,
+					"subject_id": pattern_row.subject_id,
+					"room_id": pattern_row.room_id
+				})
+				
+				# ✅ FIX: Insert first to get name
+				override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+				
+				# Populate teachers child table (keep original + add new)
+				if pattern_row.teacher_1_id:
+					override_doc.append("teachers", {"teacher_id": pattern_row.teacher_1_id, "sort_order": 0})
+				override_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 1})
+				
+				# Save to persist child table
+				override_doc.save(ignore_permissions=True)
+				created_count += 1
 		
 		# Check if there are unresolved conflicts
 		if conflicts:
