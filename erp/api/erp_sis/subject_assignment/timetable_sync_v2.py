@@ -465,28 +465,28 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 				if pattern_row.teacher_1_id == teacher_id or pattern_row.teacher_2_id == teacher_id:
 					# Teacher already assigned in pattern, skip
 					continue
+			
+			# Check if pattern row already has 2 teachers → CONFLICT!
+			if pattern_row.teacher_1_id and pattern_row.teacher_2_id:
+				# Pattern row already has 2 teachers - conflict!
+				frappe.logger().warning(
+					f"⚠️ FROM_DATE CONFLICT: Pattern row {pattern_row.name} on {date} - "
+					f"teacher_1={pattern_row.teacher_1_id}, teacher_2={pattern_row.teacher_2_id}, "
+					f"trying to add teacher={teacher_id}"
+				)
 				
-				# Check if pattern row already has 2 teachers → CONFLICT!
-				if pattern_row.teacher_1_id and pattern_row.teacher_2_id:
-					# Pattern row already has 2 teachers - conflict!
-					frappe.logger().warning(
-						f"⚠️ FROM_DATE CONFLICT: Pattern row {pattern_row.name} on {date} - "
-						f"teacher_1={pattern_row.teacher_1_id}, teacher_2={pattern_row.teacher_2_id}, "
-						f"trying to add teacher={teacher_id}"
-					)
-					
-					# ✅ Check resolution by SUBJECT_ID first
-					replace_slot = None
-					if resolution_by_subject and pattern_row.subject_id in resolution_by_subject:
-						replace_slot = resolution_by_subject[pattern_row.subject_id]
-						frappe.logger().info(f"✅ Found subject-based resolution for new override: {pattern_row.subject_id} → {replace_slot}")
-					else:
-						# Legacy: check by temp key (pattern_row_id + date)
-						temp_key = f"pattern_{pattern_row.name}_{date}"
-						if temp_key in replace_teacher_map:
-							replace_slot = replace_teacher_map[temp_key]
-							frappe.logger().info(f"✅ Found temp key resolution: {temp_key} → {replace_slot}")
-					
+				# ✅ Check resolution by SUBJECT_ID first
+				replace_slot = None
+				if resolution_by_subject and pattern_row.subject_id in resolution_by_subject:
+					replace_slot = resolution_by_subject[pattern_row.subject_id]
+					frappe.logger().info(f"✅ Found subject-based resolution for new override: {pattern_row.subject_id} → {replace_slot}")
+				else:
+					# Legacy: check by temp key (pattern_row_id + date)
+					temp_key = f"pattern_{pattern_row.name}_{date}"
+					if temp_key in replace_teacher_map:
+						replace_slot = replace_teacher_map[temp_key]
+						frappe.logger().info(f"✅ Found temp key resolution: {temp_key} → {replace_slot}")
+				
 				if replace_slot:
 					# User provided resolution
 					if replace_slot not in ["teacher_1", "teacher_2"]:
@@ -544,10 +544,10 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						"new_teacher_id": teacher_id,
 						"new_teacher_name": get_teacher_name(teacher_id)
 					})
-				frappe.logger().warning(
-					f"⚠️ FROM_DATE: Added to conflicts list: {len(conflicts)} total conflicts"
-				)
-		else:
+					frappe.logger().warning(
+						f"⚠️ FROM_DATE: Added to conflicts list: {len(conflicts)} total conflicts"
+					)
+			else:
 				# Pattern row has room - create override with co-teaching
 				# Copy from pattern row but add new teacher as co-teacher
 				override_doc = frappe.get_doc({
