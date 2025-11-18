@@ -638,26 +638,20 @@ def create_subject_assignment():
             
             frappe.logger().info(f"✅ Timetable sync completed: {sync_summary}")
             
-            # ✅ V2: ALWAYS sync Teacher Timetable when creating assignments
-            # Even if rows_updated = 0 (e.g., new subject not in timetable pattern yet)
-            # Teacher Timetable is a materialized view that should reflect ALL assignments
-            if created_names:
-                try:
-                    frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC V2 - Starting for teacher {teacher_id}, {len(created_names)} new assignments")
-                    teacher_timetable_result = sync_teacher_timetable_bulk(
-                        teacher_id=teacher_id,
-                        assignment_ids=created_names
-                    )
-                    teacher_timetable_sync_summary = {
-                        "created": teacher_timetable_result["created"],
-                        "updated": 0,
-                        "errors": teacher_timetable_result["errors"]
-                    }
-                    frappe.logger().info(f"🎯 TEACHER TIMETABLE SYNC V2 - Completed: {teacher_timetable_result}")
-                except Exception as teacher_sync_error:
-                    frappe.logger().error(f"🎯 TEACHER TIMETABLE SYNC V2 - Failed: {str(teacher_sync_error)}")
-                    import traceback
-                    frappe.logger().error(traceback.format_exc())
+            # ⚡ NOTE: Teacher Timetable sync is ALREADY handled by sync_assignment_to_timetable()
+            # above (line 598). It calls sync_for_rows() which updates Teacher Timetable.
+            # NO NEED for additional sync_teacher_timetable_bulk() call!
+            # 
+            # Previous implementation used sync_teacher_timetable_bulk() which:
+            # - Deleted existing entries
+            # - Tried to recreate but failed (returned 0 entries)
+            # - Caused data loss
+            #
+            # Current implementation (sync_assignment_to_timetable):
+            # - Updates pattern rows with teachers
+            # - Calls sync_for_rows() to update Teacher Timetable incrementally
+            # - No deletion, only upsert
+            # - More reliable and atomic
 
         # Auto-fix any existing SIS Subjects that don't have actual_subject_id linkage
         try:
