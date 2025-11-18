@@ -1373,7 +1373,7 @@ def resync_all_teacher_timetables(campus_id=None):
 			}
 		}
 	"""
-	from erp.api.erp_sis.utils.response import success_response, error_response
+	from erp.utils.api_response import single_item_response, error_response
 	from .bulk_sync_engine import sync_instance_bulk
 	
 	try:
@@ -1395,9 +1395,9 @@ def resync_all_teacher_timetables(campus_id=None):
 		)
 		
 		if not instances:
-			return success_response(
-				data={"instances_processed": 0, "teacher_entries": 0, "student_entries": 0},
-				message=f"No timetable instances found for campus {campus_id}"
+			return single_item_response(
+				{"instances_processed": 0, "teacher_entries": 0, "student_entries": 0},
+				f"No timetable instances found for campus {campus_id}"
 			)
 		
 		frappe.logger().info(f"📊 Found {len(instances)} instances to sync")
