@@ -128,11 +128,24 @@ def import_timetable():
             
             # Progress tracking list (to be sent with response)
             progress_updates = []
+            last_percentage = [0]  # Use list to allow modification in nested function
             
             def progress_callback(progress):
-                """Capture progress updates"""
+                """Capture progress updates and log frequently"""
                 progress_updates.append(progress)
-                frappe.logger().info(f"📊 Progress: {progress.get('percentage')}% - {progress.get('message')}")
+                current_pct = progress.get('percentage', 0)
+                
+                # Log every significant progress change (every 5%) for visibility
+                if current_pct - last_percentage[0] >= 5 or current_pct == 100:
+                    frappe.logger().info(
+                        f"📊 Import Progress {current_pct}%: {progress.get('message')} "
+                        f"[{progress.get('current', 0)}/{progress.get('total', 0)}]"
+                    )
+                    last_percentage[0] = current_pct
+                
+                # Always log current class being processed
+                if progress.get('current_class'):
+                    frappe.logger().info(f"  🏫 Processing: {progress.get('current_class')}")
             
             # Execute import synchronously with progress callback
             result = execute_import_synchronous(file_path, metadata, progress_callback=progress_callback)
@@ -150,17 +163,24 @@ def import_timetable():
             
             # Return result immediately
             if result.get('success'):
+                stats = result.get('stats', {})
+                instances = stats.get('instances_created', 0)
+                rows = stats.get('rows_created', 0)
+                
+                frappe.logger().info(f"✅ IMPORT SUCCESS: {instances} instances, {rows} rows created")
+                
                 return single_item_response({
                     "status": "completed",
                     "success": True,
-                    "message": result.get('message', 'Import thành công!'),
+                    "message": result.get('message', f'Import thành công! {instances} lớp, {rows} tiết học'),
                     "timetable_id": result.get('timetable_id'),
-                    "instances_created": result.get('instances_created', 0),
-                    "rows_created": result.get('rows_created', 0),
-                    "stats": result.get('stats', {}),
+                    "instances_created": instances,
+                    "rows_created": rows,
+                    "stats": stats,
                     "logs": result.get('logs', []),
                     "warnings": result.get('warnings', []),
-                    "progress_history": progress_updates  # Include all progress updates
+                    "progress_history": progress_updates,  # Include all progress updates
+                    "total_progress_steps": len(progress_updates)
                 }, "Timetable import completed successfully")
             else:
                 return validation_error_response(

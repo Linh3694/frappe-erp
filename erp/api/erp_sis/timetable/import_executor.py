@@ -399,6 +399,7 @@ class TimetableImportExecutor:
 			
 			if not class_id:
 				self.logs.append(f"⚠️  Skipped class '{class_title}': not found in cache")
+				frappe.logger().warning(f"⚠️ Class '{class_title}' not in cache, skipping")
 				continue
 			
 			# Update progress before processing class
@@ -412,9 +413,13 @@ class TimetableImportExecutor:
 			# Transform column data to row-based format for this class
 			class_df = self._transform_column_to_rows(class_title)
 			
-			if class_df is not None and not class_df.empty:
-				self._process_class(class_id, class_title, class_df)
+			if class_df is None or class_df.empty:
+				self.logs.append(f"⚠️  Class '{class_title}' has no data rows, skipping")
+				frappe.logger().warning(f"⚠️ Class '{class_title}' DataFrame is empty after transform")
+				continue
 			
+			frappe.logger().info(f"📊 Processing class '{class_title}': {len(class_df)} rows")
+			self._process_class(class_id, class_title, class_df)
 			frappe.logger().info(f"✅ Completed class {idx}/{total_classes}: {class_title}")
 	
 	def _transform_column_to_rows(self, class_title: str) -> pd.DataFrame:
@@ -432,15 +437,25 @@ class TimetableImportExecutor:
 			2   | 2    | Science
 		"""
 		if class_title not in self.df.columns:
+			frappe.logger().warning(f"⚠️ Class column '{class_title}' not found in DataFrame")
 			return None
 		
 		# Create DataFrame with Thứ, Tiết, and subject from class column
 		transformed = self.df[["Thứ", "Tiết", class_title]].copy()
 		transformed.rename(columns={class_title: "Môn học"}, inplace=True)
 		
+		frappe.logger().info(f"📊 Before filter: {len(transformed)} rows for '{class_title}'")
+		
 		# Remove rows where subject is empty/null
 		transformed = transformed[transformed["Môn học"].notna()]
 		transformed = transformed[transformed["Môn học"].astype(str).str.strip() != ""]
+		
+		frappe.logger().info(f"📊 After filter: {len(transformed)} rows for '{class_title}' (removed empty subjects)")
+		
+		if len(transformed) > 0:
+			# Show sample data
+			sample_subjects = transformed["Môn học"].head(3).tolist()
+			frappe.logger().info(f"📚 Sample subjects for '{class_title}': {sample_subjects}")
 		
 		return transformed
 	
@@ -479,18 +494,21 @@ class TimetableImportExecutor:
 	def _process_class(self, class_id: str, class_title: str, class_df: pd.DataFrame):
 		"""Process timetable for a single class"""
 		self.logs.append(f"🏫 Processing class: {class_title} ({len(class_df)} rows)")
+		frappe.logger().info(f"🏫 Starting _process_class for {class_title} with {len(class_df)} rows")
 		
 		# Create or get instance
 		instance_id = self._create_or_get_instance(class_id)
+		frappe.logger().info(f"✅ Got instance: {instance_id} for class {class_id}")
 		
 		# Delete old pattern rows for this instance
 		self._delete_old_pattern_rows(instance_id)
 		
 		# Create pattern rows
 		rows_created = self._create_pattern_rows(instance_id, class_id, class_df)
+		frappe.logger().info(f"✅ Created {rows_created} pattern rows for {class_title}")
 		
 		self.stats["rows_created"] += rows_created
-		self.logs.append(f"  ✓ Created {rows_created} pattern rows")
+		self.logs.append(f"  ✓ Created {rows_created} pattern rows for {class_title}")
 	
 	def _create_or_get_instance(self, class_id: str) -> str:
 		"""
