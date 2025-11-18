@@ -1646,28 +1646,34 @@ def process_excel_data(df, timetable_id: str, campus_id: str, logs: list = None)
 
                 # class_id already checked above
 
-                # Create timetable instance row
-                row_doc = frappe.get_doc({
-                    "doctype": "SIS Timetable Instance Row",
-                    "timetable_instance_id": instance_id,
-                    "day_of_week": mapped_day,
-                    "period": period,
-                    "class_id": class_id,
-                    "subject_id": subject_id,
-                    "subject_name": subject_name,
-                    "teacher_1_id": teacher_1_id,
-                    "campus_id": campus_id
-                })
+            # Create timetable instance row
+            row_doc = frappe.get_doc({
+                "doctype": "SIS Timetable Instance Row",
+                "parent": instance_id,
+                "parent_timetable_instance": instance_id,  # ✅ FIX: Set required Link field
+                "parenttype": "SIS Timetable Instance",
+                "parentfield": "weekly_pattern",
+                "day_of_week": mapped_day,
+                "timetable_column_id": period,  # period is actually column ID
+                "subject_id": subject_id,
+                "campus_id": campus_id
+            })
 
-                try:
-                    row_doc.insert()
-                    success_count += 1
-                except Exception as row_error:
-                    frappe.logger().error(f"Row creation error: {str(row_error)}")
-                    continue  # Continue to next row instead of failing
-
-            except Exception as e:
-                continue
+            try:
+                row_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+                
+                # Add teacher to child table if exists
+                if teacher_1_id:
+                    row_doc.append("teachers", {
+                        "teacher_id": teacher_1_id,
+                        "sort_order": 0
+                    })
+                    row_doc.save(ignore_permissions=True)
+                
+                success_count += 1
+            except Exception as row_error:
+                frappe.logger().error(f"Row creation error: {str(row_error)}")
+                continue  # Continue to next row instead of failing
 
     except Exception as e:
         pass
