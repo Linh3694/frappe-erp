@@ -617,8 +617,13 @@ def create_subject_assignment():
                         sync_summary["rows_created"] = sync_summary.get("rows_created", 0) + sync_result.get("rows_created", 0)
                         
                 except Exception as sync_error:
-                    frappe.log_error(f"Timetable sync failed for assignment {assignment_id}: {str(sync_error)}")
-                    frappe.logger().error(f"❌ Sync failed for {assignment_id}: {str(sync_error)}")
+                    error_msg = f"Timetable sync failed for assignment {assignment_id}: {str(sync_error)}"
+                    frappe.log_error(error_msg, "Timetable Sync Error")
+                    frappe.logger().error(f"❌ {error_msg}")
+                    
+                    # ⚡ CRITICAL: Throw exception to rollback transaction
+                    # This ensures we don't create "orphan" assignments without timetable sync
+                    frappe.throw(f"Failed to sync assignment to timetable: {str(sync_error)}")
             
             # If there are conflicts, rollback and return conflict error
             if all_conflicts:
