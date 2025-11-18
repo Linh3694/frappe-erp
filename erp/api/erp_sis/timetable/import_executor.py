@@ -665,6 +665,9 @@ class TimetableImportExecutor:
 				self.logs.append(
 					f"  ⚠️  Skipped row: subject='{subject_title}', period='{period_name}'"
 				)
+				frappe.logger().warning(
+					f"⚠️ Skipped - subject '{subject_title}' or period '{period_name}' not in cache"
+				)
 				continue
 			
 			# Get teacher from Subject Assignment
@@ -689,37 +692,40 @@ class TimetableImportExecutor:
 					"name"
 				)
 			
-		# Create row
-		row_doc = frappe.get_doc({
-			"doctype": "SIS Timetable Instance Row",
-			"parent": instance_id,
-			"parent_timetable_instance": instance_id,  # ✅ FIX: Set required Link field
-			"parenttype": "SIS Timetable Instance",
-			"parentfield": "weekly_pattern",
-			"day_of_week": day_of_week,
-			"date": None,  # Pattern row
-			"timetable_column_id": period_id,
-			"period_priority": period_info.period_priority,
-			"period_name": period_info.period_name,
-			"subject_id": subject_id,
-			"room_id": room_id
-		})
-		
-		# ✅ FIX: Insert first to get name
-		row_doc.insert(ignore_permissions=True, ignore_mandatory=True)
-		
-		# Populate teachers child table
-		for idx, teacher_id in enumerate(teachers):
-			row_doc.append("teachers", {
-				"teacher_id": teacher_id,
-				"sort_order": idx
+			# ✅ FIX: Create row INSIDE loop (was outside!)
+			row_doc = frappe.get_doc({
+				"doctype": "SIS Timetable Instance Row",
+				"parent": instance_id,
+				"parent_timetable_instance": instance_id,
+				"parenttype": "SIS Timetable Instance",
+				"parentfield": "weekly_pattern",
+				"day_of_week": day_of_week,
+				"date": None,  # Pattern row
+				"timetable_column_id": period_id,
+				"period_priority": period_info.period_priority,
+				"period_name": period_info.period_name,
+				"subject_id": subject_id,
+				"room_id": room_id
 			})
-		
-		# Save to persist child table
-		if teachers:
-			row_doc.save(ignore_permissions=True)
-		
-		rows_created += 1
+			
+			# Insert first to get name
+			row_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+			
+			# Populate teachers child table
+			for idx, teacher_id in enumerate(teachers):
+				row_doc.append("teachers", {
+					"teacher_id": teacher_id,
+					"sort_order": idx
+				})
+			
+			# Save to persist child table
+			if teachers:
+				row_doc.save(ignore_permissions=True)
+			
+			rows_created += 1
+			frappe.logger().info(
+				f"  ✅ Created row: {day_of_week} / {period_info.period_name} / {subject_title}"
+			)
 		
 		return rows_created
 	
