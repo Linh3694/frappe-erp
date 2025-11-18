@@ -170,21 +170,39 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			
 			debug_info.append(f"  ✓ Updated row {row.name}: {len(teacher_ids)} teachers")
 		
-		# Sync materialized view
+		# ⚡ CRITICAL: Sync materialized view INSIDE try block
 		if updated_count > 0:
 			row_ids = [r.name for r in pattern_rows]
 			if len(row_ids) <= 50:
-				# Sync immediately for small updates
+				# ⚡ CRITICAL: Sync immediately for small updates
+				# If sync fails, we MUST throw exception to trigger rollback
 				try:
 					from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
 					sync_for_rows(row_ids)
 					debug_info.append(f"✅ Synced materialized view immediately")
 				except Exception as mat_view_error:
-					debug_info.append(f"⚠️ Materialized view sync failed: {str(mat_view_error)}")
+					error_msg = f"Teacher Timetable sync failed: {str(mat_view_error)}"
+					frappe.log_error(error_msg, "Materialized View Sync Error")
+					debug_info.append(f"❌ {error_msg}")
+					
+					# ⚡ THROW EXCEPTION to trigger transaction rollback
+					# This ensures assignment is not created if timetable sync fails
+					raise Exception(f"Failed to sync Teacher Timetable: {str(mat_view_error)}")
 			else:
-				# Enqueue for async processing
-				enqueue_materialized_view_sync(row_ids)
-				debug_info.append(f"📤 Enqueued materialized view sync")
+				# For large updates (>50 rows), use direct sync instead of enqueue
+				# Background jobs are unreliable - we need immediate feedback
+				try:
+					from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
+					frappe.logger().info(f"🔄 Syncing large update: {len(row_ids)} rows")
+					sync_for_rows(row_ids)
+					debug_info.append(f"✅ Synced {len(row_ids)} rows successfully")
+				except Exception as mat_view_error:
+					error_msg = f"Teacher Timetable sync failed for {len(row_ids)} rows: {str(mat_view_error)}"
+					frappe.log_error(error_msg, "Materialized View Sync Error")
+					debug_info.append(f"❌ {error_msg}")
+					
+					# ⚡ THROW EXCEPTION to trigger transaction rollback
+					raise Exception(f"Failed to sync Teacher Timetable: {str(mat_view_error)}")
 		
 		frappe.logger().info(f"✅ Synced {updated_count} pattern rows with {len(teacher_ids)} teachers")
 		
@@ -622,21 +640,21 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 			override_row_names = [spec[1].name for spec in override_specs]
 			total_changes = created_count + updated_count
 			
-			if total_changes <= 50:
-				# Sync immediately for better UX
-				try:
-					from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
-					sync_for_rows(override_row_names)
-					debug_info.append(f"✅ Synced materialized view immediately for {total_changes} changes")
-				except Exception as sync_err:
-					frappe.log_error(f"Immediate sync failed: {str(sync_err)}")
-					# Fallback to async if immediate sync fails
-					enqueue_materialized_view_sync(override_row_names)
-					debug_info.append(f"⏰ Fallback to async sync for {total_changes} changes")
-			else:
-				# Large update - use async to avoid blocking
-				enqueue_materialized_view_sync(override_row_names)
-				debug_info.append(f"⏰ Enqueued async materialized view sync for {total_changes} changes")
+		# ⚡ CRITICAL: Always sync immediately (no async!)
+		# Background jobs are unreliable - we need immediate feedback
+		try:
+			from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
+			frappe.logger().info(f"🔄 Syncing Teacher Timetable for {total_changes} override rows")
+			sync_for_rows(override_row_names)
+			debug_info.append(f"✅ Synced materialized view for {total_changes} override rows")
+		except Exception as sync_err:
+			error_msg = f"Teacher Timetable sync failed for {total_changes} override rows: {str(sync_err)}"
+			frappe.log_error(error_msg, "Materialized View Sync Error")
+			debug_info.append(f"❌ {error_msg}")
+			
+			# ⚡ THROW EXCEPTION to trigger transaction rollback
+			# This ensures override rows are not created if timetable sync fails
+			raise Exception(f"Failed to sync Teacher Timetable: {str(sync_err)}")
 		
 		return {
 			"success": True,
