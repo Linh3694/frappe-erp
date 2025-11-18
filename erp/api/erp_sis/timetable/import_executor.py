@@ -960,21 +960,63 @@ class TimetableImportExecutor:
 		
 		# Find SIS Subject that links to this Timetable Subject
 		# MUST match education_stage to avoid cross-stage conflicts
-		subject_id = frappe.db.get_value(
+		subject_info = frappe.db.get_value(
 			"SIS Subject",
 			{
 				"timetable_subject_id": ts_id,
 				"campus_id": campus_id,
 				"education_stage": education_stage_id
 			},
-			"name"
+			["name", "actual_subject_id"],
+			as_dict=True
 		)
 		
-		if not subject_id:
+		if not subject_info:
 			frappe.logger().warning(
 				f"⚠️  SIS Subject not found linking to Timetable Subject {ts_id} "
 				f"for stage={education_stage_id}, campus={campus_id}"
 			)
+			return None
+		
+		subject_id = subject_info.name
+		actual_subject_id = subject_info.actual_subject_id
+		
+		# ⚡ FIX: Ensure actual_subject_id exists
+		# If SIS Subject doesn't have actual_subject_id, create/link it
+		if not actual_subject_id:
+			frappe.logger().warning(
+				f"⚠️ SIS Subject {subject_id} missing actual_subject_id - auto-creating..."
+			)
+			try:
+				# Try to find matching Actual Subject by title
+				actual_subject_id = frappe.db.get_value(
+					"SIS Actual Subject",
+					{"title_vn": ts_results[0].title_vn, "campus_id": campus_id},
+					"name"
+				)
+				
+				# If not found, create new Actual Subject
+				if not actual_subject_id:
+					actual_subject_doc = frappe.get_doc({
+						"doctype": "SIS Actual Subject",
+						"title_vn": ts_results[0].title_vn,
+						"title_en": ts_results[0].title_vn,  # Use VN as fallback
+						"campus_id": campus_id
+					})
+					actual_subject_doc.insert(ignore_permissions=True)
+					actual_subject_id = actual_subject_doc.name
+					frappe.logger().info(f"✅ Created Actual Subject: {actual_subject_id}")
+				
+				# Update SIS Subject with actual_subject_id link
+				frappe.db.set_value("SIS Subject", subject_id, "actual_subject_id", actual_subject_id)
+				frappe.db.commit()
+				frappe.logger().info(
+					f"✅ Linked SIS Subject {subject_id} → Actual Subject {actual_subject_id}"
+				)
+			except Exception as link_error:
+				frappe.logger().error(
+					f"❌ Failed to create/link actual_subject_id for {subject_id}: {str(link_error)}"
+				)
 		
 		return subject_id
 	
