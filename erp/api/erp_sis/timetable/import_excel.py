@@ -110,51 +110,69 @@ def import_timetable():
             file_path = save_uploaded_file(file_data, "timetable_import.xlsx")
 
             # Call Excel import processor with metadata
-            import_data = {
-                "file_path": file_path,
+            metadata = {
                 "title_vn": title_vn,
                 "title_en": title_en,
                 "campus_id": campus_id,
                 "school_year_id": school_year_id,
                 "education_stage_id": education_stage_id,
                 "start_date": start_date,
-                "end_date": end_date,
-                "dry_run": dry_run
+                "end_date": end_date
             }
 
-            # Generate job ID for progress tracking
-            import uuid
-            job_id = f"timetable_import_{uuid.uuid4().hex[:8]}"
+            frappe.logger().info(f"🚀 Starting SYNCHRONOUS import execution")
             
-            frappe.logger().info(f"🚀 Starting import job with job_id: {job_id}")
+            # ⚡ NEW: Execute synchronously instead of background job
+            # This avoids worker queue issues and provides immediate feedback
+            from erp.api.erp_sis.timetable.import_executor import execute_import_synchronous
             
-            # Add job_id and user_id to import_data for background function
-            import_data['job_id'] = job_id
-            import_data['user_id'] = frappe.session.user  # Pass current user to background job
+            # Progress tracking list (to be sent with response)
+            progress_updates = []
             
-            # Enqueue background job using NEW EXECUTOR (validator + executor pattern)
-            job = frappe.enqueue(
-                method='erp.api.erp_sis.timetable.import_executor.process_with_new_executor',
-                queue='long',
-                timeout=7200,  # 2 hour timeout - increased for handling 40+ classes
-                is_async=True,
-                **import_data
-            )
+            def progress_callback(progress):
+                """Capture progress updates"""
+                progress_updates.append(progress)
+                frappe.logger().info(f"📊 Progress: {progress.get('percentage')}% - {progress.get('message')}")
             
-            # Use our job_id (not RQ job id) for consistency
-            actual_job_id = job_id
-            frappe.logger().info(f"✅ Job enqueued successfully. Job ID for tracking: {actual_job_id}")
+            # Execute import synchronously with progress callback
+            result = execute_import_synchronous(file_path, metadata, progress_callback=progress_callback)
             
-            return single_item_response({
-                "status": "processing",
-                "job_id": actual_job_id,
-                "message": "Timetable import đang được xử lý trong background (NEW EXECUTOR)",
-                "logs": [
-                    "📤 Đã upload file thành công", 
-                    f"⚙️ Job ID: {actual_job_id}",
-                    "🚀 Using new validator + executor pattern"
-                ]
-            }, "Timetable import job created")
+            frappe.logger().info(f"✅ Import execution completed: success={result.get('success')}")
+            
+            # Clean up temp file
+            try:
+                import os
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    frappe.logger().info(f"🗑️ Cleaned up temp file: {file_path}")
+            except Exception as cleanup_error:
+                frappe.logger().warning(f"⚠️ Failed to clean up temp file: {str(cleanup_error)}")
+            
+            # Return result immediately
+            if result.get('success'):
+                return single_item_response({
+                    "status": "completed",
+                    "success": True,
+                    "message": result.get('message', 'Import thành công!'),
+                    "timetable_id": result.get('timetable_id'),
+                    "instances_created": result.get('instances_created', 0),
+                    "rows_created": result.get('rows_created', 0),
+                    "stats": result.get('stats', {}),
+                    "logs": result.get('logs', []),
+                    "warnings": result.get('warnings', []),
+                    "progress_history": progress_updates  # Include all progress updates
+                }, "Timetable import completed successfully")
+            else:
+                return validation_error_response(
+                    result.get('message', 'Import failed'),
+                    {
+                        "errors": result.get('errors', []),
+                        "logs": result.get('logs', []),
+                        "warnings": result.get('warnings', []),
+                        "stats": result.get('stats', {}),
+                        "progress_history": progress_updates
+                    }
+                )
         else:
             # No file uploaded, just validate metadata
             result = {

@@ -37,7 +37,7 @@ class TimetableImportExecutor:
 	- Subject Assignments are properly set up
 	"""
 	
-	def __init__(self, file_path: str, metadata: Dict):
+	def __init__(self, file_path: str, metadata: Dict, progress_callback=None):
 		"""
 		Initialize executor.
 		
@@ -52,9 +52,11 @@ class TimetableImportExecutor:
 				"start_date": str,
 				"end_date": str
 			}
+			progress_callback: Optional callback function(progress_dict) for real-time progress
 		"""
 		self.file_path = file_path
 		self.metadata = metadata
+		self.progress_callback = progress_callback
 		self.df = None
 		self.format = None  # "row_based" or "column_based" - detected during load
 		self.job_id = None  # Set by caller for progress tracking
@@ -443,30 +445,36 @@ class TimetableImportExecutor:
 		return transformed
 	
 	def _update_progress(self, current: int, total: int, message: str, current_class: str = ""):
-		"""Update progress in Redis cache for frontend polling"""
-		if not self.job_id:
-			return
+		"""Update progress in Redis cache for frontend polling AND via callback"""
+		percentage = int((current / total) * 100) if total > 0 else 0
+		progress_data = {
+			"phase": "importing",
+			"current": current,
+			"total": total,
+			"percentage": percentage,
+			"message": message,
+			"current_class": current_class
+		}
 		
-		try:
-			percentage = int((current / total) * 100) if total > 0 else 0
-			progress_data = {
-				"phase": "importing",
-				"current": current,
-				"total": total,
-				"percentage": percentage,
-				"message": message,
-				"current_class": current_class
-			}
-			
-			frappe.cache().set_value(
-				f"timetable_import_progress:{self.job_id}",
-				progress_data,
-				expires_in_sec=7200
-			)
-			
-			frappe.logger().info(f"📊 Progress: {percentage}% - {message}")
-		except Exception as e:
-			frappe.logger().warning(f"⚠️  Failed to update progress: {str(e)}")
+		# Call progress callback if available (for synchronous execution)
+		if self.progress_callback:
+			try:
+				self.progress_callback(progress_data)
+			except Exception as e:
+				frappe.logger().warning(f"⚠️ Progress callback failed: {str(e)}")
+		
+		# Also save to cache if job_id available (for background job compatibility)
+		if self.job_id:
+			try:
+				frappe.cache().set_value(
+					f"timetable_import_progress:{self.job_id}",
+					progress_data,
+					expires_in_sec=7200
+				)
+			except Exception as e:
+				frappe.logger().warning(f"⚠️  Failed to update progress cache: {str(e)}")
+		
+		frappe.logger().info(f"📊 Progress: {percentage}% - {message}")
 	
 	def _process_class(self, class_id: str, class_title: str, class_df: pd.DataFrame):
 		"""Process timetable for a single class"""
@@ -1651,5 +1659,153 @@ def process_with_new_executor(file_path: str, title_vn: str, title_en: str,
 			"logs": ["💥 Import failed with critical error"],
 			"traceback": error_trace,
 			"debug": debug_info
+		}
+
+
+def execute_import_synchronous(file_path: str, metadata: Dict, progress_callback=None) -> Dict:
+	"""
+	Execute timetable import synchronously with real-time progress feedback.
+	
+	This replaces background job execution with direct synchronous execution,
+	providing immediate feedback and avoiding worker queue issues.
+	
+	Args:
+		file_path: Path to uploaded Excel file
+		metadata: {
+			"title_vn": str,
+			"title_en": str,
+			"campus_id": str,
+			"school_year_id": str,
+			"education_stage_id": str,
+			"start_date": str (YYYY-MM-DD),
+			"end_date": str (YYYY-MM-DD)
+		}
+		progress_callback: Optional callback function(progress_dict) called with progress updates
+	
+	Returns:
+		dict: {
+			"success": bool,
+			"message": str,
+			"stats": Dict,
+			"logs": List[str],
+			"errors": List[str] (if any),
+			"warnings": List[str] (if any)
+		}
+	"""
+	from .import_validator import TimetableImportValidator
+	
+	try:
+		# Report starting
+		if progress_callback:
+			progress_callback({
+				"phase": "starting",
+				"current": 0,
+				"total": 100,
+				"percentage": 0,
+				"message": "Đang khởi động import...",
+				"current_class": ""
+			})
+		
+		# ============================================================
+		# PHASE 1: VALIDATION
+		# ============================================================
+		frappe.logger().info("📋 PHASE 1: Starting validation...")
+		
+		if progress_callback:
+			progress_callback({
+				"phase": "validating",
+				"current": 10,
+				"total": 100,
+				"percentage": 10,
+				"message": "Đang kiểm tra file Excel...",
+				"current_class": ""
+			})
+		
+		validator = TimetableImportValidator(file_path, metadata)
+		validation_result = validator.validate()
+		
+		if not validation_result["valid"]:
+			frappe.logger().error(f"❌ Validation failed: {validation_result.get('errors')}")
+			return {
+				"success": False,
+				"message": "Validation failed",
+				"errors": validation_result.get("errors", []),
+				"warnings": validation_result.get("warnings", []),
+				"stats": validation_result.get("stats", {}),
+				"logs": []
+			}
+		
+		frappe.logger().info("✅ Validation passed")
+		
+		if progress_callback:
+			progress_callback({
+				"phase": "validated",
+				"current": 30,
+				"total": 100,
+				"percentage": 30,
+				"message": "✅ Validation passed! Đang bắt đầu import...",
+				"current_class": ""
+			})
+		
+		# ============================================================
+		# PHASE 2: EXECUTION
+		# ============================================================
+		frappe.logger().info("⚙️ PHASE 2: Starting execution...")
+		
+		executor = TimetableImportExecutor(file_path, metadata, progress_callback=progress_callback)
+		execution_result = executor.execute()
+		
+		frappe.logger().info(f"✅ Execution complete: success={execution_result.get('success')}")
+		
+		# Get stats from execution_result
+		exec_stats = execution_result.get('stats', {})
+		instances = exec_stats.get('instances_created', 0)
+		rows = exec_stats.get('rows_created', 0)
+		
+		# Final progress
+		if progress_callback:
+			progress_callback({
+				"phase": "completed",
+				"current": 100,
+				"total": 100,
+				"percentage": 100,
+				"message": f"✅ Import thành công! Đã tạo {instances} lớp với {rows} tiết học",
+				"current_class": ""
+			})
+		
+		return {
+			"success": execution_result.get('success', False),
+			"message": f"✅ Import thành công! Đã tạo {instances} lớp với {rows} tiết học",
+			"timetable_id": exec_stats.get('timetable_id'),
+			"instances_created": instances,
+			"rows_created": rows,
+			"stats": exec_stats,
+			"warnings": validation_result.get('warnings', []) + execution_result.get('warnings', []),
+			"logs": execution_result.get('logs', []),
+			"errors": execution_result.get('errors', [])
+		}
+		
+	except Exception as e:
+		import traceback
+		error_trace = traceback.format_exc()
+		frappe.log_error(f"Synchronous import failed: {error_trace}")
+		
+		if progress_callback:
+			progress_callback({
+				"phase": "error",
+				"current": 0,
+				"total": 100,
+				"percentage": 0,
+				"message": f"❌ Lỗi: {str(e)}",
+				"current_class": ""
+			})
+		
+		return {
+			"success": False,
+			"message": f"Import failed: {str(e)}",
+			"errors": [str(e)],
+			"logs": [f"💥 Critical error: {str(e)}"],
+			"traceback": error_trace,
+			"stats": {}
 		}
 
