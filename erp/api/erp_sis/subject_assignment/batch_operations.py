@@ -230,40 +230,29 @@ def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict],
 	)
 	
 	# PHASE 4: SYNC TEACHER TIMETABLE (Materialized View)
-	# NOTE: Chỉ sync cho created/updated assignments, KHÔNG bao gồm deleted.
-	# Deleted assignments đã được cleanup trong Phase 2 (apply_all_assignments).
+	# ⚡ NOTE: Teacher Timetable sync is ALREADY handled in Phase 3 (sync_all_assignments)
+	# which calls sync_assignment_to_timetable() → sync_for_rows() → updates Teacher Timetable
+	# 
+	# DO NOT call sync_teacher_timetable_bulk() here because it:
+	# 1. Deletes ALL existing Teacher Timetable entries for this teacher
+	# 2. Tries to recreate but often returns 0 entries
+	# 3. Causes data loss
+	#
+	# Previous implementation (BROKEN):
+	#   sync_teacher_timetable_bulk() → DELETE all → CREATE 0 → Data loss!
+	# Current implementation (WORKING):
+	#   sync_assignment_to_timetable() → Update pattern rows → sync_for_rows() → Incremental upsert
+	
 	frappe.logger().info(
-		f"🔄 Phase 4: Syncing Teacher Timetable for "
-		f"{len(apply_result['assignment_ids'])} assignments "
-		f"({apply_result['stats']['deleted']} deleted assignments already cleaned up)"
+		f"✅ Phase 4: Teacher Timetable already synced in Phase 3 for "
+		f"{len(apply_result['assignment_ids'])} assignments"
 	)
 	
-	teacher_timetable_result = {"created": 0, "errors": 0, "details": []}
-	try:
-		teacher_timetable_result = sync_teacher_timetable_bulk(
-			teacher_id=teacher_id,
-			assignment_ids=apply_result["assignment_ids"]
-		)
-		
-		frappe.logger().info(
-			f"✅ Phase 4: Teacher Timetable synced - "
-			f"Created: {teacher_timetable_result['created']}, "
-			f"Errors: {teacher_timetable_result['errors']}"
-		)
-	except Exception as tt_sync_error:
-		# CRITICAL: Don't crash entire operation if Teacher Timetable sync fails
-		# Frontend cần response để update UI
-		frappe.logger().error(
-			f"⚠️ Phase 4: Teacher Timetable sync failed (but assignments were saved): "
-			f"{str(tt_sync_error)}"
-		)
-		import traceback
-		frappe.logger().error(traceback.format_exc())
-		teacher_timetable_result = {
-			"created": 0,
-			"errors": 1,
-			"details": [f"⚠️ Teacher Timetable sync failed: {str(tt_sync_error)}"]
-		}
+	teacher_timetable_result = {
+		"created": sync_result.get("rows_updated", 0),  # Use Phase 3 result
+		"errors": 0,
+		"details": ["✅ Teacher Timetable synced via sync_assignment_to_timetable()"]
+	}
 	
 	# GRACEFUL DEGRADATION: Return success nếu assignments đã save thành công
 	# (Teacher Timetable có thể sync sau bằng manual refresh hoặc background job)
