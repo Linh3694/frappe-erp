@@ -1770,11 +1770,21 @@ def upload_report_card_images():
         
         frappe.logger().info(f"   - student_code: {student_code}")
         
-        # Extract school year from report or create default
-        school_year = getattr(report, 'academic_year', 'unknown') or 'unknown'
+        # Extract school year from report - try multiple field names
+        school_year = (
+            getattr(report, 'school_year', None) or 
+            getattr(report, 'academic_year', None) or 
+            'unknown'
+        )
         
         # Get semester info - try multiple field names
-        semester_part = getattr(report, 'semester', 'semester_1') or 'semester_1'
+        semester_part = (
+            getattr(report, 'semester_part', None) or 
+            getattr(report, 'semester', None) or 
+            'semester_1'
+        )
+        
+        # Override with term or assessment_period if available
         if hasattr(report, 'term') and getattr(report, 'term', None):
             semester_part = f"term_{report.term}"
         elif hasattr(report, 'assessment_period') and getattr(report, 'assessment_period', None):
@@ -1921,11 +1931,21 @@ def get_report_card_images(report_id: Optional[str] = None):
         except:
             student_code = report.student_id
         
-        # Extract school year
-        school_year = getattr(report, 'academic_year', 'unknown') or 'unknown'
+        # Extract school year - try multiple field names
+        school_year = (
+            getattr(report, 'school_year', None) or 
+            getattr(report, 'academic_year', None) or 
+            'unknown'
+        )
         
-        # Get semester info
-        semester_part = getattr(report, 'semester', 'semester_1') or 'semester_1'
+        # Get semester info - try multiple field names
+        semester_part = (
+            getattr(report, 'semester_part', None) or 
+            getattr(report, 'semester', None) or 
+            'semester_1'
+        )
+        
+        # Override with term or assessment_period if available
         if hasattr(report, 'term'):
             term_val = getattr(report, 'term', None)
             if term_val:

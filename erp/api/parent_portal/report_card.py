@@ -406,13 +406,19 @@ def get_report_card_images(report_id=None):
     import glob
     
     try:
-        # Get report_id from multiple sources (supports both GET and POST)
-        if not report_id:
+        # Get report_id - Frappe auto-injects query params as function arguments
+        # But also check form_dict as fallback
+        if not report_id or report_id == "":
             report_id = frappe.form_dict.get("report_id")
-        if not report_id:
+        if not report_id or report_id == "":
             report_id = (frappe.local.form_dict or {}).get("report_id")
         
-        if not report_id:
+        frappe.logger().info(f"🔍 [Parent Portal] get_report_card_images debug:")
+        frappe.logger().info(f"   - report_id param: {repr(report_id)}")
+        frappe.logger().info(f"   - form_dict: {frappe.form_dict}")
+        frappe.logger().info(f"   - local.form_dict: {frappe.local.form_dict}")
+        
+        if not report_id or report_id == "":
             frappe.logger().error(f"❌ report_id not found in parent portal request")
             return error_response(
                 message="Missing report_id",
@@ -459,9 +465,27 @@ def get_report_card_images(report_id=None):
         except:
             student_code = report.student_id
         
+        # Debug: Log all report fields to find the correct ones
+        frappe.logger().info(f"   📋 Report fields debug:")
+        frappe.logger().info(f"      - school_year: {getattr(report, 'school_year', 'NOT_FOUND')}")
+        frappe.logger().info(f"      - academic_year: {getattr(report, 'academic_year', 'NOT_FOUND')}")
+        frappe.logger().info(f"      - semester_part: {getattr(report, 'semester_part', 'NOT_FOUND')}")
+        frappe.logger().info(f"      - semester: {getattr(report, 'semester', 'NOT_FOUND')}")
+        
         # Extract school year and semester info
-        school_year = getattr(report, 'academic_year', 'unknown') or getattr(report, 'school_year', 'unknown') or 'unknown'
-        semester_part = getattr(report, 'semester', 'semester_1') or getattr(report, 'semester_part', 'semester_1') or 'semester_1'
+        # Try multiple field names for school year
+        school_year = (
+            getattr(report, 'school_year', None) or 
+            getattr(report, 'academic_year', None) or 
+            'unknown'
+        )
+        
+        # Try multiple field names for semester
+        semester_part = (
+            getattr(report, 'semester_part', None) or 
+            getattr(report, 'semester', None) or 
+            'semester_1'
+        )
         
         frappe.logger().info(f"   - student_code: {student_code}")
         frappe.logger().info(f"   - school_year: {school_year}")
