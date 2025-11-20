@@ -778,3 +778,65 @@ def send_announcement():
             message=f"Failed to send announcement: {str(e)}",
             code="SEND_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def recall_announcement():
+    """Recall a sent announcement (change status from sent to draft)"""
+    try:
+        data = frappe.local.form_dict
+        
+        # Try to parse JSON from request body if needed (for POST requests)
+        if not data or not data.get('announcement_id'):
+            try:
+                if frappe.request.data:
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                    frappe.logger().info(f"Parsed JSON data for recall_announcement: {list(data.keys())}")
+            except Exception as e:
+                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+        
+        announcement_id = data.get("announcement_id")
+
+        if not announcement_id:
+            return validation_error_response(
+                "Announcement ID is required",
+                {"announcement_id": ["Announcement ID is required"]}
+            )
+
+        # Get the announcement
+        announcement = frappe.get_doc("SIS Announcement", announcement_id)
+
+        # Check if user has access to this campus
+        campus_id = get_current_campus_from_context()
+        if campus_id and announcement.campus_id != campus_id:
+            return forbidden_response("You don't have access to this announcement")
+
+        # Only allow recalling sent announcements
+        if announcement.status != "sent":
+            return validation_error_response(
+                "Only sent announcements can be recalled",
+                {"status": ["Only sent announcements can be recalled"]}
+            )
+
+        # Update status back to draft
+        announcement.status = "draft"
+        announcement.save()
+
+        frappe.logger().info(f"✅ Announcement {announcement_id} recalled successfully (status changed to draft)")
+
+        return success_response(
+            message="Announcement recalled successfully",
+            data={
+                "announcement_id": announcement.name,
+                "status": announcement.status
+            }
+        )
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Announcement not found")
+    except Exception as e:
+        frappe.logger().error(f"Error recalling announcement: {str(e)}")
+        return error_response(
+            message=f"Failed to recall announcement: {str(e)}",
+            code="RECALL_ERROR"
+        )
