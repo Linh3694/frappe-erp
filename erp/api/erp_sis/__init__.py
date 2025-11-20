@@ -14,3 +14,4 @@ from .contact_log import *
 from .daily_menu import *
 from .file_download import *
 from .badge import *
+from .report_card import *
