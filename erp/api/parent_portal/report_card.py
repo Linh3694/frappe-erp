@@ -390,3 +390,147 @@ def get_report_card_detail():
             logs=logs
         )
 
+
+@frappe.whitelist(allow_guest=False)
+def get_report_card_images(report_id=None):
+    """
+    Get list of PNG images for a report card (parent view)
+    
+    Query params:
+        - report_id: Report card ID
+    
+    Returns:
+        List of image URLs for each page
+    """
+    import os
+    import glob
+    
+    try:
+        # Get report_id from multiple sources (supports both GET and POST)
+        if not report_id:
+            report_id = frappe.form_dict.get("report_id")
+        if not report_id:
+            report_id = (frappe.local.form_dict or {}).get("report_id")
+        
+        if not report_id:
+            frappe.logger().error(f"❌ report_id not found in parent portal request")
+            return error_response(
+                message="Missing report_id",
+                code="MISSING_PARAMS",
+                logs=["report_id is required"]
+            )
+        
+        frappe.logger().info(f"📸 [Parent Portal] get_report_card_images called for report: {report_id}, parent: {frappe.session.user}")
+        
+        # Get report
+        try:
+            report = frappe.get_doc("SIS Student Report Card", report_id, ignore_permissions=True)
+        except frappe.DoesNotExistError:
+            return error_response(
+                message="Báo cáo học tập không được tìm thấy",
+                code="NOT_FOUND",
+                logs=[f"Report {report_id} not found"]
+            )
+        
+        # Verify parent has access to this student
+        parent_email = frappe.session.user
+        parent_student_ids = _get_parent_student_ids(parent_email)
+        
+        if report.student_id not in parent_student_ids:
+            frappe.logger().error(f"❌ Parent {parent_email} does not have access to student {report.student_id}")
+            return error_response(
+                message="Bạn không có quyền xem báo cáo học tập này",
+                code="PERMISSION_DENIED",
+                logs=[f"Student {report.student_id} not in parent's student list: {parent_student_ids}"]
+            )
+        
+        # Check if report is approved
+        if not report.is_approved:
+            return error_response(
+                message="Báo cáo học tập này chưa được phê duyệt",
+                code="NOT_APPROVED",
+                logs=[f"Report {report_id} is not approved yet"]
+            )
+        
+        # Get student code
+        try:
+            student = frappe.get_doc("CRM Student", report.student_id, ignore_permissions=True)
+            student_code = student.student_code or report.student_id
+        except:
+            student_code = report.student_id
+        
+        # Extract school year and semester info
+        school_year = getattr(report, 'academic_year', 'unknown') or getattr(report, 'school_year', 'unknown') or 'unknown'
+        semester_part = getattr(report, 'semester', 'semester_1') or getattr(report, 'semester_part', 'semester_1') or 'semester_1'
+        
+        frappe.logger().info(f"   - student_code: {student_code}")
+        frappe.logger().info(f"   - school_year: {school_year}")
+        frappe.logger().info(f"   - semester_part: {semester_part}")
+        
+        # Build folder path: /files/reportcard/{student_code}/{schoolYear}/{semester_part}/
+        folder_path = f"/files/reportcard/{student_code}/{school_year}/{semester_part}"
+        physical_path = frappe.get_site_path('public', 'files', 'reportcard', student_code, school_year, semester_part)
+        
+        frappe.logger().info(f"   📁 Looking for images in: {physical_path}")
+        
+        # Check if folder exists
+        if not os.path.exists(physical_path):
+            frappe.logger().info(f"   ⚠️ Folder not found: {physical_path}")
+            return success_response(
+                data={
+                    "report_id": report_id,
+                    "student_code": student_code,
+                    "school_year": school_year,
+                    "semester_part": semester_part,
+                    "images": [],
+                    "total_pages": 0,
+                    "has_images": False,
+                    "folder_path": folder_path
+                },
+                message="No images found yet. Please wait for approval.",
+                logs=[f"Folder not found: {physical_path}"]
+            )
+        
+        # Find all PNG files in folder
+        png_files = glob.glob(os.path.join(physical_path, "page_*.png"))
+        png_files.sort()  # Sort by filename (page_1.png, page_2.png, ...)
+        
+        frappe.logger().info(f"   📸 Found {len(png_files)} PNG files")
+        
+        # Build image URLs
+        image_urls = []
+        for idx, file_path in enumerate(png_files, start=1):
+            filename = os.path.basename(file_path)
+            url = f"{folder_path}/{filename}"
+            image_urls.append({
+                "page": idx,
+                "filename": filename,
+                "url": url
+            })
+        
+        frappe.logger().info(f"✅ [Parent Portal] Found {len(image_urls)} images for report {report_id}")
+        
+        return success_response(
+            data={
+                "report_id": report_id,
+                "student_code": student_code,
+                "school_year": school_year,
+                "semester_part": semester_part,
+                "images": image_urls,
+                "total_pages": len(image_urls),
+                "has_images": True,
+                "folder_path": folder_path
+            },
+            message=f"Found {len(image_urls)} pages",
+            logs=[f"Report {report_id}: {len(image_urls)} images found"]
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Parent Portal] Error in get_report_card_images: {str(e)}")
+        frappe.logger().error(frappe.get_traceback())
+        return error_response(
+            message=f"Lỗi khi lấy ảnh báo cáo: {str(e)}",
+            code="SERVER_ERROR",
+            logs=[str(e), frappe.get_traceback()]
+        )
+
