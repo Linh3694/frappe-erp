@@ -274,9 +274,8 @@ def submit_leave_request():
 					"submitted_at": datetime.now()
 				})
 				
-				# Bypass all validations and permissions
+				# Bypass permissions but allow validation to run (to populate student_name, parent_name, student_code)
 				leave_request.flags.ignore_permissions = True
-				leave_request.flags.ignore_validate = True
 				leave_request.insert()
 			except Exception as e:
 				frappe.logger().error(f"❌ Error creating leave request for student {student_id}: {str(e)}")
@@ -506,8 +505,12 @@ def update_leave_request():
 					})
 					file_doc.insert(ignore_permissions=True)
 
-		# Validate and save
-		leave_request.save(ignore_permissions=True)
+		# Save - this will trigger on_update() hook which re-syncs attendance if dates changed
+		leave_request.flags.ignore_permissions = True
+		leave_request.save()
+		
+		# Commit to ensure attendance sync is persisted
+		frappe.db.commit()
 
 		return success_response({
 			"message": "Đã cập nhật đơn xin nghỉ phép thành công",

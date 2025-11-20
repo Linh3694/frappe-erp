@@ -120,6 +120,10 @@ def get_class_leave_requests(class_id=None):
             request['reason_display'] = reason_mapping.get(request['reason'], request['reason'])
             # Add creator name (owner)
             request['creator_name'] = owner_names_map.get(request.get('owner'), request.get('owner', ''))
+            
+            # Check if created by parent (check if owner email is from parent portal)
+            owner_email = request.get('owner', '')
+            request['is_created_by_parent'] = '@parent.wellspring.edu.vn' in str(owner_email)
 
         # Calculate pagination info
         total_pages = (total_count + limit - 1) // limit  # Ceiling division
