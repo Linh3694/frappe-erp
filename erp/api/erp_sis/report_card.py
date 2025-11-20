@@ -1718,13 +1718,17 @@ def upload_report_card_images():
         user_roles = frappe.get_roles(user)
         
         frappe.logger().info(f"📸 upload_report_card_images called by {user}")
+        frappe.logger().info(f"   User roles: {user_roles}")
         
         # Check permissions
         allowed_roles = ["SIS Manager", "SIS BOD", "System Manager"]
         has_permission = any(role in user_roles for role in allowed_roles)
         
+        frappe.logger().info(f"   Allowed roles: {allowed_roles}")
+        frappe.logger().info(f"   Has permission: {has_permission}")
+        
         if not has_permission:
-            frappe.logger().error(f"❌ User {user} does not have required role: {user_roles}")
+            frappe.logger().error(f"❌ User {user} does not have required role. User roles: {user_roles}, Required: {allowed_roles}")
             frappe.throw(
                 _("Bạn không có quyền tải lên báo cáo học tập. Cần role SIS Manager, SIS BOD, hoặc System Manager"),
                 title="Permission Denied"
