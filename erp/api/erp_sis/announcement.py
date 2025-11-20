@@ -86,6 +86,7 @@ def get_announcements():
                 "campus_id",
                 "creation",
                 "modified",
+                "recipient_count",
                 "sent_count",
                 "received_count"
             ],
@@ -114,6 +115,8 @@ def get_announcements():
                 announcement["recipients"] = []
             
             # Set default counts if not set
+            if not announcement.get("recipient_count"):
+                announcement["recipient_count"] = 0
             if not announcement.get("sent_count"):
                 announcement["sent_count"] = 0
             if not announcement.get("received_count"):
@@ -302,6 +305,18 @@ def create_announcement():
                 {"recipients": ["At least one recipient is required"]}
             )
 
+        # Calculate recipient count
+        recipient_count = data.get("recipient_count", 0)
+        if not recipient_count and recipients_data:
+            try:
+                from erp.utils.notification_handler import get_parent_emails_for_recipients
+                parent_emails = get_parent_emails_for_recipients(recipients_data)
+                recipient_count = len(parent_emails)
+                frappe.logger().info(f"✅ Calculated {recipient_count} parents for announcement")
+            except Exception as e:
+                frappe.logger().error(f"❌ Error calculating recipient count: {str(e)}")
+                recipient_count = 0
+        
         # Create the announcement
         announcement = frappe.get_doc({
             "doctype": "SIS Announcement",
@@ -312,6 +327,7 @@ def create_announcement():
             "content_vn": content_vn,
             "recipients": json.dumps(recipients_data),
             "recipient_type": data.get("recipient_type", "specific"),
+            "recipient_count": recipient_count,
             "status": data.get("status", "draft"),
             "sent_by": frappe.session.user  # Always set sent_by to current user
         })

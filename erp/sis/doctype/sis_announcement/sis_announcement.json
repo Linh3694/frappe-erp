@@ -23,6 +23,7 @@
   "status",
   "sent_at",
   "sent_by",
+  "recipient_count",
   "sent_count",
   "received_count",
   "column_break_1",
@@ -86,6 +87,14 @@
    "label": "Sent By",
    "options": "User",
    "read_only": 1
+  },
+  {
+   "fieldname": "recipient_count",
+   "fieldtype": "Int",
+   "label": "Recipient Count",
+   "description": "Number of parents that will receive this announcement",
+   "read_only": 1,
+   "default": 0
   },
   {
    "fieldname": "sent_count",
