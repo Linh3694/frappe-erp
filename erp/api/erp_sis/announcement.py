@@ -309,10 +309,20 @@ def create_announcement():
         recipient_count = data.get("recipient_count", 0)
         if not recipient_count and recipients_data:
             try:
-                from erp.utils.notification_handler import get_parent_emails_for_recipients
-                parent_emails = get_parent_emails_for_recipients(recipients_data)
-                recipient_count = len(parent_emails)
-                frappe.logger().info(f"✅ Calculated {recipient_count} parents for announcement")
+                from erp.utils.notification_handler import resolve_recipient_students, get_guardians_for_students, get_parent_emails
+                
+                # Resolve to student IDs
+                student_ids = resolve_recipient_students(recipients_data)
+                if student_ids:
+                    # Get guardians
+                    guardians = get_guardians_for_students(student_ids)
+                    # Get parent emails
+                    parent_emails = get_parent_emails(guardians)
+                    recipient_count = len(parent_emails)
+                    frappe.logger().info(f"✅ Calculated {recipient_count} parents for announcement")
+                else:
+                    frappe.logger().warning("⚠️ No students found for recipients")
+                    recipient_count = 0
             except Exception as e:
                 frappe.logger().error(f"❌ Error calculating recipient count: {str(e)}")
                 recipient_count = 0
@@ -823,13 +833,28 @@ def calculate_recipient_count():
                 data={"count": 0}
             )
         
-        # Get unique parent emails based on recipients
-        from erp.utils.notification_handler import get_parent_emails_for_recipients
+        # Calculate parent count using correct flow
+        from erp.utils.notification_handler import resolve_recipient_students, get_guardians_for_students, get_parent_emails
         
-        parent_emails = get_parent_emails_for_recipients(recipients_data)
+        # Step 1: Resolve to student IDs
+        student_ids = resolve_recipient_students(recipients_data)
+        frappe.logger().info(f"📊 Resolved to {len(student_ids)} students")
+        
+        if not student_ids:
+            return success_response(
+                message="No students found for recipients",
+                data={"count": 0}
+            )
+        
+        # Step 2: Get guardians
+        guardians = get_guardians_for_students(student_ids)
+        frappe.logger().info(f"👥 Found {len(guardians)} guardians")
+        
+        # Step 3: Get unique parent emails
+        parent_emails = get_parent_emails(guardians)
         count = len(parent_emails)
         
-        frappe.logger().info(f"✅ Calculated {count} parents for announcement recipients")
+        frappe.logger().info(f"✅ Calculated {count} parents for announcement")
         
         return success_response(
             message="Recipient count calculated successfully",
