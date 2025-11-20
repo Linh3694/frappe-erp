@@ -1734,9 +1734,14 @@ def upload_report_card_images():
                 title="Permission Denied"
             )
         
-        # Get report_id - try multiple sources
-        report_id = frappe.form_dict.get('report_id')
+        # Get report_id - try multiple sources for multipart/form-data
+        report_id = None
+        if hasattr(frappe.request, 'form') and frappe.request.form:
+            report_id = frappe.request.form.get('report_id')
         if not report_id:
+            report_id = frappe.form_dict.get('report_id')
+        if not report_id:
+            frappe.logger().error(f"❌ report_id not found. form_dict: {frappe.form_dict}, request.form: {getattr(frappe.request, 'form', None)}")
             frappe.throw(_("report_id is required"), title="Missing Parameter")
         
         frappe.logger().info(f"   - report_id: {report_id}")
