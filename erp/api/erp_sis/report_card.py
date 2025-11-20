@@ -1698,7 +1698,7 @@ def render_report_card_html(report_data):
         """
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def upload_report_card_images():
     """
     Upload report card as PNG images to backend storage
