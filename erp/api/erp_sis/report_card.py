@@ -1696,3 +1696,165 @@ def render_report_card_html(report_data):
         </body>
         </html>
         """
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def upload_report_card_images():
+    """
+    Upload report card as PNG images to backend storage
+    
+    Request: multipart/form-data with:
+        - report_id: Report card ID
+        - images: Array of PNG files
+    
+    Returns:
+        Success response with file paths
+    """
+    import os
+    from datetime import datetime
+    
+    try:
+        user = frappe.session.user
+        user_roles = frappe.get_roles(user)
+        
+        frappe.logger().info(f"📸 upload_report_card_images called by {user}")
+        
+        # Check permissions
+        if "SIS Manager" not in user_roles and "SIS BOD" not in user_roles:
+            return error_response(
+                message="Bạn không có quyền tải lên báo cáo học tập",
+                code="PERMISSION_DENIED",
+                logs=[f"User {user} does not have required role"]
+            )
+        
+        # Get report_id from form data
+        report_id = frappe.form_dict.get('report_id')
+        if not report_id:
+            return error_response(
+                message="Missing report_id",
+                code="MISSING_PARAMS",
+                logs=["report_id is required"]
+            )
+        
+        # Get report to extract student info
+        try:
+            report = frappe.get_doc("SIS Student Report Card", report_id, ignore_permissions=True)
+        except frappe.DoesNotExistError:
+            return error_response(
+                message="Báo cáo học tập không được tìm thấy",
+                code="NOT_FOUND",
+                logs=[f"Report {report_id} not found"]
+            )
+        
+        # Get student code
+        try:
+            student = frappe.get_doc("CRM Student", report.student_id, ignore_permissions=True)
+            student_code = student.student_code or report.student_id
+        except:
+            student_code = report.student_id
+        
+        # Extract school year from report or create default
+        school_year = getattr(report, 'academic_year', 'unknown') or 'unknown'
+        
+        # Get semester info - try multiple field names
+        semester_part = getattr(report, 'semester', 'semester_1') or 'semester_1'
+        if hasattr(report, 'term'):
+            term_val = getattr(report, 'term', None)
+            if term_val:
+                semester_part = f"term_{term_val}"
+        elif hasattr(report, 'assessment_period'):
+            period_val = getattr(report, 'assessment_period', None)
+            if period_val:
+                semester_part = f"period_{period_val}"
+        
+        # Build folder structure: /files/reportcard/{student_code}/{schoolYear}/semester_part/
+        base_folder = frappe.get_app_path('frappe', '../files')
+        report_folder = os.path.join(
+            base_folder,
+            'reportcard',
+            student_code,
+            school_year,
+            semester_part
+        )
+        
+        # Create directories if they don't exist
+        os.makedirs(report_folder, exist_ok=True)
+        
+        frappe.logger().info(f"   📁 Report folder: {report_folder}")
+        
+        # Get uploaded files
+        files = frappe.request.files
+        if 'images' not in files:
+            return error_response(
+                message="No images uploaded",
+                code="NO_FILES",
+                logs=["images field is required"]
+            )
+        
+        uploaded_images = files.getlist('images')
+        file_paths = []
+        
+        for idx, file in enumerate(uploaded_images):
+            try:
+                # Sanitize filename
+                filename = f"page_{idx+1}.png"
+                file_path = os.path.join(report_folder, filename)
+                
+                # Save file
+                file.save(file_path)
+                
+                # Store relative path for response
+                relative_path = f"/files/reportcard/{student_code}/{school_year}/{semester_part}/{filename}"
+                file_paths.append({
+                    "filename": filename,
+                    "path": relative_path,
+                    "page": idx + 1
+                })
+                
+                frappe.logger().info(f"   ✅ Saved image {idx+1}: {file_path}")
+                
+            except Exception as e:
+                frappe.logger().error(f"   ❌ Error saving image {idx+1}: {str(e)}")
+                continue
+        
+        if not file_paths:
+            return error_response(
+                message="Không có ảnh nào được lưu thành công",
+                code="SAVE_ERROR",
+                logs=["No images were saved successfully"]
+            )
+        
+        # Update report with image info
+        try:
+            report.report_card_images_folder = f"/files/reportcard/{student_code}/{school_year}/{semester_part}"
+            report.save(ignore_permissions=True)
+            frappe.db.commit()
+        except Exception as e:
+            frappe.logger().warning(f"⚠️  Could not update report with image folder info: {str(e)}")
+        
+        return success_response(
+            data={
+                "report_id": report_id,
+                "student_code": student_code,
+                "school_year": school_year,
+                "semester_part": semester_part,
+                "images": file_paths,
+                "total_pages": len(file_paths),
+                "folder_path": f"/files/reportcard/{student_code}/{school_year}/{semester_part}"
+            },
+            message=f"Successfully uploaded {len(file_paths)} images",
+            logs=[
+                f"Report {report_id} images uploaded by {user}",
+                f"Total pages: {len(file_paths)}",
+                f"Folder: /files/reportcard/{student_code}/{school_year}/{semester_part}"
+            ]
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ Error in upload_report_card_images: {str(e)}")
+        frappe.logger().error(frappe.get_traceback())
+        return error_response(
+            message=f"Lỗi khi tải lên ảnh báo cáo: {str(e)}",
+            code="SERVER_ERROR",
+            logs=[str(e), frappe.get_traceback()]
+        )
