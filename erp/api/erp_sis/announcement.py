@@ -781,6 +781,54 @@ def send_announcement():
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
+def calculate_recipient_count():
+    """Calculate number of parents that will receive the announcement"""
+    try:
+        data = frappe.local.form_dict
+        
+        # Try to parse JSON from request body if needed
+        if not data or not data.get('recipients'):
+            try:
+                if frappe.request.data:
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+            except Exception as e:
+                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+        
+        recipients_data = data.get("recipients", [])
+        if isinstance(recipients_data, str):
+            try:
+                recipients_data = json.loads(recipients_data)
+            except json.JSONDecodeError:
+                recipients_data = []
+        
+        if not recipients_data:
+            return success_response(
+                message="No recipients provided",
+                data={"count": 0}
+            )
+        
+        # Get unique parent emails based on recipients
+        from erp.utils.notification_handler import get_parent_emails_for_recipients
+        
+        parent_emails = get_parent_emails_for_recipients(recipients_data)
+        count = len(parent_emails)
+        
+        frappe.logger().info(f"✅ Calculated {count} parents for announcement recipients")
+        
+        return success_response(
+            message="Recipient count calculated successfully",
+            data={"count": count}
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error calculating recipient count: {str(e)}")
+        return error_response(
+            message=f"Failed to calculate recipient count: {str(e)}",
+            code="CALCULATION_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
 def recall_announcement():
     """Recall a sent announcement (change status from sent to draft)"""
     try:
