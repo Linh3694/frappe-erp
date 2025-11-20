@@ -1888,13 +1888,21 @@ def get_report_card_images(report_id: Optional[str] = None):
     import glob
     
     try:
-        report_id = report_id or (frappe.local.form_dict or {}).get("report_id")
+        # Get report_id from function parameter, form_dict, or local.form_dict
         if not report_id:
+            report_id = frappe.form_dict.get("report_id")
+        if not report_id:
+            report_id = (frappe.local.form_dict or {}).get("report_id")
+        
+        if not report_id:
+            frappe.logger().error(f"❌ report_id not found. form_dict: {frappe.form_dict}, local.form_dict: {frappe.local.form_dict}")
             return error_response(
                 message="Missing report_id",
                 code="MISSING_PARAMS",
                 logs=["report_id is required"]
             )
+        
+        frappe.logger().info(f"📸 get_report_card_images called for report: {report_id}")
         
         # Get report
         try:
