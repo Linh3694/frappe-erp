@@ -1378,12 +1378,15 @@ def approve_report_card():
         frappe.logger().info(f"📝 approve_report_card called by {user}")
         frappe.logger().info(f"   User roles: {user_roles}")
         
-        if "SIS Manager" not in user_roles and "SIS BOD" not in user_roles:
+        allowed_roles = ["SIS Manager", "SIS BOD", "System Manager"]
+        has_permission = any(role in user_roles for role in allowed_roles)
+        
+        if not has_permission:
             frappe.logger().error(f"❌ User {user} does not have required role")
             return error_response(
-                message="Bạn không có quyền phê duyệt báo cáo học tập. Cần có role SIS Manager hoặc SIS BOD.",
+                message="Bạn không có quyền phê duyệt báo cáo học tập. Cần có role SIS Manager, SIS BOD, hoặc System Manager.",
                 code="PERMISSION_DENIED",
-                logs=[f"User {user} does not have SIS Manager or SIS BOD role"]
+                logs=[f"User {user} does not have required role: {user_roles}"]
             )
         
         # Get request body
@@ -1416,16 +1419,15 @@ def approve_report_card():
                 logs=[f"Report {report_id} not found"]
             )
         
-        # Check if already approved
-        if report.is_approved:
-            return error_response(
-                message="Báo cáo học tập này đã được phê duyệt trước đó",
-                code="ALREADY_APPROVED",
-                logs=[f"Report {report_id} is already approved by {report.approved_by} at {report.approved_at}"]
-            )
+        # Allow re-approval to update images and info
+        is_reapproval = bool(report.is_approved)
+        
+        if is_reapproval:
+            frappe.logger().info(f"   ℹ️ Re-approving report {report_id} (previously approved by {report.approved_by} at {report.approved_at})")
         
         # Simply approve the report - no PDF generation needed
         # Parents will download PDF directly from their browser using FormRenderer
+        # Allow re-approval for updating images and corrections
         
         # Update report card with approval info
         report.is_approved = 1
@@ -1436,7 +1438,10 @@ def approve_report_card():
         
         frappe.db.commit()
         
-        frappe.logger().info(f"✅ Report {report_id} approved successfully")
+        if is_reapproval:
+            frappe.logger().info(f"✅ Report {report_id} re-approved successfully")
+        else:
+            frappe.logger().info(f"✅ Report {report_id} approved successfully")
         
         # Send notification to parents after approval
         try:
