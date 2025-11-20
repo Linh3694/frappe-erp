@@ -569,11 +569,8 @@ def generate_action_url(notif_type, data):
         return base_url
     
     elif notif_type == 'announcement':
-        base_url = "/announcements"
-        announcement_id = data.get('announcement_id') or data.get('announcementId')
-        if announcement_id:
-            return f"{base_url}/{announcement_id}"
-        return base_url
+        # Parent portal route is /announcement (singular)
+        return "/announcement"
     
     elif notif_type == 'news':
         base_url = "/news"
@@ -583,8 +580,8 @@ def generate_action_url(notif_type, data):
         return base_url
     
     elif notif_type == 'leave':
-        base_url = "/leaves"
-        return f"{base_url}?student={student_id}" if student_id else base_url
+        # Leave notifications go to list page, no student param needed
+        return "/leave"
     
     # Default
     return "/dashboard"
