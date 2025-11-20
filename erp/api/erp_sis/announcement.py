@@ -666,6 +666,16 @@ def send_announcement():
     """Send a draft announcement"""
     try:
         data = frappe.local.form_dict
+        
+        # Try to parse JSON from request body if needed (for POST requests)
+        if not data or not data.get('announcement_id'):
+            try:
+                if frappe.request.data:
+                    data = json.loads(frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data)
+                    frappe.logger().info(f"Parsed JSON data for send_announcement: {list(data.keys())}")
+            except Exception as e:
+                frappe.logger().error(f"Failed to parse JSON from request: {str(e)}")
+        
         announcement_id = data.get("announcement_id")
 
         if not announcement_id:
