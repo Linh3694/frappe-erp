@@ -392,7 +392,7 @@ def get_report_card_detail():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_report_card_images(report_id=None):
+def get_report_card_images():
     """
     Get list of PNG images for a report card (parent view)
     
@@ -406,17 +406,26 @@ def get_report_card_images(report_id=None):
     import glob
     
     try:
-        # Get report_id - Frappe auto-injects query params as function arguments
-        # But also check form_dict as fallback
-        if not report_id or report_id == "":
+        # Get report_id from request - try all possible sources
+        report_id = None
+        
+        # Try GET query parameters (frappe.request.args)
+        if hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+            report_id = frappe.request.args.get("report_id")
+        
+        # Try form_dict (POST data or query params)
+        if not report_id:
             report_id = frappe.form_dict.get("report_id")
-        if not report_id or report_id == "":
+        
+        # Try local.form_dict
+        if not report_id:
             report_id = (frappe.local.form_dict or {}).get("report_id")
         
         frappe.logger().info(f"🔍 [Parent Portal] get_report_card_images debug:")
-        frappe.logger().info(f"   - report_id param: {repr(report_id)}")
+        frappe.logger().info(f"   - request.args: {getattr(frappe.request, 'args', 'NOT_FOUND')}")
         frappe.logger().info(f"   - form_dict: {frappe.form_dict}")
         frappe.logger().info(f"   - local.form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"   - Extracted report_id: {repr(report_id)}")
         
         if not report_id or report_id == "":
             frappe.logger().error(f"❌ report_id not found in parent portal request")
