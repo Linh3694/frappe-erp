@@ -415,16 +415,27 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
         # Apply nested test_point_titles for the just-appended child row
         try:
             row.test_point_titles = []
-            for t in sub.get("test_point_titles") or []:
+            titles_from_payload = sub.get("test_point_titles") or []
+            
+            # ✅ DEBUG: Log incoming test_point_titles
+            frappe.logger().info(f"📋 Processing test_point_titles for subject {subject_id}: {len(titles_from_payload)} titles")
+            
+            for idx, t in enumerate(titles_from_payload):
+                frappe.logger().debug(f"  Title {idx}: {t}")
                 if (t.get("title") or "").strip():
                     title = t.get("title").strip()
+                    frappe.logger().info(f"  ✅ Adding title: '{title}'")
                     # Use simple dict approach - Frappe will convert to proper objects
                     simple_child = {
                         "title": title
                     }
                     row.append("test_point_titles", simple_child)
+            
+            frappe.logger().info(f"📝 After append: row.test_point_titles length = {len(row.test_point_titles) if hasattr(row, 'test_point_titles') and row.test_point_titles else 0}")
         except Exception as e:
-            frappe.logger().error(f"Error adding test_point_titles for subject {subject_id}: {str(e)}")
+            frappe.logger().error(f"❌ Error adding test_point_titles for subject {subject_id}: {str(e)}")
+            import traceback
+            frappe.logger().error(traceback.format_exc())
 
         # Save scoreboard JSON if provided
         try:
@@ -849,12 +860,17 @@ def update_template(template_id: Optional[str] = None):
         
         # ✅ FIX: MANUAL SAVE test_point_titles (child table of child table)
         # Must save BEFORE clearing old ones to preserve data in memory
+        frappe.logger().info("🔧 [update_template] Starting manual save of test_point_titles...")
         try:
             for subject_row in doc.subjects:
+                subject_id = getattr(subject_row, 'subject_id', 'unknown')
+                frappe.logger().info(f"📝 Processing subject: {subject_id}, row.name: {subject_row.name}")
+                
                 # ✅ CRITICAL: Save test_point_titles to temp variable BEFORE deleting
                 # because delete might clear the in-memory data
                 titles_to_save = []
                 if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
+                    frappe.logger().info(f"  Found {len(subject_row.test_point_titles)} test_point_titles in memory")
                     for test_title_data in subject_row.test_point_titles:
                         title = ""
                         if isinstance(test_title_data, dict):
@@ -864,18 +880,24 @@ def update_template(template_id: Optional[str] = None):
                         
                         if title and title.strip():
                             titles_to_save.append(title.strip())
+                            frappe.logger().info(f"    ✅ Will save: '{title.strip()}'")
+                else:
+                    frappe.logger().warning(f"  ⚠️ No test_point_titles found in memory for subject {subject_id}")
+                
+                frappe.logger().info(f"  Total titles to save: {len(titles_to_save)}")
                 
                 # Now clear existing test_point_titles for this subject
                 try:
                     if subject_row.name:  # Only delete if subject_row has been saved (has name/ID)
-                        frappe.db.sql("""
+                        deleted_count = frappe.db.sql("""
                             DELETE FROM `tabSIS Report Card Test Point Title`
                             WHERE parent = %s
                             AND parenttype = 'SIS Report Card Subject Config'
                             AND parentfield = 'test_point_titles'
                         """, (subject_row.name,))
+                        frappe.logger().info(f"  🗑️ Deleted {deleted_count} old titles")
                 except Exception as delete_error:
-                    frappe.logger().error(f"Error deleting old test_point_titles for subject {subject_row.name}: {str(delete_error)}")
+                    frappe.logger().error(f"  ❌ Error deleting old test_point_titles for subject {subject_row.name}: {str(delete_error)}")
                 
                 # Insert new test_point_titles from saved data
                 for title in titles_to_save:
@@ -888,10 +910,15 @@ def update_template(template_id: Optional[str] = None):
                             "parentfield": "test_point_titles"
                         })
                         child_doc.insert(ignore_permissions=True)
+                        frappe.logger().info(f"    💾 Saved title: '{title}'")
                     except Exception as save_error:
-                        frappe.logger().error(f"Error saving test_point_title '{title}': {str(save_error)}")
+                        frappe.logger().error(f"    ❌ Error saving test_point_title '{title}': {str(save_error)}")
+                        import traceback
+                        frappe.logger().error(traceback.format_exc())
         except Exception as manual_error:
-            frappe.logger().error(f"Error in manual save of test_point_titles during update: {str(manual_error)}")
+            frappe.logger().error(f"❌ Error in manual save of test_point_titles during update: {str(manual_error)}")
+            import traceback
+            frappe.logger().error(traceback.format_exc())
         
         frappe.db.commit()
         doc.reload()
