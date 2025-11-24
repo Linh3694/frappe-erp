@@ -1548,3 +1548,100 @@ def update_student_status_in_trip():
 		frappe.log_error(f"Error updating student status in trip: {str(e)}")
 		frappe.db.rollback()
 		return error_response(f"Failed to update student status: {str(e)}")
+
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
+def get_student_bus_routes():
+	"""
+	Get all bus routes for a specific student with detailed information:
+	- Route details (name, weekday, trip_type)
+	- Pickup/drop-off locations
+	- Driver information
+	- Monitor 1 and Monitor 2 information
+	"""
+	try:
+		# Get student_id from multiple sources
+		form = getattr(frappe, 'form_dict', None) or {}
+		local_form = getattr(frappe.local, 'form_dict', None) or {}
+		request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+		request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+		payload = {}
+		if request_data:
+			try:
+				body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+				payload = json.loads(body) if body else {}
+			except Exception:
+				pass
+
+		def pick(d, keys):
+			for k in keys:
+				if d and d.get(k):
+					return d.get(k)
+			return None
+
+		student_id = (
+			pick(form, ['student_id', 'id'])
+			or pick(local_form, ['student_id', 'id'])
+			or pick(request_args, ['student_id', 'id'])
+			or pick(payload, ['student_id', 'id'])
+		)
+
+		school_year_id = (
+			pick(form, ['school_year_id', 'schoolYearId'])
+			or pick(local_form, ['school_year_id', 'schoolYearId'])
+			or pick(request_args, ['school_year_id', 'schoolYearId'])
+			or pick(payload, ['school_year_id', 'schoolYearId'])
+		)
+
+		if not student_id:
+			return error_response("Student ID is required", code="MISSING_STUDENT_ID")
+
+		# Build SQL query to get student bus routes with all details
+		school_year_filter = ""
+		params = {"student_id": student_id}
+		
+		if school_year_id:
+			school_year_filter = "AND r.school_year_id = %(school_year_id)s"
+			params["school_year_id"] = school_year_id
+
+		bus_routes = frappe.db.sql("""
+			SELECT 
+				rs.name as route_student_id,
+				rs.weekday,
+				rs.trip_type,
+				rs.pickup_location,
+				rs.drop_off_location,
+				r.name as route_id,
+				r.route_name,
+				r.status as route_status,
+				d.name as driver_id,
+				d.full_name as driver_name,
+				d.phone_number as driver_phone,
+				m1.name as monitor1_id,
+				m1.full_name as monitor1_name,
+				m1.phone_number as monitor1_phone,
+				m2.name as monitor2_id,
+				m2.full_name as monitor2_name,
+				m2.phone_number as monitor2_phone
+			FROM `tabSIS Bus Route Student` rs
+			INNER JOIN `tabSIS Bus Route` r ON rs.route_id = r.name
+			LEFT JOIN `tabSIS Bus Driver` d ON r.driver_id = d.name
+			LEFT JOIN `tabSIS Bus Monitor` m1 ON r.monitor1_id = m1.name
+			LEFT JOIN `tabSIS Bus Monitor` m2 ON r.monitor2_id = m2.name
+			WHERE rs.student_id = %(student_id)s
+				{school_year_filter}
+			ORDER BY 
+				FIELD(rs.weekday, 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật'),
+				FIELD(rs.trip_type, 'Đón', 'Trả')
+		""".format(school_year_filter=school_year_filter), params, as_dict=True)
+
+		frappe.logger().info(f"Found {len(bus_routes)} bus routes for student {student_id}")
+
+		return success_response(
+			data=bus_routes,
+			message=f"Successfully fetched {len(bus_routes)} bus routes for student"
+		)
+
+	except Exception as e:
+		frappe.log_error(f"Error fetching student bus routes: {str(e)}")
+		return error_response(f"Failed to fetch student bus routes: {str(e)}")

@@ -1074,3 +1074,312 @@ def search_students(search_term=None):
             message="Error searching students",
             code="SEARCH_STUDENTS_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
+def get_student_profile():
+    """
+    Get comprehensive student profile information including:
+    - Basic info (name, code, dob, gender, avatar)
+    - Homeroom class with teachers and academic program
+    - Running classes
+    - Student subjects
+    """
+    try:
+        # Get student_id from multiple sources
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception as e:
+                frappe.logger().info(f"get_student_profile: JSON parse failed: {str(e)}")
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
+        student_id = (
+            pick(form, ['student_id', 'id', 'name'])
+            or pick(local_form, ['student_id', 'id', 'name'])
+            or pick(request_args, ['student_id', 'id', 'name'])
+            or pick(payload, ['student_id', 'id', 'name'])
+        )
+
+        school_year_id = (
+            pick(form, ['school_year_id', 'schoolYearId'])
+            or pick(local_form, ['school_year_id', 'schoolYearId'])
+            or pick(request_args, ['school_year_id', 'schoolYearId'])
+            or pick(payload, ['school_year_id', 'schoolYearId'])
+        )
+
+        if not student_id:
+            return validation_error_response("Student ID is required")
+
+        # Get current campus
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = "campus-1"
+
+        # Get student basic info
+        student = frappe.get_doc("CRM Student", student_id)
+        
+        # Get student photo
+        student_photo = None
+        try:
+            photos = frappe.get_all(
+                "SIS Photo",
+                filters={
+                    "student_id": student.name,
+                    "type": "student",
+                    "status": "Active"
+                },
+                fields=["photo"],
+                order_by="creation desc",
+                limit=1
+            )
+            if photos and photos[0].get("photo"):
+                student_photo = photos[0]["photo"]
+        except Exception as photo_err:
+            frappe.logger().warning(f"Error fetching photo for student {student.name}: {str(photo_err)}")
+
+        # Build filters for class student
+        class_student_filters = {"student_id": student_id}
+        if school_year_id:
+            class_student_filters["school_year_id"] = school_year_id
+        else:
+            # Get current school year if not provided
+            current_school_year = frappe.db.get_value(
+                "SIS School Year",
+                filters={"is_current": 1},
+                fieldname="name"
+            )
+            if current_school_year:
+                class_student_filters["school_year_id"] = current_school_year
+
+        # Get homeroom class (Regular class type)
+        homeroom_class = None
+        homeroom_class_student = frappe.db.sql("""
+            SELECT 
+                cs.name as class_student_id,
+                cs.class_id,
+                c.title as class_name,
+                c.short_title as class_short_title,
+                c.homeroom_teacher,
+                c.vice_homeroom_teacher,
+                c.academic_program,
+                c.room,
+                t1.user_id as homeroom_teacher_user_id,
+                u1.full_name as homeroom_teacher_name,
+                u1.email as homeroom_teacher_email,
+                t2.user_id as vice_homeroom_teacher_user_id,
+                u2.full_name as vice_homeroom_teacher_name,
+                u2.email as vice_homeroom_teacher_email,
+                ap.title_vn as academic_program_name
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            LEFT JOIN `tabSIS Teacher` t1 ON c.homeroom_teacher = t1.name
+            LEFT JOIN `tabUser` u1 ON t1.user_id = u1.name
+            LEFT JOIN `tabSIS Teacher` t2 ON c.vice_homeroom_teacher = t2.name
+            LEFT JOIN `tabUser` u2 ON t2.user_id = u2.name
+            LEFT JOIN `tabSIS Academic Program` ap ON c.academic_program = ap.name
+            WHERE cs.student_id = %(student_id)s
+                AND c.class_type = 'Regular'
+                {school_year_filter}
+            LIMIT 1
+        """.format(
+            school_year_filter="AND cs.school_year_id = %(school_year_id)s" if school_year_id else ""
+        ), {"student_id": student_id, "school_year_id": school_year_id}, as_dict=True)
+
+        if homeroom_class_student:
+            homeroom_class = homeroom_class_student[0]
+
+        # Get running classes
+        running_classes = frappe.db.sql("""
+            SELECT 
+                cs.name as class_student_id,
+                cs.class_id,
+                c.title as class_name,
+                c.short_title as class_short_title,
+                c.homeroom_teacher,
+                c.room,
+                t1.user_id as homeroom_teacher_user_id,
+                u1.full_name as homeroom_teacher_name
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            LEFT JOIN `tabSIS Teacher` t1 ON c.homeroom_teacher = t1.name
+            LEFT JOIN `tabUser` u1 ON t1.user_id = u1.name
+            WHERE cs.student_id = %(student_id)s
+                AND c.class_type = 'Running'
+                {school_year_filter}
+            ORDER BY c.title ASC
+        """.format(
+            school_year_filter="AND cs.school_year_id = %(school_year_id)s" if school_year_id else ""
+        ), {"student_id": student_id, "school_year_id": school_year_id}, as_dict=True)
+
+        # Get student subjects
+        student_subjects = frappe.db.sql("""
+            SELECT 
+                ss.name,
+                ss.subject_id,
+                s.title_vn as subject_name,
+                s.title_en as subject_name_en,
+                ss.actual_subject_id,
+                acts.title_vn as actual_subject_name,
+                ss.class_id,
+                c.title as class_name
+            FROM `tabSIS Student Subject` ss
+            INNER JOIN `tabSIS Subject` s ON ss.subject_id = s.name
+            LEFT JOIN `tabSIS Actual Subject` acts ON ss.actual_subject_id = acts.name
+            LEFT JOIN `tabSIS Class` c ON ss.class_id = c.name
+            WHERE ss.student_id = %(student_id)s
+                {school_year_filter}
+            ORDER BY s.title_vn ASC
+        """.format(
+            school_year_filter="AND ss.school_year_id = %(school_year_id)s" if school_year_id else ""
+        ), {"student_id": student_id, "school_year_id": school_year_id}, as_dict=True)
+
+        # Build response
+        profile_data = {
+            "basic_info": {
+                "student_id": student.name,
+                "student_name": student.student_name,
+                "student_code": student.student_code,
+                "dob": student.dob,
+                "gender": student.gender,
+                "photo": student_photo,
+                "campus_id": student.campus_id
+            },
+            "homeroom_class": homeroom_class,
+            "running_classes": running_classes,
+            "student_subjects": student_subjects
+        }
+
+        return success_response(
+            data=profile_data,
+            message="Student profile fetched successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching student profile: {str(e)}")
+        return error_response(
+            message="Error fetching student profile",
+            code="FETCH_STUDENT_PROFILE_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
+def check_homeroom_teacher_permission():
+    """
+    Check if current user has permission to view student's family/services tabs.
+    Permission granted if:
+    - User is homeroom teacher or vice-homeroom teacher of student's regular class
+    - User has role SIS Manager or SIS BOD
+    """
+    try:
+        # Get student_id from request
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception:
+                pass
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
+        student_id = (
+            pick(form, ['student_id', 'id'])
+            or pick(local_form, ['student_id', 'id'])
+            or pick(request_args, ['student_id', 'id'])
+            or pick(payload, ['student_id', 'id'])
+        )
+
+        if not student_id:
+            return validation_error_response("Student ID is required")
+
+        current_user = frappe.session.user
+        
+        # Check if user has SIS Manager or SIS BOD role
+        user_roles = frappe.get_roles(current_user)
+        if "SIS Manager" in user_roles or "SIS BOD" in user_roles:
+            return success_response(
+                data={"has_permission": True, "reason": "SIS Manager or SIS BOD role"},
+                message="Permission granted"
+            )
+
+        # Get teacher record(s) for current user
+        teacher_records = frappe.get_all(
+            "SIS Teacher",
+            filters={"user_id": current_user},
+            fields=["name"]
+        )
+
+        if not teacher_records:
+            return success_response(
+                data={"has_permission": False, "reason": "Not a teacher"},
+                message="Permission denied"
+            )
+
+        teacher_ids = [t.name for t in teacher_records]
+
+        # Get student's regular class
+        student_class = frappe.db.sql("""
+            SELECT 
+                c.name as class_id,
+                c.homeroom_teacher,
+                c.vice_homeroom_teacher
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            WHERE cs.student_id = %(student_id)s
+                AND c.class_type = 'Regular'
+            LIMIT 1
+        """, {"student_id": student_id}, as_dict=True)
+
+        if not student_class:
+            return success_response(
+                data={"has_permission": False, "reason": "Student has no regular class"},
+                message="Permission denied"
+            )
+
+        class_doc = student_class[0]
+        
+        # Check if teacher is homeroom or vice-homeroom
+        is_homeroom = (
+            class_doc.homeroom_teacher in teacher_ids or 
+            class_doc.vice_homeroom_teacher in teacher_ids
+        )
+
+        if is_homeroom:
+            return success_response(
+                data={"has_permission": True, "reason": "Homeroom or vice-homeroom teacher"},
+                message="Permission granted"
+            )
+
+        return success_response(
+            data={"has_permission": False, "reason": "Not homeroom teacher of student's class"},
+            message="Permission denied"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error checking homeroom teacher permission: {str(e)}")
+        return error_response(
+            message="Error checking permission",
+            code="CHECK_PERMISSION_ERROR"
+        )
