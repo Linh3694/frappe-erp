@@ -413,6 +413,7 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
         row = parent_doc.append("subjects", subject_data)
 
         # Apply nested test_point_titles for the just-appended child row
+        # ✅ CRITICAL: Store titles temporarily, will manually save after parent doc is saved
         try:
             row.test_point_titles = []
             titles_from_payload = sub.get("test_point_titles") or []
@@ -420,20 +421,26 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
             # ✅ DEBUG: Log incoming test_point_titles
             frappe.logger().info(f"📋 Processing test_point_titles for subject {subject_id}: {len(titles_from_payload)} titles")
             
+            # Store titles in a temporary attribute for later manual save
+            # This is because Frappe doesn't auto-save nested child tables
+            row._temp_test_point_titles = []
+            
             for idx, t in enumerate(titles_from_payload):
                 frappe.logger().debug(f"  Title {idx}: {t}")
-                if (t.get("title") or "").strip():
+                if isinstance(t, dict) and (t.get("title") or "").strip():
                     title = t.get("title").strip()
-                    frappe.logger().info(f"  ✅ Adding title: '{title}'")
-                    # Use simple dict approach - Frappe will convert to proper objects
+                    frappe.logger().info(f"  ✅ Storing title for later save: '{title}'")
+                    row._temp_test_point_titles.append(title)
+                    
+                    # Also append to row for compatibility
                     simple_child = {
                         "title": title
                     }
                     row.append("test_point_titles", simple_child)
             
-            frappe.logger().info(f"📝 After append: row.test_point_titles length = {len(row.test_point_titles) if hasattr(row, 'test_point_titles') and row.test_point_titles else 0}")
+            frappe.logger().info(f"📝 Stored {len(row._temp_test_point_titles)} titles for manual save later")
         except Exception as e:
-            frappe.logger().error(f"❌ Error adding test_point_titles for subject {subject_id}: {str(e)}")
+            frappe.logger().error(f"❌ Error processing test_point_titles for subject {subject_id}: {str(e)}")
             import traceback
             frappe.logger().error(traceback.format_exc())
 
@@ -693,32 +700,52 @@ def create_template():
         doc.insert(ignore_permissions=True)
         
         # MANUAL SAVE: Child tables of child tables need manual saving in Frappe
+        frappe.logger().info("🔧 [create_template] Starting manual save of test_point_titles...")
         try:
             for subject_row in doc.subjects:
-                if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
+                subject_id = getattr(subject_row, 'subject_id', 'unknown')
+                frappe.logger().info(f"📝 Processing subject: {subject_id}, row.name: {subject_row.name}")
+                
+                # ✅ Use _temp_test_point_titles stored during _apply_subjects
+                titles_to_save = []
+                if hasattr(subject_row, '_temp_test_point_titles'):
+                    titles_to_save = subject_row._temp_test_point_titles
+                    frappe.logger().info(f"  Found {len(titles_to_save)} titles in _temp_test_point_titles")
+                elif hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
+                    frappe.logger().info(f"  Falling back to test_point_titles: {len(subject_row.test_point_titles)} items")
                     for test_title_data in subject_row.test_point_titles:
-                        try:
-                            # Get title from either dict or object
-                            title = ""
-                            if isinstance(test_title_data, dict):
-                                title = test_title_data.get('title', '')
-                            elif hasattr(test_title_data, 'title'):
-                                title = test_title_data.title
-                            
-                            if title:
-                                # Create and save child doc manually
-                                child_doc = frappe.get_doc({
-                                    "doctype": "SIS Report Card Test Point Title",
-                                    "title": title,
-                                    "parent": subject_row.name,
-                                    "parenttype": "SIS Report Card Subject Config",
-                                    "parentfield": "test_point_titles"
-                                })
-                                child_doc.insert(ignore_permissions=True)
-                        except Exception as save_error:
-                            frappe.logger().error(f"Error saving test_point_title '{title}': {str(save_error)}")
+                        title = ""
+                        if isinstance(test_title_data, dict):
+                            title = test_title_data.get('title', '')
+                        elif hasattr(test_title_data, 'title'):
+                            title = test_title_data.title
+                        if title and title.strip():
+                            titles_to_save.append(title.strip())
+                else:
+                    frappe.logger().warning(f"  ⚠️ No test_point_titles found for subject {subject_id}")
+                
+                frappe.logger().info(f"  Total titles to save: {len(titles_to_save)}")
+                
+                # Save each title as a child doc
+                for title in titles_to_save:
+                    try:
+                        child_doc = frappe.get_doc({
+                            "doctype": "SIS Report Card Test Point Title",
+                            "title": title,
+                            "parent": subject_row.name,
+                            "parenttype": "SIS Report Card Subject Config",
+                            "parentfield": "test_point_titles"
+                        })
+                        child_doc.insert(ignore_permissions=True)
+                        frappe.logger().info(f"    💾 Saved title: '{title}'")
+                    except Exception as save_error:
+                        frappe.logger().error(f"    ❌ Error saving test_point_title '{title}': {str(save_error)}")
+                        import traceback
+                        frappe.logger().error(traceback.format_exc())
         except Exception as manual_error:
-            frappe.logger().error(f"Error in manual save of test_point_titles: {str(manual_error)}")
+            frappe.logger().error(f"❌ Error in manual save of test_point_titles: {str(manual_error)}")
+            import traceback
+            frappe.logger().error(traceback.format_exc())
         
         frappe.db.commit()
 
@@ -859,30 +886,30 @@ def update_template(template_id: Optional[str] = None):
         doc.save(ignore_permissions=True)
         
         # ✅ FIX: MANUAL SAVE test_point_titles (child table of child table)
-        # Must save BEFORE clearing old ones to preserve data in memory
         frappe.logger().info("🔧 [update_template] Starting manual save of test_point_titles...")
         try:
             for subject_row in doc.subjects:
                 subject_id = getattr(subject_row, 'subject_id', 'unknown')
                 frappe.logger().info(f"📝 Processing subject: {subject_id}, row.name: {subject_row.name}")
                 
-                # ✅ CRITICAL: Save test_point_titles to temp variable BEFORE deleting
-                # because delete might clear the in-memory data
+                # ✅ Use _temp_test_point_titles stored during _apply_subjects
                 titles_to_save = []
-                if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
-                    frappe.logger().info(f"  Found {len(subject_row.test_point_titles)} test_point_titles in memory")
+                if hasattr(subject_row, '_temp_test_point_titles'):
+                    titles_to_save = subject_row._temp_test_point_titles
+                    frappe.logger().info(f"  Found {len(titles_to_save)} titles in _temp_test_point_titles")
+                elif hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
+                    frappe.logger().info(f"  Falling back to test_point_titles: {len(subject_row.test_point_titles)} items")
                     for test_title_data in subject_row.test_point_titles:
                         title = ""
                         if isinstance(test_title_data, dict):
                             title = test_title_data.get('title', '')
                         elif hasattr(test_title_data, 'title'):
                             title = test_title_data.title
-                        
                         if title and title.strip():
                             titles_to_save.append(title.strip())
                             frappe.logger().info(f"    ✅ Will save: '{title.strip()}'")
                 else:
-                    frappe.logger().warning(f"  ⚠️ No test_point_titles found in memory for subject {subject_id}")
+                    frappe.logger().warning(f"  ⚠️ No test_point_titles found for subject {subject_id}")
                 
                 frappe.logger().info(f"  Total titles to save: {len(titles_to_save)}")
                 
@@ -895,7 +922,7 @@ def update_template(template_id: Optional[str] = None):
                             AND parenttype = 'SIS Report Card Subject Config'
                             AND parentfield = 'test_point_titles'
                         """, (subject_row.name,))
-                        frappe.logger().info(f"  🗑️ Deleted {deleted_count} old titles")
+                        frappe.logger().info(f"  🗑️ Deleted old titles")
                 except Exception as delete_error:
                     frappe.logger().error(f"  ❌ Error deleting old test_point_titles for subject {subject_row.name}: {str(delete_error)}")
                 
