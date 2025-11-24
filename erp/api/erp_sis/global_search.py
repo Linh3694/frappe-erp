@@ -162,10 +162,10 @@ def global_search(search_term: str = None):
                         school_years = frappe.get_all(
                             "SIS School Year",
                             filters={"name": ["in", school_year_ids]},
-                            fields=["name", "title"]
+                            fields=["name", "title_vn"]
                         )
                         result["_debug"]["logs"].append(f"Found {len(school_years)} school years")
-                        school_year_map = {sy['name']: sy['title'] for sy in school_years}
+                        school_year_map = {sy['name']: sy['title_vn'] for sy in school_years}
                         
                         for cls in classes:
                             cls['school_year_name'] = school_year_map.get(cls.get('school_year_id'), '')
