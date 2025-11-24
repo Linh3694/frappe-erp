@@ -183,14 +183,14 @@ def get_students_day_map(date=None, codes=None):
 
 
 @frappe.whitelist(methods=["GET"], allow_guest=False)
-def get_employee_attendance_range(employee_code=None, start_date=None, end_date=None, include_raw_data="false", page=1, limit=100):
+def get_employee_attendance_range(**kwargs):
 	"""
 	Get attendance records for an employee over a date range
 	Used by Parent Portal attendance page to show monthly attendance
 	
 	Endpoint: /api/method/erp.api.attendance.query.get_employee_attendance_range
 	
-	Args:
+	Args (via query params):
 		employee_code (str): Employee/student code
 		start_date (str): Start date (YYYY-MM-DD), optional
 		end_date (str): End date (YYYY-MM-DD), optional
@@ -210,31 +210,27 @@ def get_employee_attendance_range(employee_code=None, start_date=None, end_date=
 	"""
 	try:
 		# Debug: Log all incoming parameters
-		frappe.logger().info(f"📥 [get_employee_attendance_range] Raw params - employee_code: {employee_code}, start_date: {start_date}, end_date: {end_date}")
+		frappe.logger().info(f"📥 [get_employee_attendance_range] kwargs: {kwargs}")
 		frappe.logger().info(f"📥 [get_employee_attendance_range] form_dict: {frappe.local.form_dict}")
-		frappe.logger().info(f"📥 [get_employee_attendance_range] request.args: {frappe.request.args}")
 		
-		# Get parameters from query string (GET request) or form_dict
-		# Frappe passes GET query params through form_dict
-		if employee_code is None:
-			employee_code = frappe.local.form_dict.get('employee_code')
-		if start_date is None:
-			start_date = frappe.local.form_dict.get('start_date')
-		if end_date is None:
-			end_date = frappe.local.form_dict.get('end_date')
-		
-		# Parse optional parameters with proper defaults
-		include_raw_data = frappe.local.form_dict.get('include_raw_data', include_raw_data)
+		# Get parameters from kwargs (Frappe auto-maps query params to kwargs)
+		employee_code = kwargs.get('employee_code') or frappe.local.form_dict.get('employee_code')
+		start_date = kwargs.get('start_date') or frappe.local.form_dict.get('start_date')
+		end_date = kwargs.get('end_date') or frappe.local.form_dict.get('end_date')
+		include_raw_data = kwargs.get('include_raw_data', 'false') or frappe.local.form_dict.get('include_raw_data', 'false')
 		
 		# Parse page and limit as integers
-		page_param = frappe.local.form_dict.get('page')
+		page = 1
+		limit = 100
+		
+		page_param = kwargs.get('page') or frappe.local.form_dict.get('page')
 		if page_param:
 			try:
 				page = int(page_param)
 			except:
 				page = 1
 		
-		limit_param = frappe.local.form_dict.get('limit')
+		limit_param = kwargs.get('limit') or frappe.local.form_dict.get('limit')
 		if limit_param:
 			try:
 				limit = int(limit_param)
@@ -377,21 +373,24 @@ def get_employee_attendance_range(employee_code=None, start_date=None, end_date=
 
 
 @frappe.whitelist(methods=["GET"], allow_guest=False)
-def debug_employee_attendance(employee_code=None, date=None):
+def debug_employee_attendance(**kwargs):
 	"""
 	Debug endpoint to show all raw timestamps for an employee on a specific date
 	Helpful for troubleshooting attendance issues
 	
 	Endpoint: /api/method/erp.api.attendance.query.debug_employee_attendance
+	
+	Args (via query params):
+		employee_code (str): Employee/student code
+		date (str): Date in YYYY-MM-DD format
 	"""
 	try:
-		# Get parameters from query string if not provided
-		if employee_code is None:
-			employee_code = frappe.local.form_dict.get('employee_code')
-		if date is None:
-			date = frappe.local.form_dict.get('date')
+		# Get parameters from kwargs (Frappe auto-maps query params to kwargs)
+		employee_code = kwargs.get('employee_code') or frappe.local.form_dict.get('employee_code')
+		date = kwargs.get('date') or frappe.local.form_dict.get('date')
 		
-		frappe.logger().info(f"📥 [debug_employee_attendance] employee_code: {employee_code}, date: {date}")
+		frappe.logger().info(f"📥 [debug_employee_attendance] kwargs: {kwargs}")
+		frappe.logger().info(f"📥 [debug_employee_attendance] Final values - employee_code: {employee_code}, date: {date}")
 		
 		if not employee_code or not date:
 			return {
