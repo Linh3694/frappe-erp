@@ -11,7 +11,7 @@ import pytz
 from erp.common.doctype.erp_time_attendance.erp_time_attendance import normalize_date_to_vn_timezone
 
 
-@frappe.whitelist(methods=["POST"])
+@frappe.whitelist(methods=["POST"], allow_guest=False)
 def get_students_day_map(date=None, codes=None):
 	"""
 	Get attendance data for multiple students on a specific date
@@ -36,11 +36,44 @@ def get_students_day_map(date=None, codes=None):
 		}
 	"""
 	try:
+		# Debug: Log raw request data
+		frappe.logger().info(f"📥 [get_students_day_map] Raw params - date: {date}, codes: {codes}")
+		frappe.logger().info(f"📥 [get_students_day_map] form_dict: {frappe.local.form_dict}")
+		frappe.logger().info(f"📥 [get_students_day_map] request.method: {frappe.request.method}")
+		frappe.logger().info(f"📥 [get_students_day_map] request.content_type: {frappe.request.content_type}")
+		
+		# If parameters are None, try multiple methods to get data
+		if date is None or codes is None:
+			# Method 1: Try form_dict
+			if date is None:
+				date = frappe.local.form_dict.get('date')
+			if codes is None:
+				codes = frappe.local.form_dict.get('codes')
+			
+			# Method 2: If still None, try to parse JSON body directly
+			if (date is None or codes is None) and frappe.request.content_type and 'json' in frappe.request.content_type.lower():
+				try:
+					raw_data = frappe.request.get_data(as_text=True)
+					frappe.logger().info(f"📥 [get_students_day_map] Raw JSON body: {raw_data[:200]}")
+					if raw_data:
+						json_data = json.loads(raw_data)
+						if date is None:
+							date = json_data.get('date')
+						if codes is None:
+							codes = json_data.get('codes')
+						frappe.logger().info(f"📥 [get_students_day_map] Parsed from JSON body - date: {date}, codes length: {len(codes) if isinstance(codes, list) else 'N/A'}")
+				except Exception as e:
+					frappe.logger().warning(f"⚠️ [get_students_day_map] Failed to parse JSON body: {str(e)}")
+		
+		frappe.logger().info(f"📥 [get_students_day_map] Final values - date: {date}, codes type: {type(codes)}, codes: {codes if isinstance(codes, list) else str(codes)[:100]}")
+		
 		# Parse codes if it's a JSON string
 		if codes and isinstance(codes, str):
 			try:
 				codes = json.loads(codes)
-			except:
+				frappe.logger().info(f"📥 [get_students_day_map] Parsed codes from JSON string - length: {len(codes)}")
+			except Exception as e:
+				frappe.logger().warning(f"⚠️ [get_students_day_map] Failed to parse codes: {str(e)}")
 				pass
 		
 		# Validate inputs
