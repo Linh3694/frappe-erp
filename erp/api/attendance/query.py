@@ -209,33 +209,59 @@ def get_employee_attendance_range(**kwargs):
 		}
 	"""
 	try:
-		# Debug: Log all incoming parameters
+		# Debug: Log all incoming parameters from multiple sources
 		frappe.logger().info(f"📥 [get_employee_attendance_range] kwargs: {kwargs}")
 		frappe.logger().info(f"📥 [get_employee_attendance_range] form_dict: {frappe.local.form_dict}")
+		frappe.logger().info(f"📥 [get_employee_attendance_range] request.args: {dict(frappe.request.args)}")
+		frappe.logger().info(f"📥 [get_employee_attendance_range] request.values: {dict(frappe.request.values)}")
 		
-		# Get parameters from kwargs (Frappe auto-maps query params to kwargs)
-		employee_code = kwargs.get('employee_code') or frappe.local.form_dict.get('employee_code')
-		start_date = kwargs.get('start_date') or frappe.local.form_dict.get('start_date')
-		end_date = kwargs.get('end_date') or frappe.local.form_dict.get('end_date')
-		include_raw_data = kwargs.get('include_raw_data', 'false') or frappe.local.form_dict.get('include_raw_data', 'false')
+		# Try to get parameters from multiple sources
+		# Priority: kwargs > form_dict > request.args > request.values
+		employee_code = (
+			kwargs.get('employee_code') or 
+			frappe.local.form_dict.get('employee_code') or 
+			frappe.request.args.get('employee_code') or
+			frappe.request.values.get('employee_code')
+		)
+		
+		start_date = (
+			kwargs.get('start_date') or 
+			frappe.local.form_dict.get('start_date') or 
+			frappe.request.args.get('start_date') or
+			frappe.request.values.get('start_date')
+		)
+		
+		end_date = (
+			kwargs.get('end_date') or 
+			frappe.local.form_dict.get('end_date') or 
+			frappe.request.args.get('end_date') or
+			frappe.request.values.get('end_date')
+		)
+		
+		include_raw_data = (
+			kwargs.get('include_raw_data') or 
+			frappe.local.form_dict.get('include_raw_data') or 
+			frappe.request.args.get('include_raw_data') or
+			frappe.request.values.get('include_raw_data') or
+			'false'
+		)
 		
 		# Parse page and limit as integers
-		page = 1
-		limit = 100
+		page_param = (
+			kwargs.get('page') or 
+			frappe.local.form_dict.get('page') or 
+			frappe.request.args.get('page') or
+			frappe.request.values.get('page')
+		)
+		page = int(page_param) if page_param else 1
 		
-		page_param = kwargs.get('page') or frappe.local.form_dict.get('page')
-		if page_param:
-			try:
-				page = int(page_param)
-			except:
-				page = 1
-		
-		limit_param = kwargs.get('limit') or frappe.local.form_dict.get('limit')
-		if limit_param:
-			try:
-				limit = int(limit_param)
-			except:
-				limit = 100
+		limit_param = (
+			kwargs.get('limit') or 
+			frappe.local.form_dict.get('limit') or 
+			frappe.request.args.get('limit') or
+			frappe.request.values.get('limit')
+		)
+		limit = int(limit_param) if limit_param else 100
 		
 		frappe.logger().info(f"📥 [get_employee_attendance_range] Final values - employee_code: {employee_code}, start_date: {start_date}, end_date: {end_date}, page: {page}, limit: {limit}")
 		
