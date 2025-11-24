@@ -1241,13 +1241,13 @@ def get_student_profile():
 
         # Get student subjects
         student_subjects = frappe.db.sql("""
-            SELECT 
+            SELECT
                 ss.name,
                 ss.subject_id,
-                s.title_vn as subject_name,
-                s.title_en as subject_name_en,
+                s.title as subject_name,
+                s.title as subject_name_en,
                 ss.actual_subject_id,
-                acts.title_vn as actual_subject_name,
+                acts.title as actual_subject_name,
                 ss.class_id,
                 c.title as class_name
             FROM `tabSIS Student Subject` ss
@@ -1256,7 +1256,7 @@ def get_student_profile():
             LEFT JOIN `tabSIS Class` c ON ss.class_id = c.name
             WHERE ss.student_id = %(student_id)s
                 {school_year_filter}
-            ORDER BY s.title_vn ASC
+            ORDER BY s.title ASC
         """.format(school_year_filter=school_year_filter_subjects), sql_params_subjects, as_dict=True)
 
         # Build response
