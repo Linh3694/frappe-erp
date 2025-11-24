@@ -1264,9 +1264,8 @@ def get_student_profile():
             LEFT JOIN `tabSIS Actual Subject` acts ON ss.actual_subject_id = acts.name
             LEFT JOIN `tabSIS Class` c ON ss.class_id = c.name
             WHERE ss.student_id = %(student_id)s
-                {school_year_filter}
             ORDER BY s.title ASC
-        """.format(school_year_filter=school_year_filter_subjects), sql_params_subjects, as_dict=True)
+        """, sql_params_subjects, as_dict=True)
 
         # Build response
         frappe.logger().info("DEBUG: Building response")
