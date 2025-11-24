@@ -394,7 +394,6 @@ def send_bulk_parent_notifications(
         try:
             from erp.common.doctype.erp_notification.erp_notification import create_notification
             from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
-            from erp.api.parent_portal.push_notification import send_push_notification
             
             success_count = 0
             failed_count = 0
@@ -433,18 +432,8 @@ def send_bulk_parent_notifications(
                     unread_count = get_unread_count(parent_email)
                     emit_unread_count_update(parent_email, unread_count)
                     
-                    # Enqueue push notification (background)
-                    frappe.enqueue(
-                        send_push_notification,
-                        queue="default",
-                        timeout=300,
-                        user_email=parent_email,
-                        title=notification_title.get("vi"),  # Use Vietnamese for push
-                        body=notification_body.get("vi"),
-                        icon=icon or "/icon.png",
-                        data=merged_data,
-                        tag=recipient_type
-                    )
+                    # Push notification will be automatically sent by the ERP Notification after_insert hook
+                    # No need to enqueue here to avoid duplicates
                     
                     success_count += 1
                     results.append({

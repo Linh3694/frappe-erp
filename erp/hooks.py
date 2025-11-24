@@ -224,6 +224,12 @@ doc_events = {
 			"erp.common.user_hooks.trigger_room_webhooks"
 		]
 	},
+	# Push notification when ERP Notification is created
+	"ERP Notification": {
+		"after_insert": [
+			"erp.api.parent_portal.realtime_notification.on_notification_created"
+		]
+	},
 	# Cache Invalidation Hooks for Subject Assignment & Timetable
 	"SIS Subject Assignment": {
 		"after_insert": "erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
