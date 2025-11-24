@@ -15,6 +15,114 @@ from erp.api.erp_sis.utils.cache_utils import clear_teacher_dashboard_cache
 
 
 @frappe.whitelist(allow_guest=False)
+def search_classes(search_term: str = None):
+    """Search classes by title or class code - returns all matching results without pagination"""
+    try:
+        # Normalize parameters: prefer form_dict values if provided
+        form = frappe.local.form_dict or {}
+        if 'search_term' in form and (search_term is None or str(search_term).strip() == ''):
+            search_term = form.get('search_term')
+
+        frappe.logger().info(f"search_classes called with search_term: '{search_term}'")
+        
+        # Get current user's campus
+        campus_id = get_current_campus_from_context()
+        
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Build search terms and campus filter (use parameterized queries)
+        where_clauses = ["campus_id = %s"]
+        params = [campus_id]
+        if search_term and str(search_term).strip():
+            # For class_code: prefix match (starts with)
+            # For title: contains match (can be anywhere)
+            search_clean = str(search_term).strip()
+            like_prefix = f"{search_clean}%"  # Starts with (for class_code)
+            like_contains = f"%{search_clean}%"  # Contains (for title)
+            where_clauses.append("(LOWER(title) LIKE LOWER(%s) OR LOWER(class_code) LIKE LOWER(%s))")
+            params.extend([like_contains, like_prefix])
+        conditions = " AND ".join(where_clauses)
+        frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
+        
+        # Get all matching classes without pagination
+        sql_query = (
+            """
+            SELECT 
+                name,
+                title,
+                short_title,
+                class_code,
+                campus_id,
+                school_year_id,
+                school_year_name,
+                education_grade,
+                academic_program,
+                homeroom_teacher,
+                vice_homeroom_teacher,
+                room,
+                class_type,
+                class_image,
+                creation,
+                modified
+            FROM `tabSIS Class`
+            WHERE {where}
+            ORDER BY title ASC
+            """
+        ).format(where=conditions)
+
+        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params}")
+
+        classes = frappe.db.sql(sql_query, params, as_dict=True)
+
+        frappe.logger().info(f"SQL QUERY RETURNED {len(classes)} classes")
+        if classes:
+            frappe.logger().info(f"FIRST 5 RESULTS: {[f'{c.title} ({c.class_code})' for c in classes[:5]]}")
+
+        # Post-filter in Python for better VN diacritics handling and strict contains
+        def normalize_text(text: str) -> str:
+            try:
+                import unicodedata
+                if not text:
+                    return ''
+                text = unicodedata.normalize('NFD', text)
+                text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
+                # Handle Vietnamese specific characters
+                text = text.replace('đ', 'd').replace('Đ', 'D')
+                return text.lower()
+            except Exception:
+                return (text or '').lower()
+
+        if search_term and str(search_term).strip():
+            norm_q = normalize_text(str(search_term).strip())
+            search_lower = str(search_term).strip().lower()
+            pre_count = len(classes)
+            classes = [
+                c for c in classes
+                if (
+                    # title: contains match (can be anywhere)
+                    normalize_text(c.get('title', '')).find(norm_q) != -1
+                    # class_code: prefix match (must start with)
+                    or (c.get('class_code') or '').lower().startswith(search_lower)
+                )
+            ]
+            frappe.logger().info(f"POST-FILTERED {pre_count} -> {len(classes)} using normalized query='{norm_q}'")
+
+        # Return all search results without pagination
+        return success_response(
+            data=classes,
+            message=f"Search completed successfully - found {len(classes)} classes"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error searching classes: {str(e)}")
+        return error_response(
+            message="Error searching classes",
+            code="SEARCH_CLASSES_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
 def get_all_classes(school_year_id: str = None, campus_id: str = None):
     """List all classes with optional filter by school_year_id and campus_id."""
     try:
