@@ -634,7 +634,14 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
         #         errors={"key_person": ["Only one key person allowed"]}
         #     )
         
-        # Reset relationships
+        # CRITICAL: Delete ALL old relationships from database first
+        # This prevents deleted guardians from still receiving notifications
+        frappe.db.sql("""
+            DELETE FROM `tabCRM Family Relationship`
+            WHERE parent = %s
+        """, (family_id,))
+        
+        # Reset relationships in doc and add new ones
         family_doc.set("relationships", [])
         for rel in relationships:
             family_doc.append("relationships", {

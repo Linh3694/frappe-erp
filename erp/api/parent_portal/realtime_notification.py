@@ -275,10 +275,14 @@ def on_notification_read(notification_doc):
 		frappe.logger().error(f"Error in on_notification_read: {str(e)}")
 
 
-def on_notification_created(notification_doc):
+def on_notification_created(notification_doc, method=None):
 	"""
-	Called when a new notification is created
+	Called when a new notification is created (Frappe hook)
 	Send realtime and push notifications
+	
+	Args:
+		notification_doc: ERP Notification document
+		method: Hook method name (passed by Frappe, not used)
 	"""
 	try:
 		recipient = notification_doc.recipient_user

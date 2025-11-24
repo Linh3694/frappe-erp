@@ -199,14 +199,21 @@ def get_guardians_for_students(student_ids: List[str]) -> List[Dict]:
         if not student_ids:
             return []
         
-        # Get all relationships for these students
-        relationships = frappe.get_all("CRM Family Relationship",
-            filters={"student": ["in", student_ids]},
-            fields=["guardian", "student"],
-            ignore_permissions=True
-        )
+        # Get all ACTIVE relationships for these students
+        # IMPORTANT: Only get relationships that still exist in their parent Family docs
+        # This prevents deleted guardians from receiving notifications
+        relationships = frappe.db.sql("""
+            SELECT DISTINCT fr.guardian, fr.student
+            FROM `tabCRM Family Relationship` fr
+            INNER JOIN `tabCRM Family` f ON fr.parent = f.name
+            WHERE fr.student IN %(student_ids)s
+                AND fr.guardian IS NOT NULL
+                AND fr.guardian != ''
+                AND f.docstatus < 2
+                AND fr.parentfield = 'relationships'
+        """, {"student_ids": student_ids}, as_dict=True)
         
-        frappe.logger().info(f"👥 Found {len(relationships)} relationships for {len(student_ids)} students")
+        frappe.logger().info(f"👥 Found {len(relationships)} ACTIVE relationships for {len(student_ids)} students")
         
         # Group by guardian
         for rel in relationships:
