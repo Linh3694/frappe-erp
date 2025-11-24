@@ -209,21 +209,39 @@ def get_employee_attendance_range(employee_code=None, start_date=None, end_date=
 		}
 	"""
 	try:
-		# Get parameters from query string if not provided
+		# Debug: Log all incoming parameters
+		frappe.logger().info(f"📥 [get_employee_attendance_range] Raw params - employee_code: {employee_code}, start_date: {start_date}, end_date: {end_date}")
+		frappe.logger().info(f"📥 [get_employee_attendance_range] form_dict: {frappe.local.form_dict}")
+		frappe.logger().info(f"📥 [get_employee_attendance_range] request.args: {frappe.request.args}")
+		
+		# Get parameters from query string (GET request) or form_dict
+		# Frappe passes GET query params through form_dict
 		if employee_code is None:
 			employee_code = frappe.local.form_dict.get('employee_code')
 		if start_date is None:
 			start_date = frappe.local.form_dict.get('start_date')
 		if end_date is None:
 			end_date = frappe.local.form_dict.get('end_date')
-		if include_raw_data == "false":
-			include_raw_data = frappe.local.form_dict.get('include_raw_data', 'false')
-		if page == 1:
-			page = frappe.local.form_dict.get('page', 1)
-		if limit == 100:
-			limit = frappe.local.form_dict.get('limit', 100)
 		
-		frappe.logger().info(f"📥 [get_employee_attendance_range] employee_code: {employee_code}, start_date: {start_date}, end_date: {end_date}")
+		# Parse optional parameters with proper defaults
+		include_raw_data = frappe.local.form_dict.get('include_raw_data', include_raw_data)
+		
+		# Parse page and limit as integers
+		page_param = frappe.local.form_dict.get('page')
+		if page_param:
+			try:
+				page = int(page_param)
+			except:
+				page = 1
+		
+		limit_param = frappe.local.form_dict.get('limit')
+		if limit_param:
+			try:
+				limit = int(limit_param)
+			except:
+				limit = 100
+		
+		frappe.logger().info(f"📥 [get_employee_attendance_range] Final values - employee_code: {employee_code}, start_date: {start_date}, end_date: {end_date}, page: {page}, limit: {limit}")
 		
 		if not employee_code:
 			return {
