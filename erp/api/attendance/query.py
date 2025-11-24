@@ -119,16 +119,52 @@ def get_students_day_map(date=None, codes=None):
 		# Query attendance records
 		# Note: Frappe DB queries are case-sensitive by default
 		# We need to query with all possible case variations or use SQL LOWER()
+		
+		# IMPORTANT FIX: Use same date comparison logic as get_employee_attendance_range
+		# which works correctly. Query: date >= start_of_day AND date < start_of_next_day
+		start_of_day = date_obj
+		end_of_next_day = date_obj + timedelta(days=1)
+		
+		# Build date filter the same way as the working range API
+		date_filter = {
+			">=": start_of_day,
+			"<": end_of_next_day
+		}
+		
+		filters = {
+			"employee_code": ["in", codes]
+		}
+		
+		# Apply date filter separately (same as range API does it)
+		if date_filter.get(">=") and date_filter.get("<"):
+			filters["date"] = ["between", [date_filter[">="], date_filter["<"]]]
+		
+		frappe.logger().info(f"📊 [get_students_day_map] Query filters: {filters}")
+		frappe.logger().info(f"📊 [get_students_day_map] date_obj: {date_obj} (type: {type(date_obj)})")
+		frappe.logger().info(f"📊 [get_students_day_map] date range: {start_of_day} to < {end_of_next_day}")
+		frappe.logger().info(f"📊 [get_students_day_map] Requesting codes: {codes}")
+		
 		records = frappe.get_all(
 			"ERP Time Attendance",
-			filters={
-				"employee_code": ["in", codes],
-				"date": date_obj
-			},
-			fields=["employee_code", "check_in_time", "check_out_time", "total_check_ins", "employee_name", "raw_data"]
+			filters=filters,
+			fields=["employee_code", "check_in_time", "check_out_time", "total_check_ins", "employee_name", "raw_data", "date"]
 		)
 		
 		frappe.logger().info(f"📊 [Attendance Batch] Found {len(records)} records for {len(codes)} codes")
+		
+		# Log first record for debugging
+		if len(records) > 0:
+			frappe.logger().info(f"📊 [get_students_day_map] First record: {records[0]}")
+		else:
+			# Try to find ANY record for these codes to see what dates exist
+			all_records = frappe.get_all(
+				"ERP Time Attendance",
+				filters={"employee_code": ["in", codes]},
+				fields=["employee_code", "date"],
+				order_by="date DESC",
+				limit=5
+			)
+			frappe.logger().info(f"📊 [get_students_day_map] Recent records for these codes: {all_records}")
 		
 		# If no records found with exact case, try case-insensitive search
 		if len(records) == 0 and len(codes) > 0:
