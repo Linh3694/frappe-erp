@@ -1086,14 +1086,12 @@ def get_student_profile():
     - Student subjects
     """
     try:
-        frappe.logger().info("DEBUG: get_student_profile started")
         # Get student_id from multiple sources
         form = getattr(frappe, 'form_dict', None) or {}
         local_form = getattr(frappe.local, 'form_dict', None) or {}
         request = getattr(frappe, 'request', None)
         request_args = getattr(request, 'args', None) if request else {}
         request_data = getattr(request, 'data', None) if request else None
-        frappe.logger().info(f"DEBUG: form_dict={form}")
 
         payload = {}
         if request_data:
@@ -1123,23 +1121,16 @@ def get_student_profile():
             or pick(payload, ['school_year_id', 'schoolYearId'])
         )
 
-        frappe.logger().info(f"DEBUG: student_id={student_id}, school_year_id={school_year_id}")
-
         if not student_id:
-            frappe.logger().info("DEBUG: No student_id, returning error")
             return error_response(message="Student ID is required")
 
         # Get current campus
-        frappe.logger().info("DEBUG: Getting campus")
         campus_id = get_current_campus_from_context()
         if not campus_id:
             campus_id = "campus-1"
-        frappe.logger().info(f"DEBUG: campus_id={campus_id}")
 
         # Get student basic info
-        frappe.logger().info(f"DEBUG: Getting student {student_id}")
         student = frappe.get_doc("CRM Student", student_id)
-        frappe.logger().info(f"DEBUG: Got student {student.student_name}")
         
         # Get student photo
         student_photo = None
@@ -1181,7 +1172,7 @@ def get_student_profile():
         # Get homeroom class (Regular class type)
         homeroom_class = None
         homeroom_class_student = frappe.db.sql("""
-            SELECT 
+            SELECT
                 cs.name as class_student_id,
                 cs.class_id,
                 c.title as class_name,
@@ -1193,9 +1184,11 @@ def get_student_profile():
                 t1.user_id as homeroom_teacher_user_id,
                 u1.full_name as homeroom_teacher_name,
                 u1.email as homeroom_teacher_email,
+                u1.user_image as homeroom_teacher_user_image,
                 t2.user_id as vice_homeroom_teacher_user_id,
                 u2.full_name as vice_homeroom_teacher_name,
                 u2.email as vice_homeroom_teacher_email,
+                u2.user_image as vice_homeroom_teacher_user_image,
                 ap.title_vn as academic_program_name
             FROM `tabSIS Class Student` cs
             INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
@@ -1222,7 +1215,7 @@ def get_student_profile():
 
         # Get running classes
         running_classes = frappe.db.sql("""
-            SELECT 
+            SELECT
                 cs.name as class_student_id,
                 cs.class_id,
                 c.title as class_name,
@@ -1230,7 +1223,8 @@ def get_student_profile():
                 c.homeroom_teacher,
                 c.room,
                 t1.user_id as homeroom_teacher_user_id,
-                u1.full_name as homeroom_teacher_name
+                u1.full_name as homeroom_teacher_name,
+                u1.user_image as homeroom_teacher_user_image
             FROM `tabSIS Class Student` cs
             INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
             LEFT JOIN `tabSIS Teacher` t1 ON c.homeroom_teacher = t1.name
@@ -1268,7 +1262,6 @@ def get_student_profile():
         """, sql_params_subjects, as_dict=True)
 
         # Build response
-        frappe.logger().info("DEBUG: Building response")
         profile_data = {
             "basic_info": {
                 "student_id": student.name,
@@ -1283,7 +1276,6 @@ def get_student_profile():
             "running_classes": running_classes,
             "student_subjects": student_subjects
         }
-        frappe.logger().info("DEBUG: About to return success response")
 
         return success_response(
             data=profile_data,
@@ -1291,9 +1283,7 @@ def get_student_profile():
         )
 
     except Exception as e:
-        import traceback
         frappe.log_error(f"Error fetching student profile: {str(e)}")
-        frappe.logger().error(f"Full traceback: {traceback.format_exc()}")
         return error_response(
             message="Error fetching student profile",
             code="FETCH_STUDENT_PROFILE_ERROR"
