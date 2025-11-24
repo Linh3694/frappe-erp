@@ -1086,12 +1086,14 @@ def get_student_profile():
     - Student subjects
     """
     try:
+        frappe.logger().info("DEBUG: get_student_profile started")
         # Get student_id from multiple sources
         form = getattr(frappe, 'form_dict', None) or {}
         local_form = getattr(frappe.local, 'form_dict', None) or {}
         request = getattr(frappe, 'request', None)
         request_args = getattr(request, 'args', None) if request else {}
         request_data = getattr(request, 'data', None) if request else None
+        frappe.logger().info(f"DEBUG: form_dict={form}")
 
         payload = {}
         if request_data:
@@ -1121,16 +1123,23 @@ def get_student_profile():
             or pick(payload, ['school_year_id', 'schoolYearId'])
         )
 
+        frappe.logger().info(f"DEBUG: student_id={student_id}, school_year_id={school_year_id}")
+
         if not student_id:
+            frappe.logger().info("DEBUG: No student_id, returning error")
             return error_response(message="Student ID is required")
 
         # Get current campus
+        frappe.logger().info("DEBUG: Getting campus")
         campus_id = get_current_campus_from_context()
         if not campus_id:
             campus_id = "campus-1"
+        frappe.logger().info(f"DEBUG: campus_id={campus_id}")
 
         # Get student basic info
+        frappe.logger().info(f"DEBUG: Getting student {student_id}")
         student = frappe.get_doc("CRM Student", student_id)
+        frappe.logger().info(f"DEBUG: Got student {student.student_name}")
         
         # Get student photo
         student_photo = None
@@ -1260,6 +1269,7 @@ def get_student_profile():
         """.format(school_year_filter=school_year_filter_subjects), sql_params_subjects, as_dict=True)
 
         # Build response
+        frappe.logger().info("DEBUG: Building response")
         profile_data = {
             "basic_info": {
                 "student_id": student.name,
@@ -1274,6 +1284,7 @@ def get_student_profile():
             "running_classes": running_classes,
             "student_subjects": student_subjects
         }
+        frappe.logger().info("DEBUG: About to return success response")
 
         return success_response(
             data=profile_data,
