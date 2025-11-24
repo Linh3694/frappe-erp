@@ -178,10 +178,10 @@ def _get_students_by_class(class_id: str) -> List[str]:
 def get_guardians_for_students(student_ids: List[str]) -> List[Dict]:
     """
     Student IDs → Guardian objects (with emails)
-    
+
     Args:
-        student_ids: List of student IDs
-    
+        student_ids: List of student IDs (can be student_code or student_id)
+
     Returns:
         List of guardian dicts: [
             {
@@ -194,11 +194,36 @@ def get_guardians_for_students(student_ids: List[str]) -> List[Dict]:
         ]
     """
     guardians_dict: Dict[str, Dict] = {}
-    
+
     try:
         if not student_ids:
             return []
-        
+
+        # Map student_codes to student_ids if needed
+        # Parent portal may pass student_code (WS12310116) but CRM stores student_id (CRM-STUDENT-09008)
+        actual_student_ids = []
+        for student_id in student_ids:
+            if student_id.startswith('CRM-STUDENT-'):
+                # Already a CRM student ID
+                actual_student_ids.append(student_id)
+            else:
+                # Try to find CRM student ID by student_code
+                crm_student = frappe.get_value('CRM Student', {'student_code': student_id}, 'name')
+                if crm_student:
+                    actual_student_ids.append(crm_student)
+                    frappe.logger().info(f"📝 Mapped student_code {student_id} to CRM student_id {crm_student}")
+                else:
+                    # Try direct lookup as student_id
+                    crm_student = frappe.get_value('CRM Student', student_id, 'name')
+                    if crm_student:
+                        actual_student_ids.append(crm_student)
+                    else:
+                        frappe.logger().warning(f"⚠️ Could not find CRM student for {student_id}")
+
+        if not actual_student_ids:
+            frappe.logger().warning(f"⚠️ No valid CRM student IDs found for {student_ids}")
+            return []
+
         # Get all ACTIVE relationships for these students
         # IMPORTANT: Only get relationships that still exist in their parent Family docs
         # This prevents deleted guardians from receiving notifications
@@ -211,7 +236,7 @@ def get_guardians_for_students(student_ids: List[str]) -> List[Dict]:
                 AND fr.guardian != ''
                 AND f.docstatus < 2
                 AND fr.parentfield = 'relationships'
-        """, {"student_ids": student_ids}, as_dict=True)
+        """, {"student_ids": actual_student_ids}, as_dict=True)
         
         frappe.logger().info(f"👥 Found {len(relationships)} ACTIVE relationships for {len(student_ids)} students")
         
