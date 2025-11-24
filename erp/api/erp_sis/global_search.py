@@ -154,22 +154,32 @@ def global_search(search_term: str = None):
             result["_debug"]["logs"].append(f"Found {len(classes)} classes from DB")
             
             # Get school year names for each class
-            if classes:
-                school_year_ids = list(set([c.get('school_year_id') for c in classes if c.get('school_year_id')]))
-                if school_year_ids:
-                    school_years = frappe.get_all(
-                        "SIS School Year",
-                        filters={"name": ["in", school_year_ids]},
-                        fields=["name", "title"]
-                    )
-                    school_year_map = {sy['name']: sy['title'] for sy in school_years}
-                    
-                    for cls in classes:
-                        cls['school_year_name'] = school_year_map.get(cls.get('school_year_id'), '')
+            try:
+                if classes:
+                    school_year_ids = list(set([c.get('school_year_id') for c in classes if c.get('school_year_id')]))
+                    if school_year_ids:
+                        result["_debug"]["logs"].append(f"Fetching school years for IDs: {school_year_ids}")
+                        school_years = frappe.get_all(
+                            "SIS School Year",
+                            filters={"name": ["in", school_year_ids]},
+                            fields=["name", "title"]
+                        )
+                        result["_debug"]["logs"].append(f"Found {len(school_years)} school years")
+                        school_year_map = {sy['name']: sy['title'] for sy in school_years}
+                        
+                        for cls in classes:
+                            cls['school_year_name'] = school_year_map.get(cls.get('school_year_id'), '')
+                    else:
+                        result["_debug"]["logs"].append("No school_year_id found in classes")
+            except Exception as ey_error:
+                result["_debug"]["logs"].append(f"Error enriching school years: {str(ey_error)}")
+                frappe.logger().error(f"Error enriching school years: {str(ey_error)}")
             
             result["classes"] = classes
+            result["_debug"]["logs"].append(f"Final classes count: {len(classes)}")
             frappe.logger().info(f"Found {len(classes)} classes")
         except Exception as e:
+            result["_debug"]["logs"].append(f"Error searching classes: {str(e)}")
             frappe.logger().error(f"Error searching classes: {str(e)}")
         
         return success_response(
