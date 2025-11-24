@@ -172,8 +172,8 @@ def get_vapid_public_key():
 
 @frappe.whitelist()
 def send_push_notification(user_email, title, body, icon=None, data=None, tag=None, actions=None):
-	"""
-	Gửi push notification đến một user cụ thể (exposed as API for testing)
+    """
+    Gửi push notification đến một user cụ thể (exposed as API for testing)
     
     Args:
         user_email: Email của user cần gửi notification
@@ -263,53 +263,45 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
             "response": str(response)
         }
         
-	except WebPushException as e:
-		# Handle specific error codes
-		error_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
-		
-		# 410 Gone = subscription expired, should delete
-		if error_code == 410:
-			frappe.logger().warning(f"Push subscription expired for {user_email}, deleting...")
-			try:
-				frappe.db.delete("Push Subscription", {"user": user_email})
-				frappe.db.commit()
-			except:
-				pass
-			
-			return {
-				"success": False,
-				"message": "Push subscription expired and has been removed",
-				"log": f"Subscription for {user_email} was expired (410 Gone)"
-			}
-		
-		# Other errors
-		return {
-			"success": False,
-			"message": f"Failed to send push notification: {str(e)}",
-			"log": f"WebPushException for {user_email}: {str(e)}"
-		}
-	except Exception as e:
-        error_message = f"WebPush error for {user_email}: {str(e)}"
-        frappe.log_error(error_message, "Push Notification Error")
+    except WebPushException as e:
+        # Handle specific error codes
+        error_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
         
-        # Nếu subscription expired hoặc invalid, xóa nó
-        if e.response and e.response.status_code in [404, 410]:
+        # 410 Gone = subscription expired, should delete
+        if error_code == 410:
+            frappe.logger().warning(f"Push subscription expired for {user_email}, deleting...")
             try:
                 frappe.db.delete("Push Subscription", {"user": user_email})
                 frappe.db.commit()
-                error_message += " (Subscription removed as it's invalid)"
             except:
                 pass
+            
+            return {
+                "success": False,
+                "message": "Push subscription expired and has been removed",
+                "log": f"Subscription for {user_email} was expired (410 Gone)"
+            }
         
+        # Other errors
         return {
             "success": False,
             "message": f"Failed to send push notification: {str(e)}",
-            "log": error_message
+            "log": f"WebPushException for {user_email}: {str(e)}"
         }
         
     except Exception as e:
         error_message = f"Error sending push notification to {user_email}: {str(e)}"
         frappe.log_error(error_message, "Push Notification Error")
+        
+        # Try to clean up expired subscription if possible
+        try:
+            if hasattr(e, 'response') and hasattr(e.response, 'status_code') and e.response.status_code in [404, 410]:
+                frappe.db.delete("Push Subscription", {"user": user_email})
+                frappe.db.commit()
+                error_message += " (Subscription removed as invalid)"
+        except:
+            pass
+        
         return {
             "success": False,
             "message": f"Error: {str(e)}",
