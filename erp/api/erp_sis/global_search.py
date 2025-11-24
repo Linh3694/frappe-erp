@@ -26,16 +26,24 @@ def global_search(search_term: str = None):
         
         result = {
             "students": [],
-            "classes": []
+            "classes": [],
+            "_debug": {
+                "campus_id": campus_id,
+                "search_term": search_term,
+                "logs": []
+            }
         }
         
         if not search_term or not str(search_term).strip():
+            result["_debug"]["logs"].append("Empty search term")
             return success_response(
                 data=result,
                 message="Empty search term"
             )
         
         search_clean = str(search_term).strip()
+        
+        frappe.logger().info(f"[GLOBAL_SEARCH] campus_id={campus_id}, search_term={search_term}, search_clean={search_clean}")
         
         # ===== SEARCH STUDENTS =====
         try:
@@ -65,7 +73,11 @@ def global_search(search_term: str = None):
                 """
             ).format(where=conditions)
             
+            debug_msg = f"Students SQL: {sql_query} | params: {params}"
+            result["_debug"]["logs"].append(debug_msg)
+            frappe.logger().info(f"[GLOBAL_SEARCH] {debug_msg}")
             students = frappe.db.sql(sql_query, params, as_dict=True)
+            result["_debug"]["logs"].append(f"Found {len(students)} students from DB")
             
             # Enrich with photos from SIS Photo
             if students:
@@ -135,7 +147,11 @@ def global_search(search_term: str = None):
                 """
             ).format(where=conditions)
             
+            debug_msg = f"Classes SQL: {sql_query} | params: {params}"
+            result["_debug"]["logs"].append(debug_msg)
+            frappe.logger().info(f"[GLOBAL_SEARCH] {debug_msg}")
             classes = frappe.db.sql(sql_query, params, as_dict=True)
+            result["_debug"]["logs"].append(f"Found {len(classes)} classes from DB")
             
             # Get school year names for each class
             if classes:
