@@ -105,10 +105,10 @@ def global_search(search_term: str = None):
         
         # ===== SEARCH CLASSES =====
         try:
-            where_clauses = ["campus_id = %s"]
+            where_clauses = ["c.campus_id = %s"]
             params = [campus_id]
             like_contains = f"%{search_clean}%"
-            where_clauses.append("(LOWER(title) LIKE LOWER(%s))")
+            where_clauses.append("(LOWER(c.title) LIKE LOWER(%s))")
             params.extend([like_contains])
             
             conditions = " AND ".join(where_clauses)
@@ -116,22 +116,24 @@ def global_search(search_term: str = None):
             sql_query = (
                 """
                 SELECT 
-                    name,
-                    title,
-                    short_title,
-                    campus_id,
-                    school_year_id,
-                    education_grade,
-                    academic_program,
-                    homeroom_teacher,
-                    vice_homeroom_teacher,
-                    room,
-                    class_type,
-                    creation,
-                    modified
-                FROM `tabSIS Class`
+                    c.name,
+                    c.title,
+                    c.short_title,
+                    c.campus_id,
+                    c.school_year_id,
+                    sy.title as school_year_name,
+                    c.education_grade,
+                    c.academic_program,
+                    c.homeroom_teacher,
+                    c.vice_homeroom_teacher,
+                    c.room,
+                    c.class_type,
+                    c.creation,
+                    c.modified
+                FROM `tabSIS Class` c
+                LEFT JOIN `tabSIS School Year` sy ON c.school_year_id = sy.name
                 WHERE {where}
-                ORDER BY title ASC
+                ORDER BY c.title ASC
                 """
             ).format(where=conditions)
             
