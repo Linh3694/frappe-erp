@@ -73,31 +73,31 @@ def handle_hikvision_event():
 				"event_type": event_type
 			}
 		
-		# Only process active events
-		if event_state and event_state != 'active':
-			return {
-				"status": "success",
-				"message": f"Event state '{event_state}' not processed",
-				"event_state": event_state
-			}
+	# Only process active events
+	if event_state != 'active':
+		return {
+			"status": "success",
+			"message": f"Event state '{event_state}' not processed",
+			"event_state": event_state
+		}
 		
 		# Process attendance records
 		records_processed = 0
 		errors = []
 		
-		# Collect posts to process
-		posts_to_process = []
-		
-		if access_controller_event:
-			posts_to_process.append(access_controller_event)
-		elif active_post:
-			if isinstance(active_post, list):
-				posts_to_process.extend(active_post)
-			else:
-				posts_to_process.append(active_post)
-		else:
-			# Fallback: parse from root level
-			posts_to_process.append(event_data)
+	# Collect posts to process
+	posts_to_process = []
+	
+	# Ưu tiên AccessControllerEvent nếu có (định dạng mới)
+	if access_controller_event:
+		posts_to_process.append(access_controller_event)
+	elif active_post and isinstance(active_post, list):
+		posts_to_process.extend(active_post)
+	elif active_post:
+		posts_to_process.append(active_post)
+	else:
+		# Fallback: parse from root level
+		posts_to_process.append(event_data)
 		
 		# Process each post
 		for post in posts_to_process:
