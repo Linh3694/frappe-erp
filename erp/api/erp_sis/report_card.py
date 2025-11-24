@@ -448,6 +448,7 @@ def _apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
             print(f"\n========== _apply_subjects DEBUG ==========")
             print(f"📋 Processing test_point_titles for subject {subject_id}: {len(titles_from_payload)} titles")
             print(f"Titles from payload: {titles_from_payload}")
+            print(f"🔍 Full sub payload keys: {sub.keys()}")
             
             # Store titles in a temporary attribute for later manual save
             # This is because Frappe doesn't auto-save nested child tables
