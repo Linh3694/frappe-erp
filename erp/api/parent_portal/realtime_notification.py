@@ -226,6 +226,16 @@ def format_notification_for_realtime(notification_doc):
 	student_id = data.get('student_id') or data.get('studentId') or data.get('studentCode')
 	student_name = data.get('student_name') or data.get('studentName')
 	
+	# Helper to convert datetime/string to ISO format
+	def to_iso_string(dt_value):
+		if not dt_value:
+			return None
+		if isinstance(dt_value, str):
+			return dt_value  # Already a string
+		if hasattr(dt_value, 'isoformat'):
+			return dt_value.isoformat()  # datetime object
+		return str(dt_value)
+	
 	return {
 		"id": notification_doc.name,
 		"type": notification_doc.notification_type,
@@ -233,8 +243,8 @@ def format_notification_for_realtime(notification_doc):
 		"message": message,
 		"status": "read" if notification_doc.read_status == "read" else "unread",
 		"priority": notification_doc.priority or "normal",
-		"created_at": notification_doc.event_timestamp.isoformat() if notification_doc.event_timestamp else notification_doc.creation.isoformat(),
-		"read_at": notification_doc.read_at.isoformat() if notification_doc.read_at else None,
+		"created_at": to_iso_string(notification_doc.event_timestamp) if notification_doc.event_timestamp else to_iso_string(notification_doc.creation),
+		"read_at": to_iso_string(notification_doc.read_at),
 		"student_id": student_id,
 		"student_name": student_name,
 		"data": data
@@ -258,11 +268,19 @@ def on_notification_read(notification_doc):
 	try:
 		user_email = notification_doc.recipient_user
 		if user_email:
+			# Convert read_at to ISO string safely
+			read_at_iso = None
+			if notification_doc.read_at:
+				if isinstance(notification_doc.read_at, str):
+					read_at_iso = notification_doc.read_at
+				elif hasattr(notification_doc.read_at, 'isoformat'):
+					read_at_iso = notification_doc.read_at.isoformat()
+			
 			# Emit notification update
 			emit_notification_to_user(user_email, {
 				"id": notification_doc.name,
 				"status": "read",
-				"read_at": notification_doc.read_at.isoformat() if notification_doc.read_at else None,
+				"read_at": read_at_iso,
 				"action": "marked_read"
 			})
 			
