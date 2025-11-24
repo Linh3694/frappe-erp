@@ -96,10 +96,34 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
             }
             # nested child table for test point titles
             try:
-                for t in (getattr(row, "test_point_titles", None) or []):
-                    subject_detail["test_point_titles"].append({"name": t.name, "title": getattr(t, "title", None)})
-            except Exception:
-                pass
+                test_titles_list = getattr(row, "test_point_titles", None) or []
+                print(f"[_doc_to_template_dict] Reading test_point_titles for subject {subject_id}: found {len(test_titles_list)} items")
+                print(f"  row.test_point_titles = {test_titles_list}")
+                
+                # ✅ CRITICAL FIX: Query directly from DB instead of relying on row object
+                # because row.test_point_titles might not be refreshed after manual insert
+                if row.name:
+                    db_titles = frappe.get_all(
+                        "SIS Report Card Test Point Title",
+                        filters={
+                            "parent": row.name,
+                            "parenttype": "SIS Report Card Subject Config",
+                            "parentfield": "test_point_titles"
+                        },
+                        fields=["name", "title"],
+                        order_by="idx asc"
+                    )
+                    print(f"  ✅ Queried from DB: found {len(db_titles)} titles")
+                    for t in db_titles:
+                        subject_detail["test_point_titles"].append({"name": t.name, "title": t.title})
+                else:
+                    # Fallback to row object if no name (shouldn't happen)
+                    for t in test_titles_list:
+                        subject_detail["test_point_titles"].append({"name": t.name, "title": getattr(t, "title", None)})
+            except Exception as e:
+                print(f"  ❌ Error reading test_point_titles: {str(e)}")
+                import traceback
+                traceback.print_exc()
             # scoreboard JSON (optional)
             try:
                 sb = getattr(row, "scoreboard", None)
