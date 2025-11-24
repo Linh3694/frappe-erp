@@ -240,14 +240,21 @@ def format_notification_for_realtime(notification_doc):
 		"id": notification_doc.name,
 		"type": notification_doc.notification_type,
 		"title": title,
-		"message": message,
+		"body": message,  # Service worker expects "body" not "message"
+		"message": message,  # Keep both for backward compatibility
 		"status": "read" if notification_doc.read_status == "read" else "unread",
 		"priority": notification_doc.priority or "normal",
 		"created_at": to_iso_string(notification_doc.event_timestamp) if notification_doc.event_timestamp else to_iso_string(notification_doc.creation),
 		"read_at": to_iso_string(notification_doc.read_at),
 		"student_id": student_id,
 		"student_name": student_name,
-		"data": data
+		"data": data,
+		"icon": "/parent-portal.svg",  # Service worker expects icon
+		"badge": "/parent-portal.svg",  # Badge for notification
+		"tag": notification_doc.notification_type,  # Tag for grouping
+		"requireInteraction": False,
+		"actions": [],
+		"timestamp": int(frappe.utils.now_datetime().timestamp() * 1000) if frappe.utils.now_datetime() else None
 	}
 
 
