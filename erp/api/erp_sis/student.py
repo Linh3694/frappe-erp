@@ -1281,7 +1281,9 @@ def get_student_profile():
         )
 
     except Exception as e:
+        import traceback
         frappe.log_error(f"Error fetching student profile: {str(e)}")
+        frappe.logger().error(f"Full traceback: {traceback.format_exc()}")
         return error_response(
             message="Error fetching student profile",
             code="FETCH_STUDENT_PROFILE_ERROR"
