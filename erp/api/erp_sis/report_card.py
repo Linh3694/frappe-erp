@@ -96,9 +96,10 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
             }
             # nested child table for test point titles
             try:
+                subject_id = getattr(row, "subject_id", "unknown")
                 test_titles_list = getattr(row, "test_point_titles", None) or []
                 print(f"[_doc_to_template_dict] Reading test_point_titles for subject {subject_id}: found {len(test_titles_list)} items")
-                print(f"  row.test_point_titles = {test_titles_list}")
+                print(f"  row.name = {row.name}")
                 
                 # ✅ CRITICAL FIX: Query directly from DB instead of relying on row object
                 # because row.test_point_titles might not be refreshed after manual insert
@@ -117,6 +118,7 @@ def _doc_to_template_dict(doc) -> Dict[str, Any]:
                     for t in db_titles:
                         subject_detail["test_point_titles"].append({"name": t.name, "title": t.title})
                 else:
+                    print(f"  ⚠️ row.name is empty, falling back to row object")
                     # Fallback to row object if no name (shouldn't happen)
                     for t in test_titles_list:
                         subject_detail["test_point_titles"].append({"name": t.name, "title": getattr(t, "title", None)})
