@@ -29,21 +29,21 @@
   "reference_name"
  ],
  "fields": [
-  {
-   "fieldname": "title",
-   "fieldtype": "JSON",
-   "label": "Tiêu đề",
-   "reqd": 1,
-   "in_list_view": 1,
-   "description": "Support bilingual: String or JSON {vi, en}"
-  },
-  {
-   "fieldname": "message",
-   "fieldtype": "JSON",
-   "label": "Nội dung",
-   "reqd": 1,
-   "description": "Support bilingual: String or JSON {vi, en}"
-  },
+ {
+  "fieldname": "title",
+  "fieldtype": "Long Text",
+  "label": "Tiêu đề",
+  "reqd": 1,
+  "in_list_view": 1,
+  "description": "Support bilingual: String or JSON {vi, en}"
+ },
+ {
+  "fieldname": "message",
+  "fieldtype": "Long Text",
+  "label": "Nội dung",
+  "reqd": 1,
+  "description": "Support bilingual: String or JSON {vi, en}"
+ },
   {
    "fieldname": "notification_type",
    "fieldtype": "Select",
@@ -75,7 +75,7 @@
   },
   {
    "fieldname": "recipients",
-   "fieldtype": "JSON",
+   "fieldtype": "Long Text",
    "label": "Danh sách người nhận"
   },
   {
@@ -130,12 +130,12 @@
   },
   {
    "fieldname": "push_tokens",
-   "fieldtype": "JSON",
+   "fieldtype": "Long Text",
    "label": "Push Tokens"
   },
   {
    "fieldname": "data",
-   "fieldtype": "JSON",
+   "fieldtype": "Long Text",
    "label": "Dữ liệu bổ sung"
   },
   {
