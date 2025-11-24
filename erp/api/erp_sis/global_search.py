@@ -8,7 +8,7 @@ from erp.utils.api_response import (
 )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def global_search(search_term: str = None):
     """Global search for both students and classes - single unified endpoint"""
     try:
