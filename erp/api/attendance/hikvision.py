@@ -21,12 +21,41 @@ def handle_hikvision_event():
 	No authentication required so devices can send events directly
 	"""
 	try:
-		# Get event data from request
+		# Get event data from request - xử lý cả multipart/form-data và JSON
 		event_data = frappe.local.form_dict
 		
-		# LOG: Print raw request data
-		frappe.logger().info(f"🔍 [HIKVISION] Received request - form_dict keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
+		# LOG: Print raw request data với nhiều thông tin hơn
+		frappe.logger().info(f"🔍 [HIKVISION] ===== NEW REQUEST =====")
+		frappe.logger().info(f"🔍 [HIKVISION] Request method: {frappe.request.method}")
+		frappe.logger().info(f"🔍 [HIKVISION] Content-Type: {frappe.request.content_type}")
+		frappe.logger().info(f"🔍 [HIKVISION] Request headers: {dict(frappe.request.headers)}")
+		frappe.logger().info(f"🔍 [HIKVISION] form_dict keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
 		frappe.logger().info(f"🔍 [HIKVISION] Raw event_data: {str(event_data)[:500]}")
+		
+		# Nếu event_data rỗng, thử đọc raw request body
+		if not event_data or len(event_data) == 0:
+			try:
+				raw_data = frappe.request.get_data(as_text=True)
+				frappe.logger().info(f"🔍 [HIKVISION] Raw request body: {raw_data[:500]}")
+				if raw_data:
+					event_data = json.loads(raw_data)
+					frappe.logger().info(f"🔍 [HIKVISION] Parsed from raw body - keys: {list(event_data.keys())}")
+			except Exception as parse_error:
+				frappe.logger().warning(f"⚠️ [HIKVISION] Could not parse raw body: {str(parse_error)}")
+		
+		# Parse multipart/form-data nếu có (giống Node.js)
+		# HiVision có thể gửi JSON trong một field của form-data
+		if event_data and isinstance(event_data, dict):
+			for key, value in list(event_data.items()):
+				if isinstance(value, str):
+					try:
+						parsed = json.loads(value)
+						if isinstance(parsed, dict):
+							frappe.logger().info(f"🔍 [HIKVISION] Parsed JSON from field '{key}'")
+							event_data = parsed
+							break
+					except:
+						continue
 		
 		# Handle empty body (heartbeat)
 		if not event_data or len(event_data) == 0:
