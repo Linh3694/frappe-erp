@@ -1253,12 +1253,13 @@ def get_student_profile():
                 acts.title_vn as actual_subject_name,
                 ss.class_id,
                 c.title as class_name,
-                -- Teacher information from Subject Assignment
-                sa.teacher_id,
-                t.user_id as teacher_user_id,
-                u.full_name as teacher_name,
-                u.email as teacher_email,
-                u.user_image as teacher_user_image
+                -- Teacher information from Subject Assignment (concatenated)
+                GROUP_CONCAT(DISTINCT CONCAT(
+                    t.user_id, '|',
+                    u.full_name, '|',
+                    u.email, '|',
+                    COALESCE(u.user_image, '')
+                ) SEPARATOR ';') as teachers_info
             FROM `tabSIS Student Subject` ss
             INNER JOIN `tabSIS Subject` s ON ss.subject_id = s.name
             LEFT JOIN `tabSIS Actual Subject` acts ON ss.actual_subject_id = acts.name
@@ -1267,8 +1268,47 @@ def get_student_profile():
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE ss.student_id = %(student_id)s
+                AND sa.teacher_id IS NOT NULL
+            GROUP BY ss.name, ss.subject_id, s.title, s.title, ss.actual_subject_id, acts.title_vn, ss.class_id, c.title
             ORDER BY s.title ASC
         """, sql_params_subjects, as_dict=True)
+
+        # Process teachers_info to create teacher arrays
+        for subject in student_subjects:
+            if subject.get('teachers_info'):
+                teachers = []
+                for teacher_info in subject['teachers_info'].split(';'):
+                    if teacher_info.strip():
+                        parts = teacher_info.split('|')
+                        if len(parts) >= 3:
+                            teachers.append({
+                                'user_id': parts[0],
+                                'full_name': parts[1],
+                                'email': parts[2],
+                                'user_image': parts[3] if len(parts) > 3 and parts[3] else None
+                            })
+                subject['teachers'] = teachers
+                # Keep backward compatibility with single teacher fields
+                if teachers:
+                    subject['teacher_id'] = teachers[0].get('teacher_id')
+                    subject['teacher_user_id'] = teachers[0].get('user_id')
+                    subject['teacher_name'] = teachers[0].get('full_name')
+                    subject['teacher_email'] = teachers[0].get('email')
+                    subject['teacher_user_image'] = teachers[0].get('user_image')
+                else:
+                    subject['teachers'] = []
+                    subject['teacher_id'] = None
+                    subject['teacher_user_id'] = None
+                    subject['teacher_name'] = None
+                    subject['teacher_email'] = None
+                    subject['teacher_user_image'] = None
+            else:
+                subject['teachers'] = []
+                subject['teacher_id'] = None
+                subject['teacher_user_id'] = None
+                subject['teacher_name'] = None
+                subject['teacher_email'] = None
+                subject['teacher_user_image'] = None
 
         # Build response
         profile_data = {
