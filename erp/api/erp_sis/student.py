@@ -1155,7 +1155,7 @@ def get_student_profile():
             # Get current school year if not provided
             current_school_year = frappe.db.get_value(
                 "SIS School Year",
-                filters={"is_current": 1},
+                filters={"is_enable": 1},
                 fieldname="name"
             )
             if current_school_year:
