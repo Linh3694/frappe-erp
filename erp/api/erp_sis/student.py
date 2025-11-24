@@ -1122,7 +1122,7 @@ def get_student_profile():
         )
 
         if not student_id:
-            return validation_error_response("Student ID is required")
+            return error_response(message="Student ID is required")
 
         # Get current campus
         campus_id = get_current_campus_from_context()
@@ -1327,7 +1327,7 @@ def check_homeroom_teacher_permission():
         )
 
         if not student_id:
-            return validation_error_response("Student ID is required")
+            return error_response(message="Student ID is required")
 
         current_user = frappe.session.user
         
