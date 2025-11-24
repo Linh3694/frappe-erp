@@ -1089,8 +1089,9 @@ def get_student_profile():
         # Get student_id from multiple sources
         form = getattr(frappe, 'form_dict', None) or {}
         local_form = getattr(frappe.local, 'form_dict', None) or {}
-        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
-        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+        request = getattr(frappe, 'request', None)
+        request_args = getattr(request, 'args', None) if request else {}
+        request_data = getattr(request, 'data', None) if request else None
 
         payload = {}
         if request_data:
@@ -1281,8 +1282,6 @@ def get_student_profile():
 
     except Exception as e:
         frappe.log_error(f"Error fetching student profile: {str(e)}")
-        import traceback
-        frappe.logger().error(f"Full traceback: {traceback.format_exc()}")
         return error_response(
             message="Error fetching student profile",
             code="FETCH_STUDENT_PROFILE_ERROR"
