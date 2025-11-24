@@ -330,9 +330,11 @@ def mark_viewed():
     
     except Exception as e:
         # Truncate error message to avoid CharacterLengthExceededError (max 140 chars)
+        # Account for prefix "mark_viewed error: " (18 chars) + error message
         error_msg = str(e)
-        if len(error_msg) > 130:
-            error_msg = error_msg[:127] + "..."
+        max_error_length = 140 - 18  # 122 characters for error message
+        if len(error_msg) > max_error_length:
+            error_msg = error_msg[:max_error_length-3] + "..."
 
         frappe.log_error(f"mark_viewed error: {error_msg}")
         return error_response(
