@@ -848,43 +848,48 @@ def update_template(template_id: Optional[str] = None):
         doc.save(ignore_permissions=True)
         
         # ✅ FIX: MANUAL SAVE test_point_titles (child table of child table)
-        # Same logic as in create_template (line 686-710)
+        # Must save BEFORE clearing old ones to preserve data in memory
         try:
             for subject_row in doc.subjects:
-                # First, clear existing test_point_titles for this subject
+                # ✅ CRITICAL: Save test_point_titles to temp variable BEFORE deleting
+                # because delete might clear the in-memory data
+                titles_to_save = []
+                if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
+                    for test_title_data in subject_row.test_point_titles:
+                        title = ""
+                        if isinstance(test_title_data, dict):
+                            title = test_title_data.get('title', '')
+                        elif hasattr(test_title_data, 'title'):
+                            title = test_title_data.title
+                        
+                        if title and title.strip():
+                            titles_to_save.append(title.strip())
+                
+                # Now clear existing test_point_titles for this subject
                 try:
-                    frappe.db.sql("""
-                        DELETE FROM `tabSIS Report Card Test Point Title`
-                        WHERE parent = %s
-                        AND parenttype = 'SIS Report Card Subject Config'
-                        AND parentfield = 'test_point_titles'
-                    """, (subject_row.name,))
+                    if subject_row.name:  # Only delete if subject_row has been saved (has name/ID)
+                        frappe.db.sql("""
+                            DELETE FROM `tabSIS Report Card Test Point Title`
+                            WHERE parent = %s
+                            AND parenttype = 'SIS Report Card Subject Config'
+                            AND parentfield = 'test_point_titles'
+                        """, (subject_row.name,))
                 except Exception as delete_error:
                     frappe.logger().error(f"Error deleting old test_point_titles for subject {subject_row.name}: {str(delete_error)}")
                 
-                # Then, insert new test_point_titles
-                if hasattr(subject_row, 'test_point_titles') and subject_row.test_point_titles:
-                    for test_title_data in subject_row.test_point_titles:
-                        try:
-                            # Get title from either dict or object
-                            title = ""
-                            if isinstance(test_title_data, dict):
-                                title = test_title_data.get('title', '')
-                            elif hasattr(test_title_data, 'title'):
-                                title = test_title_data.title
-                            
-                            if title:
-                                # Create and save child doc manually
-                                child_doc = frappe.get_doc({
-                                    "doctype": "SIS Report Card Test Point Title",
-                                    "title": title,
-                                    "parent": subject_row.name,
-                                    "parenttype": "SIS Report Card Subject Config",
-                                    "parentfield": "test_point_titles"
-                                })
-                                child_doc.insert(ignore_permissions=True)
-                        except Exception as save_error:
-                            frappe.logger().error(f"Error saving test_point_title '{title}': {str(save_error)}")
+                # Insert new test_point_titles from saved data
+                for title in titles_to_save:
+                    try:
+                        child_doc = frappe.get_doc({
+                            "doctype": "SIS Report Card Test Point Title",
+                            "title": title,
+                            "parent": subject_row.name,
+                            "parenttype": "SIS Report Card Subject Config",
+                            "parentfield": "test_point_titles"
+                        })
+                        child_doc.insert(ignore_permissions=True)
+                    except Exception as save_error:
+                        frappe.logger().error(f"Error saving test_point_title '{title}': {str(save_error)}")
         except Exception as manual_error:
             frappe.logger().error(f"Error in manual save of test_point_titles during update: {str(manual_error)}")
         
