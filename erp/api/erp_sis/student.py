@@ -1247,7 +1247,7 @@ def get_student_profile():
                 s.title as subject_name,
                 s.title as subject_name_en,
                 ss.actual_subject_id,
-                acts.title as actual_subject_name,
+                acts.title_vn as actual_subject_name,
                 ss.class_id,
                 c.title as class_name
             FROM `tabSIS Student Subject` ss
