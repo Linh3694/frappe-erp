@@ -12,7 +12,7 @@ from erp.common.doctype.erp_time_attendance.erp_time_attendance import normalize
 
 
 @frappe.whitelist(methods=["POST"])
-def get_students_day_map(date, codes):
+def get_students_day_map(date=None, codes=None):
 	"""
 	Get attendance data for multiple students on a specific date
 	Used by Parent Portal dashboard for quick check-in/check-out display
@@ -21,7 +21,7 @@ def get_students_day_map(date, codes):
 	
 	Args:
 		date (str): Date in YYYY-MM-DD format
-		codes (list): List of student codes
+		codes (list): List of student codes (can be JSON string or list)
 	
 	Returns:
 		dict: {
@@ -36,6 +36,13 @@ def get_students_day_map(date, codes):
 		}
 	"""
 	try:
+		# Parse codes if it's a JSON string
+		if codes and isinstance(codes, str):
+			try:
+				codes = json.loads(codes)
+			except:
+				pass
+		
 		# Validate inputs
 		if not date:
 			return {

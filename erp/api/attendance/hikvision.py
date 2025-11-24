@@ -126,6 +126,8 @@ def handle_hikvision_event():
 		
 		# Handle empty body (heartbeat)
 		if not event_data or len(event_data) == 0:
+			logger.info("💓 Empty body - heartbeat received")
+			logger.info("=" * 80)
 			return {
 				"status": "success",
 				"message": "Heartbeat received",
@@ -162,9 +164,22 @@ def handle_hikvision_event():
 		# Validate event type
 		if not event_type:
 			logger.warning(f"⚠️ No eventType found in request")
+			logger.info("=" * 80)
 			return {
 				"status": "success",
 				"message": "No valid eventType found",
+				"timestamp": frappe.utils.now()
+			}
+		
+		# Handle heartbeat events
+		if event_type == 'heartBeat':
+			logger.info(f"💓 Heartbeat event from device {event_data.get('ipAddress', 'unknown')}")
+			logger.info("=" * 80)
+			return {
+				"status": "success",
+				"message": "Heartbeat received",
+				"event_type": "heartBeat",
+				"device_ip": event_data.get('ipAddress'),
 				"timestamp": frappe.utils.now()
 			}
 		
@@ -172,6 +187,7 @@ def handle_hikvision_event():
 		valid_event_types = ['faceSnapMatch', 'faceMatch', 'faceRecognition', 'accessControllerEvent', 'AccessControllerEvent']
 		if event_type not in valid_event_types:
 			logger.warning(f"⚠️ Event type '{event_type}' not in valid list: {valid_event_types}")
+			logger.info("=" * 80)
 			return {
 				"status": "success",
 				"message": f"Event type '{event_type}' not processed",
@@ -181,6 +197,7 @@ def handle_hikvision_event():
 		# Only process active events
 		if event_state != 'active':
 			logger.warning(f"⚠️ Event state '{event_state}' is not 'active', skipping")
+			logger.info("=" * 80)
 			return {
 				"status": "success",
 				"message": f"Event state '{event_state}' not processed",
@@ -188,6 +205,7 @@ def handle_hikvision_event():
 			}
 		
 		# Process attendance records
+		logger.info(f"🎯 PROCESSING ATTENDANCE EVENT: {event_type}")
 		records_processed = 0
 		errors = []
 		
