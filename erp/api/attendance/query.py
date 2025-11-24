@@ -182,8 +182,8 @@ def get_students_day_map(date=None, codes=None):
 		}
 
 
-@frappe.whitelist(methods=["GET"])
-def get_employee_attendance_range(employee_code, start_date=None, end_date=None, include_raw_data="false", page=1, limit=100):
+@frappe.whitelist(methods=["GET"], allow_guest=False)
+def get_employee_attendance_range(employee_code=None, start_date=None, end_date=None, include_raw_data="false", page=1, limit=100):
 	"""
 	Get attendance records for an employee over a date range
 	Used by Parent Portal attendance page to show monthly attendance
@@ -209,6 +209,22 @@ def get_employee_attendance_range(employee_code, start_date=None, end_date=None,
 		}
 	"""
 	try:
+		# Get parameters from query string if not provided
+		if employee_code is None:
+			employee_code = frappe.local.form_dict.get('employee_code')
+		if start_date is None:
+			start_date = frappe.local.form_dict.get('start_date')
+		if end_date is None:
+			end_date = frappe.local.form_dict.get('end_date')
+		if include_raw_data == "false":
+			include_raw_data = frappe.local.form_dict.get('include_raw_data', 'false')
+		if page == 1:
+			page = frappe.local.form_dict.get('page', 1)
+		if limit == 100:
+			limit = frappe.local.form_dict.get('limit', 100)
+		
+		frappe.logger().info(f"📥 [get_employee_attendance_range] employee_code: {employee_code}, start_date: {start_date}, end_date: {end_date}")
+		
 		if not employee_code:
 			return {
 				"status": "error",
@@ -342,8 +358,8 @@ def get_employee_attendance_range(employee_code, start_date=None, end_date=None,
 		}
 
 
-@frappe.whitelist(methods=["GET"])
-def debug_employee_attendance(employee_code, date):
+@frappe.whitelist(methods=["GET"], allow_guest=False)
+def debug_employee_attendance(employee_code=None, date=None):
 	"""
 	Debug endpoint to show all raw timestamps for an employee on a specific date
 	Helpful for troubleshooting attendance issues
@@ -351,6 +367,14 @@ def debug_employee_attendance(employee_code, date):
 	Endpoint: /api/method/erp.api.attendance.query.debug_employee_attendance
 	"""
 	try:
+		# Get parameters from query string if not provided
+		if employee_code is None:
+			employee_code = frappe.local.form_dict.get('employee_code')
+		if date is None:
+			date = frappe.local.form_dict.get('date')
+		
+		frappe.logger().info(f"📥 [debug_employee_attendance] employee_code: {employee_code}, date: {date}")
+		
 		if not employee_code or not date:
 			return {
 				"status": "error",
