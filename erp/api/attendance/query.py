@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timedelta
 import pytz
 from erp.common.doctype.erp_time_attendance.erp_time_attendance import normalize_date_to_vn_timezone
+from erp.utils.api_response import success_response, error_response
 
 
 @frappe.whitelist(methods=["POST"], allow_guest=False)
@@ -78,42 +79,42 @@ def get_students_day_map(date=None, codes=None):
 		
 		# Validate inputs
 		if not date:
-			return {
-				"status": "error",
-				"message": "Date parameter is required (YYYY-MM-DD format)"
-			}
+			return error_response(
+				message="Date parameter is required (YYYY-MM-DD format)",
+				code="MISSING_DATE"
+			)
 		
 		if not codes or not isinstance(codes, list):
-			return {
-				"status": "error",
-				"message": "Codes parameter is required (array of student codes)"
-			}
+			return error_response(
+				message="Codes parameter is required (array of student codes)",
+				code="MISSING_CODES"
+			)
 		
 		if len(codes) == 0:
-			return {
-				"status": "success",
-				"data": {},
-				"timestamp": frappe.utils.now()
-			}
+			return success_response(
+				data={},
+				message="No codes provided",
+				meta={"date": date, "timestamp": frappe.utils.now()}
+			)
 		
 		# Limit batch size
 		MAX_BATCH = 500
 		if len(codes) > MAX_BATCH:
-			return {
-				"status": "error",
-				"message": f"Number of codes exceeds maximum limit of {MAX_BATCH}"
-			}
+			return error_response(
+				message=f"Number of codes exceeds maximum limit of {MAX_BATCH}",
+				code="BATCH_SIZE_EXCEEDED"
+			)
 		
 		frappe.logger().info(f"📥 [Attendance Batch] /students/day request: date={date}, codes_count={len(codes)}")
 		
 		# Parse and normalize date to VN timezone
 		try:
 			date_obj = frappe.utils.getdate(date)
-		except:
-			return {
-				"status": "error",
-				"message": f"Invalid date format: {date}. Expected YYYY-MM-DD"
-			}
+		except Exception as e:
+			return error_response(
+				message=f"Invalid date format: {date}. Expected YYYY-MM-DD",
+				code="INVALID_DATE_FORMAT"
+			)
 		
 		# Query attendance records
 		# Note: Frappe DB queries are case-sensitive by default
@@ -207,21 +208,26 @@ def get_students_day_map(date=None, codes=None):
 		
 		frappe.logger().info(f"📤 [Attendance Batch] Responding with {len(result)} results")
 		
-		return {
-			"status": "success",
-			"data": result,
-			"date": date,
-			"timestamp": frappe.utils.now()
-		}
+		# Use response utility for consistent format
+		return success_response(
+			data=result,
+			message="Attendance data retrieved successfully",
+			meta={
+				"date": date,
+				"codes_count": len(codes),
+				"records_found": len(records),
+				"timestamp": frappe.utils.now()
+			}
+		)
 		
 	except Exception as e:
 		frappe.logger().error(f"❌ Error in get_students_day_map: {str(e)}")
 		frappe.log_error(message=str(e), title="Get Students Day Map Error")
-		return {
-			"status": "error",
-			"message": "Server error retrieving attendance data",
-			"error": str(e)
-		}
+		return error_response(
+			message="Server error retrieving attendance data",
+			code="SERVER_ERROR",
+			debug_info={"error": str(e)}
+		)
 
 
 @frappe.whitelist(methods=["GET"], allow_guest=False)
@@ -308,10 +314,10 @@ def get_employee_attendance_range(**kwargs):
 		frappe.logger().info(f"📥 [get_employee_attendance_range] Final values - employee_code: {employee_code}, start_date: {start_date}, end_date: {end_date}, page: {page}, limit: {limit}")
 		
 		if not employee_code:
-			return {
-				"status": "error",
-				"message": "employee_code is required"
-			}
+			return error_response(
+				message="employee_code is required",
+				code="MISSING_EMPLOYEE_CODE"
+			)
 		
 		# Build filters
 		filters = {"employee_code": employee_code}
@@ -325,10 +331,10 @@ def get_employee_attendance_range(**kwargs):
 					start_date_obj = frappe.utils.getdate(start_date)
 					date_filter[">="] = start_date_obj
 				except:
-					return {
-						"status": "error",
-						"message": f"Invalid start_date format: {start_date}"
-					}
+					return error_response(
+						message=f"Invalid start_date format: {start_date}",
+						code="INVALID_START_DATE"
+					)
 			
 			if end_date:
 				try:
@@ -337,10 +343,10 @@ def get_employee_attendance_range(**kwargs):
 					end_date_inclusive = end_date_obj + timedelta(days=1)
 					date_filter["<"] = end_date_inclusive
 				except:
-					return {
-						"status": "error",
-						"message": f"Invalid end_date format: {end_date}"
-					}
+					return error_response(
+						message=f"Invalid end_date format: {end_date}",
+						code="INVALID_END_DATE"
+					)
 			
 			if date_filter:
 				filters["date"] = ["between", [date_filter.get(">="), date_filter.get("<")]] if ">=" in date_filter and "<" in date_filter else date_filter
@@ -415,9 +421,9 @@ def get_employee_attendance_range(**kwargs):
 		
 		frappe.logger().info(f"📊 Retrieved {len(formatted_records)} attendance records for employee {employee_code}")
 		
-		return {
-			"status": "success",
-			"data": {
+		# Use response utility for consistent format
+		return success_response(
+			data={
 				"records": formatted_records,
 				"pagination": {
 					"currentPage": page_num,
@@ -426,18 +432,23 @@ def get_employee_attendance_range(**kwargs):
 					"hasMore": has_more
 				}
 			},
-			"timestamp": frappe.utils.now()
-		}
+			message="Attendance records retrieved successfully",
+			meta={
+				"employee_code": employee_code,
+				"start_date": start_date,
+				"end_date": end_date,
+				"timestamp": frappe.utils.now()
+			}
+		)
 		
 	except Exception as e:
 		frappe.logger().error(f"❌ Error retrieving employee attendance: {str(e)}")
 		frappe.log_error(message=str(e), title="Get Employee Attendance Range Error")
-		return {
-			"status": "error",
-			"message": "Server error retrieving attendance data",
-			"error": str(e),
-			"timestamp": frappe.utils.now()
-		}
+		return error_response(
+			message="Server error retrieving attendance data",
+			code="SERVER_ERROR",
+			debug_info={"error": str(e)}
+		)
 
 
 @frappe.whitelist(methods=["GET"], allow_guest=False)
@@ -472,10 +483,10 @@ def debug_employee_attendance(**kwargs):
 		frappe.logger().info(f"📥 [debug_employee_attendance] Final values - employee_code: {employee_code}, date: {date}")
 		
 		if not employee_code or not date:
-			return {
-				"status": "error",
-				"message": "employee_code and date are required"
-			}
+			return error_response(
+				message="employee_code and date are required",
+				code="MISSING_PARAMETERS"
+			)
 		
 		date_obj = frappe.utils.getdate(date)
 		
@@ -491,10 +502,10 @@ def debug_employee_attendance(**kwargs):
 		)
 		
 		if not record:
-			return {
-				"status": "error",
-				"message": "No attendance record found for this date"
-			}
+			return error_response(
+				message="No attendance record found for this date",
+				code="NOT_FOUND"
+			)
 		
 		rec = record[0]
 		
@@ -525,35 +536,37 @@ def debug_employee_attendance(**kwargs):
 		check_in = all_timestamps[0] if all_timestamps else None
 		check_out = all_timestamps[-1] if all_timestamps else None
 		
-		return {
-			"status": "success",
-			"employeeCode": employee_code,
-			"date": str(date_obj),
-			"summary": {
-				"totalCheckIns": len(all_timestamps),
-				"checkInTime": {
-					"utc": rec.check_in_time.isoformat() if rec.check_in_time else None,
-					"vnTime": check_in['vnTime'] if check_in else None
+		return success_response(
+			data={
+				"employeeCode": employee_code,
+				"date": str(date_obj),
+				"summary": {
+					"totalCheckIns": len(all_timestamps),
+					"checkInTime": {
+						"utc": rec.check_in_time.isoformat() if rec.check_in_time else None,
+						"vnTime": check_in['vnTime'] if check_in else None
+					},
+					"checkOutTime": {
+						"utc": rec.check_out_time.isoformat() if rec.check_out_time else None,
+						"vnTime": check_out['vnTime'] if check_out else None
+					},
+					"storedCheckIn": rec.check_in_time.isoformat() if rec.check_in_time else None,
+					"storedCheckOut": rec.check_out_time.isoformat() if rec.check_out_time else None
 				},
-				"checkOutTime": {
-					"utc": rec.check_out_time.isoformat() if rec.check_out_time else None,
-					"vnTime": check_out['vnTime'] if check_out else None
-				},
-				"storedCheckIn": rec.check_in_time.isoformat() if rec.check_in_time else None,
-				"storedCheckOut": rec.check_out_time.isoformat() if rec.check_out_time else None
+				"allTimestamps": all_timestamps,
+				"duplicateAnalysis": {
+					"uniqueTimestamps": len(set([t['timestamp'] for t in all_timestamps])),
+					"hasDuplicates": len(all_timestamps) > len(set([t['timestamp'] for t in all_timestamps]))
+				}
 			},
-			"allTimestamps": all_timestamps,
-			"duplicateAnalysis": {
-				"uniqueTimestamps": len(set([t['timestamp'] for t in all_timestamps])),
-				"hasDuplicates": len(all_timestamps) > len(set([t['timestamp'] for t in all_timestamps]))
-			}
-		}
+			message="Debug data retrieved successfully"
+		)
 		
 	except Exception as e:
 		frappe.logger().error(f"Debug endpoint error: {str(e)}")
-		return {
-			"status": "error",
-			"message": "Failed to debug attendance data",
-			"error": str(e)
-		}
+		return error_response(
+			message="Failed to debug attendance data",
+			code="DEBUG_ERROR",
+			debug_info={"error": str(e)}
+		)
 
