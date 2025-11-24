@@ -240,3 +240,40 @@ def on_notification_created_for_sse(notification_doc, method=None):
 	except Exception as e:
 		frappe.logger().error(f"❌ [SSE] Error in on_notification_created_for_sse: {str(e)}")
 
+
+@frappe.whitelist()
+def test_send_notification_to_student_parents(student_id="WS12310116"):
+	"""
+	Test function để gửi notification tới phụ huynh của học sinh
+	Có thể chạy từ bench console: frappe.call('erp.api.parent_portal.sse_notification.test_send_notification_to_student_parents')
+	"""
+	try:
+		print(f"🧪 [TEST] Testing notification for student: {student_id}")
+
+		# Import notification handler
+		from erp.utils.notification_handler import send_bulk_parent_notifications
+
+		# Gửi notification test
+		result = send_bulk_parent_notifications(
+			recipient_type="test",
+			recipients_data={
+				"student_ids": [student_id]
+			},
+			title="Test Notification",
+			body=f"Đây là notification test cho học sinh {student_id}",
+			data={
+				"type": "test",
+				"student_id": student_id,
+				"timestamp": frappe.utils.now()
+			}
+		)
+
+		print(f"✅ [TEST] Notification sent result: {result}")
+		return result
+
+	except Exception as e:
+		print(f"❌ [TEST] Error: {str(e)}")
+		import traceback
+		traceback.print_exc()
+		return {"success": False, "error": str(e)}
+
