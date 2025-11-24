@@ -105,10 +105,10 @@ def global_search(search_term: str = None):
         
         # ===== SEARCH CLASSES =====
         try:
-            where_clauses = ["c.campus_id = %s"]
+            where_clauses = ["campus_id = %s"]
             params = [campus_id]
             like_contains = f"%{search_clean}%"
-            where_clauses.append("(LOWER(c.title) LIKE LOWER(%s))")
+            where_clauses.append("(LOWER(title) LIKE LOWER(%s))")
             params.extend([like_contains])
             
             conditions = " AND ".join(where_clauses)
@@ -116,28 +116,41 @@ def global_search(search_term: str = None):
             sql_query = (
                 """
                 SELECT 
-                    c.name,
-                    c.title,
-                    c.short_title,
-                    c.campus_id,
-                    c.school_year_id,
-                    sy.title as school_year_name,
-                    c.education_grade,
-                    c.academic_program,
-                    c.homeroom_teacher,
-                    c.vice_homeroom_teacher,
-                    c.room,
-                    c.class_type,
-                    c.creation,
-                    c.modified
-                FROM `tabSIS Class` c
-                LEFT JOIN `tabSIS School Year` sy ON c.school_year_id = sy.name
+                    name,
+                    title,
+                    short_title,
+                    campus_id,
+                    school_year_id,
+                    education_grade,
+                    academic_program,
+                    homeroom_teacher,
+                    vice_homeroom_teacher,
+                    room,
+                    class_type,
+                    creation,
+                    modified
+                FROM `tabSIS Class`
                 WHERE {where}
-                ORDER BY c.title ASC
+                ORDER BY title ASC
                 """
             ).format(where=conditions)
             
             classes = frappe.db.sql(sql_query, params, as_dict=True)
+            
+            # Get school year names for each class
+            if classes:
+                school_year_ids = list(set([c.get('school_year_id') for c in classes if c.get('school_year_id')]))
+                if school_year_ids:
+                    school_years = frappe.get_all(
+                        "SIS School Year",
+                        filters={"name": ["in", school_year_ids]},
+                        fields=["name", "title"]
+                    )
+                    school_year_map = {sy['name']: sy['title'] for sy in school_years}
+                    
+                    for cls in classes:
+                        cls['school_year_name'] = school_year_map.get(cls.get('school_year_id'), '')
+            
             result["classes"] = classes
             frappe.logger().info(f"Found {len(classes)} classes")
         except Exception as e:
