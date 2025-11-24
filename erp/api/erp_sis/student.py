@@ -1213,7 +1213,7 @@ def get_student_profile():
             school_year_filter_running = "AND cs.school_year_id = %(school_year_id)s"
             sql_params_running["school_year_id"] = school_year_id
 
-        # Get running classes
+        # Get mixed classes (running/extra-curricular classes)
         running_classes = frappe.db.sql("""
             SELECT
                 cs.name as class_student_id,
@@ -1230,7 +1230,7 @@ def get_student_profile():
             LEFT JOIN `tabSIS Teacher` t1 ON c.homeroom_teacher = t1.name
             LEFT JOIN `tabUser` u1 ON t1.user_id = u1.name
             WHERE cs.student_id = %(student_id)s
-                AND c.class_type = 'Running'
+                AND c.class_type = 'mixed'
                 {school_year_filter}
             ORDER BY c.title ASC
         """.format(school_year_filter=school_year_filter_running), sql_params_running, as_dict=True)
