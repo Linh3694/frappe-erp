@@ -1150,11 +1150,8 @@ def get_student_profile():
         except Exception as photo_err:
             frappe.logger().warning(f"Error fetching photo for student {student.name}: {str(photo_err)}")
 
-        # Build filters for class student
-        class_student_filters = {"student_id": student_id}
-        if school_year_id:
-            class_student_filters["school_year_id"] = school_year_id
-        else:
+        # Determine school year to use
+        if not school_year_id:
             # Get current school year if not provided
             current_school_year = frappe.db.get_value(
                 "SIS School Year",
@@ -1162,7 +1159,14 @@ def get_student_profile():
                 fieldname="name"
             )
             if current_school_year:
-                class_student_filters["school_year_id"] = current_school_year
+                school_year_id = current_school_year
+
+        # Build SQL query parameters
+        sql_params = {"student_id": student_id}
+        school_year_filter = ""
+        if school_year_id:
+            school_year_filter = "AND cs.school_year_id = %(school_year_id)s"
+            sql_params["school_year_id"] = school_year_id
 
         # Get homeroom class (Regular class type)
         homeroom_class = None
@@ -1194,12 +1198,17 @@ def get_student_profile():
                 AND c.class_type = 'Regular'
                 {school_year_filter}
             LIMIT 1
-        """.format(
-            school_year_filter="AND cs.school_year_id = %(school_year_id)s" if school_year_id else ""
-        ), {"student_id": student_id, "school_year_id": school_year_id}, as_dict=True)
+        """.format(school_year_filter=school_year_filter), sql_params, as_dict=True)
 
-        if homeroom_class_student:
+        if homeroom_class_student and len(homeroom_class_student) > 0:
             homeroom_class = homeroom_class_student[0]
+
+        # Build SQL query parameters for running classes
+        sql_params_running = {"student_id": student_id}
+        school_year_filter_running = ""
+        if school_year_id:
+            school_year_filter_running = "AND cs.school_year_id = %(school_year_id)s"
+            sql_params_running["school_year_id"] = school_year_id
 
         # Get running classes
         running_classes = frappe.db.sql("""
@@ -1220,9 +1229,14 @@ def get_student_profile():
                 AND c.class_type = 'Running'
                 {school_year_filter}
             ORDER BY c.title ASC
-        """.format(
-            school_year_filter="AND cs.school_year_id = %(school_year_id)s" if school_year_id else ""
-        ), {"student_id": student_id, "school_year_id": school_year_id}, as_dict=True)
+        """.format(school_year_filter=school_year_filter_running), sql_params_running, as_dict=True)
+
+        # Build SQL query parameters for student subjects
+        sql_params_subjects = {"student_id": student_id}
+        school_year_filter_subjects = ""
+        if school_year_id:
+            school_year_filter_subjects = "AND ss.school_year_id = %(school_year_id)s"
+            sql_params_subjects["school_year_id"] = school_year_id
 
         # Get student subjects
         student_subjects = frappe.db.sql("""
@@ -1242,9 +1256,7 @@ def get_student_profile():
             WHERE ss.student_id = %(student_id)s
                 {school_year_filter}
             ORDER BY s.title_vn ASC
-        """.format(
-            school_year_filter="AND ss.school_year_id = %(school_year_id)s" if school_year_id else ""
-        ), {"student_id": student_id, "school_year_id": school_year_id}, as_dict=True)
+        """.format(school_year_filter=school_year_filter_subjects), sql_params_subjects, as_dict=True)
 
         # Build response
         profile_data = {
