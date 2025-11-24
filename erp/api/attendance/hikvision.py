@@ -24,6 +24,10 @@ def handle_hikvision_event():
 		# Get event data from request
 		event_data = frappe.local.form_dict
 		
+		# LOG: Print raw request data
+		frappe.logger().info(f"🔍 [HIKVISION] Received request - form_dict keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
+		frappe.logger().info(f"🔍 [HIKVISION] Raw event_data: {str(event_data)[:500]}")
+		
 		# Handle empty body (heartbeat)
 		if not event_data or len(event_data) == 0:
 			return {
@@ -56,8 +60,12 @@ def handle_hikvision_event():
 			active_post = event_data.get("ActivePost") or event_data.get("activePost")
 			access_controller_event = event_data.get("AccessControllerEvent")
 		
+		# LOG: Print parsed fields
+		frappe.logger().info(f"🔍 [HIKVISION] Parsed - eventType: {event_type}, eventState: {event_state}, dateTime: {date_time}")
+		
 		# Validate event type
 		if not event_type:
+			frappe.logger().warning(f"⚠️ [HIKVISION] No eventType found in request")
 			return {
 				"status": "success",
 				"message": "No valid eventType found",
@@ -67,37 +75,39 @@ def handle_hikvision_event():
 		# Only process face recognition events
 		valid_event_types = ['faceSnapMatch', 'faceMatch', 'faceRecognition', 'accessControllerEvent', 'AccessControllerEvent']
 		if event_type not in valid_event_types:
+			frappe.logger().warning(f"⚠️ [HIKVISION] Event type '{event_type}' not in valid list: {valid_event_types}")
 			return {
 				"status": "success",
 				"message": f"Event type '{event_type}' not processed",
 				"event_type": event_type
 			}
 		
-	# Only process active events
-	if event_state != 'active':
-		return {
-			"status": "success",
-			"message": f"Event state '{event_state}' not processed",
-			"event_state": event_state
-		}
+		# Only process active events
+		if event_state != 'active':
+			frappe.logger().warning(f"⚠️ [HIKVISION] Event state '{event_state}' is not 'active', skipping")
+			return {
+				"status": "success",
+				"message": f"Event state '{event_state}' not processed",
+				"event_state": event_state
+			}
 		
 		# Process attendance records
 		records_processed = 0
 		errors = []
 		
-	# Collect posts to process
-	posts_to_process = []
-	
-	# Ưu tiên AccessControllerEvent nếu có (định dạng mới)
-	if access_controller_event:
-		posts_to_process.append(access_controller_event)
-	elif active_post and isinstance(active_post, list):
-		posts_to_process.extend(active_post)
-	elif active_post:
-		posts_to_process.append(active_post)
-	else:
-		# Fallback: parse from root level
-		posts_to_process.append(event_data)
+		# Collect posts to process
+		posts_to_process = []
+		
+		# Ưu tiên AccessControllerEvent nếu có (định dạng mới)
+		if access_controller_event:
+			posts_to_process.append(access_controller_event)
+		elif active_post and isinstance(active_post, list):
+			posts_to_process.extend(active_post)
+		elif active_post:
+			posts_to_process.append(active_post)
+		else:
+			# Fallback: parse from root level
+			posts_to_process.append(event_data)
 		
 		# Process each post
 		for post in posts_to_process:
@@ -115,8 +125,11 @@ def handle_hikvision_event():
 				device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
 				device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
 				
+				frappe.logger().info(f"🔍 [HIKVISION] Processing post - employee_code: {employee_code}, timestamp: {timestamp}")
+				
 				# Skip if no employee data
 				if not employee_code or not timestamp:
+					frappe.logger().warning(f"⚠️ [HIKVISION] Skipping post - missing employee_code or timestamp")
 					continue
 				
 				# Parse timestamp
@@ -148,8 +161,10 @@ def handle_hikvision_event():
 				attendance_doc.update_attendance_time(parsed_timestamp, device_id, device_name)
 				
 				# Save to database
+				frappe.logger().info(f"💾 [HIKVISION] Saving attendance record for {employee_code} - check_in: {attendance_doc.check_in_time}, check_out: {attendance_doc.check_out_time}")
 				attendance_doc.save(ignore_permissions=True)
 				frappe.db.commit()
+				frappe.logger().info(f"✅ [HIKVISION] Record saved! ID: {attendance_doc.name}")
 				
 				records_processed += 1
 				
@@ -376,4 +391,3 @@ def format_vn_time(dt):
 	vn_time = dt.astimezone(vn_tz)
 	
 	return vn_time.strftime('%Y-%m-%d %H:%M:%S')
-
