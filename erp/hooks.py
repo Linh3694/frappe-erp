@@ -227,7 +227,8 @@ doc_events = {
 	# Push notification when ERP Notification is created
 	"ERP Notification": {
 		"after_insert": [
-			"erp.api.parent_portal.realtime_notification.on_notification_created"
+			"erp.api.parent_portal.realtime_notification.on_notification_created",
+			"erp.api.parent_portal.sse_notification.on_notification_created_for_sse"
 		]
 	},
 	# Cache Invalidation Hooks for Subject Assignment & Timetable

@@ -174,15 +174,69 @@ def push_notification_via_sse(user_email, notification_data):
 	"""
 	Helper function để push notification qua SSE
 	Được gọi từ các service khác (attendance, contact_log, etc.)
-	
+
 	Args:
 		user_email: User email to send notification
 		notification_data: Notification data dict
-	
+
 	Note:
 		SSE hoạt động theo cơ chế polling, nên function này chỉ log
 		Client sẽ tự động nhận notification khi polling
 	"""
 	frappe.logger().info(f"📡 [SSE] Notification ready for {user_email}: {notification_data.get('id')}")
 	return True
+
+
+def trigger_sse_notification_for_user(user_email, notification_doc=None, notification_data=None):
+	"""
+	Trigger SSE notification cho user cụ thể
+	Called when ERP Notification is created
+
+	Args:
+		user_email: User email
+		notification_doc: ERP Notification document (optional)
+		notification_data: Pre-formatted notification data (optional)
+	"""
+	try:
+		if not user_email:
+			return
+
+		# Format notification data if not provided
+		if not notification_data and notification_doc:
+			notification_data = format_notification_for_sse(notification_doc)
+
+		if not notification_data:
+			frappe.logger().warning(f"⚠️ [SSE] No notification data to trigger for {user_email}")
+			return
+
+		# Publish realtime event để trigger SSE clients (nếu có listener)
+		# Và cũng để log rằng có notification mới
+		frappe.publish_realtime(
+			event="sse_notification_available",
+			message={
+				"user_email": user_email,
+				"notification_id": notification_data.get('id'),
+				"timestamp": frappe.utils.now()
+			},
+			user=user_email
+		)
+
+		frappe.logger().info(f"📡 [SSE] Triggered SSE notification for {user_email}: {notification_data.get('id')}")
+
+	except Exception as e:
+		frappe.logger().error(f"❌ [SSE] Failed to trigger SSE notification: {str(e)}")
+
+
+@frappe.whitelist()
+def on_notification_created_for_sse(notification_doc, method=None):
+	"""
+	Hook function called when ERP Notification is created
+	Triggers SSE notification for the recipient
+	"""
+	try:
+		user_email = notification_doc.recipient_user
+		if user_email:
+			trigger_sse_notification_for_user(user_email, notification_doc=notification_doc)
+	except Exception as e:
+		frappe.logger().error(f"❌ [SSE] Error in on_notification_created_for_sse: {str(e)}")
 
