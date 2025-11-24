@@ -1242,7 +1242,7 @@ def get_student_profile():
             school_year_filter_subjects = "AND ss.school_year_id = %(school_year_id)s"
             sql_params_subjects["school_year_id"] = school_year_id
 
-        # Get student subjects
+        # Get student subjects with teacher information
         student_subjects = frappe.db.sql("""
             SELECT
                 ss.name,
@@ -1252,11 +1252,20 @@ def get_student_profile():
                 ss.actual_subject_id,
                 acts.title_vn as actual_subject_name,
                 ss.class_id,
-                c.title as class_name
+                c.title as class_name,
+                -- Teacher information from Subject Assignment
+                sa.teacher_id,
+                t.user_id as teacher_user_id,
+                u.full_name as teacher_name,
+                u.email as teacher_email,
+                u.user_image as teacher_user_image
             FROM `tabSIS Student Subject` ss
             INNER JOIN `tabSIS Subject` s ON ss.subject_id = s.name
             LEFT JOIN `tabSIS Actual Subject` acts ON ss.actual_subject_id = acts.name
             LEFT JOIN `tabSIS Class` c ON ss.class_id = c.name
+            LEFT JOIN `tabSIS Subject Assignment` sa ON sa.class_id = ss.class_id AND sa.actual_subject_id = ss.actual_subject_id
+            LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE ss.student_id = %(student_id)s
             ORDER BY s.title ASC
         """, sql_params_subjects, as_dict=True)
