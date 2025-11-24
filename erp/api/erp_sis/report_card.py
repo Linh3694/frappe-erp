@@ -912,7 +912,9 @@ def update_template(template_id: Optional[str] = None):
         if "subjects" in data:
             _apply_subjects(doc, data.get("subjects") or [])
 
+        print("🔄 About to save doc...")
         doc.save(ignore_permissions=True)
+        print("✅ Doc saved successfully!")
         
         # ✅ FIX: MANUAL SAVE test_point_titles (child table of child table)
         print("\n========== UPDATE_TEMPLATE: Manual Save test_point_titles ==========")
