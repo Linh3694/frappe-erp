@@ -11,13 +11,17 @@
   "message",
   "notification_type",
   "priority",
+  "recipient_user",
   "recipient_type",
   "recipients",
   "sender",
   "status",
+  "delivery_status",
   "read_status",
   "sent_at",
+  "delivered_at",
   "read_at",
+  "event_timestamp",
   "push_tokens",
   "data",
   "channel",
@@ -27,22 +31,24 @@
  "fields": [
   {
    "fieldname": "title",
-   "fieldtype": "Data",
+   "fieldtype": "JSON",
    "label": "Tiêu đề",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Support bilingual: String or JSON {vi, en}"
   },
   {
    "fieldname": "message",
-   "fieldtype": "Text Editor",
+   "fieldtype": "JSON",
    "label": "Nội dung",
-   "reqd": 1
+   "reqd": 1,
+   "description": "Support bilingual: String or JSON {vi, en}"
   },
   {
    "fieldname": "notification_type",
    "fieldtype": "Select",
    "label": "Loại thông báo",
-   "options": "system\nuser\nalert\nreminder\ninfo",
+   "options": "system\nattendance\nticket\nchat\npost\nnews\nreport_card\ncontact_log\nannouncement\nuser\nalert\nreminder\ninfo",
    "default": "system",
    "in_list_view": 1
   },
@@ -52,6 +58,13 @@
    "label": "Độ ưu tiên",
    "options": "low\nmedium\nhigh\nurgent",
    "default": "medium"
+  },
+  {
+   "fieldname": "recipient_user",
+   "fieldtype": "Link",
+   "label": "Người nhận",
+   "options": "User",
+   "description": "Primary recipient for querying notifications by user"
   },
   {
    "fieldname": "recipient_type",
@@ -80,6 +93,14 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "delivery_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái gửi",
+   "options": "pending\nsent\ndelivered\nfailed",
+   "default": "pending",
+   "description": "Push notification delivery status"
+  },
+  {
    "fieldname": "read_status",
    "fieldtype": "Select",
    "label": "Trạng thái đọc",
@@ -92,9 +113,20 @@
    "label": "Thời gian gửi"
   },
   {
+   "fieldname": "delivered_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian đã gửi"
+  },
+  {
    "fieldname": "read_at",
    "fieldtype": "Datetime",
    "label": "Thời gian đọc"
+  },
+  {
+   "fieldname": "event_timestamp",
+   "fieldtype": "Datetime",
+   "label": "Thời gian event",
+   "description": "Actual event time (for attendance, etc.)"
   },
   {
    "fieldname": "push_tokens",

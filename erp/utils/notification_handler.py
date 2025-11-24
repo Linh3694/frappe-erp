@@ -360,122 +360,125 @@ def send_bulk_parent_notifications(
             "recipients": recipients_data
         }
         
-        # Create notification records (for history)
-        try:
-            create_notification_records(recipient_type, parent_emails, guardians, notification_data)
-        except Exception as e:
-            frappe.logger().warning(f"⚠️ Failed to create notification records: {str(e)}")
-            # Continue with push notifications even if record creation fails
-        
-        # Send push notifications via notification-service microservice
-        try:
-            import requests
-            
-            # Get notification service URL from config
-            notification_service_url = frappe.conf.get("notification_service_url", "http://172.16.20.115:5001")
-            
-            # Prepare notification payload for notification-service
-            # Support bilingual title/body if provided as dict
+        # Prepare notification title and body (support bilingual)
+        if isinstance(title, dict):
             notification_title = title
-            notification_body = body
-            
-            # If title/body are dicts with language keys, keep them as is
-            # Otherwise, convert to dict format for consistency
-            if isinstance(title, dict):
-                notification_title = title
-            else:
-                notification_title = {
-                    "vi": title,
-                    "en": title
-                }
-            
-            if isinstance(body, dict):
-                notification_body = body
-            else:
-                notification_body = {
-                    "vi": body,
-                    "en": body
-                }
-            
-            # Merge custom data parameter if provided
-            merged_data = {
-                "type": recipient_type,
-                "notificationType": recipient_type,
-                **notification_data
+        else:
+            notification_title = {
+                "vi": title,
+                "en": title
             }
-            
-            # If custom data is provided, merge it (data parameter takes precedence)
-            if data:
-                merged_data.update(data)
-            
-            payload = {
-                "title": notification_title,
-                "body": notification_body,
-                "recipients": parent_emails,
-                "notification_type": recipient_type,
-                "type": "system",
-                "priority": "medium",
-                "channel": "push",
-                "data": merged_data
-            }
-            
-            frappe.logger().info(f"📤 [Notification Handler] Sending to notification-service: {notification_service_url}/api/notifications/send")
-            frappe.logger().info(f"   Recipients: {len(parent_emails)} parents")
-            frappe.logger().info(f"   Type: {recipient_type}")
-            
-            # Send notification via HTTP request to notification-service
-            response = requests.post(
-                f"{notification_service_url}/api/notifications/send",
-                json=payload,
-                timeout=30
-            )
-            
-            frappe.logger().info(f"📡 [Notification Handler] Response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                result_data = response.json()
-                success_count = result_data.get("success_count", len(parent_emails))
-                failed_count = result_data.get("failed_count", 0)
-                
-                frappe.logger().info(f"✅ [Notification Handler] Notifications sent - Success: {success_count}, Failed: {failed_count}")
-                
-                return {
-                    "success": True,
-                    "message": "Notifications sent successfully",
-                    "parent_emails": parent_emails,
-                    "success_count": success_count,
-                    "failed_count": failed_count,
-                    "total_parents": len(parent_emails),
-                    "guardians": guardians,
-                    "results": result_data.get("results", [])
-                }
-            else:
-                error_text = response.text[:500] if hasattr(response, 'text') else str(response)
-                frappe.logger().warning(f"⚠️ [Notification Handler] Failed to send notification: {response.status_code} - {error_text}")
-                
-                return {
-                    "success": False,
-                    "message": f"Failed to send notifications: HTTP {response.status_code}",
-                    "parent_emails": parent_emails,
-                    "success_count": 0,
-                    "failed_count": len(parent_emails),
-                    "total_parents": len(parent_emails),
-                    "guardians": guardians
-                }
         
-        except requests.exceptions.RequestException as e:
-            frappe.logger().error(f"❌ [Notification Handler] Network error sending notifications: {str(e)}")
-            return {
-                "success": False,
-                "message": f"Failed to send notifications: {str(e)}",
-                "parent_emails": parent_emails,
-                "success_count": 0,
-                "failed_count": len(parent_emails),
-                "total_parents": len(parent_emails),
-                "guardians": guardians
+        if isinstance(body, dict):
+            notification_body = body
+        else:
+            notification_body = {
+                "vi": body,
+                "en": body
             }
+        
+        # Merge custom data parameter
+        merged_data = {
+            "type": recipient_type,
+            "notificationType": recipient_type,
+            **notification_data
+        }
+        
+        if data:
+            merged_data.update(data)
+        
+        frappe.logger().info(f"📤 [Notification Handler] Sending {len(parent_emails)} notifications via Frappe")
+        frappe.logger().info(f"   Type: {recipient_type}")
+        
+        # Send notifications using local Frappe functions
+        try:
+            from erp.common.doctype.erp_notification.erp_notification import create_notification
+            from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
+            from erp.api.parent_portal.push_notification import send_push_notification
+            
+            success_count = 0
+            failed_count = 0
+            results = []
+            
+            # Create notification for each parent
+            for parent_email in parent_emails:
+                try:
+                    # Create notification record in DB
+                    notification_doc = create_notification(
+                        title=notification_title,
+                        message=notification_body,
+                        recipient_user=parent_email,
+                        recipients=[parent_email],
+                        notification_type=recipient_type,
+                        priority="medium",
+                        data=merged_data,
+                        channel="push",
+                        event_timestamp=frappe.utils.now()
+                    )
+                    
+                    # Send realtime notification via SocketIO
+                    emit_notification_to_user(parent_email, {
+                        "id": notification_doc.name,
+                        "type": recipient_type,
+                        "title": notification_title,
+                        "message": notification_body,
+                        "status": "unread",
+                        "priority": "medium",
+                        "created_at": frappe.utils.now(),
+                        "data": merged_data
+                    })
+                    
+                    # Update unread count
+                    from erp.common.doctype.erp_notification.erp_notification import get_unread_count
+                    unread_count = get_unread_count(parent_email)
+                    emit_unread_count_update(parent_email, unread_count)
+                    
+                    # Enqueue push notification (background)
+                    frappe.enqueue(
+                        send_push_notification,
+                        queue="default",
+                        timeout=300,
+                        user_email=parent_email,
+                        title=notification_title.get("vi"),  # Use Vietnamese for push
+                        body=notification_body.get("vi"),
+                        icon=icon or "/icon.png",
+                        data=merged_data,
+                        tag=recipient_type
+                    )
+                    
+                    success_count += 1
+                    results.append({
+                        "email": parent_email,
+                        "success": True,
+                        "notification_id": notification_doc.name
+                    })
+                    
+                except Exception as parent_error:
+                    failed_count += 1
+                    frappe.logger().error(f"Failed to send notification to {parent_email}: {str(parent_error)}")
+                    results.append({
+                        "email": parent_email,
+                        "success": False,
+                        "error": str(parent_error)
+                    })
+            
+            frappe.db.commit()
+            
+            frappe.logger().info(f"✅ [Notification Handler] Notifications sent - Success: {success_count}, Failed: {failed_count}")
+            
+            return {
+                "success": True,
+                "message": f"Sent {success_count} notifications successfully",
+                "parent_emails": parent_emails,
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "total_parents": len(parent_emails),
+                "guardians": guardians,
+                "results": results
+            }
+            
         except Exception as e:
-            frappe.logger().error(f"❌ [Notification Handler] Error sending push notifications: {str(e)}")
+            frappe.logger().error(f"❌ [Notification Handler] Error sending notifications: {str(e)}")
             import traceback
             frappe.logger().error(traceback.format_exc())
             return {

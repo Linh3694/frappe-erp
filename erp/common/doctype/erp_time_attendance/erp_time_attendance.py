@@ -3,126 +3,157 @@
 
 import frappe
 from frappe.model.document import Document
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
+import pytz
 
 
 class ERPTimeAttendance(Document):
-	def before_insert(self):
-		# Tự động set thông tin audit khi tạo mới
-		if hasattr(self, 'create_at'):
-			self.create_at = frappe.utils.now()
-		if hasattr(self, 'create_date'):
-			self.create_date = frappe.utils.now()
-		if hasattr(self, 'submitted_at') and not self.submitted_at:
-			self.submitted_at = frappe.utils.now()
+	"""
+	Time Attendance Document
+	Handles attendance records with proper timezone handling for VN timezone (+7)
+	"""
 	
-	def before_save(self):
-		# Tự động set thông tin audit khi cập nhật
-		if hasattr(self, 'update_at'):
-			self.update_at = frappe.utils.now()
-		if hasattr(self, 'update_by'):
-			self.update_by = frappe.session.user
-		if hasattr(self, 'last_update'):
-			self.last_update = frappe.utils.now()
-		if hasattr(self, 'last_updated'):
-			self.last_updated = frappe.utils.now()
-	
-	def update_attendance_time(self, timestamp, device_id=None):
-		"""Update attendance time with smart check-in/check-out logic"""
+	def update_attendance_time(self, timestamp, device_id=None, device_name=None):
+		"""
+		Update attendance time - recalculate from ALL raw_data for accuracy
+		This matches the logic from MongoDB microservice
+		"""
 		check_time = frappe.utils.get_datetime(timestamp)
 		device_id_to_use = device_id or self.device_id
+		device_name_to_use = device_name or self.device_name
 		
 		# Parse raw_data
 		raw_data = json.loads(self.raw_data or "[]")
 		
-		# Check for duplicates within 30 seconds
-		for item in raw_data:
-			existing_time = frappe.utils.get_datetime(item.get('timestamp'))
-			time_diff = abs((check_time - existing_time).total_seconds())
-			same_device = item.get('device_id') == device_id_to_use
-			
-			if time_diff < 30 and same_device:
-				frappe.log_error("Duplicate attendance detected within 30 seconds, skipping")
-				return self
-		
-		# Add to raw data
+		# Add to raw data (no duplicate check - we want all records)
 		raw_data.append({
 			'timestamp': check_time.isoformat(),
 			'device_id': device_id_to_use,
+			'device_name': device_name_to_use,
 			'recorded_at': frappe.utils.now()
 		})
 		
-		# Update check-in/check-out times
-		self._update_check_in_out_times(check_time)
+		# RECALCULATE check-in and check-out from ALL raw_data
+		# This ensures accuracy even when records arrive out of order
+		if len(raw_data) == 1:
+			# First record
+			self.check_in_time = check_time
+			self.check_out_time = check_time
+			self.total_check_ins = 1
+		else:
+			# Multiple records: get earliest and latest
+			all_times = [frappe.utils.get_datetime(item['timestamp']) for item in raw_data]
+			all_times.sort()
+			
+			self.check_in_time = all_times[0]  # Earliest = check-in
+			self.check_out_time = all_times[-1]  # Latest = check-out
+			self.total_check_ins = len(raw_data)
+		
+		# Update device info if provided
+		if device_id_to_use and not self.device_id:
+			self.device_id = device_id_to_use
+		if device_name_to_use and not self.device_name:
+			self.device_name = device_name_to_use
 		
 		# Save raw data
 		self.raw_data = json.dumps(raw_data)
-		self.total_check_ins = len(raw_data)
 		
 		return self
 	
-	def _update_check_in_out_times(self, new_time):
-		"""Smart logic to determine check-in vs check-out"""
-		current_hour = new_time.hour
+	def recalculate_times(self):
+		"""Recalculate check-in/check-out times from raw_data"""
+		raw_data = json.loads(self.raw_data or "[]")
 		
-		# Logic based on time
-		is_likely_check_in = 6 <= current_hour <= 12  # 6h-12h: check-in
-		is_likely_check_out = 15 <= current_hour <= 22  # 15h-22h: check-out
+		if not raw_data:
+			return self
 		
-		# If no check-in or new time is very early
-		if not self.check_in_time or (is_likely_check_in and new_time < frappe.utils.get_datetime(self.check_in_time)):
-			self.check_in_time = new_time
-		# If no check-out or new time is very late
-		elif not self.check_out_time or (is_likely_check_out and new_time > frappe.utils.get_datetime(self.check_out_time)):
-			self.check_out_time = new_time
-		# If both exist, update based on proximity
-		elif self.check_in_time and self.check_out_time:
-			check_in_time = frappe.utils.get_datetime(self.check_in_time)
-			check_out_time = frappe.utils.get_datetime(self.check_out_time)
+		if len(raw_data) == 1:
+			time = frappe.utils.get_datetime(raw_data[0]['timestamp'])
+			self.check_in_time = time
+			self.check_out_time = time
+			self.total_check_ins = 1
+		else:
+			all_times = [frappe.utils.get_datetime(item['timestamp']) for item in raw_data]
+			all_times.sort()
 			
-			distance_to_check_in = abs((new_time - check_in_time).total_seconds())
-			distance_to_check_out = abs((new_time - check_out_time).total_seconds())
-			
-			if is_likely_check_in and distance_to_check_in < distance_to_check_out:
-				self.check_in_time = new_time
-			elif is_likely_check_out and distance_to_check_out < distance_to_check_in:
-				self.check_out_time = new_time
-		# Fallback: if only check-in exists
-		elif self.check_in_time and not self.check_out_time:
-			if new_time > frappe.utils.get_datetime(self.check_in_time):
-				self.check_out_time = new_time
-			else:
-				self.check_in_time = new_time
+			self.check_in_time = all_times[0]
+			self.check_out_time = all_times[-1]
+			self.total_check_ins = len(raw_data)
 		
-		# Ensure check-in is always before check-out
-		if self.check_in_time and self.check_out_time:
-			check_in_time = frappe.utils.get_datetime(self.check_in_time)
-			check_out_time = frappe.utils.get_datetime(self.check_out_time)
-			if check_in_time > check_out_time:
-				self.check_in_time, self.check_out_time = self.check_out_time, self.check_in_time
+		return self
+
+
+def normalize_date_to_vn_timezone(timestamp):
+	"""
+	Normalize timestamp to VN timezone date (start of day)
+	Matches MongoDB microservice logic
+	
+	Example:
+	- Input: UTC 2025-01-15T10:00:00Z
+	- VN time: 2025-01-15 17:00:00+07:00
+	- Day in VN: 2025-01-15
+	- Return: date object for 2025-01-15
+	"""
+	# Convert to VN timezone
+	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+	
+	if isinstance(timestamp, str):
+		dt = frappe.utils.get_datetime(timestamp)
+	else:
+		dt = timestamp
+	
+	# If naive datetime, assume UTC
+	if dt.tzinfo is None:
+		dt = pytz.UTC.localize(dt)
+	
+	# Convert to VN timezone
+	vn_time = dt.astimezone(vn_tz)
+	
+	# Return date only (start of day in VN timezone)
+	return vn_time.date()
 
 
 @frappe.whitelist()
-def find_or_create_day_record(employee_code, date, device_id=None):
-	"""Find or create attendance record for a specific day"""
-	# Normalize date to start of day
-	date_obj = frappe.utils.get_datetime(date).date()
+def find_or_create_day_record(employee_code, date, device_id=None, employee_name=None, device_name=None):
+	"""
+	Find or create attendance record for a specific day
+	Date is normalized to VN timezone to match microservice behavior
+	"""
+	# Normalize date to VN timezone
+	if isinstance(date, str):
+		# Could be date string or datetime string
+		try:
+			date_obj = frappe.utils.get_datetime(date)
+			date_only = normalize_date_to_vn_timezone(date_obj)
+		except:
+			# Already a date string YYYY-MM-DD
+			date_only = frappe.utils.getdate(date)
+	else:
+		date_only = normalize_date_to_vn_timezone(date)
 	
 	# Find existing record
 	existing = frappe.db.get_value("ERP Time Attendance", {
 		"employee_code": employee_code,
-		"date": date_obj
+		"date": date_only
 	}, "name")
 	
 	if existing:
-		return frappe.get_doc("ERP Time Attendance", existing)
+		doc = frappe.get_doc("ERP Time Attendance", existing)
+		# Update employee_name and device_name if provided and not set
+		if employee_name and not doc.employee_name:
+			doc.employee_name = employee_name
+		if device_name and not doc.device_name:
+			doc.device_name = device_name
+		return doc
 	
 	# Create new record
 	doc = frappe.new_doc("ERP Time Attendance")
 	doc.employee_code = employee_code
-	doc.date = date_obj
+	doc.employee_name = employee_name
+	doc.date = date_only
 	doc.device_id = device_id
+	doc.device_name = device_name
 	doc.raw_data = "[]"
 	doc.save(ignore_permissions=True)
 	
