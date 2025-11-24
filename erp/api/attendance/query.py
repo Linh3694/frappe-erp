@@ -116,6 +116,8 @@ def get_students_day_map(date=None, codes=None):
 			}
 		
 		# Query attendance records
+		# Note: Frappe DB queries are case-sensitive by default
+		# We need to query with all possible case variations or use SQL LOWER()
 		records = frappe.get_all(
 			"ERP Time Attendance",
 			filters={
@@ -127,7 +129,26 @@ def get_students_day_map(date=None, codes=None):
 		
 		frappe.logger().info(f"📊 [Attendance Batch] Found {len(records)} records for {len(codes)} codes")
 		
+		# If no records found with exact case, try case-insensitive search
+		if len(records) == 0 and len(codes) > 0:
+			frappe.logger().info(f"📊 [Attendance Batch] No records with exact case, trying case-insensitive search")
+			# Use SQL for case-insensitive search
+			codes_upper = [c.upper() for c in codes]
+			codes_lower = [c.lower() for c in codes]
+			all_variants = list(set(codes + codes_upper + codes_lower))
+			
+			records = frappe.get_all(
+				"ERP Time Attendance",
+				filters={
+					"employee_code": ["in", all_variants],
+					"date": date_obj
+				},
+				fields=["employee_code", "check_in_time", "check_out_time", "total_check_ins", "employee_name", "raw_data"]
+			)
+			frappe.logger().info(f"📊 [Attendance Batch] Case-insensitive search found {len(records)} records")
+		
 		# Initialize result map with null values for all codes
+		# Keep original case for keys to match frontend expectations
 		result = {}
 		for code in codes:
 			result[code] = {
@@ -137,8 +158,29 @@ def get_students_day_map(date=None, codes=None):
 				"employeeName": None
 			}
 		
+		# Create a case-insensitive lookup map for matching
+		codes_lower_map = {code.lower(): code for code in codes}
+		
+		frappe.logger().info(f"📥 [get_students_day_map] codes_lower_map: {codes_lower_map}")
+		
 		# Fill in data from found records
 		for rec in records:
+			# Try to match employee_code case-insensitively
+			employee_code_from_db = rec.employee_code
+			matched_code = codes_lower_map.get(employee_code_from_db.lower())
+			
+			if not matched_code:
+				# If no match, try exact match as fallback
+				matched_code = employee_code_from_db if employee_code_from_db in result else None
+			
+			if not matched_code:
+				frappe.logger().warning(f"⚠️ [get_students_day_map] No match found for DB code: {employee_code_from_db}, requested codes: {codes}")
+				continue
+			
+			frappe.logger().info(f"📥 [get_students_day_map] Matched DB code '{employee_code_from_db}' to request code '{matched_code}'")
+			
+			# Continue processing with matched_code
+			rec.employee_code = matched_code  # Use the matched code for consistency
 			# Recalculate from raw_data for accuracy
 			check_in_time = rec.check_in_time
 			check_out_time = rec.check_out_time
@@ -411,9 +453,20 @@ def debug_employee_attendance(**kwargs):
 		date (str): Date in YYYY-MM-DD format
 	"""
 	try:
-		# Get parameters from kwargs (Frappe auto-maps query params to kwargs)
-		employee_code = kwargs.get('employee_code') or frappe.local.form_dict.get('employee_code')
-		date = kwargs.get('date') or frappe.local.form_dict.get('date')
+		# Get parameters from multiple sources
+		employee_code = (
+			kwargs.get('employee_code') or 
+			frappe.local.form_dict.get('employee_code') or 
+			frappe.request.args.get('employee_code') or
+			frappe.request.values.get('employee_code')
+		)
+		
+		date = (
+			kwargs.get('date') or 
+			frappe.local.form_dict.get('date') or 
+			frappe.request.args.get('date') or
+			frappe.request.values.get('date')
+		)
 		
 		frappe.logger().info(f"📥 [debug_employee_attendance] kwargs: {kwargs}")
 		frappe.logger().info(f"📥 [debug_employee_attendance] Final values - employee_code: {employee_code}, date: {date}")
