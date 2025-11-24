@@ -8,7 +8,41 @@ from frappe import _
 import json
 from datetime import datetime
 import pytz
+import logging
+import os
 from erp.common.doctype.erp_time_attendance.erp_time_attendance import find_or_create_day_record
+
+# Tạo logger riêng cho HiVision với file log riêng
+def get_hikvision_logger():
+	"""Get or create HiVision logger với file handler riêng"""
+	logger = logging.getLogger('hikvision_attendance')
+	
+	# Chỉ setup logger một lần
+	if not logger.handlers:
+		logger.setLevel(logging.DEBUG)
+		
+		# Tạo file handler - log vào file riêng
+		log_dir = frappe.get_site_path('logs')
+		if not os.path.exists(log_dir):
+			os.makedirs(log_dir)
+		
+		log_file = os.path.join(log_dir, 'hikvision_realtime.log')
+		file_handler = logging.FileHandler(log_file)
+		file_handler.setLevel(logging.DEBUG)
+		
+		# Format với timestamp chi tiết
+		formatter = logging.Formatter(
+			'%(asctime)s - [HIKVISION] - %(levelname)s - %(message)s',
+			datefmt='%Y-%m-%d %H:%M:%S'
+		)
+		file_handler.setFormatter(formatter)
+		
+		logger.addHandler(file_handler)
+		
+		# Tránh log duplicate lên parent logger
+		logger.propagate = False
+	
+	return logger
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -20,12 +54,18 @@ def handle_hikvision_event():
 	This endpoint accepts multipart/form-data or JSON from HiVision devices
 	No authentication required so devices can send events directly
 	"""
+	# Get logger riêng cho HiVision
+	logger = get_hikvision_logger()
+	
 	try:
 		# LOG: Print raw request data với nhiều thông tin hơn
-		frappe.logger().info(f"🔍 [HIKVISION] ===== NEW REQUEST =====")
-		frappe.logger().info(f"🔍 [HIKVISION] Request method: {frappe.request.method}")
-		frappe.logger().info(f"🔍 [HIKVISION] Content-Type: {frappe.request.content_type}")
-		frappe.logger().info(f"🔍 [HIKVISION] Request headers: {dict(frappe.request.headers)}")
+		logger.info("=" * 80)
+		logger.info("===== NEW REQUEST FROM HIKVISION DEVICE =====")
+		logger.info(f"Request method: {frappe.request.method}")
+		logger.info(f"Content-Type: {frappe.request.content_type}")
+		logger.info(f"Request URL: {frappe.request.url}")
+		logger.info(f"Remote IP: {frappe.request.remote_addr}")
+		logger.info(f"Request headers: {dict(frappe.request.headers)}")
 		
 		# Get event data from request - xử lý cả multipart/form-data và JSON
 		event_data = {}
@@ -33,22 +73,22 @@ def handle_hikvision_event():
 		# Check if request is multipart/form-data (giống Node.js)
 		is_multipart = (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type)
 		
-		frappe.logger().info(f"🔍 [HIKVISION] Is multipart: {is_multipart}")
+		logger.info(f"Is multipart: {is_multipart}")
 		
 		if is_multipart:
 			# Method 1: Try frappe.request.form (Werkzeug's ImmutableMultiDict) - QUAN TRỌNG
 			if hasattr(frappe.request, 'form') and frappe.request.form:
-				frappe.logger().info(f"🔍 [HIKVISION] Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
+				logger.info(f"✅ Using frappe.request.form, keys: {list(frappe.request.form.keys())}")
 				for key in frappe.request.form.keys():
 					value = frappe.request.form.get(key)
-					frappe.logger().info(f"🔍 [HIKVISION] request.form[{key}] = {str(value)[:200]}")
+					logger.info(f"   Form field [{key}] = {str(value)[:200]}")
 					event_data[key] = value
 			
 			# Method 2: If request.form is empty, try form_dict
 			if not event_data:
-				frappe.logger().info("🔍 [HIKVISION] request.form is empty, trying form_dict")
+				logger.info("⚠️ request.form is empty, trying form_dict")
 				event_data = dict(frappe.local.form_dict)
-				frappe.logger().info(f"🔍 [HIKVISION] form_dict keys: {list(event_data.keys())}")
+				logger.info(f"   form_dict keys: {list(event_data.keys())}")
 			
 			# Parse JSON trong form fields nếu có (giống Node.js parseHikvisionData)
 			# HiVision có thể gửi JSON trong một field của multipart/form-data
@@ -58,7 +98,8 @@ def handle_hikvision_event():
 						try:
 							parsed = json.loads(value)
 							if isinstance(parsed, dict):
-								frappe.logger().info(f"🔍 [HIKVISION] Parsed JSON from field '{key}'")
+								logger.info(f"✅ Parsed JSON from field '{key}'")
+								logger.info(f"   Parsed data keys: {list(parsed.keys())}")
 								event_data = parsed
 								break
 						except:
@@ -66,21 +107,22 @@ def handle_hikvision_event():
 		else:
 			# Không phải multipart, sử dụng parsing tiêu chuẩn
 			event_data = frappe.local.form_dict
-			frappe.logger().info(f"🔍 [HIKVISION] Using form_dict, keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
+			logger.info(f"Using form_dict (not multipart), keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
 			
 			# Nếu event_data rỗng, thử đọc raw request body
 			if not event_data or len(event_data) == 0:
 				try:
 					raw_data = frappe.request.get_data(as_text=True)
-					frappe.logger().info(f"🔍 [HIKVISION] Raw request body: {raw_data[:500]}")
+					logger.info(f"Raw request body (first 500 chars): {raw_data[:500]}")
 					if raw_data:
 						event_data = json.loads(raw_data)
-						frappe.logger().info(f"🔍 [HIKVISION] Parsed from raw body - keys: {list(event_data.keys())}")
+						logger.info(f"✅ Parsed from raw body - keys: {list(event_data.keys())}")
 				except Exception as parse_error:
-					frappe.logger().warning(f"⚠️ [HIKVISION] Could not parse raw body: {str(parse_error)}")
+					logger.warning(f"⚠️ Could not parse raw body: {str(parse_error)}")
 		
-		frappe.logger().info(f"🔍 [HIKVISION] Final event_data keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
-		frappe.logger().info(f"🔍 [HIKVISION] Final event_data: {str(event_data)[:500]}")
+		logger.info(f"FINAL event_data keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
+		if event_data:
+			logger.info(f"FINAL event_data (first 500 chars): {str(event_data)[:500]}")
 		
 		# Handle empty body (heartbeat)
 		if not event_data or len(event_data) == 0:
@@ -115,11 +157,11 @@ def handle_hikvision_event():
 			access_controller_event = event_data.get("AccessControllerEvent")
 		
 		# LOG: Print parsed fields
-		frappe.logger().info(f"🔍 [HIKVISION] Parsed - eventType: {event_type}, eventState: {event_state}, dateTime: {date_time}")
+		logger.info(f"Parsed - eventType: {event_type}, eventState: {event_state}, dateTime: {date_time}")
 		
 		# Validate event type
 		if not event_type:
-			frappe.logger().warning(f"⚠️ [HIKVISION] No eventType found in request")
+			logger.warning(f"⚠️ No eventType found in request")
 			return {
 				"status": "success",
 				"message": "No valid eventType found",
@@ -129,7 +171,7 @@ def handle_hikvision_event():
 		# Only process face recognition events
 		valid_event_types = ['faceSnapMatch', 'faceMatch', 'faceRecognition', 'accessControllerEvent', 'AccessControllerEvent']
 		if event_type not in valid_event_types:
-			frappe.logger().warning(f"⚠️ [HIKVISION] Event type '{event_type}' not in valid list: {valid_event_types}")
+			logger.warning(f"⚠️ Event type '{event_type}' not in valid list: {valid_event_types}")
 			return {
 				"status": "success",
 				"message": f"Event type '{event_type}' not processed",
@@ -138,7 +180,7 @@ def handle_hikvision_event():
 		
 		# Only process active events
 		if event_state != 'active':
-			frappe.logger().warning(f"⚠️ [HIKVISION] Event state '{event_state}' is not 'active', skipping")
+			logger.warning(f"⚠️ Event state '{event_state}' is not 'active', skipping")
 			return {
 				"status": "success",
 				"message": f"Event state '{event_state}' not processed",
@@ -179,11 +221,11 @@ def handle_hikvision_event():
 				device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
 				device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
 				
-				frappe.logger().info(f"🔍 [HIKVISION] Processing post - employee_code: {employee_code}, timestamp: {timestamp}")
+				logger.info(f"Processing post - employee_code: {employee_code}, timestamp: {timestamp}")
 				
 				# Skip if no employee data
 				if not employee_code or not timestamp:
-					frappe.logger().warning(f"⚠️ [HIKVISION] Skipping post - missing employee_code or timestamp")
+					logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
 					continue
 				
 				# Parse timestamp
@@ -215,16 +257,16 @@ def handle_hikvision_event():
 				attendance_doc.update_attendance_time(parsed_timestamp, device_id, device_name)
 				
 				# Save to database
-				frappe.logger().info(f"💾 [HIKVISION] Saving attendance record for {employee_code} - check_in: {attendance_doc.check_in_time}, check_out: {attendance_doc.check_out_time}")
+				logger.info(f"💾 Saving attendance record for {employee_code} - check_in: {attendance_doc.check_in_time}, check_out: {attendance_doc.check_out_time}")
 				attendance_doc.save(ignore_permissions=True)
 				frappe.db.commit()
-				frappe.logger().info(f"✅ [HIKVISION] Record saved! ID: {attendance_doc.name}")
+				logger.info(f"✅ Record saved! ID: {attendance_doc.name}")
 				
 				records_processed += 1
 				
 				# Log success
 				display_time = format_vn_time(parsed_timestamp)
-				frappe.logger().info(f"✅ Nhân viên {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
+				logger.info(f"✅ Nhân viên {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
 				
 				# Trigger notification in background (enqueue to avoid blocking response)
 				try:
@@ -243,10 +285,10 @@ def handle_hikvision_event():
 						date=str(attendance_doc.date)
 					)
 				except Exception as enqueue_error:
-					frappe.logger().warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
+					logger.warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
 				
 			except Exception as post_error:
-				frappe.logger().error(f"❌ Error processing post: {str(post_error)}")
+				logger.error(f"❌ Error processing post: {str(post_error)}")
 				errors.append({
 					"post": post,
 					"error": str(post_error)
@@ -267,12 +309,14 @@ def handle_hikvision_event():
 			response["errors"] = errors[:5]  # Return first 5 errors only
 		
 		if records_processed > 0 or len(errors) > 0:
-			frappe.logger().info(f"📊 Processed: {records_processed} attendance events, {len(errors)} errors")
+			logger.info(f"📊 SUMMARY: Processed {records_processed} attendance events, {len(errors)} errors")
 		
+		logger.info("=" * 80)
 		return response
 		
 	except Exception as e:
-		frappe.logger().error(f"❌ Error processing HiVision event: {str(e)}")
+		logger.error(f"❌ FATAL ERROR processing HiVision event: {str(e)}")
+		logger.error("=" * 80)
 		frappe.log_error(message=str(e), title="HiVision Event Processing Error")
 		return {
 			"status": "error",
@@ -290,10 +334,19 @@ def upload_attendance_batch():
 	
 	Body: { data: [{ fingerprintCode, dateTime, device_id }], tracker_id }
 	"""
+	# Get logger riêng cho HiVision
+	logger = get_hikvision_logger()
+	
 	try:
+		logger.info("=" * 80)
+		logger.info("===== BATCH UPLOAD REQUEST =====")
+		
 		request_data = frappe.local.form_dict
 		data = request_data.get("data")
 		tracker_id = request_data.get("tracker_id")
+		
+		logger.info(f"Batch size: {len(data) if isinstance(data, list) else 0}")
+		logger.info(f"Tracker ID: {tracker_id}")
 		
 		if not data or not isinstance(data, list):
 			return {
@@ -351,7 +404,7 @@ def upload_attendance_batch():
 				
 				# Log
 				display_time = format_vn_time(timestamp)
-				frappe.logger().info(f"✅ Nhân viên {employee_name or fingerprint_code} đã chấm công lúc {display_time} tại máy {device_name or 'Unknown Device'}")
+				logger.info(f"✅ Nhân viên {employee_name or fingerprint_code} đã chấm công lúc {display_time} tại máy {device_name or 'Unknown Device'}")
 				
 				# Trigger notification
 				try:
@@ -372,14 +425,17 @@ def upload_attendance_batch():
 						tracker_id=tracker_id
 					)
 				except Exception as enqueue_error:
-					frappe.logger().warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
+					logger.warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
 				
 			except Exception as record_error:
-				frappe.logger().error(f"❌ Error processing record: {str(record_error)}")
+				logger.error(f"❌ Error processing record: {str(record_error)}")
 				errors.append({
 					"record": record,
 					"error": str(record_error)
 				})
+		
+		logger.info(f"📊 BATCH SUMMARY: Processed {records_processed} new, updated {records_updated}, errors {len(errors)}")
+		logger.info("=" * 80)
 		
 		return {
 			"status": "success",
@@ -391,7 +447,8 @@ def upload_attendance_batch():
 		}
 		
 	except Exception as e:
-		frappe.logger().error(f"❌ Error in batch upload: {str(e)}")
+		logger.error(f"❌ FATAL ERROR in batch upload: {str(e)}")
+		logger.error("=" * 80)
 		frappe.log_error(message=str(e), title="Attendance Batch Upload Error")
 		return {
 			"status": "error",
