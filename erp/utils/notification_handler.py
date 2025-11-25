@@ -421,8 +421,9 @@ def send_bulk_parent_notifications(
         
         frappe.logger().info(f"📤 [Notification Handler] Sending {len(parent_emails)} notifications via Frappe")
         frappe.logger().info(f"   Type: {recipient_type}")
-        
+
         # Send notifications using local Frappe functions
+        frappe.logger().info(f"🚀 [Notification Handler] About to enter try block")
         try:
             from erp.common.doctype.erp_notification.erp_notification import create_notification
             from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
@@ -432,7 +433,9 @@ def send_bulk_parent_notifications(
             results = []
             
             # Create notification for each parent
+            frappe.logger().info(f"📧 [Bulk Handler] Processing {len(parent_emails)} parent emails")
             for parent_email in parent_emails:
+                frappe.logger().info(f"👤 [Bulk Handler] Processing parent: {parent_email}")
                 try:
                     # Create notification record in DB
                     notification_doc = create_notification(
