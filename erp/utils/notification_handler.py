@@ -427,7 +427,7 @@ def send_bulk_parent_notifications(
         frappe.logger().info(f"🚀 [Notification Handler] About to enter try block")
         try:
             from erp.common.doctype.erp_notification.erp_notification import create_notification
-            from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
+            from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update, get_notification_text
             
             success_count = 0
             failed_count = 0
