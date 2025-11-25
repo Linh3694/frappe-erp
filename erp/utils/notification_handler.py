@@ -471,7 +471,8 @@ def send_bulk_parent_notifications(
 
                     # Send push notification immediately (don't wait for hook)
                     print(f"📤 DEBUG: About to send push to {parent_email}")
-                    frappe.logger().info(f"📤 [Bulk Push] Attempting to send push notification to {parent_email}")
+                        frappe.logger().info(f"📤 [Bulk Push] Attempting to send push notification to {parent_email}")
+                        print(f"📤 DEBUG: Inside try block for {parent_email}")
                     try:
                         from erp.api.parent_portal.push_notification import send_push_notification
 
@@ -497,6 +498,7 @@ def send_bulk_parent_notifications(
                             frappe.logger().warning(f"❌ [Bulk Push] Push notification failed for {parent_email}: {push_result.get('message')}")
 
                     except Exception as push_error:
+                        print(f"💥 DEBUG: Exception caught: {str(push_error)}")
                         frappe.logger().error(f"💥 [Bulk Push] Exception sending push to {parent_email}: {str(push_error)}")
                         import traceback
                         frappe.logger().error(f"💥 [Bulk Push] Traceback: {traceback.format_exc()}")
