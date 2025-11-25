@@ -342,7 +342,6 @@ def send_bulk_parent_notifications(
     """
     
     try:
-        print(f"🔔 DEBUG: send_bulk_parent_notifications called with type: {recipient_type}")
         frappe.logger().info(f"🔔 START send_bulk_parent_notifications - type: {recipient_type}")
         
         # Get student IDs from recipients_data
@@ -424,7 +423,6 @@ def send_bulk_parent_notifications(
         frappe.logger().info(f"   Type: {recipient_type}")
 
         # Send notifications using local Frappe functions
-        frappe.logger().info(f"🚀 [Notification Handler] About to enter try block")
         try:
             from erp.common.doctype.erp_notification.erp_notification import create_notification
             from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update, get_notification_text
@@ -437,7 +435,6 @@ def send_bulk_parent_notifications(
             frappe.logger().info(f"📧 [Bulk Handler] Processing {len(parent_emails)} parent emails")
             for parent_email in parent_emails:
                 frappe.logger().info(f"👤 [Bulk Handler] Processing parent: {parent_email}")
-                print(f"👤 DEBUG: Processing parent: {parent_email}")
                 try:
                     # Create notification record in DB
                     notification_doc = create_notification(
@@ -470,9 +467,7 @@ def send_bulk_parent_notifications(
                     emit_unread_count_update(parent_email, unread_count)
 
                     # Send push notification immediately (don't wait for hook)
-                    print(f"📤 DEBUG: About to send push to {parent_email}")
                     frappe.logger().info(f"📤 [Bulk Push] Attempting to send push notification to {parent_email}")
-                    print(f"📤 DEBUG: Inside try block for {parent_email}")
                     try:
                         from erp.api.parent_portal.push_notification import send_push_notification
 
@@ -496,39 +491,26 @@ def send_bulk_parent_notifications(
                         # Check response status
                         response = push_result.get('response')
                         if response:
-                            print(f"📤 DEBUG: Response object exists for {parent_email}")
                             try:
                                 status_code = getattr(response, 'status_code', None)
-                                print(f"📤 DEBUG: HTTP status for {parent_email}: {status_code}")
                                 frappe.logger().info(f"📤 [Bulk Push] HTTP status for {parent_email}: {status_code}")
                                 if status_code == 201:
-                                    print(f"✅ DEBUG: Push notification sent successfully to {parent_email}")
                                     frappe.logger().info(f"✅ [Bulk Push] Push notification sent successfully to {parent_email}")
                                 elif status_code in [400, 410]:
-                                    print(f"❌ DEBUG: Push subscription invalid for {parent_email} (status: {status_code})")
                                     frappe.logger().warning(f"❌ [Bulk Push] Push subscription invalid for {parent_email} (status: {status_code})")
                                 else:
-                                    print(f"⚠️ DEBUG: Unexpected status for {parent_email}: {status_code}")
                                     frappe.logger().warning(f"⚠️ [Bulk Push] Unexpected status for {parent_email}: {status_code}")
                             except Exception as status_error:
-                                print(f"💥 DEBUG: Error getting status for {parent_email}: {str(status_error)}")
                                 frappe.logger().info(f"✅ [Bulk Push] Push notification sent (status check failed) to {parent_email}")
                         else:
-                            print(f"❌ DEBUG: No response object for {parent_email}")
                             frappe.logger().warning(f"❌ [Bulk Push] No response object for {parent_email}")
 
-                        success = push_result.get("success")
-                        print(f"📤 DEBUG: Push success = {success} for {parent_email}")
-                        if success:
-                            print(f"✅ DEBUG: Push notification reported success for {parent_email}")
+                        if push_result.get("success"):
                             frappe.logger().info(f"✅ [Bulk Push] Push notification sent successfully to {parent_email}")
                         else:
-                            message = push_result.get('message', 'Unknown error')
-                            print(f"❌ DEBUG: Push notification failed for {parent_email}: {message}")
-                            frappe.logger().warning(f"❌ [Bulk Push] Push notification failed for {parent_email}: {message}")
+                            frappe.logger().warning(f"❌ [Bulk Push] Push notification failed for {parent_email}: {push_result.get('message')}")
 
                     except Exception as push_error:
-                        print(f"💥 DEBUG: Exception caught: {str(push_error)}")
                         frappe.logger().error(f"💥 [Bulk Push] Exception sending push to {parent_email}: {str(push_error)}")
                         import traceback
                         frappe.logger().error(f"💥 [Bulk Push] Traceback: {traceback.format_exc()}")

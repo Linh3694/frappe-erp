@@ -321,26 +321,9 @@ def on_notification_created(notification_doc, method=None):
 			unread_count = get_unread_count(recipient)
 			emit_unread_count_update(recipient, unread_count)
 			
-			# Send push notification directly (not enqueued to ensure immediate delivery)
-			try:
-				from erp.api.parent_portal.push_notification import send_push_notification
-				
-				title = get_notification_text(notification_doc.title)
-				message = get_notification_text(notification_doc.message)
-				data = json.loads(notification_doc.data) if isinstance(notification_doc.data, str) else notification_doc.data
-				
-				# Call directly instead of enqueue to ensure push is sent immediately
-				# This is important when workers are not running
-				send_push_notification(
-					user_email=recipient,
-					title=title,
-					body=message,
-					icon="/icon.png",
-					data=data,
-					tag=notification_doc.notification_type
-				)
-			except Exception as push_error:
-				frappe.logger().warning(f"Failed to send push notification: {str(push_error)}")
+			# Push notification is now sent by bulk notification handler
+			# Hook only handles real-time notifications and unread count updates
+			# frappe.logger().info(f"📤 [Hook] Push notification handled by bulk handler for {recipient}")
 				
 	except Exception as e:
 		frappe.logger().error(f"Error in on_notification_created: {str(e)}")
