@@ -254,9 +254,17 @@ def get_students_day_map(date=None, codes=None):
 				except Exception as e:
 					frappe.logger().warning(f"Failed to parse raw_data for {rec.employee_code}: {str(e)}")
 			
+			# Format times using record date, not datetime date
+			def format_time_with_record_date(time_obj, record_date):
+				if not time_obj:
+					return None
+				# Create datetime with record date but time from time_obj
+				correct_dt = datetime.combine(record_date, time_obj.time())
+				return correct_dt.isoformat()
+
 			result[rec.employee_code] = {
-				"checkInTime": check_in_time.isoformat() if check_in_time else None,
-				"checkOutTime": check_out_time.isoformat() if check_out_time else None,
+				"checkInTime": format_time_with_record_date(check_in_time, rec.date),
+				"checkOutTime": format_time_with_record_date(check_out_time, rec.date),
 				"totalCheckIns": total_check_ins,
 				"employeeName": rec.employee_name
 			}
@@ -477,15 +485,22 @@ def get_employee_attendance_range(**kwargs):
 			# Format date as YYYY-MM-DD string
 			date_str = rec.date.strftime('%Y-%m-%d') if rec.date else None
 			
-			# Format times correctly for API response
+			# Format times correctly for API response - use record date, not datetime date
 			from erp.api.attendance.hikvision import format_vn_time
+
+			def format_time_with_record_date(time_obj, record_date):
+				if not time_obj:
+					return None
+				# Create datetime with record date but time from time_obj
+				correct_dt = datetime.combine(record_date, time_obj.time())
+				return correct_dt.isoformat()
 
 			formatted_rec = {
 				"_id": rec.name,
 				"employeeCode": rec.employee_code,
 				"date": date_str,
-				"checkInTime": check_in_time.isoformat() if check_in_time else None,  # Keep ISO format for backward compatibility
-				"checkOutTime": check_out_time.isoformat() if check_out_time else None,  # Keep ISO format for backward compatibility
+				"checkInTime": format_time_with_record_date(check_in_time, rec.date),
+				"checkOutTime": format_time_with_record_date(check_out_time, rec.date),
 				"totalCheckIns": total_check_ins,
 				"status": rec.status
 			}
