@@ -121,13 +121,38 @@ def send_student_attendance_notification(
 		# Determine if check-in or check-out
 		is_check_in = determine_checkin_or_checkout(timestamp, check_in_time, check_out_time)
 
-		# Build notification title and message (Vietnamese only)
-		if is_check_in:
-			title = f"✅ {employee_name} đã đến trường"
-			message = f"{employee_name} đã check-in lúc {vn_time} tại {device_name or 'thiết bị'}"
+		# Build notification theo format chuẩn của notification-service
+		title = "Điểm danh"
+
+		# Parse location từ device name (giống notification-service)
+		if not device_name:
+			location = "cổng trường"
 		else:
-			title = f"👋 {employee_name} đã về nhà"
-			message = f"{employee_name} đã check-out lúc {vn_time} tại {device_name or 'thiết bị'}"
+			# Parse "Gate 2 - Check In" → "Cổng 2"
+			parts = device_name.split(' - ')
+			location = parts[0].strip() if len(parts) >= 1 else device_name
+
+			# Map common locations
+			location_map = {
+				'Gate 2': 'Cổng 2',
+				'Gate 5': 'Cổng 5',
+				'Main Gate': 'Cổng chính',
+				'Front Gate': 'Cổng trước',
+				'Back Gate': 'Cổng sau'
+			}
+			location = location_map.get(location, location)
+
+		# Format time giống notification-service: HH:MM DD/MM/YYYY
+		event_time = timestamp
+		if hasattr(timestamp, 'isoformat'):
+			# datetime object
+			time_str = event_time.strftime('%H:%M %d/%m/%Y')
+		else:
+			# string
+			event_time = frappe.utils.get_datetime(timestamp)
+			time_str = event_time.strftime('%H:%M %d/%m/%Y')
+
+		message = f"Học sinh {employee_name} đã đi qua {location} lúc {time_str}"
 
 		# Additional data
 		notification_data = {
@@ -197,13 +222,22 @@ def send_staff_attendance_notification(
 		# Determine if check-in or check-out
 		is_check_in = determine_checkin_or_checkout(timestamp, check_in_time, check_out_time)
 		
-		# Build notification (Vietnamese only)
-		if is_check_in:
-			title = f"✅ Bạn đã check-in"
-			message = f"Bạn đã check-in lúc {vn_time} tại {device_name or 'thiết bị'}"
+		# Build notification cho staff (giống notification-service)
+		title = "Chấm công"
+
+		# Format time giống notification-service
+		event_time = timestamp
+		if hasattr(timestamp, 'isoformat'):
+			time_str = event_time.strftime('%H:%M %d/%m/%Y')
 		else:
-			title = f"👋 Bạn đã check-out"
-			message = f"Bạn đã check-out lúc {vn_time} tại {device_name or 'thiết bị'}"
+			event_time = frappe.utils.get_datetime(timestamp)
+			time_str = event_time.strftime('%H:%M %d/%m/%Y')
+
+		# Staff message format
+		if is_check_in:
+			message = f"Check-in lúc {time_str} tại {device_name or 'thiết bị'}"
+		else:
+			message = f"Check-out lúc {time_str} tại {device_name or 'thiết bị'}"
 		
 		# Additional data
 		notification_data = {
