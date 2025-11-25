@@ -411,16 +411,16 @@ def get_employee_attendance_range(**kwargs):
 			limit_page_length=limit_num
 		)
 		
-		# Format records
+		# Format records - ALWAYS recalculate from raw_data for consistency with get_students_day_map
 		formatted_records = []
 		for rec in records:
-			# Recalculate check-in/check-out from raw_data for accuracy
+			# ALWAYS recalculate from raw_data for accuracy (same as get_students_day_map)
 			check_in_time = rec.check_in_time
 			check_out_time = rec.check_out_time
 			total_check_ins = rec.total_check_ins or 0
-			
-			# Get raw_data if needed for recalculation
-			if include_raw_data.lower() == "true" and rec.get("raw_data"):
+
+			# ALWAYS recalculate from raw_data if available (fix inconsistency with get_students_day_map)
+			if rec.raw_data:
 				try:
 					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
 					if raw_data and len(raw_data) > 0:
@@ -428,8 +428,13 @@ def get_employee_attendance_range(**kwargs):
 						check_in_time = all_times[0]
 						check_out_time = all_times[-1]
 						total_check_ins = len(all_times)
+						frappe.logger().info(f"✅ Recalculated {rec.name}: {len(all_times)} events")
+					else:
+						frappe.logger().warning(f"⚠️ Empty raw_data for {rec.name}")
 				except Exception as e:
 					frappe.logger().warning(f"Failed to parse raw_data for record {rec.name}: {str(e)}")
+			else:
+				frappe.logger().warning(f"⚠️ No raw_data for {rec.name}")
 			
 			# Format date as YYYY-MM-DD string
 			date_str = rec.date.strftime('%Y-%m-%d') if rec.date else None
