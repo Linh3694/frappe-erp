@@ -492,6 +492,23 @@ def send_bulk_parent_notifications(
 
                         frappe.logger().info(f"📤 [Bulk Push] Push result for {parent_email}: {push_result}")
 
+                        # Check response status
+                        response = push_result.get('response')
+                        if response:
+                            try:
+                                status_code = getattr(response, 'status_code', None)
+                                frappe.logger().info(f"📤 [Bulk Push] HTTP status for {parent_email}: {status_code}")
+                                if status_code == 201:
+                                    frappe.logger().info(f"✅ [Bulk Push] Push notification sent successfully to {parent_email}")
+                                elif status_code in [400, 410]:
+                                    frappe.logger().warning(f"❌ [Bulk Push] Push subscription invalid for {parent_email} (status: {status_code})")
+                                else:
+                                    frappe.logger().warning(f"⚠️ [Bulk Push] Unexpected status for {parent_email}: {status_code}")
+                            except:
+                                frappe.logger().info(f"✅ [Bulk Push] Push notification sent (no status available) to {parent_email}")
+                        else:
+                            frappe.logger().warning(f"❌ [Bulk Push] No response object for {parent_email}")
+
                         if push_result.get("success"):
                             frappe.logger().info(f"✅ [Bulk Push] Push notification sent successfully to {parent_email}")
                         else:
