@@ -228,9 +228,9 @@ def get_students_day_map(date=None, codes=None):
 				try:
 					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
 					if raw_data and len(raw_data) > 0:
-						# Use parse_attendance_timestamp with VN assumption for raw_data
+						# Use parse_attendance_timestamp to get correct VN times from raw_data
 						from erp.api.attendance.hikvision import parse_attendance_timestamp
-						all_times = sorted([parse_attendance_timestamp(item['timestamp'], 'vn') for item in raw_data])
+						all_times = sorted([parse_attendance_timestamp(item['timestamp']) for item in raw_data])
 						check_in_time = all_times[0]
 						check_out_time = all_times[-1]
 						total_check_ins = len(all_times)
@@ -426,9 +426,9 @@ def get_employee_attendance_range(**kwargs):
 				try:
 					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
 					if raw_data and len(raw_data) > 0:
-						# Use parse_attendance_timestamp with VN assumption for raw_data
+						# Use parse_attendance_timestamp to get correct VN times from raw_data
 						from erp.api.attendance.hikvision import parse_attendance_timestamp
-						all_times = sorted([parse_attendance_timestamp(item['timestamp'], 'vn') for item in raw_data])
+						all_times = sorted([parse_attendance_timestamp(item['timestamp']) for item in raw_data])
 						check_in_time = all_times[0]
 						check_out_time = all_times[-1]
 						total_check_ins = len(all_times)
@@ -443,12 +443,15 @@ def get_employee_attendance_range(**kwargs):
 			# Format date as YYYY-MM-DD string
 			date_str = rec.date.strftime('%Y-%m-%d') if rec.date else None
 			
+			# Format times correctly for API response
+			from erp.api.attendance.hikvision import format_vn_time
+
 			formatted_rec = {
 				"_id": rec.name,
 				"employeeCode": rec.employee_code,
 				"date": date_str,
-				"checkInTime": check_in_time.isoformat() if check_in_time else None,
-				"checkOutTime": check_out_time.isoformat() if check_out_time else None,
+				"checkInTime": check_in_time.isoformat() if check_in_time else None,  # Keep ISO format for backward compatibility
+				"checkOutTime": check_out_time.isoformat() if check_out_time else None,  # Keep ISO format for backward compatibility
 				"totalCheckIns": total_check_ins,
 				"status": rec.status
 			}
@@ -495,121 +498,4 @@ def get_employee_attendance_range(**kwargs):
 			debug_info={"error": str(e)}
 		)
 
-
-@frappe.whitelist(methods=["GET"], allow_guest=False)
-def debug_employee_attendance(**kwargs):
-	"""
-	Debug endpoint to show all raw timestamps for an employee on a specific date
-	Helpful for troubleshooting attendance issues
-	
-	Endpoint: /api/method/erp.api.attendance.query.debug_employee_attendance
-	
-	Args (via query params):
-		employee_code (str): Employee/student code
-		date (str): Date in YYYY-MM-DD format
-	"""
-	try:
-		# Get parameters from multiple sources
-		employee_code = (
-			kwargs.get('employee_code') or 
-			frappe.local.form_dict.get('employee_code') or 
-			frappe.request.args.get('employee_code') or
-			frappe.request.values.get('employee_code')
-		)
-		
-		date = (
-			kwargs.get('date') or 
-			frappe.local.form_dict.get('date') or 
-			frappe.request.args.get('date') or
-			frappe.request.values.get('date')
-		)
-		
-		frappe.logger().info(f"📥 [debug_employee_attendance] kwargs: {kwargs}")
-		frappe.logger().info(f"📥 [debug_employee_attendance] Final values - employee_code: {employee_code}, date: {date}")
-		
-		if not employee_code or not date:
-			return error_response(
-				message="employee_code and date are required",
-				code="MISSING_PARAMETERS"
-			)
-		
-		date_obj = frappe.utils.getdate(date)
-		
-		# Get attendance record
-		record = frappe.get_all(
-			"ERP Time Attendance",
-			filters={
-				"employee_code": employee_code,
-				"date": date_obj
-			},
-			fields=["name", "employee_code", "employee_name", "date", "check_in_time", "check_out_time", "total_check_ins", "raw_data"],
-			limit=1
-		)
-		
-		if not record:
-			return error_response(
-				message="No attendance record found for this date",
-				code="NOT_FOUND"
-			)
-		
-		rec = record[0]
-		
-		# Parse raw_data
-		raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
-		
-		# Sort and format timestamps
-		all_timestamps = []
-		if raw_data:
-			from erp.api.attendance.hikvision import parse_attendance_timestamp, format_vn_time
-			for item in raw_data:
-				timestamp = parse_attendance_timestamp(item['timestamp'], 'vn')
-				vn_display = format_vn_time(timestamp)
-
-				all_timestamps.append({
-					"timestamp": item['timestamp'],
-					"deviceId": item.get('device_id'),
-					"deviceName": item.get('device_name'),
-					"recordedAt": item.get('recorded_at'),
-					"vnTime": vn_display
-				})
-		
-		all_timestamps.sort(key=lambda x: x['timestamp'])
-		
-		# Calculate summary
-		check_in = all_timestamps[0] if all_timestamps else None
-		check_out = all_timestamps[-1] if all_timestamps else None
-		
-		return success_response(
-			data={
-				"employeeCode": employee_code,
-				"date": str(date_obj),
-				"summary": {
-					"totalCheckIns": len(all_timestamps),
-					"checkInTime": {
-						"utc": rec.check_in_time.isoformat() if rec.check_in_time else None,
-						"vnTime": check_in['vnTime'] if check_in else None
-					},
-					"checkOutTime": {
-						"utc": rec.check_out_time.isoformat() if rec.check_out_time else None,
-						"vnTime": check_out['vnTime'] if check_out else None
-					},
-					"storedCheckIn": rec.check_in_time.isoformat() if rec.check_in_time else None,
-					"storedCheckOut": rec.check_out_time.isoformat() if rec.check_out_time else None
-				},
-				"allTimestamps": all_timestamps,
-				"duplicateAnalysis": {
-					"uniqueTimestamps": len(set([t['timestamp'] for t in all_timestamps])),
-					"hasDuplicates": len(all_timestamps) > len(set([t['timestamp'] for t in all_timestamps]))
-				}
-			},
-			message="Debug data retrieved successfully"
-		)
-		
-	except Exception as e:
-		frappe.logger().error(f"Debug endpoint error: {str(e)}")
-		return error_response(
-			message="Failed to debug attendance data",
-			code="DEBUG_ERROR",
-			debug_info={"error": str(e)}
-		)
 
