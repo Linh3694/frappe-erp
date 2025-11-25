@@ -501,25 +501,32 @@ def upload_attendance_batch():
 def parse_attendance_timestamp(date_time_string):
 	"""
 	Parse timestamp from HiVision device
-	Handles various formats and timezone conversion
+	Device sends timestamp in VN timezone (+7), convert to UTC for storage
 	Returns UTC datetime without timezone info for MariaDB compatibility
 	"""
 	if not date_time_string:
 		raise ValueError("DateTime string is required")
-	
+
 	# Parse datetime
 	if isinstance(date_time_string, str):
 		timestamp = frappe.utils.get_datetime(date_time_string)
 	else:
 		timestamp = date_time_string
-	
-	# Ensure timezone-aware datetime is converted to UTC
-	if timestamp.tzinfo is not None:
-		# Convert to UTC timezone
-		utc_tz = pytz.UTC
-		if timestamp.tzinfo != utc_tz:
-			timestamp = timestamp.astimezone(utc_tz)
-	
+
+	# Handle timezone conversion
+	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')  # UTC+7
+
+	# If timestamp has no timezone info, assume it's VN time (+7)
+	if timestamp.tzinfo is None:
+		timestamp = vn_tz.localize(timestamp)
+	# If timestamp has timezone but not UTC, convert to UTC
+	elif timestamp.tzinfo != pytz.UTC:
+		timestamp = timestamp.astimezone(pytz.UTC)
+
+	# Convert from VN time to UTC for storage
+	if timestamp.tzinfo == vn_tz:
+		timestamp = timestamp.astimezone(pytz.UTC)
+
 	# Return as naive datetime (no timezone info) for MariaDB
 	# MariaDB doesn't support timezone offsets in datetime columns
 	return timestamp.replace(tzinfo=None)
