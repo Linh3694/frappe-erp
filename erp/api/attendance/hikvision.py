@@ -562,21 +562,17 @@ def parse_attendance_timestamp(date_time_string, assume_device_timezone=None):
 
 
 def format_vn_time(dt):
-	"""Format datetime to VN timezone string for display"""
-	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-
-	# TEMP FIX: DB currently stores VN time, convert to UTC first then to VN
-	# This handles the double conversion until DB is fixed
-	if dt.tzinfo is None:
-		# DB stores VN time, convert VN→UTC→VN to display
-		vn_time = vn_tz.localize(dt)  # Assume VN time
-		utc_time = vn_time.astimezone(pytz.UTC)  # Convert to UTC
-		final_vn = utc_time.astimezone(vn_tz)  # Convert back to VN for display
-		return final_vn.strftime('%Y-%m-%d %H:%M:%S')
-	else:
-		# If has timezone, convert to VN
-		vn_time = dt.astimezone(vn_tz)
-		return vn_time.strftime('%Y-%m-%d %H:%M:%S')
+    """Format datetime to VN timezone string for display"""
+    vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+    
+    # DB now stores UTC time, convert to VN for display
+    if dt.tzinfo is None:
+        dt = pytz.UTC.localize(dt)
+    
+    # Convert to VN timezone
+    vn_time = dt.astimezone(vn_tz)
+    
+    return vn_time.strftime('%Y-%m-%d %H:%M:%S')
 
 
 def fix_hikvision_attendance_timestamps():
