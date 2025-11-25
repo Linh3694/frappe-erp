@@ -128,7 +128,7 @@ def get_students_day_map(date=None, codes=None):
 		
 		frappe.logger().info(f"📊 [get_students_day_map] Query filters: {filters}")
 		frappe.logger().info(f"📊 [get_students_day_map] date_obj: {date_obj} (type: {type(date_obj)})")
-		frappe.logger().info(f"📊 [get_students_day_map] date range: {start_of_day} to < {end_of_next_day}")
+		frappe.logger().info(f"📊 [get_students_day_map] Exact date match: {date_obj}")
 		frappe.logger().info(f"📊 [get_students_day_map] Requesting codes: {codes}")
 		
 		records = frappe.get_all(
