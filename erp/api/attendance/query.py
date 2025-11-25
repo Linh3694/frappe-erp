@@ -228,7 +228,9 @@ def get_students_day_map(date=None, codes=None):
 				try:
 					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
 					if raw_data and len(raw_data) > 0:
-						all_times = sorted([frappe.utils.get_datetime(item['timestamp']) for item in raw_data])
+						# Use parse_attendance_timestamp to handle VN time correctly
+						from erp.api.attendance.hikvision import parse_attendance_timestamp
+						all_times = sorted([parse_attendance_timestamp(item['timestamp']) for item in raw_data])
 						check_in_time = all_times[0]
 						check_out_time = all_times[-1]
 						total_check_ins = len(all_times)
