@@ -997,7 +997,7 @@ def publish_news_article():
                             "article_id": article.name
                         },
                         title=article.title_vn or article.title_en,
-                        body=article.summary_vn[:100] if article.summary_vn else (article.summary_en[:100] if article.summary_en else ""),
+                        body=article.content_vn[:200] if article.content_vn else (article.content_en[:200] if article.content_en else article.title_vn or article.title_en),
                         icon="/icon.png",
                         data={
                             "type": "news",

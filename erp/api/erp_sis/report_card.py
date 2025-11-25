@@ -1628,9 +1628,16 @@ def _send_report_card_notification(report):
             frappe.logger().warning(f"⚠️ [Report Card Notification] Student not found: {student_id}")
             return
         
+        # Get semester info for notification
+        semester_part = (
+            getattr(report, 'semester_part', None) or
+            getattr(report, 'semester', None) or
+            'học kỳ 1'
+        )
+
         # Use unified notification handler
         from erp.utils.notification_handler import send_bulk_parent_notifications
-        
+
         result = send_bulk_parent_notifications(
             recipient_type="report_card",
             recipients_data={
@@ -1638,7 +1645,7 @@ def _send_report_card_notification(report):
                 "report_id": report.name
             },
             title="Báo cáo học tập",
-            body=f"Học sinh {student_name} có báo cáo học tập mới.",
+            body=f"Học sinh {student_name} có báo cáo học tập của {semester_part}.",
             icon="/icon.png",
             data={
                 "type": "report_card",

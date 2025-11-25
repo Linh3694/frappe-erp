@@ -574,8 +574,8 @@ def create_leave_request():
             end_date_display = datetime.strptime(end_date, '%Y-%m-%d').strftime('%d/%m/%Y')
             
             # Notification title and body
-            notification_title = "Đơn nghỉ phép mới"
-            notification_body = f"Giáo viên đã tạo đơn nghỉ phép cho {leave_request.student_name}.\nLý do: {reason_display}\nThời gian: {start_date_display} - {end_date_display}"
+            notification_title = "Đơn xin nghỉ"
+            notification_body = f"Thông tin đơn xin nghỉ, lý do: {reason_display}, ngày nghỉ: {start_date_display} - {end_date_display}"
             
             # Send notification
             notification_result = send_bulk_parent_notifications(

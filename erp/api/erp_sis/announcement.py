@@ -360,7 +360,7 @@ def create_announcement():
                         "announcement_id": created_announcement.name
                     },
                     title="Thông báo",
-                    body=created_announcement.title_vn or created_announcement.title_en or "Thông báo mới",
+                    body=created_announcement.content_vn or created_announcement.content_en or "Thông báo mới",
                     icon="/icon.png",
                     data={
                         "type": "announcement",

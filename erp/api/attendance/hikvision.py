@@ -286,12 +286,13 @@ def handle_hikvision_event():
 				display_time = format_vn_time(parsed_timestamp)
 				logger.info(f"✅ Nhân viên {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
 				
-				# Trigger notification in background (enqueue to avoid blocking response)
+				# Send notification immediately (no enqueue for instant push delivery)
 				try:
-					frappe.enqueue(
-						"erp.api.attendance.notification.publish_attendance_notification",
-						queue="default",
-						timeout=300,
+					# Import and call notification function directly
+					from erp.api.attendance.notification import publish_attendance_notification
+
+					# Call immediately for instant push notification
+					publish_attendance_notification(
 						employee_code=employee_code,
 						employee_name=employee_name,
 						timestamp=parsed_timestamp.isoformat(),
@@ -302,8 +303,30 @@ def handle_hikvision_event():
 						total_check_ins=attendance_doc.total_check_ins,
 						date=str(attendance_doc.date)
 					)
-				except Exception as enqueue_error:
-					logger.warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
+
+					logger.info(f"✅ Push notification sent immediately for {employee_code}")
+
+				except Exception as notify_error:
+					logger.warning(f"⚠️ Failed to send immediate notification: {str(notify_error)}")
+					# Fallback to enqueue if immediate send fails
+					try:
+						frappe.enqueue(
+							"erp.api.attendance.notification.publish_attendance_notification",
+							queue="default",
+							timeout=300,
+							employee_code=employee_code,
+							employee_name=employee_name,
+							timestamp=parsed_timestamp.isoformat(),
+							device_id=device_id,
+							device_name=device_name,
+							check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
+							check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
+							total_check_ins=attendance_doc.total_check_ins,
+							date=str(attendance_doc.date)
+						)
+						logger.info(f"📋 Fallback: Notification enqueued for {employee_code}")
+					except Exception as enqueue_error:
+						logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
 				
 			except Exception as post_error:
 				logger.error(f"❌ Error processing post: {str(post_error)}")
