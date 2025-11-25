@@ -29,7 +29,7 @@ def publish_attendance_notification(
 	"""
 	Publish attendance notification to relevant recipients
 	Called by HiVision endpoint after processing attendance event
-	
+
 	Args:
 		employee_code: Employee/student code
 		employee_name: Employee/student name
@@ -45,14 +45,19 @@ def publish_attendance_notification(
 	"""
 	try:
 		frappe.logger().info(f"📢 [Attendance Notif] Processing notification for {employee_code}")
-		
+
 		# Parse timestamp
 		if isinstance(timestamp, str):
 			timestamp = frappe.utils.get_datetime(timestamp)
-		
+
+		# DEBOUNCE CHECK: Skip if notification sent recently (within 5 minutes)
+		if should_skip_due_to_debounce(employee_code, timestamp):
+			frappe.logger().info(f"⏭️ [Debounce] Skipping notification for {employee_code} - sent recently")
+			return
+
 		# Check if this is a student or staff
 		is_student = check_if_student(employee_code)
-		
+
 		if is_student:
 			# Send notification to guardians
 			send_student_attendance_notification(
@@ -77,9 +82,12 @@ def publish_attendance_notification(
 				total_check_ins=total_check_ins,
 				date=date
 			)
-		
+
+		# UPDATE DEBOUNCE CACHE: Mark notification as sent
+		update_debounce_cache(employee_code, timestamp)
+
 		frappe.logger().info(f"✅ [Attendance Notif] Notification sent for {employee_code}")
-		
+
 	except Exception as e:
 		frappe.logger().error(f"❌ [Attendance Notif] Error sending notification for {employee_code}: {str(e)}")
 		frappe.log_error(message=str(e), title="Attendance Notification Error")
@@ -389,16 +397,98 @@ def format_datetime_vn(dt):
 	"""Format datetime to VN timezone string"""
 	if isinstance(dt, str):
 		dt = frappe.utils.get_datetime(dt)
-	
+
 	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-	
+
 	# Ensure timezone-aware
 	if dt.tzinfo is None:
 		dt = pytz.UTC.localize(dt)
-	
+
 	# Convert to VN timezone
 	vn_time = dt.astimezone(vn_tz)
-	
+
 	# Format: "08:30 AM, 24/11/2025"
 	return vn_time.strftime('%H:%M, %d/%m/%Y')
+
+
+def should_skip_due_to_debounce(employee_code, current_timestamp):
+	"""
+	Check if notification should be skipped due to debounce
+	Returns True if notification was sent within debounce window (5 minutes)
+	"""
+	try:
+		cache_key = f"attendance_notif:{employee_code}"
+
+		# Get last notification timestamp from cache
+		last_notif_timestamp = frappe.cache().get(cache_key)
+
+		if not last_notif_timestamp:
+			return False  # No previous notification, allow sending
+
+		# Ensure both timestamps are datetime objects
+		if isinstance(last_notif_timestamp, str):
+			last_notif_timestamp = frappe.utils.get_datetime(last_notif_timestamp)
+		if isinstance(current_timestamp, str):
+			current_timestamp = frappe.utils.get_datetime(current_timestamp)
+
+		# Calculate time difference in minutes
+		time_diff = (current_timestamp - last_notif_timestamp).total_seconds() / 60
+
+		# Skip if within debounce window (5 minutes)
+		if time_diff < 5:
+			frappe.logger().info(f"⏭️ [Debounce] Skipping {employee_code} - last notif {time_diff:.1f} min ago")
+			return True
+
+		return False
+
+	except Exception as e:
+		frappe.logger().warning(f"⚠️ [Debounce] Error checking debounce for {employee_code}: {str(e)}")
+		return False  # On error, allow notification to be sent
+
+
+def update_debounce_cache(employee_code, timestamp):
+	"""
+	Update cache with timestamp of successful notification
+	Cache expires after 6 minutes (slightly longer than debounce window)
+	"""
+	try:
+		cache_key = f"attendance_notif:{employee_code}"
+
+		# Store timestamp as ISO string for cache
+		if hasattr(timestamp, 'isoformat'):
+			cache_value = timestamp.isoformat()
+		else:
+			cache_value = str(timestamp)
+
+		# Cache for 6 minutes (300 seconds) - slightly longer than 5-minute debounce
+		frappe.cache().set(cache_key, cache_value, expires_in_sec=360)
+
+		frappe.logger().debug(f"📝 [Debounce] Updated cache for {employee_code}: {cache_value}")
+
+	except Exception as e:
+		frappe.logger().warning(f"⚠️ [Debounce] Error updating cache for {employee_code}: {str(e)}")
+
+
+def clear_attendance_notification_cache(employee_code=None):
+	"""
+	Clear debounce cache for testing or maintenance
+	Args:
+		employee_code: Specific employee to clear, or None to clear all
+	"""
+	try:
+		if employee_code:
+			cache_key = f"attendance_notif:{employee_code}"
+			frappe.cache().delete(cache_key)
+			frappe.logger().info(f"🗑️ [Debounce] Cleared cache for {employee_code}")
+		else:
+			# Clear all attendance notification caches (dangerous, use with caution)
+			# This would require iterating through cache keys, which may not be efficient
+			frappe.logger().warning("⚠️ [Debounce] Clear all cache not implemented for safety")
+			return False
+
+		return True
+
+	except Exception as e:
+		frappe.logger().error(f"❌ [Debounce] Error clearing cache: {str(e)}")
+		return False
 
