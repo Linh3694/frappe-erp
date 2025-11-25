@@ -535,12 +535,99 @@ def parse_attendance_timestamp(date_time_string):
 def format_vn_time(dt):
 	"""Format datetime to VN timezone string for display"""
 	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-	
+
 	# Ensure datetime is timezone-aware
 	if dt.tzinfo is None:
 		dt = pytz.UTC.localize(dt)
-	
+
 	# Convert to VN timezone
 	vn_time = dt.astimezone(vn_tz)
-	
+
 	return vn_time.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def fix_hikvision_attendance_timestamps():
+	"""
+	Fix attendance timestamps that were saved incorrectly (7 hours behind)
+	This function corrects timestamps from HiVision devices that were saved as VN time
+	but should have been converted to UTC before saving.
+
+	Run this from bench console: bench execute erp.api.attendance.hikvision.fix_hikvision_attendance_timestamps
+	"""
+	logger = get_hikvision_logger()
+	logger.info("=== STARTING HIKVISION TIMESTAMP FIX ===")
+
+	try:
+		# Get all ERP Time Attendance records from HiVision devices
+		records = frappe.get_all(
+			"ERP Time Attendance",
+			filters={
+				"device_name": ["not in", ["", None]],  # Has device info
+				"creation": [">", "2024-01-01"]  # Recent records to avoid old data
+			},
+			fields=["name", "date", "check_in_time", "check_out_time", "device_name", "employee_code"]
+		)
+
+		logger.info(f"Found {len(records)} attendance records to check")
+
+		fixed_count = 0
+		vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+
+		for record in records:
+			try:
+				doc = frappe.get_doc("ERP Time Attendance", record.name)
+				updated = False
+
+				# Fix check_in_time if exists
+				if doc.check_in_time:
+					# Current value is stored as VN time, but should be UTC
+					# We need to convert it back: VN time - 7 hours = UTC time
+					vn_time = vn_tz.localize(doc.check_in_time.replace(tzinfo=None))
+					utc_time = vn_time.astimezone(pytz.UTC).replace(tzinfo=None)
+
+					if utc_time != doc.check_in_time:
+						logger.info(f"Fixing {record.employee_code} check_in: {doc.check_in_time} → {utc_time}")
+						doc.check_in_time = utc_time
+						updated = True
+
+				# Fix check_out_time if exists
+				if doc.check_out_time:
+					vn_time = vn_tz.localize(doc.check_out_time.replace(tzinfo=None))
+					utc_time = vn_time.astimezone(pytz.UTC).replace(tzinfo=None)
+
+					if utc_time != doc.check_out_time:
+						logger.info(f"Fixing {record.employee_code} check_out: {doc.check_out_time} → {utc_time}")
+						doc.check_out_time = utc_time
+						updated = True
+
+				# Save if updated
+				if updated:
+					doc.save(ignore_permissions=True)
+					fixed_count += 1
+
+					# Commit every 10 records to avoid memory issues
+					if fixed_count % 10 == 0:
+						frappe.db.commit()
+						logger.info(f"Committed {fixed_count} fixes so far")
+
+			except Exception as e:
+				logger.error(f"Error fixing record {record.name}: {str(e)}")
+				continue
+
+		# Final commit
+		frappe.db.commit()
+
+		logger.info(f"=== COMPLETED: Fixed {fixed_count} attendance records ===")
+		return {
+			"status": "success",
+			"records_fixed": fixed_count,
+			"total_checked": len(records)
+		}
+
+	except Exception as e:
+		logger.error(f"FATAL ERROR in timestamp fix: {str(e)}")
+		frappe.db.rollback()
+		return {
+			"status": "error",
+			"error": str(e)
+		}
