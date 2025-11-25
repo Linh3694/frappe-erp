@@ -458,14 +458,30 @@ def send_bulk_parent_notifications(
                         "created_at": frappe.utils.now(),
                         "data": merged_data
                     })
-                    
+
                     # Update unread count
                     from erp.common.doctype.erp_notification.erp_notification import get_unread_count
                     unread_count = get_unread_count(parent_email)
                     emit_unread_count_update(parent_email, unread_count)
-                    
-                    # Push notification will be automatically sent by the ERP Notification after_insert hook
-                    # No need to enqueue here to avoid duplicates
+
+                    # Send push notification immediately (don't wait for hook)
+                    try:
+                        from erp.api.parent_portal.push_notification import send_push_notification
+
+                        push_result = send_push_notification(
+                            user_email=parent_email,
+                            title=get_notification_text(notification_title),
+                            body=get_notification_text(notification_body),
+                            icon="/icon.png",
+                            data=merged_data,
+                            tag=recipient_type
+                        )
+
+                        if not push_result.get("success"):
+                            frappe.logger().warning(f"Push notification failed for {parent_email}: {push_result.get('message')}")
+
+                    except Exception as push_error:
+                        frappe.logger().warning(f"Failed to send push notification to {parent_email}: {str(push_error)}")
                     
                     success_count += 1
                     results.append({
