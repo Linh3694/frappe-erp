@@ -437,6 +437,7 @@ def send_bulk_parent_notifications(
             frappe.logger().info(f"📧 [Bulk Handler] Processing {len(parent_emails)} parent emails")
             for parent_email in parent_emails:
                 frappe.logger().info(f"👤 [Bulk Handler] Processing parent: {parent_email}")
+                print(f"👤 DEBUG: Processing parent: {parent_email}")
                 try:
                     # Create notification record in DB
                     notification_doc = create_notification(
@@ -469,6 +470,7 @@ def send_bulk_parent_notifications(
                     emit_unread_count_update(parent_email, unread_count)
 
                     # Send push notification immediately (don't wait for hook)
+                    print(f"📤 DEBUG: About to send push to {parent_email}")
                     frappe.logger().info(f"📤 [Bulk Push] Attempting to send push notification to {parent_email}")
                     try:
                         from erp.api.parent_portal.push_notification import send_push_notification
