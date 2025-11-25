@@ -465,23 +465,35 @@ def send_bulk_parent_notifications(
                     emit_unread_count_update(parent_email, unread_count)
 
                     # Send push notification immediately (don't wait for hook)
+                    frappe.logger().info(f"📤 [Bulk Push] Attempting to send push notification to {parent_email}")
                     try:
                         from erp.api.parent_portal.push_notification import send_push_notification
 
+                        final_title = get_notification_text(notification_title)
+                        final_body = get_notification_text(notification_body)
+
+                        frappe.logger().info(f"📤 [Bulk Push] Title: '{final_title}', Body: '{final_body[:50]}...'")
+
                         push_result = send_push_notification(
                             user_email=parent_email,
-                            title=get_notification_text(notification_title),
-                            body=get_notification_text(notification_body),
+                            title=final_title,
+                            body=final_body,
                             icon="/icon.png",
                             data=merged_data,
                             tag=recipient_type
                         )
 
-                        if not push_result.get("success"):
-                            frappe.logger().warning(f"Push notification failed for {parent_email}: {push_result.get('message')}")
+                        frappe.logger().info(f"📤 [Bulk Push] Push result for {parent_email}: {push_result}")
+
+                        if push_result.get("success"):
+                            frappe.logger().info(f"✅ [Bulk Push] Push notification sent successfully to {parent_email}")
+                        else:
+                            frappe.logger().warning(f"❌ [Bulk Push] Push notification failed for {parent_email}: {push_result.get('message')}")
 
                     except Exception as push_error:
-                        frappe.logger().warning(f"Failed to send push notification to {parent_email}: {str(push_error)}")
+                        frappe.logger().error(f"💥 [Bulk Push] Exception sending push to {parent_email}: {str(push_error)}")
+                        import traceback
+                        frappe.logger().error(f"💥 [Bulk Push] Traceback: {traceback.format_exc()}")
                     
                     success_count += 1
                     results.append({
