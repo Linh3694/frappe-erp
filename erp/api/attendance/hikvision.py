@@ -498,14 +498,32 @@ def upload_attendance_batch():
 		}
 
 
-def parse_attendance_timestamp(date_time_string):
+def get_device_timezone_assumption():
+	"""Get timezone assumption from site config, default to 'detect'"""
+	try:
+		return frappe.get_system_settings("hikvision_device_timezone") or "detect"
+	except:
+		return "detect"
+
+
+def parse_attendance_timestamp(date_time_string, assume_device_timezone=None):
 	"""
-	Parse timestamp from HiVision device
-	Device sends timestamp in VN timezone (+7), convert to UTC for storage
+	Parse timestamp from HiVision device with timezone handling
 	Returns UTC datetime without timezone info for MariaDB compatibility
+
+	Args:
+		date_time_string: Timestamp string from device
+		assume_device_timezone: 'utc', 'vn', or 'detect' (optional, uses config if not provided)
+			- 'utc': Assume device sends UTC
+			- 'vn': Assume device sends VN timezone (+7)
+			- 'detect': Try to detect based on timestamp patterns (default)
 	"""
 	if not date_time_string:
 		raise ValueError("DateTime string is required")
+
+	# Get timezone assumption from config if not provided
+	if assume_device_timezone is None:
+		assume_device_timezone = get_device_timezone_assumption()
 
 	# Parse datetime
 	if isinstance(date_time_string, str):
@@ -513,22 +531,33 @@ def parse_attendance_timestamp(date_time_string):
 	else:
 		timestamp = date_time_string
 
-	# Handle timezone conversion
-	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')  # UTC+7
-
-	# If timestamp has no timezone info, assume it's VN time (+7)
-	if timestamp.tzinfo is None:
-		timestamp = vn_tz.localize(timestamp)
-	# If timestamp has timezone but not UTC, convert to UTC
-	elif timestamp.tzinfo != pytz.UTC:
+	# Handle timezone conversion based on assumption
+	if assume_device_timezone == 'vn':
+		# Assume device sends VN time (+7), convert to UTC
+		vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+		if timestamp.tzinfo is None:
+			timestamp = vn_tz.localize(timestamp)
 		timestamp = timestamp.astimezone(pytz.UTC)
 
-	# Convert from VN time to UTC for storage
-	if timestamp.tzinfo == vn_tz:
-		timestamp = timestamp.astimezone(pytz.UTC)
+	elif assume_device_timezone == 'detect':
+		# Try to detect timezone based on patterns
+		if timestamp.tzinfo is None:
+			# No timezone info - check if timestamp looks like VN time
+			hour = timestamp.hour
+			# If timestamp is between 6-18 VN time (23-13 UTC), likely VN time
+			if 23 <= hour <= 24 or 0 <= hour <= 13:
+				# Likely VN time, convert to UTC
+				vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+				timestamp = vn_tz.localize(timestamp)
+				timestamp = timestamp.astimezone(pytz.UTC)
+			# Else assume UTC
+
+	else:  # assume_device_timezone == 'utc' or default
+		# Assume device sends UTC (original behavior)
+		if timestamp.tzinfo is not None and timestamp.tzinfo != pytz.UTC:
+			timestamp = timestamp.astimezone(pytz.UTC)
 
 	# Return as naive datetime (no timezone info) for MariaDB
-	# MariaDB doesn't support timezone offsets in datetime columns
 	return timestamp.replace(tzinfo=None)
 
 

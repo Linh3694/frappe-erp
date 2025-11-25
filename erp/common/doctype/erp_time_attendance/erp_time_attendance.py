@@ -87,30 +87,26 @@ class ERPTimeAttendance(Document):
 def normalize_date_to_vn_timezone(timestamp):
 	"""
 	Normalize timestamp to VN timezone date (start of day)
-	Matches MongoDB microservice logic
-	
+	Updated logic: check_in_time stored in DB is already VN time
+
 	Example:
-	- Input: UTC 2025-01-15T10:00:00Z
-	- VN time: 2025-01-15 17:00:00+07:00
-	- Day in VN: 2025-01-15
-	- Return: date object for 2025-01-15
+	- Input: 2025-11-24 17:02:29 (stored as VN time, naive datetime)
+	- Return: 2025-11-24 (correct VN date)
 	"""
-	# Convert to VN timezone
 	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-	
+
 	if isinstance(timestamp, str):
 		dt = frappe.utils.get_datetime(timestamp)
 	else:
 		dt = timestamp
-	
-	# If naive datetime, assume UTC
+
+	# CRITICAL FIX: check_in_time in DB is already VN time (naive datetime)
+	# Just return its date directly, no timezone conversion needed
 	if dt.tzinfo is None:
-		dt = pytz.UTC.localize(dt)
-	
-	# Convert to VN timezone
+		return dt.date()
+
+	# If has timezone info, convert to VN date (for future compatibility)
 	vn_time = dt.astimezone(vn_tz)
-	
-	# Return date only (start of day in VN timezone)
 	return vn_time.date()
 
 
