@@ -120,24 +120,11 @@ def get_students_day_map(date=None, codes=None):
 		# Note: Frappe DB queries are case-sensitive by default
 		# We need to query with all possible case variations or use SQL LOWER()
 		
-		# IMPORTANT FIX: Use same date comparison logic as get_employee_attendance_range
-		# which works correctly. Query: date >= start_of_day AND date < start_of_next_day
-		start_of_day = date_obj
-		end_of_next_day = date_obj + timedelta(days=1)
-		
-		# Build date filter the same way as the working range API
-		date_filter = {
-			">=": start_of_day,
-			"<": end_of_next_day
-		}
-		
+		# Use exact date match to avoid timezone/date range issues
 		filters = {
-			"employee_code": ["in", codes]
+			"employee_code": ["in", codes],
+			"date": date_obj  # Exact date match
 		}
-		
-		# Apply date filter separately (same as range API does it)
-		if date_filter.get(">=") and date_filter.get("<"):
-			filters["date"] = ["between", [date_filter[">="], date_filter["<"]]]
 		
 		frappe.logger().info(f"📊 [get_students_day_map] Query filters: {filters}")
 		frappe.logger().info(f"📊 [get_students_day_map] date_obj: {date_obj} (type: {type(date_obj)})")
