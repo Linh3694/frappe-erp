@@ -14,7 +14,7 @@ class ERPTimeAttendance(Document):
 	Handles attendance records with proper timezone handling for VN timezone (+7)
 	"""
 	
-	def update_attendance_time(self, timestamp, device_id=None, device_name=None):
+	def update_attendance_time(self, timestamp, device_id=None, device_name=None, original_timestamp=None):
 		"""
 		Update attendance time - recalculate from ALL raw_data for accuracy
 		This matches the logic from MongoDB microservice
@@ -27,8 +27,10 @@ class ERPTimeAttendance(Document):
 		raw_data = json.loads(self.raw_data or "[]")
 		
 		# Add to raw data (no duplicate check - we want all records)
+		# Use original timestamp from device to preserve accuracy
+		timestamp_to_store = original_timestamp if original_timestamp else check_time.isoformat()
 		raw_data.append({
-			'timestamp': check_time.isoformat(),
+			'timestamp': timestamp_to_store,
 			'device_id': device_id_to_use,
 			'device_name': device_name_to_use,
 			'recorded_at': frappe.utils.now()
@@ -42,10 +44,26 @@ class ERPTimeAttendance(Document):
 			self.check_out_time = check_time
 			self.total_check_ins = 1
 		else:
-			# Multiple records: get earliest and latest
-			all_times = [frappe.utils.get_datetime(item['timestamp']) for item in raw_data]
+			# Multiple records: parse timestamps correctly (they may be original device timestamps)
+			all_times = []
+			for item in raw_data:
+				ts_str = item['timestamp']
+				# If timestamp has timezone info, parse as device timestamp
+				if '+' in ts_str or ts_str.endswith('Z'):
+					parsed_ts = frappe.utils.get_datetime(ts_str)
+					if parsed_ts.tzinfo is not None:
+						try:
+							import pytz
+							vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+							parsed_ts = parsed_ts.astimezone(vn_tz)
+						except ImportError:
+							pass
+					all_times.append(parsed_ts.replace(tzinfo=None) if parsed_ts.tzinfo else parsed_ts)
+				else:
+					# Legacy format - already processed VN time
+					all_times.append(frappe.utils.get_datetime(ts_str))
+
 			all_times.sort()
-			
 			self.check_in_time = all_times[0]  # Earliest = check-in
 			self.check_out_time = all_times[-1]  # Latest = check-out
 			self.total_check_ins = len(raw_data)

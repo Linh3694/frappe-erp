@@ -228,9 +228,26 @@ def get_students_day_map(date=None, codes=None):
 				try:
 					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
 					if raw_data and len(raw_data) > 0:
-						# Use parse_attendance_timestamp to get correct VN times from raw_data
-						from erp.api.attendance.hikvision import parse_attendance_timestamp
-						all_times = sorted([parse_attendance_timestamp(item['timestamp']) for item in raw_data])
+						# Parse timestamps from raw_data (may be original device timestamps or processed VN times)
+						all_times = []
+						for item in raw_data:
+							ts_str = item['timestamp']
+							# If timestamp has timezone info (original device format), parse correctly
+							if '+' in ts_str or ts_str.endswith('Z'):
+								parsed_ts = frappe.utils.get_datetime(ts_str)
+								if parsed_ts.tzinfo is not None:
+									try:
+										import pytz
+										vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+										parsed_ts = parsed_ts.astimezone(vn_tz)
+									except ImportError:
+										pass
+								all_times.append(parsed_ts.replace(tzinfo=None) if parsed_ts.tzinfo else parsed_ts)
+							else:
+								# Legacy format - already processed VN time
+								all_times.append(frappe.utils.get_datetime(ts_str))
+
+						all_times.sort()
 						check_in_time = all_times[0]
 						check_out_time = all_times[-1]
 						total_check_ins = len(all_times)
@@ -426,9 +443,26 @@ def get_employee_attendance_range(**kwargs):
 				try:
 					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
 					if raw_data and len(raw_data) > 0:
-						# Use parse_attendance_timestamp to get correct VN times from raw_data
-						from erp.api.attendance.hikvision import parse_attendance_timestamp
-						all_times = sorted([parse_attendance_timestamp(item['timestamp']) for item in raw_data])
+						# Parse timestamps from raw_data (may be original device timestamps or processed VN times)
+						all_times = []
+						for item in raw_data:
+							ts_str = item['timestamp']
+							# If timestamp has timezone info (original device format), parse correctly
+							if '+' in ts_str or ts_str.endswith('Z'):
+								parsed_ts = frappe.utils.get_datetime(ts_str)
+								if parsed_ts.tzinfo is not None:
+									try:
+										import pytz
+										vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+										parsed_ts = parsed_ts.astimezone(vn_tz)
+									except ImportError:
+										pass
+								all_times.append(parsed_ts.replace(tzinfo=None) if parsed_ts.tzinfo else parsed_ts)
+							else:
+								# Legacy format - already processed VN time
+								all_times.append(frappe.utils.get_datetime(ts_str))
+
+						all_times.sort()
 						check_in_time = all_times[0]
 						check_out_time = all_times[-1]
 						total_check_ins = len(all_times)

@@ -271,8 +271,8 @@ def handle_hikvision_event():
 					existing_notes = attendance_doc.notes or ""
 					attendance_doc.notes = existing_notes + "; ".join(notes_parts) + "; "
 				
-				# Update attendance time
-				attendance_doc.update_attendance_time(parsed_timestamp, device_id, device_name)
+				# Update attendance time - pass original timestamp to preserve it
+				attendance_doc.update_attendance_time(parsed_timestamp, device_id, device_name, original_timestamp=timestamp)
 				
 				# Save to database
 				logger.info(f"💾 Saving attendance record for {employee_code} - check_in: {format_vn_time(attendance_doc.check_in_time)}, check_out: {format_vn_time(attendance_doc.check_out_time)}")
@@ -432,7 +432,7 @@ def upload_attendance_batch():
 				
 				# Update attendance time
 				is_new = not attendance_doc.name
-				attendance_doc.update_attendance_time(timestamp, device_id, device_name)
+				attendance_doc.update_attendance_time(timestamp, device_id, device_name, original_timestamp=date_time)
 				
 				# Save
 				attendance_doc.save(ignore_permissions=True)
