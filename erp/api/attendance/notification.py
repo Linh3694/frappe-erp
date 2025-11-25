@@ -124,23 +124,21 @@ def send_student_attendance_notification(
 		# Build notification theo format chuẩn của notification-service
 		title = "Điểm danh"
 
-		# Parse location từ device name (giống notification-service)
+		# Parse location từ device name
+		# Device name format: "Gate 2 - Check in", "Gate 5 - Check out", "Gate 2 - Abnormal", etc.
 		if not device_name:
 			location = "cổng trường"
 		else:
-			# Parse "Gate 2 - Check In" → "Cổng 2"
+			# Extract gate name (Gate 2, Gate 5, etc.)
 			parts = device_name.split(' - ')
-			location = parts[0].strip() if len(parts) >= 1 else device_name
+			gate_name = parts[0].strip() if len(parts) >= 1 else device_name
 
-			# Map common locations
+			# Map to Vietnamese names
 			location_map = {
 				'Gate 2': 'Cổng 2',
-				'Gate 5': 'Cổng 5',
-				'Main Gate': 'Cổng chính',
-				'Front Gate': 'Cổng trước',
-				'Back Gate': 'Cổng sau'
+				'Gate 5': 'Cổng 5'
 			}
-			location = location_map.get(location, location)
+			location = location_map.get(gate_name, gate_name)  # Default to original if not mapped
 
 		# Format time giống notification-service: HH:MM DD/MM/YYYY
 		event_time = timestamp
@@ -154,7 +152,7 @@ def send_student_attendance_notification(
 
 		message = f"Học sinh {employee_name} đã đi qua {location} lúc {time_str}"
 
-		# Additional data
+		# Additional data (convert datetime to string for JSON serialization)
 		notification_data = {
 			"type": "student_attendance",
 			"notificationType": "attendance",
@@ -164,11 +162,11 @@ def send_student_attendance_notification(
 			"studentName": employee_name,
 			"employeeCode": employee_code,
 			"employeeName": employee_name,
-			"timestamp": timestamp.isoformat(),
-			"checkInTime": check_in_time,
-			"checkOutTime": check_out_time,
+			"timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
+			"checkInTime": check_in_time.isoformat() if check_in_time and hasattr(check_in_time, 'isoformat') else check_in_time,
+			"checkOutTime": check_out_time.isoformat() if check_out_time and hasattr(check_out_time, 'isoformat') else check_out_time,
 			"totalCheckIns": total_check_ins,
-			"date": date,
+			"date": str(date) if date else None,
 			"deviceName": device_name,
 			"isCheckIn": is_check_in
 		}
