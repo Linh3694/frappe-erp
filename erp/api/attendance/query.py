@@ -228,9 +228,9 @@ def get_students_day_map(date=None, codes=None):
 				try:
 					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
 					if raw_data and len(raw_data) > 0:
-						# Use parse_attendance_timestamp to handle VN time correctly
+						# Use parse_attendance_timestamp with VN assumption for raw_data
 						from erp.api.attendance.hikvision import parse_attendance_timestamp
-						all_times = sorted([parse_attendance_timestamp(item['timestamp']) for item in raw_data])
+						all_times = sorted([parse_attendance_timestamp(item['timestamp'], 'vn') for item in raw_data])
 						check_in_time = all_times[0]
 						check_out_time = all_times[-1]
 						total_check_ins = len(all_times)
@@ -426,7 +426,9 @@ def get_employee_attendance_range(**kwargs):
 				try:
 					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
 					if raw_data and len(raw_data) > 0:
-						all_times = sorted([frappe.utils.get_datetime(item['timestamp']) for item in raw_data])
+						# Use parse_attendance_timestamp with VN assumption for raw_data
+						from erp.api.attendance.hikvision import parse_attendance_timestamp
+						all_times = sorted([parse_attendance_timestamp(item['timestamp'], 'vn') for item in raw_data])
 						check_in_time = all_times[0]
 						check_out_time = all_times[-1]
 						total_check_ins = len(all_times)
@@ -558,19 +560,17 @@ def debug_employee_attendance(**kwargs):
 		# Sort and format timestamps
 		all_timestamps = []
 		if raw_data:
+			from erp.api.attendance.hikvision import parse_attendance_timestamp, format_vn_time
 			for item in raw_data:
-				timestamp = frappe.utils.get_datetime(item['timestamp'])
-				vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-				if timestamp.tzinfo is None:
-					timestamp = pytz.UTC.localize(timestamp)
-				vn_time = timestamp.astimezone(vn_tz)
-				
+				timestamp = parse_attendance_timestamp(item['timestamp'], 'vn')
+				vn_display = format_vn_time(timestamp)
+
 				all_timestamps.append({
 					"timestamp": item['timestamp'],
 					"deviceId": item.get('device_id'),
 					"deviceName": item.get('device_name'),
 					"recordedAt": item.get('recorded_at'),
-					"vnTime": vn_time.strftime('%Y-%m-%d %H:%M:%S')
+					"vnTime": vn_display
 				})
 		
 		all_timestamps.sort(key=lambda x: x['timestamp'])

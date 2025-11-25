@@ -275,7 +275,7 @@ def handle_hikvision_event():
 				attendance_doc.update_attendance_time(parsed_timestamp, device_id, device_name)
 				
 				# Save to database
-				logger.info(f"💾 Saving attendance record for {employee_code} - check_in: {attendance_doc.check_in_time}, check_out: {attendance_doc.check_out_time}")
+				logger.info(f"💾 Saving attendance record for {employee_code} - check_in: {format_vn_time(attendance_doc.check_in_time)}, check_out: {format_vn_time(attendance_doc.check_out_time)}")
 				attendance_doc.save(ignore_permissions=True)
 				frappe.db.commit()
 				logger.info(f"✅ Record saved! ID: {attendance_doc.name}")
@@ -508,22 +508,11 @@ def get_device_timezone_assumption():
 
 def parse_attendance_timestamp(date_time_string, assume_device_timezone=None):
 	"""
-	Parse timestamp from HiVision device with timezone handling
-	Returns UTC datetime without timezone info for MariaDB compatibility
-
-	Args:
-		date_time_string: Timestamp string from device
-		assume_device_timezone: 'utc', 'vn', or 'detect' (optional, uses config if not provided)
-			- 'utc': Assume device sends UTC
-			- 'vn': Assume device sends VN timezone (+7)
-			- 'detect': Try to detect based on timestamp patterns (default)
+	SIMPLE FIX: Parse and return VN time directly (no UTC conversion)
+	Device sends VN time, we store VN time, display VN time.
 	"""
 	if not date_time_string:
 		raise ValueError("DateTime string is required")
-
-	# Get timezone assumption from config if not provided
-	if assume_device_timezone is None:
-		assume_device_timezone = get_device_timezone_assumption()
 
 	# Parse datetime
 	if isinstance(date_time_string, str):
@@ -531,34 +520,13 @@ def parse_attendance_timestamp(date_time_string, assume_device_timezone=None):
 	else:
 		timestamp = date_time_string
 
-	# Handle timezone conversion based on assumption
-	if assume_device_timezone == 'vn':
-		# Assume device sends VN time (+7), convert to UTC
+	# Convert to VN timezone if it has timezone info
+	if timestamp.tzinfo is not None:
 		vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-		if timestamp.tzinfo is None:
-			timestamp = vn_tz.localize(timestamp)
-		timestamp = timestamp.astimezone(pytz.UTC)
+		timestamp = timestamp.astimezone(vn_tz)
 
-	elif assume_device_timezone == 'detect':
-		# Try to detect timezone based on patterns
-		if timestamp.tzinfo is None:
-			# No timezone info - check if timestamp looks like VN time
-			hour = timestamp.hour
-			# If timestamp is between 6-18 VN time (23-13 UTC), likely VN time
-			if 23 <= hour <= 24 or 0 <= hour <= 13:
-				# Likely VN time, convert to UTC
-				vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-				timestamp = vn_tz.localize(timestamp)
-				timestamp = timestamp.astimezone(pytz.UTC)
-			# Else assume UTC
-
-	else:  # assume_device_timezone == 'utc' or default
-		# Assume device sends UTC (original behavior)
-		if timestamp.tzinfo is not None and timestamp.tzinfo != pytz.UTC:
-			timestamp = timestamp.astimezone(pytz.UTC)
-
-	# Return as naive datetime (no timezone info) for MariaDB
-	return timestamp.replace(tzinfo=None)
+	# Return VN time (naive for DB storage)
+	return timestamp.replace(tzinfo=None) if timestamp.tzinfo else timestamp
 
 
 def format_vn_time(dt):
@@ -567,9 +535,10 @@ def format_vn_time(dt):
 
 	# Ensure datetime is timezone-aware
 	if dt.tzinfo is None:
-		dt = pytz.UTC.localize(dt)
+		# DB stores VN time as naive datetime, so treat it as VN time
+		dt = vn_tz.localize(dt)
 
-	# Convert to VN timezone
+	# Convert to VN timezone (should be no-op if already VN)
 	vn_time = dt.astimezone(vn_tz)
 
 	return vn_time.strftime('%Y-%m-%d %H:%M:%S')
