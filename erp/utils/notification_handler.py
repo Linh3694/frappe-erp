@@ -342,6 +342,7 @@ def send_bulk_parent_notifications(
     """
     
     try:
+        print(f"🔔 DEBUG: send_bulk_parent_notifications called with type: {recipient_type}")
         frappe.logger().info(f"🔔 START send_bulk_parent_notifications - type: {recipient_type}")
         
         # Get student IDs from recipients_data
