@@ -107,44 +107,28 @@ def send_student_attendance_notification(
 	date
 ):
 	"""
-	Send attendance notification to student's guardians
+	Send attendance notification to student's guardians using unified handler
 	"""
 	try:
-		# Get guardians from CRM Family Relationship
-		guardians = get_student_guardians(employee_code)
-		
-		if not guardians or len(guardians) == 0:
-			frappe.logger().warning(f"No guardians found for student {employee_code}")
-			return
-		
-		frappe.logger().info(f"📧 [Student Attendance] Sending to {len(guardians)} guardians for student {employee_code}")
-		
+		frappe.logger().info(f"📧 [Student Attendance] Processing attendance for student {employee_code}")
+
+		# Use unified notification handler
+		from erp.utils.notification_handler import send_bulk_parent_notifications
+
 		# Format timestamp to VN timezone
 		vn_time = format_datetime_vn(timestamp)
-		
+
 		# Determine if check-in or check-out
 		is_check_in = determine_checkin_or_checkout(timestamp, check_in_time, check_out_time)
-		
-		# Build notification title and message (bilingual)
+
+		# Build notification title and message (Vietnamese only)
 		if is_check_in:
-			title = {
-				"vi": f"✅ {employee_name} đã đến trường",
-				"en": f"✅ {employee_name} arrived at school"
-			}
-			message = {
-				"vi": f"{employee_name} đã check-in lúc {vn_time} tại {device_name or 'thiết bị'}",
-				"en": f"{employee_name} checked in at {vn_time} at {device_name or 'device'}"
-			}
+			title = f"✅ {employee_name} đã đến trường"
+			message = f"{employee_name} đã check-in lúc {vn_time} tại {device_name or 'thiết bị'}"
 		else:
-			title = {
-				"vi": f"👋 {employee_name} đã về nhà",
-				"en": f"👋 {employee_name} left school"
-			}
-			message = {
-				"vi": f"{employee_name} đã check-out lúc {vn_time} tại {device_name or 'thiết bị'}",
-				"en": f"{employee_name} checked out at {vn_time} at {device_name or 'device'}"
-			}
-		
+			title = f"👋 {employee_name} đã về nhà"
+			message = f"{employee_name} đã check-out lúc {vn_time} tại {device_name or 'thiết bị'}"
+
 		# Additional data
 		notification_data = {
 			"type": "student_attendance",
@@ -163,67 +147,25 @@ def send_student_attendance_notification(
 			"deviceName": device_name,
 			"isCheckIn": is_check_in
 		}
-		
-		# Create notification for each guardian
-		for guardian in guardians:
-			try:
-				# Create notification record in DB
-				notification_doc = create_notification(
-					title=title,
-					message=message,
-					recipient_user=guardian["email"],
-					recipients=[guardian["email"]],
-					notification_type="attendance",
-					priority="normal",
-					data=notification_data,
-					channel="push",
-					event_timestamp=timestamp,
-					reference_doctype="CRM Student",
-					reference_name=employee_code
-				)
-				
-				# Send realtime notification via SocketIO
-				emit_notification_to_user(guardian["email"], {
-					"id": notification_doc.name,
-					"type": "attendance",
-					"title": title,
-					"message": message,
-					"status": "unread",
-					"priority": "normal",
-					"created_at": timestamp.isoformat(),
-					"student_id": employee_code,
-					"student_name": employee_name,
-					"data": notification_data
-				})
-				
-				# Update unread count
-				from erp.common.doctype.erp_notification.erp_notification import get_unread_count
-				unread_count = get_unread_count(guardian["email"])
-				emit_unread_count_update(guardian["email"], unread_count)
-				
-				# Send push notification (enqueue for background)
-				frappe.enqueue(
-					send_push_notification,
-					queue="default",
-					timeout=300,
-					user_email=guardian["email"],
-					title=title.get("vi"),  # Use Vietnamese for push
-					body=message.get("vi"),
-					icon="/icon.png",
-					data=notification_data,
-					tag="attendance"
-				)
-				
-				frappe.logger().info(f"✅ Sent attendance notification to guardian {guardian['email']}")
-				
-			except Exception as guardian_error:
-				frappe.logger().error(f"Failed to send notification to guardian {guardian.get('email')}: {str(guardian_error)}")
-		
-		frappe.db.commit()
-		
+
+		# Send bulk notification using unified handler
+		result = send_bulk_parent_notifications(
+			recipient_type="attendance",
+			recipients_data={
+				"student_ids": [employee_code]
+			},
+			title=title,
+			body=message,
+			data=notification_data
+		)
+
+		frappe.logger().info(f"✅ [Student Attendance] Sent attendance notification for {employee_code}: {result}")
+		return result
+
 	except Exception as e:
-		frappe.logger().error(f"Error in send_student_attendance_notification: {str(e)}")
+		frappe.logger().error(f"❌ Error in send_student_attendance_notification: {str(e)}")
 		frappe.log_error(message=str(e), title="Student Attendance Notification Error")
+		return False
 
 
 def send_staff_attendance_notification(
@@ -255,25 +197,13 @@ def send_staff_attendance_notification(
 		# Determine if check-in or check-out
 		is_check_in = determine_checkin_or_checkout(timestamp, check_in_time, check_out_time)
 		
-		# Build notification
+		# Build notification (Vietnamese only)
 		if is_check_in:
-			title = {
-				"vi": f"✅ Bạn đã check-in",
-				"en": f"✅ You checked in"
-			}
-			message = {
-				"vi": f"Bạn đã check-in lúc {vn_time} tại {device_name or 'thiết bị'}",
-				"en": f"You checked in at {vn_time} at {device_name or 'device'}"
-			}
+			title = f"✅ Bạn đã check-in"
+			message = f"Bạn đã check-in lúc {vn_time} tại {device_name or 'thiết bị'}"
 		else:
-			title = {
-				"vi": f"👋 Bạn đã check-out",
-				"en": f"👋 You checked out"
-			}
-			message = {
-				"vi": f"Bạn đã check-out lúc {vn_time} tại {device_name or 'thiết bị'}",
-				"en": f"You checked out at {vn_time} at {device_name or 'device'}"
-			}
+			title = f"👋 Bạn đã check-out"
+			message = f"Bạn đã check-out lúc {vn_time} tại {device_name or 'thiết bị'}"
 		
 		# Additional data
 		notification_data = {
@@ -315,22 +245,22 @@ def send_staff_attendance_notification(
 			"data": notification_data
 		})
 		
-		# Send push notification (enqueue)
-		frappe.enqueue(
-			send_push_notification,
-			queue="default",
-			timeout=300,
-			user_email=staff_email,
-			title=title.get("vi"),
-			body=message.get("vi"),
-			icon="/icon.png",
-			data=notification_data,
-			tag="attendance"
+		# Use unified notification handler
+		from erp.utils.notification_handler import send_bulk_parent_notifications
+
+		result = send_bulk_parent_notifications(
+			recipient_type="attendance",
+			recipients_data={
+				"parent_emails": [staff_email]  # Direct email list for staff
+			},
+			title=title,
+			body=message,
+			data=notification_data
 		)
-		
+
 		frappe.db.commit()
-		frappe.logger().info(f"✅ Sent attendance notification to staff {staff_email}")
-		
+		frappe.logger().info(f"✅ Sent attendance notification to staff {staff_email}: {result}")
+
 	except Exception as e:
 		frappe.logger().error(f"Error in send_staff_attendance_notification: {str(e)}")
 		frappe.log_error(message=str(e), title="Staff Attendance Notification Error")
