@@ -781,7 +781,7 @@ def generate_homeroom_report_email(attendance_data):
 		<div style="text-align: center; color: #666; font-size: 14px;">
 			<p><strong>Hệ thống quản lý trường học</strong></p>
 			<p>Trường PTLC Song Ngữ Quốc tế Wellspring</p>
-			<p>Email: it@wellspring.edu.vn | Thời gian tạo: {current_time}</p>
+			<p>Email: it@wellspring.edu.vn | Thời gian tạo: """ + current_time + """</p>
 		</div>
 	</div>
 	"""
