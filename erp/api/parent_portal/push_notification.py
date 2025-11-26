@@ -27,6 +27,7 @@ except ImportError:
 def save_push_subscription(subscription_json=None):
     """
     Lưu push subscription của user
+    Also removes any expired subscription notifications
 
     Args:
         subscription_json: JSON string của push subscription từ frontend
@@ -57,17 +58,17 @@ def save_push_subscription(subscription_json=None):
             }
 
         subscription = json.loads(subscription_json) if isinstance(subscription_json, str) else subscription_json
-        
+
         # Validate subscription data
         if not subscription.get("endpoint"):
             return {
                 "success": False,
                 "message": "Invalid subscription data - missing endpoint"
             }
-        
+
         # Kiểm tra xem user đã có subscription chưa
         existing = frappe.db.exists("Push Subscription", {"user": user})
-        
+
         if existing:
             # Update existing subscription
             doc = frappe.get_doc("Push Subscription", existing)
@@ -85,15 +86,36 @@ def save_push_subscription(subscription_json=None):
             })
             doc.insert(ignore_permissions=True)
             message = "Push subscription created successfully"
-        
+
+        # Remove any "expired subscription" notifications for this user
+        try:
+            expired_notifications = frappe.db.sql("""
+                SELECT name FROM `tabERP Notification`
+                WHERE recipient_user = %s
+                AND notification_type = 'system'
+                AND data LIKE '%%"push_subscription_expired"%%'
+            """, (user,), pluck="name")
+
+            if expired_notifications:
+                for notif_name in expired_notifications:
+                    try:
+                        frappe.delete_doc("ERP Notification", notif_name, ignore_permissions=True)
+                    except:
+                        pass
+                frappe.db.commit()
+                frappe.logger().info(f"Removed {len(expired_notifications)} expired subscription notifications for {user}")
+
+        except Exception as cleanup_error:
+            frappe.logger().warning(f"Failed to cleanup expired notifications: {str(cleanup_error)}")
+
         frappe.db.commit()
-        
+
         return {
             "success": True,
             "message": message,
             "log": f"Saved push subscription for user: {user}"
         }
-        
+
     except Exception as e:
         frappe.log_error(f"Error saving push subscription: {str(e)}", "Push Notification Error")
         return {
@@ -267,19 +289,48 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
         # Handle specific error codes
         error_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
         
-        # 410 Gone = subscription expired, should delete
+        # 410 Gone = subscription expired, should delete and notify user
         if error_code == 410:
-            frappe.logger().warning(f"Push subscription expired for {user_email}, deleting...")
+            frappe.logger().warning(f"Push subscription expired for {user_email}, deleting and creating notification...")
+
+            # Delete expired subscription
             try:
                 frappe.db.delete("Push Subscription", {"user": user_email})
                 frappe.db.commit()
-            except:
-                pass
-            
+            except Exception as del_error:
+                frappe.logger().error(f"Failed to delete expired subscription: {str(del_error)}")
+
+            # Create notification to inform user to re-enable push notifications
+            try:
+                from erp.common.doctype.erp_notification.erp_notification import create_notification
+
+                create_notification(
+                    title="Cần bật lại thông báo đẩy",
+                    message="Thông báo đẩy của bạn đã hết hạn. Vui lòng truy cập trang Hồ sơ để bật lại thông báo đẩy.",
+                    recipient_user=user_email,
+                    recipients=[user_email],
+                    notification_type="system",
+                    priority="medium",
+                    data={
+                        "type": "push_subscription_expired",
+                        "action_required": "reenable_push",
+                        "url": "/profile"
+                    },
+                    channel="database",  # Only show in notification list, no push
+                    event_timestamp=frappe.utils.now()
+                )
+
+                frappe.db.commit()
+                frappe.logger().info(f"Created re-enable notification for {user_email}")
+
+            except Exception as notif_error:
+                frappe.logger().error(f"Failed to create re-enable notification: {str(notif_error)}")
+
             return {
                 "success": False,
-                "message": "Push subscription expired and has been removed",
-                "log": f"Subscription for {user_email} was expired (410 Gone)"
+                "message": "Push subscription expired and has been removed. User notified to re-enable.",
+                "log": f"Subscription for {user_email} was expired (410 Gone) - user notified",
+                "subscription_expired": True
             }
         
         # Other errors

@@ -61,10 +61,6 @@ def publish_attendance_notification(
 		)
 		frappe.logger().info(f"🔍 [Attendance Notif] Debounce result for {employee_code}: should_skip={should_skip}")
 
-		# TEMPORARILY DISABLE DEBOUNCE FOR TESTING
-		should_skip = False
-		frappe.logger().info(f"🔍 [Attendance Notif] DEBOUNCE DISABLED FOR TESTING - forcing send")
-
 		if should_skip:
 			frappe.logger().info(f"⏭️ [Debounce] SKIPPING notification for {employee_code} - sent recently")
 			return
