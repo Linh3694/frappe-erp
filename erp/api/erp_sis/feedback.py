@@ -23,8 +23,8 @@ from erp.utils.api_response import (
 def _check_staff_permission():
     """Check if user has staff/admin permission"""
     user_roles = frappe.get_roles()
-    allowed_roles = ["System Manager", "SIS Manager", "Administrator"]
-    
+    allowed_roles = ["System Manager", "SIS Manager", "SIS Sales", "SIS IT"]
+
     if not any(role in allowed_roles for role in user_roles):
         frappe.throw(_("Bạn không có quyền truy cập API này"), frappe.PermissionError)
 
