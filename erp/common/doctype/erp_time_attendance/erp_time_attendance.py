@@ -20,6 +20,16 @@ class ERPTimeAttendance(Document):
 		This prevents duplicate records when student stands in front of camera for extended time
 		"""
 		check_time = frappe.utils.get_datetime(timestamp)
+
+		# Ensure check_time is timezone-naive for consistent comparisons
+		if check_time.tzinfo is not None:
+			try:
+				import pytz
+				vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+				check_time = check_time.astimezone(vn_tz).replace(tzinfo=None)
+			except ImportError:
+				check_time = check_time.replace(tzinfo=None)
+
 		device_id_to_use = device_id or self.device_id
 		device_name_to_use = device_name or self.device_name
 
@@ -35,6 +45,15 @@ class ERPTimeAttendance(Document):
 		for item in raw_data:
 			ts_str = item['timestamp']
 			existing_time = frappe.utils.get_datetime(ts_str)
+
+			# Ensure both timestamps are timezone-naive for comparison
+			if existing_time.tzinfo is not None:
+				try:
+					import pytz
+					vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+					existing_time = existing_time.astimezone(vn_tz).replace(tzinfo=None)
+				except ImportError:
+					existing_time = existing_time.replace(tzinfo=None)
 
 			# Calculate time difference
 			time_diff = abs((check_time - existing_time).total_seconds())
