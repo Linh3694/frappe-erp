@@ -314,19 +314,25 @@ def get_student_guardians(student_code):
 		List of dicts: [{"name": "Guardian Name", "email": "guardian@email.com", "relation": "Father"}]
 	"""
 	try:
-		# Query CRM Family Relationship với đúng field names
+		# First, find the CRM Student record by student_code
+		student_record = frappe.db.get_value("CRM Student", {"student_code": student_code}, "name")
+		if not student_record:
+			frappe.logger().warning(f"No CRM Student found for student_code: {student_code}")
+			return []
+
+		# Query CRM Family Relationship with correct joins
 		relationships = frappe.db.sql("""
 			SELECT
 				cfr.guardian,
 				cfr.relationship_type,
 				cfr.key_person,
-				cg.name as guardian_name,
+				cg.guardian_name,
 				cg.email as guardian_email
 			FROM `tabCRM Family Relationship` cfr
 			LEFT JOIN `tabCRM Guardian` cg ON cfr.guardian = cg.name
 			WHERE cfr.student = %s
 			ORDER BY cfr.key_person DESC, cfr.creation ASC
-		""", (student_code,), as_dict=True)
+		""", (student_record,), as_dict=True)
 
 		# Format results
 		guardians = []
