@@ -78,8 +78,8 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 			campus_id = "CAMPUS-00001"
 			frappe.logger().info(f"🏫 Using default campus: {campus_id}")
 
-		# Get all active classes for the campus
-		class_filters = {"status": "Active"}
+		# Get all active classes for the campus (only regular classes)
+		class_filters = {"docstatus": 0, "class_type": "regular"}
 		if campus_id:
 			class_filters["campus_id"] = campus_id
 
@@ -88,7 +88,7 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 		try:
 			classes = frappe.get_all("SIS Class",
 				filters=class_filters,
-				fields=["name", "title", "campus_id"]
+				fields=["name", "title", "campus_id", "class_type"]
 			)
 			frappe.logger().info(f"✅ Found {len(classes)} classes")
 		except Exception as class_error:
