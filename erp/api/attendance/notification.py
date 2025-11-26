@@ -475,7 +475,7 @@ def update_debounce_cache(employee_code, timestamp):
 			cache_value = str(timestamp)
 
 		# Cache for 2 minutes (120 seconds) - debounce window
-		frappe.cache().set(cache_key, cache_value, expires_in_sec=120)
+		frappe.cache().set_value(cache_key, cache_value, expires_in_sec=120)
 
 		frappe.logger().info(f"📝 [Debounce] SET cache for {employee_code}: {cache_value} (expires in 2 min)")
 
