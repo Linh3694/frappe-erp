@@ -429,36 +429,33 @@ def should_skip_due_to_debounce(employee_code, current_timestamp):
 	"""
 	Check if notification should be skipped due to debounce
 	Returns True if notification was sent within debounce window (5 minutes)
+	Uses database instead of cache for persistence across requests
 	"""
 	try:
-		cache_key = f"attendance_notif:{employee_code}"
+		# Query database for recent notifications to this user
+		system_email = f"{employee_code}@parent.wellspring.edu.vn"
 
-		# Get last notification timestamp from cache
-		last_notif_timestamp = frappe.cache().get_value(cache_key)
+		recent_notifications = frappe.db.sql("""
+			SELECT creation
+			FROM `tabERP Notification`
+			WHERE recipient_user = %s
+			AND notification_type = 'attendance'
+			AND creation >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+			ORDER BY creation DESC
+			LIMIT 1
+		""", (system_email,), as_dict=True)
 
-		frappe.logger().info(f"🔍 [Debounce] Checking {employee_code} - cache_key: {cache_key}, cached_value: {last_notif_timestamp}")
+		if recent_notifications:
+			last_notif_time = recent_notifications[0].creation
+			time_diff = (current_timestamp - last_notif_time).total_seconds() / 60
 
-		if not last_notif_timestamp:
-			frappe.logger().info(f"✅ [Debounce] No previous notification for {employee_code}, allowing send")
-			return False  # No previous notification, allow sending
+			frappe.logger().info(f"⏱️ [Debounce] {employee_code} - current: {current_timestamp}, last: {last_notif_time}, diff: {time_diff:.2f} min")
 
-		# Ensure both timestamps are datetime objects
-		if isinstance(last_notif_timestamp, str):
-			last_notif_timestamp = frappe.utils.get_datetime(last_notif_timestamp)
-		if isinstance(current_timestamp, str):
-			current_timestamp = frappe.utils.get_datetime(current_timestamp)
+			if time_diff < 5:
+				frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - last notif {time_diff:.2f} min ago (< 5 min)")
+				return True
 
-		# Calculate time difference in minutes
-		time_diff = (current_timestamp - last_notif_timestamp).total_seconds() / 60
-
-		frappe.logger().info(f"⏱️ [Debounce] {employee_code} - current: {current_timestamp}, last: {last_notif_timestamp}, diff: {time_diff:.2f} min")
-
-		# Skip if within debounce window (5 minutes)
-		if time_diff < 5:
-			frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - last notif {time_diff:.2f} min ago (< 5 min)")
-			return True
-
-		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - last notif {time_diff:.2f} min ago (>= 2 min)")
+		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - no recent notification or outside window")
 		return False
 
 	except Exception as e:
@@ -468,25 +465,17 @@ def should_skip_due_to_debounce(employee_code, current_timestamp):
 
 def update_debounce_cache(employee_code, timestamp):
 	"""
-	Update cache with timestamp of successful notification
-	Cache expires after 5 minutes (debounce window)
+	Update debounce cache with timestamp of successful notification
+	Now using database-based approach, so this function is kept for compatibility
+	but doesn't need to do anything since we check from ERP Notification table
 	"""
 	try:
-		cache_key = f"attendance_notif:{employee_code}"
-
-		# Store timestamp as ISO string for cache
-		if hasattr(timestamp, 'isoformat'):
-			cache_value = timestamp.isoformat()
-		else:
-			cache_value = str(timestamp)
-
-		# Cache for 5 minutes (300 seconds) - debounce window
-		frappe.cache().set_value(cache_key, cache_value, expires_in_sec=300)
-
-		frappe.logger().info(f"📝 [Debounce] SET cache for {employee_code}: {cache_value} (expires in 5 min)")
+		# Database-based debounce doesn't need explicit cache update
+		# The notification record itself serves as the debounce marker
+		frappe.logger().info(f"📝 [Debounce] Notification sent for {employee_code} - database-based debounce active")
 
 	except Exception as e:
-		frappe.logger().error(f"❌ [Debounce] Error updating cache for {employee_code}: {str(e)}")
+		frappe.logger().error(f"❌ [Debounce] Error in update_debounce_cache for {employee_code}: {str(e)}")
 
 
 def clear_attendance_notification_cache(employee_code=None):
