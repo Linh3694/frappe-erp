@@ -199,6 +199,11 @@
    "read": 1,
    "report": 1,
    "role": "Academic User",
+   "select": 0,
+   "set_user_permissions": 0,
+   "share": 1,
+   "submit": 0,
+   "write": 1
   },
   {
    "amend": 0,
@@ -214,12 +219,6 @@
    "read": 1,
    "report": 1,
    "role": "SIS Administrative",
-   "select": 0,
-   "set_user_permissions": 0,
-   "share": 1,
-   "submit": 0,
-   "write": 1
-  }
    "select": 0,
    "set_user_permissions": 0,
    "share": 1,
