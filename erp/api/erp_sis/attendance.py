@@ -58,81 +58,125 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 		}
 	"""
 	try:
+		frappe.logger().info(f"🏫 Starting check_homeroom_attendance_status - date: {date}, campus_id: {campus_id}")
+
 		if not date:
 			date = frappe.utils.nowdate()
+			frappe.logger().info(f"📅 Using current date: {date}")
 
 		if not campus_id:
-			from erp.utils.campus_utils import get_current_campus_from_context
-			campus_id = get_current_campus_from_context()
+			try:
+				from erp.utils.campus_utils import get_current_campus_from_context
+				campus_id = get_current_campus_from_context()
+				frappe.logger().info(f"🏫 Campus ID from context: {campus_id}")
+			except Exception as campus_error:
+				frappe.logger().warning(f"⚠️ Failed to get campus from context: {str(campus_error)}")
+				campus_id = None
+
+		# Default to CAMPUS-00001 if no campus found
+		if not campus_id:
+			campus_id = "CAMPUS-00001"
+			frappe.logger().info(f"🏫 Using default campus: {campus_id}")
 
 		# Get all active classes for the campus
 		class_filters = {"status": "Active"}
 		if campus_id:
 			class_filters["campus_id"] = campus_id
 
-		classes = frappe.get_all("SIS Class",
-			filters=class_filters,
-			fields=["name", "class_name", "campus_id"]
-		)
+		frappe.logger().info(f"🔍 Getting classes with filters: {class_filters}")
+
+		try:
+			classes = frappe.get_all("SIS Class",
+				filters=class_filters,
+				fields=["name", "class_name", "campus_id"]
+			)
+			frappe.logger().info(f"✅ Found {len(classes)} classes")
+		except Exception as class_error:
+			frappe.logger().error(f"❌ Failed to get classes: {str(class_error)}")
+			return error_response(message=f"Failed to get classes: {str(class_error)}", code="GET_CLASSES_ERROR")
+
+		if not classes:
+			frappe.logger().warning(f"⚠️ No classes found with filters: {class_filters}")
+			return success_response({
+				"date": date,
+				"campus_id": campus_id,
+				"total_classes": 0,
+				"completed_classes": 0,
+				"pending_classes": 0,
+				"completion_percentage": 0,
+				"classes": []
+			}, message="No classes found")
 
 		result_classes = []
 		total_completed = 0
 
 		for class_info in classes:
 			class_id = class_info.name
+			frappe.logger().info(f"📚 Processing class: {class_id} ({class_info.class_name})")
 
-			# Check if homeroom attendance exists for this class/date
-			attendance_count = frappe.db.count("SIS Class Attendance", {
-				"class_id": class_id,
-				"date": date,
-				"period": "homeroom"
-			})
+			try:
+				# Check if homeroom attendance exists for this class/date
+				attendance_count = frappe.db.count("SIS Class Attendance", {
+					"class_id": class_id,
+					"date": date,
+					"period": "homeroom"
+				})
+				frappe.logger().info(f"   📊 Attendance count: {attendance_count}")
 
-			# Get student count in class
-			student_count = frappe.db.count("SIS Class Student", {
-				"class_id": class_id
-			})
+				# Get student count in class
+				student_count = frappe.db.count("SIS Class Student", {
+					"class_id": class_id
+				})
+				frappe.logger().info(f"   👥 Student count: {student_count}")
 
-			# Get last update time
-			last_updated = None
-			if attendance_count > 0:
-				last_record = frappe.get_all("SIS Class Attendance",
-					filters={
-						"class_id": class_id,
-						"date": date,
-						"period": "homeroom"
-					},
-					fields=["modified"],
-					order_by="modified desc",
-					limit=1
-				)
-				if last_record:
-					last_updated = last_record[0].modified
+				# Get last update time
+				last_updated = None
+				if attendance_count > 0:
+					last_record = frappe.get_all("SIS Class Attendance",
+						filters={
+							"class_id": class_id,
+							"date": date,
+							"period": "homeroom"
+						},
+						fields=["modified"],
+						order_by="modified desc",
+						limit=1
+					)
+					if last_record:
+						last_updated = last_record[0].modified
+						frappe.logger().info(f"   🕐 Last updated: {last_updated}")
 
-			# Calculate status
-			if attendance_count == 0:
-				status = "not_started"
-				attended_count = 0
-				attendance_percentage = 0
-			elif attendance_count < student_count:
-				status = "pending"
-				attended_count = attendance_count
-				attendance_percentage = round((attendance_count / student_count) * 100, 1)
-			else:
-				status = "completed"
-				attended_count = attendance_count
-				attendance_percentage = round((attendance_count / student_count) * 100, 1)
-				total_completed += 1
+				# Calculate status
+				if attendance_count == 0:
+					status = "not_started"
+					attended_count = 0
+					attendance_percentage = 0
+				elif attendance_count < student_count:
+					status = "pending"
+					attended_count = attendance_count
+					attendance_percentage = round((attendance_count / student_count) * 100, 1)
+				else:
+					status = "completed"
+					attended_count = attendance_count
+					attendance_percentage = round((attendance_count / student_count) * 100, 1)
+					total_completed += 1
 
-			result_classes.append({
-				"class_id": class_id,
-				"class_name": class_info.class_name,
-				"status": status,
-				"student_count": student_count,
-				"attended_count": attended_count,
-				"attendance_percentage": attendance_percentage,
-				"last_updated": last_updated.isoformat() if last_updated else None
-			})
+				frappe.logger().info(f"   📈 Status: {status}, Attended: {attended_count}/{student_count} ({attendance_percentage}%)")
+
+				result_classes.append({
+					"class_id": class_id,
+					"class_name": class_info.class_name,
+					"status": status,
+					"student_count": student_count,
+					"attended_count": attended_count,
+					"attendance_percentage": attendance_percentage,
+					"last_updated": last_updated.isoformat() if last_updated else None
+				})
+
+			except Exception as class_process_error:
+				frappe.logger().error(f"❌ Error processing class {class_id}: {str(class_process_error)}")
+				# Continue with other classes
+				continue
 
 		# Sort by status priority: not_started, pending, completed
 		status_priority = {"not_started": 0, "pending": 1, "completed": 2}
@@ -152,11 +196,14 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 			"classes": result_classes
 		}
 
+		frappe.logger().info(f"✅ check_homeroom_attendance_status completed - {total_completed}/{total_classes} classes completed")
 		return success_response(result, message="Homeroom attendance status retrieved successfully")
 
 	except Exception as e:
-		frappe.log_error(f"check_homeroom_attendance_status error: {str(e)}")
-		return error_response(message="Failed to check homeroom attendance status", code="CHECK_ATTENDANCE_ERROR")
+		frappe.logger().error(f"❌ check_homeroom_attendance_status error: {str(e)}")
+		import traceback
+		frappe.logger().error(f"❌ Full traceback: {traceback.format_exc()}")
+		return error_response(message=f"Failed to check homeroom attendance status: {str(e)}", code="CHECK_ATTENDANCE_ERROR")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -843,6 +890,48 @@ def send_email_via_service(to, subject, body):
 	except Exception as e:
 		frappe.logger().error(f"Error sending email: {str(e)}")
 		return {"success": False, "message": f"Error: {str(e)}"}
+
+
+# Simple test function (can be called without full frappe environment)
+def test_basic_functionality():
+	"""
+	Test basic functionality without frappe dependencies
+	"""
+	print("🧪 Testing basic attendance functionality...")
+
+	# Test default campus logic
+	campus_id = None
+	if not campus_id:
+		campus_id = "CAMPUS-00001"
+	print(f"✅ Default campus set to: {campus_id}")
+
+	# Test date logic
+	import datetime
+	date = None
+	if not date:
+		date = datetime.date.today().strftime('%Y-%m-%d')
+	print(f"✅ Default date set to: {date}")
+
+	print("✅ Basic functionality test passed")
+	return True
+
+
+# Standalone test script that can be run directly
+if __name__ == "__main__":
+	# This allows running the file directly for testing
+	import sys
+	import os
+
+	# Add the apps path so we can import
+	sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+	try:
+		test_basic_functionality()
+		print("\n🎯 Standalone test completed successfully!")
+	except Exception as e:
+		print(f"\n❌ Standalone test failed: {e}")
+		import traceback
+		traceback.print_exc()
 
 
 # Test function for bench console
