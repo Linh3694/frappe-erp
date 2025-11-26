@@ -909,7 +909,7 @@ def send_email_via_service(to, subject, body):
 		# Variables for GraphQL mutation
 		variables = {
 			"input": {
-				"to": [to],
+				"to": to,
 				"subject": subject,
 				"body": body,
 				"contentType": "HTML"
