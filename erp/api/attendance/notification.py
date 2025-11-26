@@ -61,6 +61,10 @@ def publish_attendance_notification(
 		)
 		frappe.logger().info(f"🔍 [Attendance Notif] Debounce result for {employee_code}: should_skip={should_skip}")
 
+		# TEMPORARILY DISABLE DEBOUNCE FOR TESTING
+		should_skip = False
+		frappe.logger().info(f"🔍 [Attendance Notif] DEBOUNCE DISABLED FOR TESTING - forcing send")
+
 		if should_skip:
 			frappe.logger().info(f"⏭️ [Debounce] SKIPPING notification for {employee_code} - sent recently")
 			return
@@ -463,18 +467,27 @@ def should_skip_due_to_debounce(employee_code, current_timestamp, check_in_time=
 	Returns True if notification should be skipped
 	"""
 	try:
-		# Query database for recent notifications to this user
-		system_email = f"{employee_code}@parent.wellspring.edu.vn"
+		# Get guardians for this student first
+		from erp.utils.notification_handler import get_guardians_for_students
+		guardians = get_guardians_for_students([employee_code])
 
+		if not guardians:
+			frappe.logger().info(f"⏱️ [Debounce] {employee_code} - No guardians found, allowing notification")
+			return False
+
+		# Get guardian emails
+		guardian_emails = [g['email'] for g in guardians]
+
+		# Query database for recent notifications to any of these guardians
 		recent_notifications = frappe.db.sql("""
-			SELECT creation, data
+			SELECT creation, data, recipient_user
 			FROM `tabERP Notification`
-			WHERE recipient_user = %s
+			WHERE recipient_user IN %(guardian_emails)s
 			AND notification_type = 'attendance'
 			AND creation >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
 			ORDER BY creation DESC
-			LIMIT 3  -- Check last 3 notifications for context
-		""", (system_email,), as_dict=True)
+			LIMIT 5  -- Check last 5 notifications for context
+		""", {"guardian_emails": guardian_emails}, as_dict=True)
 
 		if recent_notifications:
 			last_notif_time = recent_notifications[0].creation
