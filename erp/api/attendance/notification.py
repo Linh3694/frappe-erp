@@ -50,10 +50,16 @@ def publish_attendance_notification(
 		if isinstance(timestamp, str):
 			timestamp = frappe.utils.get_datetime(timestamp)
 
-		# DEBOUNCE CHECK: Skip if notification sent recently (within 5 minutes)
-		if should_skip_due_to_debounce(employee_code, timestamp):
-			frappe.logger().info(f"⏭️ [Debounce] Skipping notification for {employee_code} - sent recently")
+		# DEBOUNCE CHECK: Skip if notification sent recently (within 2 minutes)
+		frappe.logger().info(f"🔍 [Attendance Notif] Checking debounce for {employee_code}")
+		should_skip = should_skip_due_to_debounce(employee_code, timestamp)
+		frappe.logger().info(f"🔍 [Attendance Notif] Debounce result for {employee_code}: should_skip={should_skip}")
+
+		if should_skip:
+			frappe.logger().info(f"⏭️ [Debounce] SKIPPING notification for {employee_code} - sent recently")
 			return
+
+		frappe.logger().info(f"✅ [Attendance Notif] ALLOWING notification for {employee_code}")
 
 		# Check if this is a student or staff
 		is_student = check_if_student(employee_code)
@@ -422,7 +428,7 @@ def format_datetime_vn(dt):
 def should_skip_due_to_debounce(employee_code, current_timestamp):
 	"""
 	Check if notification should be skipped due to debounce
-	Returns True if notification was sent within debounce window (2 minutes)
+	Returns True if notification was sent within debounce window (5 minutes)
 	"""
 	try:
 		cache_key = f"attendance_notif:{employee_code}"
@@ -447,9 +453,9 @@ def should_skip_due_to_debounce(employee_code, current_timestamp):
 
 		frappe.logger().info(f"⏱️ [Debounce] {employee_code} - current: {current_timestamp}, last: {last_notif_timestamp}, diff: {time_diff:.2f} min")
 
-		# Skip if within debounce window (2 minutes)
-		if time_diff < 2:
-			frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - last notif {time_diff:.2f} min ago (< 2 min)")
+		# Skip if within debounce window (5 minutes)
+		if time_diff < 5:
+			frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - last notif {time_diff:.2f} min ago (< 5 min)")
 			return True
 
 		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - last notif {time_diff:.2f} min ago (>= 2 min)")
@@ -463,7 +469,7 @@ def should_skip_due_to_debounce(employee_code, current_timestamp):
 def update_debounce_cache(employee_code, timestamp):
 	"""
 	Update cache with timestamp of successful notification
-	Cache expires after 2 minutes (debounce window)
+	Cache expires after 5 minutes (debounce window)
 	"""
 	try:
 		cache_key = f"attendance_notif:{employee_code}"
@@ -474,10 +480,10 @@ def update_debounce_cache(employee_code, timestamp):
 		else:
 			cache_value = str(timestamp)
 
-		# Cache for 2 minutes (120 seconds) - debounce window
-		frappe.cache().set_value(cache_key, cache_value, expires_in_sec=120)
+		# Cache for 5 minutes (300 seconds) - debounce window
+		frappe.cache().set_value(cache_key, cache_value, expires_in_sec=300)
 
-		frappe.logger().info(f"📝 [Debounce] SET cache for {employee_code}: {cache_value} (expires in 2 min)")
+		frappe.logger().info(f"📝 [Debounce] SET cache for {employee_code}: {cache_value} (expires in 5 min)")
 
 	except Exception as e:
 		frappe.logger().error(f"❌ [Debounce] Error updating cache for {employee_code}: {str(e)}")
