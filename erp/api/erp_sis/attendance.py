@@ -867,7 +867,8 @@ def test_homeroom_report_console(date=None):
 			return status_result
 
 		attendance_data = status_result['data']
-		print("✅ Attendance status retrieved successfully"		print(f"   - Total classes: {attendance_data.get('total_classes', 0)}")
+		print("✅ Attendance status retrieved successfully")
+		print(f"   - Total classes: {attendance_data.get('total_classes', 0)}")
 		print(f"   - Completed: {attendance_data.get('completed_classes', 0)}")
 		print(f"   - Pending: {attendance_data.get('pending_classes', 0)}")
 		print(".1f")
