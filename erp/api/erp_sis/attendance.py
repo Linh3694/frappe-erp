@@ -705,15 +705,19 @@ def generate_homeroom_report_email(attendance_data):
 		else:
 			stage_data[stage_name]['pending_classes'].append(class_title)
 
+	# Format current time for email
+	from datetime import datetime
+	current_time = datetime.now().strftime('%d/%m/%Y %H:%M')
+
 	# Generate HTML content
 	html_content = f"""
 	<div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
 		<h1 style="color: #2e7d32; text-align: center; border-bottom: 3px solid #2e7d32; padding-bottom: 10px;">
-			📊 Báo cáo điểm danh chủ nhiệm - {date}
+			Báo cáo điểm danh chủ nhiệm ngày {date}
 		</h1>
 
 		<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-			<h2 style="color: #1976d2; margin-top: 0;">Tổng quan</h2>
+			<h2 style="color: #002855; margin-top: 0;">Tổng quan</h2>
 			<p><strong>Tổng số lớp:</strong> {attendance_data.get('total_classes', 0)} lớp</p>
 			<p><strong>Đã hoàn thành:</strong> {attendance_data.get('completed_classes', 0)} lớp</p>
 			<p><strong>Chưa hoàn thành:</strong> {attendance_data.get('pending_classes', 0)} lớp</p>
@@ -776,7 +780,7 @@ def generate_homeroom_report_email(attendance_data):
 		<div style="text-align: center; color: #666; font-size: 14px;">
 			<p><strong>Hệ thống quản lý trường học</strong></p>
 			<p>Trường PTLC Song Ngữ Quốc tế Wellspring</p>
-			<p>Email: it@wellspring.edu.vn | Thời gian tạo: {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+			<p>Email: it@wellspring.edu.vn | Thời gian tạo: {current_time}</p>
 		</div>
 	</div>
 	"""
