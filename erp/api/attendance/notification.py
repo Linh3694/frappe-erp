@@ -309,41 +309,38 @@ def send_staff_attendance_notification(
 def get_student_guardians(student_code):
 	"""
 	Get guardians for a student from CRM Family Relationship
-	
+
 	Returns:
 		List of dicts: [{"name": "Guardian Name", "email": "guardian@email.com", "relation": "Father"}]
 	"""
 	try:
-		# Query CRM Family Relationship
-		relationships = frappe.get_all(
-			"CRM Family Relationship",
-			filters={
-				"student_code": student_code,
-				"is_primary_guardian": 1
-			},
-			fields=["guardian_name", "guardian_email", "relation"]
-		)
-		
-		if not relationships:
-			# Fallback: get all guardians if no primary guardian
-			relationships = frappe.get_all(
-				"CRM Family Relationship",
-				filters={"student_code": student_code},
-				fields=["guardian_name", "guardian_email", "relation"]
-			)
-		
+		# Query CRM Family Relationship với đúng field names
+		relationships = frappe.db.sql("""
+			SELECT
+				cfr.guardian,
+				cfr.relationship_type,
+				cfr.key_person,
+				cg.name as guardian_name,
+				cg.email as guardian_email
+			FROM `tabCRM Family Relationship` cfr
+			LEFT JOIN `tabCRM Guardian` cg ON cfr.guardian = cg.name
+			WHERE cfr.student = %s
+			ORDER BY cfr.key_person DESC, cfr.creation ASC
+		""", (student_code,), as_dict=True)
+
 		# Format results
 		guardians = []
 		for rel in relationships:
 			if rel.guardian_email:
 				guardians.append({
-					"name": rel.guardian_name,
+					"name": rel.guardian_name or rel.guardian,
 					"email": rel.guardian_email,
-					"relation": rel.relation
+					"relation": rel.relationship_type,
+					"is_primary": rel.key_person
 				})
-		
+
 		return guardians
-		
+
 	except Exception as e:
 		frappe.logger().error(f"Error getting guardians for {student_code}: {str(e)}")
 		return []
@@ -414,7 +411,7 @@ def format_datetime_vn(dt):
 def should_skip_due_to_debounce(employee_code, current_timestamp):
 	"""
 	Check if notification should be skipped due to debounce
-	Returns True if notification was sent within debounce window (5 minutes)
+	Returns True if notification was sent within debounce window (2 minutes)
 	"""
 	try:
 		cache_key = f"attendance_notif:{employee_code}"
@@ -422,7 +419,10 @@ def should_skip_due_to_debounce(employee_code, current_timestamp):
 		# Get last notification timestamp from cache
 		last_notif_timestamp = frappe.cache().get(cache_key)
 
+		frappe.logger().info(f"🔍 [Debounce] Checking {employee_code} - cache_key: {cache_key}, cached_value: {last_notif_timestamp}")
+
 		if not last_notif_timestamp:
+			frappe.logger().info(f"✅ [Debounce] No previous notification for {employee_code}, allowing send")
 			return False  # No previous notification, allow sending
 
 		# Ensure both timestamps are datetime objects
@@ -434,22 +434,25 @@ def should_skip_due_to_debounce(employee_code, current_timestamp):
 		# Calculate time difference in minutes
 		time_diff = (current_timestamp - last_notif_timestamp).total_seconds() / 60
 
-		# Skip if within debounce window (5 minutes)
-		if time_diff < 5:
-			frappe.logger().info(f"⏭️ [Debounce] Skipping {employee_code} - last notif {time_diff:.1f} min ago")
+		frappe.logger().info(f"⏱️ [Debounce] {employee_code} - current: {current_timestamp}, last: {last_notif_timestamp}, diff: {time_diff:.2f} min")
+
+		# Skip if within debounce window (2 minutes)
+		if time_diff < 2:
+			frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - last notif {time_diff:.2f} min ago (< 2 min)")
 			return True
 
+		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - last notif {time_diff:.2f} min ago (>= 2 min)")
 		return False
 
 	except Exception as e:
-		frappe.logger().warning(f"⚠️ [Debounce] Error checking debounce for {employee_code}: {str(e)}")
+		frappe.logger().error(f"❌ [Debounce] Error checking debounce for {employee_code}: {str(e)}")
 		return False  # On error, allow notification to be sent
 
 
 def update_debounce_cache(employee_code, timestamp):
 	"""
 	Update cache with timestamp of successful notification
-	Cache expires after 6 minutes (slightly longer than debounce window)
+	Cache expires after 2 minutes (debounce window)
 	"""
 	try:
 		cache_key = f"attendance_notif:{employee_code}"
@@ -460,13 +463,13 @@ def update_debounce_cache(employee_code, timestamp):
 		else:
 			cache_value = str(timestamp)
 
-		# Cache for 6 minutes (300 seconds) - slightly longer than 5-minute debounce
-		frappe.cache().set(cache_key, cache_value, expires_in_sec=360)
+		# Cache for 2 minutes (120 seconds) - debounce window
+		frappe.cache().set(cache_key, cache_value, expires_in_sec=120)
 
-		frappe.logger().debug(f"📝 [Debounce] Updated cache for {employee_code}: {cache_value}")
+		frappe.logger().info(f"📝 [Debounce] SET cache for {employee_code}: {cache_value} (expires in 2 min)")
 
 	except Exception as e:
-		frappe.logger().warning(f"⚠️ [Debounce] Error updating cache for {employee_code}: {str(e)}")
+		frappe.logger().error(f"❌ [Debounce] Error updating cache for {employee_code}: {str(e)}")
 
 
 def clear_attendance_notification_cache(employee_code=None):
