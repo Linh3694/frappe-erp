@@ -427,7 +427,7 @@ def test_push_notification():
     Test push notification cho user hiện tại
     """
     user = frappe.session.user
-    
+
     result = send_push_notification(
         user_email=user,
         title="🎉 Test Notification",
@@ -440,8 +440,77 @@ def test_push_notification():
         },
         tag="test-notification"
     )
-    
+
     return result
+
+@frappe.whitelist(allow_guest=False)
+def test_push_subscription():
+    """
+    Test push subscription validity without showing notification
+    Returns: {"success": true/false, "message": "..."}
+    """
+    user = frappe.session.user
+
+    try:
+        # Get subscription data from request
+        subscription_json = frappe.form_dict.get('subscription_json')
+        if not subscription_json:
+            return {"success": False, "message": "No subscription data provided"}
+
+        # Parse subscription
+        subscription = json.loads(subscription_json) if isinstance(subscription_json, str) else subscription_json
+
+        # Test with minimal payload (no actual notification sent)
+        response = webpush(
+            subscription_info=subscription,
+            data=json.dumps({
+                "test": True,
+                "timestamp": frappe.utils.now_datetime().isoformat()
+            }),
+            vapid_private_key=frappe.conf.get("vapid_private_key"),
+            vapid_claims={
+                "sub": f"mailto:{frappe.conf.get('vapid_claims_email', 'admin@example.com')}"
+            }
+        )
+
+        # If no exception thrown, subscription is valid
+        return {
+            "success": True,
+            "message": "Push subscription is valid",
+            "log": f"Subscription test successful for {user}"
+        }
+
+    except WebPushException as e:
+        error_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
+
+        if error_code == 410:
+            return {
+                "success": False,
+                "message": "Push subscription has expired",
+                "expired": True,
+                "log": f"Subscription expired for {user}"
+            }
+        elif error_code == 400:
+            return {
+                "success": False,
+                "message": "Push subscription is invalid",
+                "invalid": True,
+                "log": f"Subscription invalid for {user}"
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Push subscription test failed (HTTP {error_code})",
+                "error_code": error_code,
+                "log": f"Subscription test failed for {user}: {str(e)}"
+            }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Error testing push subscription: {str(e)}",
+            "log": f"Subscription test error for {user}: {str(e)}"
+        }
 
 
 # Hook function để gửi notification khi có sự kiện
