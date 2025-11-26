@@ -88,7 +88,7 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 		try:
 			classes = frappe.get_all("SIS Class",
 				filters=class_filters,
-				fields=["name", "class_name", "campus_id"]
+				fields=["name", "title", "campus_id"]
 			)
 			frappe.logger().info(f"✅ Found {len(classes)} classes")
 		except Exception as class_error:
@@ -112,7 +112,7 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 
 		for class_info in classes:
 			class_id = class_info.name
-			frappe.logger().info(f"📚 Processing class: {class_id} ({class_info.class_name})")
+			frappe.logger().info(f"📚 Processing class: {class_id} ({class_info.title})")
 
 			try:
 				# Check if homeroom attendance exists for this class/date
@@ -165,7 +165,7 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 
 				result_classes.append({
 					"class_id": class_id,
-					"class_name": class_info.class_name,
+					"class_name": class_info.title,
 					"status": status,
 					"student_count": student_count,
 					"attended_count": attended_count,
@@ -180,7 +180,7 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 
 		# Sort by status priority: not_started, pending, completed
 		status_priority = {"not_started": 0, "pending": 1, "completed": 2}
-		result_classes.sort(key=lambda x: (status_priority.get(x["status"], 3), x["class_name"]))
+		result_classes.sort(key=lambda x: (status_priority.get(x["status"], 3), x["class_name"] or ""))
 
 		total_classes = len(classes)
 		pending_classes = total_classes - total_completed
@@ -684,7 +684,7 @@ def generate_homeroom_report_email(attendance_data):
 		if class_info['status'] == 'completed':
 			stage_data[stage_name]['completed'] += 1
 		else:
-			stage_data[stage_name]['pending_classes'].append(class_info['class_name'])
+			stage_data[stage_name]['pending_classes'].append(class_info['title'])
 
 	# Generate HTML content
 	html_content = f"""
@@ -982,7 +982,7 @@ def test_homeroom_report_console(date=None):
 			if class_info['status'] == 'completed':
 				stage_summary[stage_name]['completed'] += 1
 			else:
-				stage_summary[stage_name]['classes'].append(class_info['class_name'])
+				stage_summary[stage_name]['classes'].append(class_info['title'])
 
 		for stage_name, stage_info in stage_summary.items():
 			completion_rate = round((stage_info['completed'] / stage_info['total']) * 100, 1) if stage_info['total'] > 0 else 0
