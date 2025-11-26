@@ -428,7 +428,7 @@ def should_skip_due_to_debounce(employee_code, current_timestamp):
 		cache_key = f"attendance_notif:{employee_code}"
 
 		# Get last notification timestamp from cache
-		last_notif_timestamp = frappe.cache().get(cache_key)
+		last_notif_timestamp = frappe.cache().get_value(cache_key)
 
 		frappe.logger().info(f"🔍 [Debounce] Checking {employee_code} - cache_key: {cache_key}, cached_value: {last_notif_timestamp}")
 
