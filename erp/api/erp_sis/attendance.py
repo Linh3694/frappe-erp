@@ -485,6 +485,41 @@ def save_class_attendance(items=None, overwrite=None):
 
 
 @frappe.whitelist(allow_guest=False)
+def preview_homeroom_attendance_report(date=None):
+	"""
+	Preview homeroom attendance report content without sending email
+	Returns the email content and data for testing
+	"""
+	try:
+		if not date:
+			date = frappe.utils.nowdate()
+
+		# Get homeroom attendance status
+		status_result = check_homeroom_attendance_status(date=date)
+		if not status_result.get('success'):
+			return error_response("Failed to check attendance status", code="CHECK_FAILED")
+
+		attendance_data = status_result['data']
+
+		# Generate email content
+		email_content = generate_homeroom_report_email(attendance_data)
+
+		# Return preview data
+		return success_response({
+			"date": date,
+			"attendance_data": attendance_data,
+			"email_subject": f"[WSHN] Báo cáo điểm danh chủ nhiệm - {date}",
+			"email_recipient": "linh.nguyenhai@wellspring.edu.vn",
+			"email_content_html": email_content,
+			"email_content_preview": email_content.replace('<br>', '\n').replace('</p>', '\n\n').replace('<li>', '• ').replace('</li>', '\n')[:500] + "..."
+		}, "Preview generated successfully")
+
+	except Exception as e:
+		frappe.log_error(f"preview_homeroom_attendance_report error: {str(e)}")
+		return error_response("Failed to generate preview", code="PREVIEW_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
 def test_email_service_connection():
 	"""
 	Test connection to email service
@@ -808,6 +843,132 @@ def send_email_via_service(to, subject, body):
 	except Exception as e:
 		frappe.logger().error(f"Error sending email: {str(e)}")
 		return {"success": False, "message": f"Error: {str(e)}"}
+
+
+# Test function for bench console
+def test_homeroom_report_console(date=None):
+	"""
+	Function to test homeroom report in bench console
+	Run: bench execute erp.api.erp_sis.attendance.test_homeroom_report_console --kwargs '{"date": "2024-01-15"}'
+	"""
+	try:
+		if not date:
+			date = frappe.utils.nowdate()
+
+		print(f"🏫 Testing homeroom attendance report for date: {date}")
+		print("=" * 80)
+
+		# Step 1: Check attendance status
+		print("📊 Step 1: Getting attendance status...")
+		status_result = check_homeroom_attendance_status(date=date)
+
+		if not status_result.get('success'):
+			print(f"❌ Failed to check attendance status: {status_result.get('message')}")
+			return status_result
+
+		attendance_data = status_result['data']
+		print("✅ Attendance status retrieved successfully"		print(f"   - Total classes: {attendance_data.get('total_classes', 0)}")
+		print(f"   - Completed: {attendance_data.get('completed_classes', 0)}")
+		print(f"   - Pending: {attendance_data.get('pending_classes', 0)}")
+		print(".1f")
+		print()
+
+		# Step 2: Show class details
+		print("📋 Step 2: Class details by educational stage:")
+		stage_summary = {}
+
+		for class_info in attendance_data.get('classes', []):
+			education_stage = get_education_stage_from_class(class_info['class_id'])
+			stage_name = get_stage_display_name(education_stage)
+
+			if stage_name not in stage_summary:
+				stage_summary[stage_name] = {
+					'total': 0,
+					'completed': 0,
+					'classes': []
+				}
+
+			stage_summary[stage_name]['total'] += 1
+			if class_info['status'] == 'completed':
+				stage_summary[stage_name]['completed'] += 1
+			else:
+				stage_summary[stage_name]['classes'].append(class_info['class_name'])
+
+		for stage_name, stage_info in stage_summary.items():
+			completion_rate = round((stage_info['completed'] / stage_info['total']) * 100, 1) if stage_info['total'] > 0 else 0
+			print(f"   🏫 {stage_name}:")
+			print(f"      - Tổng lớp: {stage_info['total']}")
+			print(f"      - Đã hoàn thành: {stage_info['completed']}")
+			print(".1f")
+			if stage_info['classes']:
+				print(f"      - Chưa hoàn thành: {', '.join(stage_info['classes'][:5])}{'...' if len(stage_info['classes']) > 5 else ''}")
+			print()
+
+		# Step 3: Generate email preview
+		print("📧 Step 3: Generating email content...")
+		email_content = generate_homeroom_report_email(attendance_data)
+		print("✅ Email content generated successfully")
+		print(f"   - Subject: [WSHN] Báo cáo điểm danh chủ nhiệm - {date}")
+		print(f"   - Recipient: linh.nguyenhai@wellspring.edu.vn")
+		print(f"   - Content length: {len(email_content)} characters")
+		print()
+
+		# Step 4: Show email preview (first 1000 chars)
+		print("📄 Step 4: Email preview (first 1000 characters):")
+		print("-" * 80)
+		# Remove HTML tags for console preview
+		import re
+		clean_preview = re.sub(r'<[^>]+>', '', email_content)
+		clean_preview = re.sub(r'\s+', ' ', clean_preview).strip()
+		print(clean_preview[:1000] + "..." if len(clean_preview) > 1000 else clean_preview)
+		print("-" * 80)
+		print()
+
+		# Step 5: Test email service connection (optional)
+		print("🔗 Step 5: Testing email service connection...")
+		try:
+			email_service_url = frappe.conf.get('email_service_url') or 'http://172.16.20.113:5030'
+			print(f"   - Email service URL: {email_service_url}")
+
+			import requests
+			graphql_endpoint = f"{email_service_url}/graphql"
+			graphql_query = """query { health }"""
+			payload = {"query": graphql_query}
+
+			response = requests.post(graphql_endpoint, json=payload, headers={'Content-Type': 'application/json'}, timeout=5)
+
+			if response.status_code == 200:
+				result = response.json()
+				if result.get('data', {}).get('health'):
+					print("   ✅ Email service connection: OK")
+					print(f"   ✅ Health check: {result['data']['health']}")
+				else:
+					print("   ⚠️ Email service responded but health check failed")
+			else:
+				print(f"   ❌ Email service HTTP error: {response.status_code}")
+
+		except Exception as e:
+			print(f"   ❌ Email service connection failed: {str(e)}")
+
+		print()
+		print("=" * 80)
+		print("🎯 Test completed successfully!")
+		print()
+		print("💡 To send the actual email, run:")
+		print(f"   frappe.call('erp.api.erp_sis.attendance.send_homeroom_attendance_report', {{'date': '{date}'}})")
+
+		return success_response({
+			"test_date": date,
+			"attendance_data": attendance_data,
+			"email_content_length": len(email_content),
+			"email_service_url": frappe.conf.get('email_service_url') or 'http://172.16.20.113:5030'
+		}, "Test completed successfully")
+
+	except Exception as e:
+		print(f"❌ Test failed with error: {str(e)}")
+		import traceback
+		traceback.print_exc()
+		return error_response(f"Test failed: {str(e)}", code="TEST_ERROR")
 
 
 # Scheduled job for daily homeroom attendance report
