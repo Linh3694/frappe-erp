@@ -327,7 +327,8 @@ def get_student_guardians(student_code):
 				cfr.relationship_type,
 				cfr.key_person,
 				cg.guardian_name,
-				cg.email as guardian_email
+				cg.email as guardian_email,
+				cg.guardian_id
 			FROM `tabCRM Family Relationship` cfr
 			LEFT JOIN `tabCRM Guardian` cg ON cfr.guardian = cg.name
 			WHERE cfr.student = %s
@@ -338,9 +339,13 @@ def get_student_guardians(student_code):
 		guardians = []
 		for rel in relationships:
 			if rel.guardian_email:
+				# Use system email format for push notifications (guardian_id@parent.wellspring.edu.vn)
+				system_email = f"{rel.guardian_id}@parent.wellspring.edu.vn" if hasattr(rel, 'guardian_id') and rel.guardian_id else rel.guardian_email
+
 				guardians.append({
 					"name": rel.guardian_name or rel.guardian,
-					"email": rel.guardian_email,
+					"email": system_email,  # Use system email for push notifications
+					"personal_email": rel.guardian_email,  # Keep personal email for reference
 					"relation": rel.relationship_type,
 					"is_primary": rel.key_person
 				})
