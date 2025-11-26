@@ -552,11 +552,20 @@ def preview_homeroom_attendance_report(date=None):
 		# Generate email content
 		email_content = generate_homeroom_report_email(attendance_data)
 
+		# Format date for subject (DD/MM/YYYY)
+		try:
+			from datetime import datetime
+			date_obj = datetime.strptime(date, '%Y-%m-%d')
+			formatted_date = date_obj.strftime('%d/%m/%Y')
+		except:
+			formatted_date = date
+
 		# Return preview data
 		return success_response({
 			"date": date,
+			"formatted_date": formatted_date,
 			"attendance_data": attendance_data,
-			"email_subject": f"[WSHN] Báo cáo điểm danh chủ nhiệm - {date}",
+			"email_subject": f"[WSHN] Báo cáo điểm danh chủ nhiệm ngày {formatted_date}",
 			"email_recipient": "linh.nguyenhai@wellspring.edu.vn",
 			"email_content_html": email_content,
 			"email_content_preview": email_content.replace('<br>', '\n').replace('</p>', '\n\n').replace('<li>', '• ').replace('</li>', '\n')[:500] + "..."
@@ -639,10 +648,18 @@ def send_homeroom_attendance_report(date=None):
 		# Generate email content
 		email_content = generate_homeroom_report_email(attendance_data)
 
+		# Format date for subject (DD/MM/YYYY)
+		try:
+			from datetime import datetime
+			date_obj = datetime.strptime(date, '%Y-%m-%d')
+			formatted_date = date_obj.strftime('%d/%m/%Y')
+		except:
+			formatted_date = date
+
 		# Send email via email service
 		email_result = send_email_via_service(
 			to="linh.nguyenhai@wellspring.edu.vn",
-			subject=f"[WSHN] Báo cáo điểm danh chủ nhiệm - {date}",
+			subject=f"[WSHN] Báo cáo điểm danh chủ nhiệm ngày {formatted_date}",
 			body=email_content
 		)
 
@@ -729,10 +746,9 @@ def generate_homeroom_report_email(attendance_data):
 		"""
 
 		if stage_info['pending_classes']:
-			html_content += "<ul style='margin: 0; padding-left: 20px;'>"
-			for class_name in stage_info['pending_classes']:
-				html_content += f"<li>{class_name}</li>"
-			html_content += "</ul>"
+			# Display all classes, break into multiple lines if too many
+			classes_text = ", ".join(stage_info['pending_classes'])
+			html_content += f"<p style='margin: 0; line-height: 1.4; word-wrap: break-word;'>{classes_text}</p>"
 		else:
 			html_content += "<p style='margin: 0; color: #4caf50; font-weight: bold;'>✅ Tất cả lớp đã hoàn thành</p>"
 
@@ -786,16 +802,26 @@ def get_education_stage_from_class(class_id):
 
 
 def get_stage_display_name(stage_id):
-	"""Convert education stage ID to display name"""
+	"""Convert education stage ID to display name using title_vn"""
 	try:
 		if not stage_id:
 			return "Chưa phân loại"
 
-		stage_name = frappe.get_value("SIS Education Stage", stage_id, "stage_name")
+		# Try to get title_vn first, then fallback to stage_name
+		stage_info = frappe.get_value("SIS Education Stage", stage_id, ["title_vn", "stage_name"], as_dict=True)
+
+		if not stage_info:
+			return stage_id
+
+		# Use title_vn if available, otherwise use stage_name with mapping
+		if stage_info.get('title_vn'):
+			return stage_info['title_vn']
+
+		stage_name = stage_info.get('stage_name')
 		if not stage_name:
 			return stage_id
 
-		# Map to Vietnamese names
+		# Map to Vietnamese names as fallback
 		name_mapping = {
 			"Elementary": "Trường Tiểu học",
 			"Middle School": "Trường Trung học Cơ sở",
@@ -994,14 +1020,42 @@ def test_homeroom_report_console(date=None):
 			print(f"      - Đã hoàn thành: {stage_info['completed']}")
 			print(".1f")
 			if stage_info['classes']:
-				print(f"      - Chưa hoàn thành: {', '.join(stage_info['classes'][:5])}{'...' if len(stage_info['classes']) > 5 else ''}")
+				classes_text = ", ".join(stage_info['classes'])
+				# Break into multiple lines if too long
+				if len(classes_text) > 100:
+					# Split into chunks of ~80 chars
+					words = classes_text.split(", ")
+					lines = []
+					current_line = ""
+					for word in words:
+						if len(current_line + word) > 80:
+							lines.append(current_line.rstrip(", "))
+							current_line = word + ", "
+						else:
+							current_line += word + ", "
+					if current_line:
+						lines.append(current_line.rstrip(", "))
+
+					for i, line in enumerate(lines):
+						prefix = "      - Chưa hoàn thành: " if i == 0 else "                        "
+						print(f"{prefix}{line}")
+				else:
+					print(f"      - Chưa hoàn thành: {classes_text}")
 			print()
 
 		# Step 3: Generate email preview
 		print("📧 Step 3: Generating email content...")
 		email_content = generate_homeroom_report_email(attendance_data)
 		print("✅ Email content generated successfully")
-		print(f"   - Subject: [WSHN] Báo cáo điểm danh chủ nhiệm - {date}")
+		# Format date for subject (DD/MM/YYYY)
+		try:
+			from datetime import datetime
+			date_obj = datetime.strptime(date, '%Y-%m-%d')
+			formatted_date = date_obj.strftime('%d/%m/%Y')
+		except:
+			formatted_date = date
+
+		print(f"   - Subject: [WSHN] Báo cáo điểm danh chủ nhiệm ngày {formatted_date}")
 		print(f"   - Recipient: linh.nguyenhai@wellspring.edu.vn")
 		print(f"   - Content length: {len(email_content)} characters")
 		print()
