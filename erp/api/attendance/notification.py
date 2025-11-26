@@ -50,9 +50,15 @@ def publish_attendance_notification(
 		if isinstance(timestamp, str):
 			timestamp = frappe.utils.get_datetime(timestamp)
 
-		# DEBOUNCE CHECK: Skip if notification sent recently (within 2 minutes)
+		# DEBOUNCE CHECK: Skip if notification sent recently with enhanced context checking
 		frappe.logger().info(f"🔍 [Attendance Notif] Checking debounce for {employee_code}")
-		should_skip = should_skip_due_to_debounce(employee_code, timestamp)
+		should_skip = should_skip_due_to_debounce(
+			employee_code,
+			timestamp,
+			check_in_time=check_in_time,
+			check_out_time=check_out_time,
+			total_check_ins=total_check_ins
+		)
 		frappe.logger().info(f"🔍 [Attendance Notif] Debounce result for {employee_code}: should_skip={should_skip}")
 
 		if should_skip:
@@ -393,18 +399,43 @@ def get_staff_email(employee_code):
 def determine_checkin_or_checkout(timestamp, check_in_time, check_out_time):
 	"""
 	Determine if this is a check-in or check-out event
-	Based on time of day and proximity to check_in_time vs check_out_time
+	More intelligent logic based on existing attendance data and time patterns
 	"""
 	if isinstance(timestamp, str):
 		timestamp = frappe.utils.get_datetime(timestamp)
-	
-	hour = timestamp.hour
-	
-	# Simple heuristic: morning hours = check-in, afternoon/evening = check-out
-	if hour < 12:
+
+	# Convert string times to datetime if needed
+	if isinstance(check_in_time, str):
+		check_in_time = frappe.utils.get_datetime(check_in_time)
+	if isinstance(check_out_time, str):
+		check_out_time = frappe.utils.get_datetime(check_out_time)
+
+	# If no existing check-in time, this must be a check-in
+	if not check_in_time:
 		return True  # Check-in
-	else:
-		return False  # Check-out
+
+	# If check-in and check-out are the same, this could be either
+	# Use time-based heuristic for school context
+	if check_in_time == check_out_time:
+		hour = timestamp.hour
+		# School hours: morning = check-in, afternoon = check-out
+		if 6 <= hour < 13:  # 6 AM - 1 PM = likely check-in
+			return True
+		else:  # Afternoon/evening = likely check-out
+			return False
+
+	# If we have both check-in and check-out times, compare proximity
+	if check_in_time and check_out_time and check_in_time != check_out_time:
+		time_diff_to_checkin = abs((timestamp - check_in_time).total_seconds())
+		time_diff_to_checkout = abs((timestamp - check_out_time).total_seconds())
+
+		# If closer to check-in time, likely a duplicate check-in
+		# If closer to check-out time, likely a check-out
+		return time_diff_to_checkin <= time_diff_to_checkout
+
+	# Default fallback: use school time patterns
+	hour = timestamp.hour
+	return hour < 13  # Before 1 PM = check-in, after = check-out
 
 
 def format_datetime_vn(dt):
@@ -425,24 +456,24 @@ def format_datetime_vn(dt):
 	return vn_time.strftime('%H:%M, %d/%m/%Y')
 
 
-def should_skip_due_to_debounce(employee_code, current_timestamp):
+def should_skip_due_to_debounce(employee_code, current_timestamp, check_in_time=None, check_out_time=None, total_check_ins=None):
 	"""
 	Check if notification should be skipped due to debounce
-	Returns True if notification was sent within debounce window (5 minutes)
-	Uses database instead of cache for persistence across requests
+	Enhanced logic that considers attendance context, not just time window
+	Returns True if notification should be skipped
 	"""
 	try:
 		# Query database for recent notifications to this user
 		system_email = f"{employee_code}@parent.wellspring.edu.vn"
 
 		recent_notifications = frappe.db.sql("""
-			SELECT creation
+			SELECT creation, data
 			FROM `tabERP Notification`
 			WHERE recipient_user = %s
 			AND notification_type = 'attendance'
 			AND creation >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
 			ORDER BY creation DESC
-			LIMIT 1
+			LIMIT 3  -- Check last 3 notifications for context
 		""", (system_email,), as_dict=True)
 
 		if recent_notifications:
@@ -451,11 +482,35 @@ def should_skip_due_to_debounce(employee_code, current_timestamp):
 
 			frappe.logger().info(f"⏱️ [Debounce] {employee_code} - current: {current_timestamp}, last: {last_notif_time}, diff: {time_diff:.2f} min")
 
-			if time_diff < 5:
-				frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - last notif {time_diff:.2f} min ago (< 5 min)")
+			# If last notification was very recent (< 1 minute), always skip
+			if time_diff < 1:
+				frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - too recent ({time_diff:.2f} min < 1 min)")
 				return True
 
-		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - no recent notification or outside window")
+			# If within 5 minutes, check if attendance state has actually changed
+			if time_diff < 5:
+				# Parse the last notification's data to understand previous state
+				try:
+					last_data = json.loads(recent_notifications[0].data) if isinstance(recent_notifications[0].data, str) else recent_notifications[0].data
+
+					last_check_ins = last_data.get('totalCheckIns', 0)
+					last_is_checkin = last_data.get('isCheckIn', True)
+
+					# If total check-ins haven't changed and it's the same type of event, skip
+					if (total_check_ins and last_check_ins == total_check_ins and
+						determine_checkin_or_checkout(current_timestamp, check_in_time, check_out_time) == last_is_checkin):
+						frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - same attendance state (check_ins: {total_check_ins}, type: {'check-in' if last_is_checkin else 'check-out'})")
+						return True
+
+				except Exception as parse_error:
+					frappe.logger().warning(f"⚠️ [Debounce] Could not parse last notification data: {str(parse_error)}")
+					# If we can't parse the data, be conservative and skip
+					return True
+
+			frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - significant attendance change")
+			return False
+
+		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - no recent notification")
 		return False
 
 	except Exception as e:

@@ -16,26 +16,46 @@ class ERPTimeAttendance(Document):
 	
 	def update_attendance_time(self, timestamp, device_id=None, device_name=None, original_timestamp=None):
 		"""
-		Update attendance time - recalculate from ALL raw_data for accuracy
-		This matches the logic from MongoDB microservice
+		Update attendance time with deduplication for rapid successive events
+		This prevents duplicate records when student stands in front of camera for extended time
 		"""
 		check_time = frappe.utils.get_datetime(timestamp)
 		device_id_to_use = device_id or self.device_id
 		device_name_to_use = device_name or self.device_name
-		
+
 		# Parse raw_data
 		raw_data = json.loads(self.raw_data or "[]")
-		
-		# Add to raw data (no duplicate check - we want all records)
-		# Use original timestamp from device to preserve accuracy
-		timestamp_to_store = original_timestamp if original_timestamp else check_time.isoformat()
-		raw_data.append({
-			'timestamp': timestamp_to_store,
-			'device_id': device_id_to_use,
-			'device_name': device_name_to_use,
-			'recorded_at': frappe.utils.now()
-		})
-		
+
+		# Check for duplicate events within time threshold (30 seconds)
+		# This prevents multiple records when student stands in front of camera
+		DUP_THRESHOLD_SECONDS = 30
+
+		# Check if this timestamp is too close to existing records
+		is_duplicate = False
+		for item in raw_data:
+			ts_str = item['timestamp']
+			existing_time = frappe.utils.get_datetime(ts_str)
+
+			# Calculate time difference
+			time_diff = abs((check_time - existing_time).total_seconds())
+			if time_diff < DUP_THRESHOLD_SECONDS:
+				is_duplicate = True
+				break
+
+		if is_duplicate:
+			# Skip adding duplicate record, but still recalculate times from existing data
+			pass
+		else:
+			# Add to raw data (no duplicate check - we want all legitimate records)
+			# Use original timestamp from device to preserve accuracy
+			timestamp_to_store = original_timestamp if original_timestamp else check_time.isoformat()
+			raw_data.append({
+				'timestamp': timestamp_to_store,
+				'device_id': device_id_to_use,
+				'device_name': device_name_to_use,
+				'recorded_at': frappe.utils.now()
+			})
+
 		# RECALCULATE check-in and check-out from ALL raw_data
 		# This ensures accuracy even when records arrive out of order
 		if len(raw_data) == 1:
@@ -67,16 +87,16 @@ class ERPTimeAttendance(Document):
 			self.check_in_time = all_times[0]  # Earliest = check-in
 			self.check_out_time = all_times[-1]  # Latest = check-out
 			self.total_check_ins = len(raw_data)
-		
+
 		# Update device info if provided
 		if device_id_to_use and not self.device_id:
 			self.device_id = device_id_to_use
 		if device_name_to_use and not self.device_name:
 			self.device_name = device_name_to_use
-		
+
 		# Save raw data
 		self.raw_data = json.dumps(raw_data)
-		
+
 		return self
 	
 	def recalculate_times(self):

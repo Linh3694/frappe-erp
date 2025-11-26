@@ -50,13 +50,16 @@ def handle_hikvision_event():
 	"""
 	Handle real-time event from HiVision Face ID device
 	Endpoint: /api/method/erp.api.attendance.hikvision.handle_hikvision_event
-	
+
 	This endpoint accepts multipart/form-data or JSON from HiVision devices
 	No authentication required so devices can send events directly
 	"""
 	# Get logger riêng cho HiVision
 	logger = get_hikvision_logger()
-	
+
+	# Track processed students for this request to prevent duplicate notifications
+	processed_students = set()
+
 	try:
 		# LOG: Print raw request data với nhiều thông tin hơn
 		logger.info("=" * 80)
@@ -287,33 +290,16 @@ def handle_hikvision_event():
 				logger.info(f"✅ Nhân viên {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
 				
 				# Send notification immediately (no enqueue for instant push delivery)
-				try:
-					# Import and call notification function directly
-					from erp.api.attendance.notification import publish_attendance_notification
+				# Check per-request deduplication to prevent multiple notifications for same student
+				if employee_code not in processed_students:
+					processed_students.add(employee_code)
 
-					# Call immediately for instant push notification
-					publish_attendance_notification(
-						employee_code=employee_code,
-						employee_name=employee_name,
-						timestamp=parsed_timestamp.isoformat(),
-						device_id=device_id,
-						device_name=device_name,
-						check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-						check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-						total_check_ins=attendance_doc.total_check_ins,
-						date=str(attendance_doc.date)
-					)
-
-					logger.info(f"✅ Push notification sent immediately for {employee_code}")
-
-				except Exception as notify_error:
-					logger.warning(f"⚠️ Failed to send immediate notification: {str(notify_error)}")
-					# Fallback to enqueue if immediate send fails
 					try:
-						frappe.enqueue(
-							"erp.api.attendance.notification.publish_attendance_notification",
-							queue="default",
-							timeout=300,
+						# Import and call notification function directly
+						from erp.api.attendance.notification import publish_attendance_notification
+
+						# Call immediately for instant push notification
+						publish_attendance_notification(
 							employee_code=employee_code,
 							employee_name=employee_name,
 							timestamp=parsed_timestamp.isoformat(),
@@ -324,9 +310,32 @@ def handle_hikvision_event():
 							total_check_ins=attendance_doc.total_check_ins,
 							date=str(attendance_doc.date)
 						)
-						logger.info(f"📋 Fallback: Notification enqueued for {employee_code}")
-					except Exception as enqueue_error:
-						logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
+
+						logger.info(f"✅ Push notification sent immediately for {employee_code}")
+
+					except Exception as notify_error:
+						logger.warning(f"⚠️ Failed to send immediate notification: {str(notify_error)}")
+						# Fallback to enqueue if immediate send fails
+						try:
+							frappe.enqueue(
+								"erp.api.attendance.notification.publish_attendance_notification",
+								queue="default",
+								timeout=300,
+								employee_code=employee_code,
+								employee_name=employee_name,
+								timestamp=parsed_timestamp.isoformat(),
+								device_id=device_id,
+								device_name=device_name,
+								check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
+								check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
+								total_check_ins=attendance_doc.total_check_ins,
+								date=str(attendance_doc.date)
+							)
+							logger.info(f"📋 Fallback: Notification enqueued for {employee_code}")
+						except Exception as enqueue_error:
+							logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
+				else:
+					logger.info(f"⏭️ Skipping duplicate notification for {employee_code} in this request")
 				
 			except Exception as post_error:
 				logger.error(f"❌ Error processing post: {str(post_error)}")
@@ -372,12 +381,15 @@ def upload_attendance_batch():
 	"""
 	Upload batch attendance data from HiVision device
 	Endpoint: /api/method/erp.api.attendance.hikvision.upload_attendance_batch
-	
+
 	Body: { data: [{ fingerprintCode, dateTime, device_id }], tracker_id }
 	"""
 	# Get logger riêng cho HiVision
 	logger = get_hikvision_logger()
-	
+
+	# Track processed students for this request to prevent duplicate notifications
+	processed_students = set()
+
 	try:
 		logger.info("=" * 80)
 		logger.info("===== BATCH UPLOAD REQUEST =====")
@@ -447,26 +459,32 @@ def upload_attendance_batch():
 				display_time = format_vn_time(timestamp)
 				logger.info(f"✅ Nhân viên {employee_name or fingerprint_code} đã chấm công lúc {display_time} tại máy {device_name or 'Unknown Device'}")
 				
-				# Trigger notification
-				try:
-					frappe.enqueue(
-						"erp.api.attendance.notification.publish_attendance_notification",
-						queue="default",
-						timeout=300,
-						employee_code=fingerprint_code,
-						employee_name=employee_name,
-						timestamp=timestamp.isoformat(),
-						device_id=device_id,
-						device_name=device_name,
-						check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-						check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-						total_check_ins=attendance_doc.total_check_ins,
-						date=str(attendance_doc.date),
-						event_type="batch_upload",
-						tracker_id=tracker_id
-					)
-				except Exception as enqueue_error:
-					logger.warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
+				# Trigger notification with per-request deduplication
+				if fingerprint_code not in processed_students:
+					processed_students.add(fingerprint_code)
+
+					try:
+						frappe.enqueue(
+							"erp.api.attendance.notification.publish_attendance_notification",
+							queue="default",
+							timeout=300,
+							employee_code=fingerprint_code,
+							employee_name=employee_name,
+							timestamp=timestamp.isoformat(),
+							device_id=device_id,
+							device_name=device_name,
+							check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
+							check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
+							total_check_ins=attendance_doc.total_check_ins,
+							date=str(attendance_doc.date),
+							event_type="batch_upload",
+							tracker_id=tracker_id
+						)
+						logger.info(f"📋 Notification enqueued for {fingerprint_code} (batch)")
+					except Exception as enqueue_error:
+						logger.warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
+				else:
+					logger.info(f"⏭️ Skipping duplicate notification for {fingerprint_code} in batch")
 				
 			except Exception as record_error:
 				logger.error(f"❌ Error processing record: {str(record_error)}")
