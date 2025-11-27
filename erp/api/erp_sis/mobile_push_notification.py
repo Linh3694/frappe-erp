@@ -417,7 +417,7 @@ def send_mobile_notification(user_email, title, body, data=None):
                 "body": body,
                 "data": data or {},
                 "priority": "high",
-                "sound": "default",  # iOS default sound (ting ting like message)
+                "sound": "default",  # iOS default message sound (ting ting)
                 "channelId": "attendance" if data and data.get("type") == "attendance" else "default"
             }
 
