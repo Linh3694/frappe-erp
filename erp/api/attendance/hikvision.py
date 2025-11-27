@@ -61,7 +61,28 @@ def handle_hikvision_event():
 	processed_students = set()
 
 	try:
-		# LOG: Print raw request data với nhiều thông tin hơn
+		# Quick heartbeat check trước khi log bất kỳ thứ gì
+		is_multipart = (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type)
+		if is_multipart and hasattr(frappe.request, 'form') and frappe.request.form:
+			# Try to parse AccessControllerEvent quickly for heartbeat check
+			access_event = frappe.request.form.get('AccessControllerEvent')
+			if access_event and isinstance(access_event, str):
+				try:
+					import json
+					parsed_quick = json.loads(access_event)
+					if parsed_quick.get("eventType") == "heartBeat":
+						# Heartbeat detected - return immediately without logging
+						return {
+							"status": "success",
+							"message": "Heartbeat received",
+							"event_type": "heartBeat",
+							"device_ip": parsed_quick.get('ipAddress'),
+							"timestamp": frappe.utils.now()
+						}
+				except:
+					pass  # Continue with normal processing if parsing fails
+
+		# LOG: Print raw request data với nhiều thông tin hơn (chỉ cho non-heartbeat)
 		logger.info("=" * 80)
 		logger.info("===== NEW REQUEST FROM HIKVISION DEVICE =====")
 		logger.info(f"Request method: {frappe.request.method}")
@@ -69,12 +90,9 @@ def handle_hikvision_event():
 		logger.info(f"Request URL: {frappe.request.url}")
 		logger.info(f"Remote IP: {frappe.request.remote_addr}")
 		logger.info(f"Request headers: {dict(frappe.request.headers)}")
-		
+
 		# Get event data from request - xử lý cả multipart/form-data và JSON
 		event_data = {}
-		
-		# Check if request is multipart/form-data (giống Node.js)
-		is_multipart = (frappe.request.content_type and 'multipart/form-data' in frappe.request.content_type)
 		
 		logger.info(f"Is multipart: {is_multipart}")
 		
