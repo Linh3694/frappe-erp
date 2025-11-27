@@ -252,11 +252,8 @@ def send_staff_attendance_notification(
 			event_time = frappe.utils.get_datetime(timestamp)
 			time_str = event_time.strftime('%H:%M %d/%m/%Y')
 
-		# Staff message format
-		if is_check_in:
-			message = f"Check-in lúc {time_str} tại {device_name or 'thiết bị'}"
-		else:
-			message = f"Check-out lúc {time_str} tại {device_name or 'thiết bị'}"
+		# Staff message format - unified for all attendance events
+		message = f"Nhận diện khuôn mặt thành công lúc {time_str}"
 		
 		# Additional data
 		notification_data = {
