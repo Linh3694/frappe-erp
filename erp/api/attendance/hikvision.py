@@ -338,6 +338,7 @@ def handle_hikvision_event():
 						from erp.api.attendance.notification import publish_attendance_notification
 
 						# Call immediately for instant push notification
+						logger.info(f"📢 [HIKVISION] About to call publish_attendance_notification for {employee_code}")
 						publish_attendance_notification(
 							employee_code=employee_code,
 							employee_name=employee_name,
@@ -350,7 +351,7 @@ def handle_hikvision_event():
 							date=str(attendance_doc.date)
 						)
 
-						logger.info(f"✅ Push notification sent immediately for {employee_code}")
+						logger.info(f"✅ [HIKVISION] Push notification sent immediately for {employee_code}")
 
 					except Exception as notify_error:
 						logger.warning(f"⚠️ Failed to send immediate notification: {str(notify_error)}")
