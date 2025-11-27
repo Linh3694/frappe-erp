@@ -514,7 +514,7 @@ def get_teacher_week_gvbm():
 
         if education_stage and education_stage != 'all':
             # Get valid timetable columns for this education stage
-            column_filters = {"education_stage": education_stage}
+            column_filters = {"education_stage_id": education_stage}
             try:
                 valid_columns = frappe.get_all(
                     "SIS Timetable Column",
@@ -567,14 +567,14 @@ def get_teacher_week_gvbm():
                 COALESCE(r.short_title, r.title_vn, r.title_en) as room_name,
                 r.room_type as room_type,
                 -- Add educational stage info
-                tc.education_stage,
+                tc.education_stage_id,
                 es.title_vn as education_stage_title
             FROM `tabSIS Teacher Timetable` tt
             LEFT JOIN `tabSIS Subject` s ON tt.subject_id = s.name
             LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
             LEFT JOIN `tabSIS Class` c ON tt.class_id = c.name
             LEFT JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
-            LEFT JOIN `tabSIS Education Stage` es ON tc.education_stage = es.name
+            LEFT JOIN `tabSIS Education Stage` es ON tc.education_stage_id = es.name
             LEFT JOIN `tabERP Administrative Room` r ON tt.room_id = r.name
             WHERE {where_clause}
             ORDER BY tt.date ASC, tt.day_of_week ASC, tc.order ASC
@@ -599,7 +599,7 @@ def get_teacher_week_gvbm():
         # Group by educational stage for better organization
         grouped_entries = {}
         for entry in entries:
-            stage = entry.get("education_stage_title", "Unknown Stage")
+            stage = entry.get("education_stage_title") or entry.get("education_stage_id", "Unknown Stage")
             if stage not in grouped_entries:
                 grouped_entries[stage] = []
             grouped_entries[stage].append(entry)
@@ -642,13 +642,17 @@ def test_gvbm_endpoint():
         # Simulate frappe request context
         import frappe
 
-        # Set up request context manually
-        frappe.local.form_dict = {
+        # Set up minimal context to avoid errors
+        if not hasattr(frappe.local, 'form_dict'):
+            frappe.local.form_dict = {}
+        if not hasattr(frappe.local, 'request'):
+            frappe.local.request = type('MockRequest', (), {'args': {}})()
+
+        frappe.local.form_dict.update({
             'teacher_id': 'linh.nguyenhai@wellspring.edu.vn',
             'week_start': '2025-11-24',
             'week_end': '2025-11-30'
-        }
-        frappe.local.request = type('MockRequest', (), {'args': frappe.local.form_dict})()
+        })
 
         print("=" * 50)
         print("TESTING GVBM ENDPOINT")
@@ -658,29 +662,26 @@ def test_gvbm_endpoint():
         result = get_teacher_week_gvbm()
 
         print("Raw result type:", type(result))
-        print("Raw result:", result)
+        print("Raw result keys:", list(result.keys()) if isinstance(result, dict) else "Not dict")
 
-        if isinstance(result, dict):
-            print("\nParsed result keys:", list(result.keys()) if result else "None")
-            if 'message' in result:
-                message = result['message']
-                print("Message type:", type(message))
-                print("Message keys:", list(message.keys()) if isinstance(message, dict) else "Not dict")
+        if isinstance(result, dict) and 'message' in result:
+            message = result['message']
+            print("Message type:", type(message))
 
-                if isinstance(message, dict) and 'data' in message:
-                    data = message['data']
-                    print("Data type:", type(data))
-                    print("Data keys:", list(data.keys()) if isinstance(data, dict) else "Not dict")
+            if isinstance(message, dict) and 'data' in message:
+                data = message['data']
+                print("Data type:", type(data))
+                print("Data keys:", list(data.keys()) if isinstance(data, dict) else "Not dict")
 
-                    if isinstance(data, dict):
-                        print("\nData content:")
-                        for key, value in data.items():
-                            if key == 'entries':
-                                print(f"  {key}: {len(value) if isinstance(value, list) else 'not list'} items")
-                            elif key == 'grouped_by_stage':
-                                print(f"  {key}: {len(value) if isinstance(value, dict) else 'not dict'} stages")
-                            else:
-                                print(f"  {key}: {value}")
+                if isinstance(data, dict):
+                    print("\nData content:")
+                    for key, value in data.items():
+                        if key == 'entries':
+                            print(f"  {key}: {len(value) if isinstance(value, list) else 'not list'} items")
+                        elif key == 'grouped_by_stage':
+                            print(f"  {key}: {len(value) if isinstance(value, dict) else 'not dict'} stages")
+                        else:
+                            print(f"  {key}: {value}")
 
         return result
 
