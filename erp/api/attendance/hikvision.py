@@ -101,6 +101,16 @@ def handle_hikvision_event():
 						try:
 							parsed = json.loads(value)
 							if isinstance(parsed, dict):
+								# Quick heartbeat check ngay sau khi parse - không log gì cả
+								if parsed.get("eventType") == "heartBeat":
+									return {
+										"status": "success",
+										"message": "Heartbeat received",
+										"event_type": "heartBeat",
+										"device_ip": parsed.get('ipAddress'),
+										"timestamp": frappe.utils.now()
+									}
+
 								logger.info(f"✅ Parsed JSON from field '{key}'")
 								logger.info(f"   Parsed data keys: {list(parsed.keys())}")
 								event_data = parsed
