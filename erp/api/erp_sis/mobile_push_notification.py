@@ -495,7 +495,7 @@ def send_attendance_mobile_notification(user_email, employee_code, check_in_time
     Được gọi từ attendance hooks hoặc manual triggers
     """
     try:
-        title = "⏰ Cập nhật chấm công"
+        title = "Cập nhật chấm công"
         timestamp = frappe.utils.now()
 
         if check_in_time and not check_out_time:
