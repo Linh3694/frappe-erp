@@ -122,11 +122,17 @@ def handle_hikvision_event():
 						logger.info(f"✅ Parsed from raw body - keys: {list(event_data.keys())}")
 				except Exception as parse_error:
 					logger.warning(f"⚠️ Could not parse raw body: {str(parse_error)}")
-		
-		logger.info(f"FINAL event_data keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
-		if event_data:
-			logger.info(f"FINAL event_data (first 500 chars): {str(event_data)[:500]}")
-		
+
+		# Quick heartbeat check for AccessControllerEvent - không log gì cả để tránh spam
+		if event_data and event_data.get("eventType") == "heartBeat":
+			return {
+				"status": "success",
+				"message": "Heartbeat received",
+				"event_type": "heartBeat",
+				"device_ip": event_data.get('ipAddress'),
+				"timestamp": frappe.utils.now()
+			}
+
 		# Handle empty body (heartbeat) - không log gì cả để tránh spam hoàn toàn
 		if not event_data or len(event_data) == 0:
 			return {
@@ -134,7 +140,12 @@ def handle_hikvision_event():
 				"message": "Heartbeat received",
 				"timestamp": frappe.utils.now()
 			}
-		
+
+		# LOG: Print final parsed data (chỉ cho non-heartbeat events)
+		logger.info(f"FINAL event_data keys: {list(event_data.keys()) if event_data else 'EMPTY'}")
+		if event_data:
+			logger.info(f"FINAL event_data (first 500 chars): {str(event_data)[:500]}")
+
 		# Extract event information from HiVision format
 		event_type = None
 		event_state = None
