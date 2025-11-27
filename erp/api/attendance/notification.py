@@ -281,7 +281,7 @@ def send_staff_attendance_notification(
 				"title": title,
 				"message": message,
 				"recipient_user": staff_email,
-				"recipients": [staff_email],
+				"recipients": json.dumps([staff_email]),  # Convert list to JSON string
 				"notification_type": "attendance",
 				"priority": "low",
 				"data": json.dumps(notification_data) if isinstance(notification_data, dict) else notification_data,

@@ -259,6 +259,25 @@ def unregister_device_token():
         return error_response(f"Error unregistering device: {str(e)}", code="UNREGISTRATION_ERROR")
 
 
+@frappe.whitelist(allow_guest=True)
+def test_mobile_api():
+    """
+    Test API để kiểm tra authentication
+    """
+    try:
+        user = frappe.session.user
+        frappe.logger().info(f"Test mobile API called by user: {user}")
+        frappe.logger().info(f"Request headers: {dict(frappe.request.headers)}")
+
+        return success_response({
+            "user": user,
+            "message": "API is working",
+            "timestamp": frappe.utils.now()
+        }, "Test successful")
+    except Exception as e:
+        frappe.logger().error(f"Test mobile API error: {str(e)}")
+        return error_response(f"Test failed: {str(e)}")
+
 @frappe.whitelist()
 def send_mobile_notification(user_email, title, body, data=None):
     """
