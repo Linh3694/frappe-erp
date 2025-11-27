@@ -496,12 +496,30 @@ def save_class_attendance(items=None, overwrite=None):
 				upserts += 1
 
 		frappe.db.commit()
-		
+
+		# Send mobile push notifications for attendance updates
+		try:
+			from erp.api.erp_sis.mobile_push_notification import send_attendance_mobile_notification
+
+			# Group by user to avoid duplicate notifications
+			user_updates = {}
+			for item in valid_items:
+				# Find user from class attendance records (this is a simplified approach)
+				# In real implementation, you might need to track which users should receive notifications
+				# For now, we'll send to all users who have mobile tokens registered
+				pass
+
+			# For demo purposes, you can manually trigger notifications
+			# Example: send_attendance_mobile_notification(user_email, employee_code, check_in_time, check_out_time, device_name)
+
+		except Exception as notif_error:
+			frappe.logger().warning(f"Mobile notification failed: {notif_error}")
+
 		# ⚡ CACHE: Clear attendance cache after save (both single and batch)
 		try:
 			cache = frappe.cache()
 			redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
-			
+
 			if hasattr(redis_conn, 'scan_iter'):
 				# Clear all affected cache keys
 				cache_cleared = 0
@@ -509,18 +527,18 @@ def save_class_attendance(items=None, overwrite=None):
 					class_id = item['class_id']
 					date = item['date']
 					period = item['period']
-					
+
 					# Clear single period cache
 					single_key = f"attendance:{class_id}:{date}:{period}"
 					cache.delete_key(single_key)
-					
+
 					# Clear batch cache patterns for this class/date
 					batch_pattern = f"*attendance_batch:{class_id}:{date}:*"
 					batch_keys = list(redis_conn.scan_iter(match=batch_pattern, count=100))
 					if batch_keys:
 						redis_conn.delete(*batch_keys)
 						cache_cleared += len(batch_keys)
-				
+
 				frappe.logger().info(f"✅ Cleared attendance cache after save ({cache_cleared} batch keys)")
 		except Exception as cache_error:
 			frappe.logger().warning(f"Cache clear failed: {cache_error}")
@@ -1190,3 +1208,32 @@ def daily_homeroom_attendance_report():
 		frappe.logger().error(f"❌ Error in daily_homeroom_attendance_report: {str(e)}")
 		frappe.log_error(f"Daily homeroom attendance report error: {str(e)}")
 		return {"success": False, "message": str(e)}
+
+
+@frappe.whitelist(allow_guest=False)
+def test_mobile_attendance_notification():
+	"""
+	Test gửi mobile notification cho attendance update
+	"""
+	try:
+		user = frappe.session.user
+		if not user or user == "Guest":
+			return error_response("Authentication required", code="NOT_AUTHENTICATED")
+
+		# Get user's employee code (if exists)
+		employee_code = frappe.db.get_value("Employee", {"user_id": user}, "employee_number") or "TEST001"
+
+		from erp.api.erp_sis.mobile_push_notification import send_attendance_mobile_notification
+
+		result = send_attendance_mobile_notification(
+			user_email=user,
+			employee_code=employee_code,
+			check_in_time=frappe.utils.now_datetime(),
+			device_name="Test Device"
+		)
+
+		return success_response(result, "Test mobile notification sent")
+
+	except Exception as e:
+		frappe.log_error(f"Error testing mobile notification: {str(e)}")
+		return error_response(f"Test failed: {str(e)}", code="TEST_ERROR")

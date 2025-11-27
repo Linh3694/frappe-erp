@@ -518,11 +518,11 @@ def send_notification_on_event(doc, method=None):
     """
     Example hook function để gửi notification khi có sự kiện
     Có thể hook vào các DocType khác nhau
-    
+
     Usage in hooks.py:
         doc_events = {
             "Communication": {
-                "after_insert": "erp.api.parent_portal.push_notification.send_notification_on_communication"
+                "after_insert": "erp.api.erp_sis.push_notification.send_notification_on_communication"
             }
         }
     """

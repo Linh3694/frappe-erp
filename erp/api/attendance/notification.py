@@ -10,7 +10,8 @@ import pytz
 from datetime import datetime
 from erp.common.doctype.erp_notification.erp_notification import create_notification
 from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
-from erp.api.parent_portal.push_notification import send_push_notification
+from erp.api.erp_sis.push_notification import send_push_notification
+from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
 
 
 def publish_attendance_notification(
@@ -297,7 +298,25 @@ def send_staff_attendance_notification(
 			"data": notification_data
 		})
 		
-		# Use unified notification handler
+		# Send MOBILE push notification for staff
+		try:
+			mobile_result = send_mobile_notification(
+				user_email=staff_email,
+				title="⏰ " + title,
+				body=message,
+				data={
+					"type": "attendance",
+					"employeeCode": employee_code,
+					"timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
+					"deviceName": device_name,
+					"isCheckIn": is_check_in
+				}
+			)
+			frappe.logger().info(f"📱 Mobile notification sent to {staff_email}: {mobile_result}")
+		except Exception as mobile_error:
+			frappe.logger().error(f"❌ Failed to send mobile notification to {staff_email}: {str(mobile_error)}")
+
+		# Use unified notification handler for PWA notifications
 		from erp.utils.notification_handler import send_bulk_parent_notifications
 
 		result = send_bulk_parent_notifications(

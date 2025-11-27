@@ -586,6 +586,70 @@ def fix_hikvision_attendance_timestamps():
 
 		logger.info(f"Found {len(records)} attendance records to check")
 
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def test_mobile_attendance_notification():
+	"""
+	Test endpoint to simulate hikvision attendance event and trigger mobile notification
+	"""
+	try:
+		logger = get_hikvision_logger()
+		logger.info("=== TESTING MOBILE ATTENDANCE NOTIFICATION ===")
+
+		# Test data - simulate attendance event for user linh.nguyenhai@wellspring.edu.vn
+		test_employee_code = "WF01IT"  # linh.nguyenhai@wellspring.edu.vn employee code
+		test_employee_name = "Nguyễn Hải Linh"
+		test_device_name = "Test Device - Mobile Notification"
+
+		# Create test attendance record
+		from erp.common.doctype.erp_time_attendance.erp_time_attendance import find_or_create_day_record
+
+		attendance_doc = find_or_create_day_record(
+			employee_code=test_employee_code,
+			date=frappe.utils.now_datetime(),
+			device_id="TEST_DEVICE_MOBILE",
+			employee_name=test_employee_name,
+			device_name=test_device_name
+		)
+
+		# Save attendance record
+		attendance_doc.save(ignore_permissions=True)
+		frappe.db.commit()
+
+		logger.info(f"✅ Created test attendance record: {attendance_doc.name}")
+
+		# Trigger mobile notification
+		from erp.api.attendance.notification import publish_attendance_notification
+
+		publish_attendance_notification(
+			employee_code=test_employee_code,
+			employee_name=test_employee_name,
+			timestamp=frappe.utils.now_datetime(),
+			device_name=test_device_name,
+			check_in_time=attendance_doc.check_in_time,
+			check_out_time=attendance_doc.check_out_time,
+			total_check_ins=attendance_doc.total_check_ins,
+			date=frappe.utils.nowdate()
+		)
+
+		logger.info("✅ Mobile attendance notification test completed")
+
+		return {
+			"success": True,
+			"message": "Test mobile attendance notification sent",
+			"employee_code": test_employee_code,
+			"attendance_record": attendance_doc.name
+		}
+
+	except Exception as e:
+		logger = get_hikvision_logger()
+		logger.error(f"❌ Test failed: {str(e)}")
+
+		return {
+			"success": False,
+			"message": f"Test failed: {str(e)}"
+		}
+
 		fixed_count = 0
 		vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
 
