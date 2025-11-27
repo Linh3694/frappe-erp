@@ -320,9 +320,13 @@ def handle_hikvision_event():
 				
 				records_processed += 1
 				
-				# Log success
+				# Log success - hiển thị đúng loại user
+				from erp.api.attendance.notification import check_if_student
+				is_student = check_if_student(employee_code)
+				user_type = "Học sinh" if is_student else "Nhân viên"
+
 				display_time = format_vn_time(parsed_timestamp)
-				logger.info(f"✅ Nhân viên {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
+				logger.info(f"✅ {user_type} {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
 				
 				# Send notification immediately (no enqueue for instant push delivery)
 				# Check per-request deduplication to prevent multiple notifications for same student
@@ -490,9 +494,13 @@ def upload_attendance_batch():
 				else:
 					records_updated += 1
 				
-				# Log
+				# Log - hiển thị đúng loại user
+				from erp.api.attendance.notification import check_if_student
+				is_student = check_if_student(fingerprint_code)
+				user_type = "Học sinh" if is_student else "Nhân viên"
+
 				display_time = format_vn_time(timestamp)
-				logger.info(f"✅ Nhân viên {employee_name or fingerprint_code} đã chấm công lúc {display_time} tại máy {device_name or 'Unknown Device'}")
+				logger.info(f"✅ {user_type} {employee_name or fingerprint_code} đã chấm công lúc {display_time} tại máy {device_name or 'Unknown Device'}")
 				
 				# Trigger notification with per-request deduplication
 				if fingerprint_code not in processed_students:
