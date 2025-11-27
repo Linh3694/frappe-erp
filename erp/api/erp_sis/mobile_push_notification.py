@@ -99,7 +99,7 @@ def ensure_mobile_device_token_doctype():
                     "delete": 1
                 },
                 {
-                    "role": "User",
+                    "role": "Desk User",
                     "read": 1,
                     "write": 1,
                     "create": 1
