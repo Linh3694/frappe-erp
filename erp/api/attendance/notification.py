@@ -50,6 +50,7 @@ def publish_attendance_notification(
 		# Parse timestamp
 		if isinstance(timestamp, str):
 			timestamp = frappe.utils.get_datetime(timestamp)
+			frappe.logger().info(f"📢 [Attendance Notif] Parsed timestamp: {timestamp}")
 
 		# DEBOUNCE CHECK: Skip if notification sent recently with enhanced context checking
 		frappe.logger().info(f"🔍 [Attendance Notif] Checking debounce for {employee_code}")
