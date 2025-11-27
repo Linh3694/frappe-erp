@@ -448,3 +448,186 @@ def get_teacher_week_optimized():
         frappe.log_error(f"Error fetching teacher week: {str(e)}")
         return error_response(f"Error fetching teacher week: {str(e)}")
 
+
+@frappe.whitelist(allow_guest=False)
+def get_teacher_week_gvbm():
+    """
+    🎯 GVBM OPTIMIZED: Get teacher weekly timetable for GVBM (subject teachers)
+
+    Used by: Mobile Attendance - Theo tiết tab
+    Focus: Returns timetable entries grouped by educational stage and period
+
+    Performance: Optimized for GVBM with educational stage filtering
+    """
+    try:
+        # Get parameters from frappe request
+        teacher_id = frappe.local.form_dict.get("teacher_id") or frappe.request.args.get("teacher_id")
+        week_start = frappe.local.form_dict.get("week_start") or frappe.request.args.get("week_start")
+        week_end = frappe.local.form_dict.get("week_end") or frappe.request.args.get("week_end")
+        education_stage = frappe.local.form_dict.get("education_stage") or frappe.request.args.get("education_stage")
+
+        if not teacher_id:
+            return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
+        if not week_start:
+            return validation_error_response("Validation failed", {"week_start": ["Week start is required"]})
+
+        # Parse week_end
+        if not week_end:
+            ws = datetime.strptime(week_start, '%Y-%m-%d')
+            we = ws + timedelta(days=6)
+            week_end = we.strftime('%Y-%m-%d')
+
+        # Get current campus
+        campus_id = get_current_campus_from_context()
+
+        # ⚡ CACHE: Check Redis cache first (5 min TTL)
+        cache_key = f"teacher_week_gvbm:{teacher_id}:{week_start}:{week_end}:{education_stage or 'all'}:{campus_id or 'none'}"
+
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data:
+                frappe.logger().info(f"✅ Cache HIT for teacher_week_gvbm {teacher_id} (week {week_start})")
+                return success_response(
+                    data=cached_data,
+                    message="GVBM teacher week fetched successfully (cached)"
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+
+        frappe.logger().info(f"❌ Cache MISS for teacher_week_gvbm {teacher_id} (week {week_start}) - fetching from DB")
+
+        # Resolve teacher_id to SIS Teacher doc name
+        teacher_name = None
+        if frappe.db.exists("SIS Teacher", teacher_id):
+            teacher_name = teacher_id
+        else:
+            # Try by user_id
+            teacher_name = frappe.db.get_value("SIS Teacher", {"user_id": teacher_id}, "name")
+
+        if not teacher_name:
+            return success_response(data=[], message="No teacher record found")
+
+        # Build educational stage filter for GVBM
+        # GVBM should see all stages unless specifically filtered
+        valid_column_ids = []
+        stage_filter_info = "all stages"
+
+        if education_stage and education_stage != 'all':
+            # Get valid timetable columns for this education stage
+            column_filters = {"education_stage": education_stage}
+            try:
+                valid_columns = frappe.get_all(
+                    "SIS Timetable Column",
+                    filters=column_filters,
+                    fields=["name"]
+                )
+
+                if not valid_columns:
+                    frappe.logger().warning(f"No timetable columns found for education_stage={education_stage}")
+                    return success_response(data=[], message="No timetable columns found for this education stage")
+
+                valid_column_ids = [col.name for col in valid_columns]
+                stage_filter_info = f"stage {education_stage} ({len(valid_column_ids)} columns)"
+            except Exception as col_error:
+                frappe.logger().warning(f"Error fetching timetable columns: {col_error}")
+                # Continue without column filtering
+
+        # ⚡ SINGLE MEGA QUERY: Get timetable entries for GVBM
+        where_clauses = [
+            "tt.teacher_id = %(teacher_name)s",
+            "tt.date BETWEEN %(week_start)s AND %(week_end)s",
+            # Exclude homeroom entries for GVBM (GVBM only sees subject teaching)
+            "tt.subject_id IS NOT NULL"
+        ]
+
+        params = {
+            "teacher_name": teacher_name,
+            "week_start": week_start,
+            "week_end": week_end
+        }
+
+        # Add education_stage filter if needed
+        if valid_column_ids:
+            where_clauses.append("tt.timetable_column_id IN %(column_ids)s")
+            params["column_ids"] = valid_column_ids
+
+        entries_sql = """
+            SELECT
+                tt.name,
+                tt.date,
+                tt.day_of_week,
+                tt.timetable_column_id,
+                tt.class_id,
+                tt.subject_id,
+                tt.room_id,
+                s.title as subject_title,
+                ts.title_vn as timetable_subject_title_vn,
+                ts.title_en as timetable_subject_title_en,
+                c.title as class_title,
+                COALESCE(r.short_title, r.title_vn, r.title_en) as room_name,
+                r.room_type as room_type,
+                -- Add educational stage info
+                tc.education_stage,
+                es.title_vn as education_stage_title
+            FROM `tabSIS Teacher Timetable` tt
+            LEFT JOIN `tabSIS Subject` s ON tt.subject_id = s.name
+            LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
+            LEFT JOIN `tabSIS Class` c ON tt.class_id = c.name
+            LEFT JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
+            LEFT JOIN `tabSIS Education Stage` es ON tc.education_stage = es.name
+            LEFT JOIN `tabERP Administrative Room` r ON tt.room_id = r.name
+            WHERE {where_clause}
+            ORDER BY tt.date ASC, tt.day_of_week ASC, tc.order ASC
+        """.format(where_clause=" AND ".join(where_clauses))
+
+        # Execute query
+        frappe.logger().info(f"Executing GVBM SQL with params: teacher={teacher_name}, week={week_start} to {week_end}, {stage_filter_info}")
+        entries = frappe.db.sql(entries_sql, params, as_dict=True)
+
+        # Process entries: Use timetable_subject title if available, otherwise subject title
+        for entry in entries:
+            if entry.get("timetable_subject_title_vn"):
+                entry["subject_title"] = entry["timetable_subject_title_vn"]
+            elif entry.get("timetable_subject_title_en"):
+                entry["subject_title"] = entry["timetable_subject_title_en"]
+            # Clean up temp fields
+            entry.pop("timetable_subject_title_vn", None)
+            entry.pop("timetable_subject_title_en", None)
+
+        frappe.logger().info(f"✅ GVBM fetched {len(entries)} timetable entries for {teacher_id}")
+
+        # Group by educational stage for better organization
+        grouped_entries = {}
+        for entry in entries:
+            stage = entry.get("education_stage_title", "Unknown Stage")
+            if stage not in grouped_entries:
+                grouped_entries[stage] = []
+            grouped_entries[stage].append(entry)
+
+        result_data = {
+            "entries": entries,  # Flat list for backward compatibility
+            "grouped_by_stage": grouped_entries,  # New grouped format
+            "total_entries": len(entries),
+            "education_stages": list(grouped_entries.keys()),
+            "filter_applied": {
+                "education_stage": education_stage,
+                "stage_filter_info": stage_filter_info
+            }
+        }
+
+        # ⚡ CACHE: Store result in Redis (5 min = 300 sec)
+        try:
+            frappe.cache().set_value(cache_key, result_data, expires_in_sec=300)
+            frappe.logger().info(f"✅ Cached GVBM result for {teacher_id} (key: {cache_key})")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
+
+        return success_response(
+            data=result_data,
+            message="GVBM teacher week fetched successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching teacher week GVBM: {str(e)}")
+        return error_response(f"Error fetching teacher week GVBM: {str(e)}")
+
