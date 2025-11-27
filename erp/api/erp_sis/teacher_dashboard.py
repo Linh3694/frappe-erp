@@ -577,7 +577,7 @@ def get_teacher_week_gvbm():
             LEFT JOIN `tabSIS Education Stage` es ON tc.education_stage_id = es.name
             LEFT JOIN `tabERP Administrative Room` r ON tt.room_id = r.name
             WHERE {where_clause}
-            ORDER BY tt.date ASC, tt.day_of_week ASC, tc.order ASC
+            ORDER BY tt.date ASC, tt.day_of_week ASC, tc.period_priority ASC
         """.format(where_clause=" AND ".join(where_clauses))
 
         # Execute query
