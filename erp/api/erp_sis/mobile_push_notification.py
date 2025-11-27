@@ -17,7 +17,7 @@ def ensure_mobile_device_token_doctype():
         doc = frappe.get_doc({
             "doctype": "DocType",
             "name": "Mobile Device Token",
-            "module": "Erp",
+            "module": "erp",
             "custom": 0,
             "is_submittable": 0,
             "is_child_table": 0,
