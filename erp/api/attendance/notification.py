@@ -295,17 +295,17 @@ def send_staff_attendance_notification(
 			frappe.logger().error(f"❌ Failed to create notification directly: {str(create_error)}")
 			return
 		
-		# Send realtime notification
-		emit_notification_to_user(staff_email, {
-			"id": notification_doc.name,
-			"type": "attendance",
-			"title": title,
-			"message": message,
-			"status": "unread",
-			"priority": "low",
-			"created_at": timestamp.isoformat(),
-			"data": notification_data
-		})
+		# Skip realtime notification for attendance to avoid duplicate push notifications
+		# emit_notification_to_user(staff_email, {
+		# 	"id": notification_doc.name,
+		# 	"type": "attendance",
+		# 	"title": title,
+		# 	"message": message,
+		# 	"status": "unread",
+		# 	"priority": "low",
+		# 	"created_at": timestamp.isoformat(),
+		# 	"data": notification_data
+		# })
 		
 		# Send MOBILE push notification for staff
 		try:
