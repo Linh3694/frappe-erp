@@ -443,7 +443,7 @@ def send_bulk_parent_notifications(
                         "title": json.dumps(notification_title) if isinstance(notification_title, dict) else notification_title,
                         "message": json.dumps(notification_body) if isinstance(notification_body, dict) else notification_body,
                         "recipient_user": parent_email,
-                        "recipients": [parent_email],
+                        "recipients": json.dumps([parent_email]),  # Convert list to JSON string
                         "notification_type": recipient_type,
                         "priority": "medium",
                         "data": json.dumps(merged_data) if isinstance(merged_data, dict) else merged_data,
