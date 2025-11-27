@@ -568,7 +568,11 @@ def get_teacher_week_gvbm():
                 r.room_type as room_type,
                 -- Add educational stage info
                 tc.education_stage_id,
-                es.title_vn as education_stage_title
+                es.title_vn as education_stage_title,
+                -- Add period info
+                tc.period_name,
+                tc.start_time,
+                tc.end_time
             FROM `tabSIS Teacher Timetable` tt
             LEFT JOIN `tabSIS Subject` s ON tt.subject_id = s.name
             LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
@@ -664,12 +668,33 @@ def test_gvbm_endpoint():
         print("Raw result type:", type(result))
         print("Raw result keys:", list(result.keys()) if isinstance(result, dict) else "Not dict")
 
-        if isinstance(result, dict) and 'message' in result:
+        # Check direct data first (new format)
+        if isinstance(result, dict) and 'data' in result:
+            data = result['data']
+            print("✅ Found data in result (new format)")
+            print("Data type:", type(data))
+            print("Data keys:", list(data.keys()) if isinstance(data, dict) else "Not dict")
+
+            if isinstance(data, dict):
+                print("\nData content:")
+                for key, value in data.items():
+                    if key == 'entries':
+                        print(f"  {key}: {len(value) if isinstance(value, list) else 'not list'} items")
+                        if isinstance(value, list) and len(value) > 0:
+                            print(f"    Sample entry keys: {list(value[0].keys()) if isinstance(value[0], dict) else 'not dict'}")
+                    elif key == 'grouped_by_stage':
+                        print(f"  {key}: {len(value) if isinstance(value, dict) else 'not dict'} stages")
+                    else:
+                        print(f"  {key}: {value}")
+
+        # Check frappe response format (old format)
+        elif isinstance(result, dict) and 'message' in result:
             message = result['message']
             print("Message type:", type(message))
 
             if isinstance(message, dict) and 'data' in message:
                 data = message['data']
+                print("✅ Found data in message.data (frappe format)")
                 print("Data type:", type(data))
                 print("Data keys:", list(data.keys()) if isinstance(data, dict) else "Not dict")
 
@@ -678,6 +703,8 @@ def test_gvbm_endpoint():
                     for key, value in data.items():
                         if key == 'entries':
                             print(f"  {key}: {len(value) if isinstance(value, list) else 'not list'} items")
+                            if isinstance(value, list) and len(value) > 0:
+                                print(f"    Sample entry keys: {list(value[0].keys()) if isinstance(value[0], dict) else 'not dict'}")
                         elif key == 'grouped_by_stage':
                             print(f"  {key}: {len(value) if isinstance(value, dict) else 'not dict'} stages")
                         else:
