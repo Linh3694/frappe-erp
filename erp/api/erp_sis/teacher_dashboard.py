@@ -631,3 +631,55 @@ def get_teacher_week_gvbm():
         frappe.log_error(f"Error fetching teacher week GVBM: {str(e)}")
         return error_response(f"Error fetching teacher week GVBM: {str(e)}")
 
+
+# Debug function for testing GVBM endpoint
+@frappe.whitelist(allow_guest=True)
+def test_gvbm_endpoint():
+    """
+    Debug function to test GVBM endpoint response format
+    Call from bench console: frappe.call('erp.api.erp_sis.teacher_dashboard.test_gvbm_endpoint')
+    """
+    try:
+        # Test with a sample teacher
+        teacher_id = "admin@example.com"  # Adjust as needed
+        week_start = "2025-11-24"
+        week_end = "2025-11-30"
+
+        print("=" * 50)
+        print("TESTING GVBM ENDPOINT")
+        print("=" * 50)
+
+        # Call the actual function
+        result = get_teacher_week_gvbm()
+
+        print("Raw result type:", type(result))
+        print("Raw result:", result)
+
+        if isinstance(result, dict):
+            print("\nParsed result keys:", list(result.keys()) if result else "None")
+            if 'message' in result:
+                message = result['message']
+                print("Message type:", type(message))
+                print("Message keys:", list(message.keys()) if isinstance(message, dict) else "Not dict")
+
+                if isinstance(message, dict) and 'data' in message:
+                    data = message['data']
+                    print("Data type:", type(data))
+                    print("Data keys:", list(data.keys()) if isinstance(data, dict) else "Not dict")
+
+                    if isinstance(data, dict):
+                        print("\nData content:")
+                        for key, value in data.items():
+                            if key == 'entries':
+                                print(f"  {key}: {len(value) if isinstance(value, list) else 'not list'} items")
+                            elif key == 'grouped_by_stage':
+                                print(f"  {key}: {len(value) if isinstance(value, dict) else 'not dict'} stages")
+                            else:
+                                print(f"  {key}: {value}")
+
+        return result
+
+    except Exception as e:
+        print("Error in test function:", str(e))
+        return {"error": str(e)}
+
