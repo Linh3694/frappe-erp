@@ -10,7 +10,7 @@ import pytz
 from datetime import datetime
 from erp.common.doctype.erp_notification.erp_notification import create_notification
 from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
-from erp.api.erp_sis.push_notification import send_push_notification
+from erp.api.parent_portal.push_notification import send_push_notification
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
 
 
