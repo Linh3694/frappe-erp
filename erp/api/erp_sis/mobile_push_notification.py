@@ -17,7 +17,7 @@ def ensure_mobile_device_token_doctype():
         doc = frappe.get_doc({
             "doctype": "DocType",
             "name": "Mobile Device Token",
-            "module": "erp",
+            "module": "Core",
             "custom": 0,
             "is_submittable": 0,
             "is_child_table": 0,
@@ -110,8 +110,8 @@ def ensure_mobile_device_token_doctype():
         frappe.db.commit()
         frappe.logger().info("Created Mobile Device Token DocType")
 
-# Initialize on module load
-ensure_mobile_device_token_doctype()
+# Initialize on module load - commented out since doctype already exists
+# ensure_mobile_device_token_doctype()
 
 
 @frappe.whitelist(allow_guest=True)
