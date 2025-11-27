@@ -70,8 +70,10 @@ def publish_attendance_notification(
 
 		# Check if this is a student or staff
 		is_student = check_if_student(employee_code)
+		frappe.logger().info(f"📢 [Attendance Notif] {employee_code} is_student = {is_student}")
 
 		if is_student:
+			frappe.logger().info(f"📧 [Attendance Notif] Sending STUDENT notification for {employee_code}")
 			# Send notification to guardians
 			send_student_attendance_notification(
 				employee_code=employee_code,
@@ -151,7 +153,16 @@ def send_student_attendance_notification(
 	Send attendance notification to student's guardians using unified handler
 	"""
 	try:
-		frappe.logger().info(f"📧 [Student Attendance] Processing attendance for student {employee_code}")
+		frappe.logger().info(f"📧 [Student Attendance] STARTING notification for student {employee_code}")
+
+		# DEBUG: Check if student exists and has guardians
+		from erp.utils.notification_handler import get_guardians_for_students
+		guardians = get_guardians_for_students([employee_code])
+		frappe.logger().info(f"📧 [Student Attendance] Found {len(guardians)} guardians for student {employee_code}")
+
+		if not guardians:
+			frappe.logger().warning(f"📧 [Student Attendance] No guardians found for student {employee_code} - cannot send notification")
+			return False
 
 		# Use unified notification handler
 		from erp.utils.notification_handler import send_bulk_parent_notifications
@@ -213,6 +224,7 @@ def send_student_attendance_notification(
 		}
 
 		# Send bulk notification using unified handler
+		frappe.logger().info(f"📧 [Student Attendance] Calling send_bulk_parent_notifications for {employee_code}")
 		result = send_bulk_parent_notifications(
 			recipient_type="attendance",
 			recipients_data={
@@ -223,7 +235,7 @@ def send_student_attendance_notification(
 			data=notification_data
 		)
 
-		frappe.logger().info(f"✅ [Student Attendance] Sent attendance notification for {employee_code}: {result}")
+		frappe.logger().info(f"✅ [Student Attendance] send_bulk_parent_notifications result for {employee_code}: {result}")
 		return result
 
 	except Exception as e:
