@@ -107,14 +107,34 @@ def publish_attendance_notification(
 
 
 def check_if_student(employee_code):
-	"""Check if employee_code belongs to a student"""
+	"""Check if employee_code belongs to a student or staff"""
 	try:
-		# Query CRM Student table
+		# First, check if it's a student in CRM Student table
 		student = frappe.db.exists("CRM Student", {"student_code": employee_code})
-		return bool(student)
+		if student:
+			frappe.logger().info(f"✅ {employee_code} identified as STUDENT (found in CRM Student)")
+			return True
+
+		# If not a student, check if it's a staff member in User table
+		# Check multiple possible fields where employee_code might be stored
+		staff_checks = [
+			{"name": employee_code},  # Check if employee_code is the username/email
+			{"employee_code": employee_code},  # Direct employee_code field
+			{"username": employee_code},  # Username field
+		]
+
+		for check_filter in staff_checks:
+			if frappe.db.exists("User", check_filter):
+				frappe.logger().info(f"✅ {employee_code} identified as STAFF (found in User table)")
+				return False  # False means it's a staff member
+
+		# If not found in either table, log warning and default to staff
+		frappe.logger().warning(f"⚠️ {employee_code} not found in CRM Student or User tables - defaulting to STAFF")
+		return False  # Default to staff if not found anywhere
+
 	except Exception as e:
-		frappe.logger().warning(f"Failed to check if {employee_code} is student: {str(e)}")
-		return False
+		frappe.logger().warning(f"Failed to check if {employee_code} is student/staff: {str(e)}")
+		return False  # Default to staff on error
 
 
 def send_student_attendance_notification(
