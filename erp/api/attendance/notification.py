@@ -311,7 +311,7 @@ def send_staff_attendance_notification(
 		try:
 			mobile_result = send_mobile_notification(
 				user_email=staff_email,
-				title="⏰ " + title,
+				title=title,  # Just "Chấm công" without emoji
 				body=message,
 				data={
 					"type": "attendance",
