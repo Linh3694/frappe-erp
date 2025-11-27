@@ -220,20 +220,28 @@ def register_device_token():
             "last_seen": frappe.utils.now(),
         }
 
-        if existing:
-            # Update existing token
-            doc = frappe.get_doc("Mobile Device Token", existing)
-            doc.update(device_data)
-            doc.save(ignore_permissions=True)
-            message = "Device token updated successfully"
-        else:
-            # Create new token
-            device_data["user"] = user
-            doc = frappe.get_doc({
-                "doctype": "Mobile Device Token",
-                **device_data
-            })
-            doc.insert(ignore_permissions=True)
+        # Temporarily switch to system user to avoid permission issues
+        original_user = frappe.session.user
+        try:
+            frappe.session.user = 'Administrator'  # Use system user for database operations
+
+            if existing:
+                # Update existing token
+                doc = frappe.get_doc("Mobile Device Token", existing)
+                doc.update(device_data)
+                doc.save(ignore_permissions=True)
+                message = "Device token updated successfully"
+            else:
+                # Create new token
+                device_data["user"] = user
+                doc = frappe.get_doc({
+                    "doctype": "Mobile Device Token",
+                    **device_data
+                })
+                doc.insert(ignore_permissions=True)
+        finally:
+            # Restore original user
+            frappe.session.user = original_user
             message = "Device token registered successfully"
 
         frappe.db.commit()
