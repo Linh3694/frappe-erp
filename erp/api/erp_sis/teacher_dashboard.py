@@ -644,7 +644,7 @@ def test_gvbm_endpoint():
 
         # Set up request context manually
         frappe.local.form_dict = {
-            'teacher_id': 'admin@example.com',
+            'teacher_id': 'linh.nguyenhai@wellspring.edu.vn',
             'week_start': '2025-11-24',
             'week_end': '2025-11-30'
         }
