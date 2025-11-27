@@ -633,17 +633,22 @@ def get_teacher_week_gvbm():
 
 
 # Debug function for testing GVBM endpoint
-@frappe.whitelist(allow_guest=True)
 def test_gvbm_endpoint():
     """
     Debug function to test GVBM endpoint response format
-    Call from bench console: frappe.call('erp.api.erp_sis.teacher_dashboard.test_gvbm_endpoint')
+    Call from bench console: from erp.api.erp_sis.teacher_dashboard import test_gvbm_endpoint; test_gvbm_endpoint()
     """
     try:
-        # Test with a sample teacher
-        teacher_id = "admin@example.com"  # Adjust as needed
-        week_start = "2025-11-24"
-        week_end = "2025-11-30"
+        # Simulate frappe request context
+        import frappe
+
+        # Set up request context manually
+        frappe.local.form_dict = {
+            'teacher_id': 'admin@example.com',
+            'week_start': '2025-11-24',
+            'week_end': '2025-11-30'
+        }
+        frappe.local.request = type('MockRequest', (), {'args': frappe.local.form_dict})()
 
         print("=" * 50)
         print("TESTING GVBM ENDPOINT")
@@ -681,5 +686,7 @@ def test_gvbm_endpoint():
 
     except Exception as e:
         print("Error in test function:", str(e))
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
