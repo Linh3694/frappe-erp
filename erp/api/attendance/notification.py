@@ -273,18 +273,26 @@ def send_staff_attendance_notification(
 			"isCheckIn": is_check_in
 		}
 		
-		# Create notification record
-		notification_doc = create_notification(
-			title=title,
-			message=message,
-			recipient_user=staff_email,
-			recipients=[staff_email],
-			notification_type="attendance",
-			priority="low",
-			data=notification_data,
-			channel="push",
-			event_timestamp=timestamp
-		)
+		# Create notification record - sử dụng system user vì Hikvision chạy dưới Guest context
+		from frappe.utils import get_system_settings
+
+		# Temporarily switch to Administrator context để tạo notification
+		original_user = frappe.session.user
+		try:
+			frappe.session.user = "Administrator"
+			notification_doc = create_notification(
+				title=title,
+				message=message,
+				recipient_user=staff_email,
+				recipients=[staff_email],
+				notification_type="attendance",
+				priority="low",
+				data=notification_data,
+				channel="push",
+				event_timestamp=timestamp
+			)
+		finally:
+			frappe.session.user = original_user
 		
 		# Send realtime notification
 		emit_notification_to_user(staff_email, {
