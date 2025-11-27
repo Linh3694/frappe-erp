@@ -127,10 +127,8 @@ def handle_hikvision_event():
 		if event_data:
 			logger.info(f"FINAL event_data (first 500 chars): {str(event_data)[:500]}")
 		
-		# Handle empty body (heartbeat) - không log để tránh spam
+		# Handle empty body (heartbeat) - không log gì cả để tránh spam hoàn toàn
 		if not event_data or len(event_data) == 0:
-			# logger.info("💓 Empty body - heartbeat received")
-			# logger.info("=" * 80)
 			return {
 				"status": "success",
 				"message": "Heartbeat received",
@@ -160,10 +158,20 @@ def handle_hikvision_event():
 			date_time = event_data.get("dateTime")
 			active_post = event_data.get("ActivePost") or event_data.get("activePost")
 			access_controller_event = event_data.get("AccessControllerEvent")
-		
-		# LOG: Print parsed fields
+
+		# Handle heartbeat events FIRST - không log gì cả để tránh spam hoàn toàn
+		if event_type == 'heartBeat':
+			return {
+				"status": "success",
+				"message": "Heartbeat received",
+				"event_type": "heartBeat",
+				"device_ip": event_data.get('ipAddress'),
+				"timestamp": frappe.utils.now()
+			}
+
+		# LOG: Print parsed fields (chỉ cho non-heartbeat events)
 		logger.info(f"Parsed - eventType: {event_type}, eventState: {event_state}, dateTime: {date_time}")
-		
+
 		# Validate event type
 		if not event_type:
 			logger.warning(f"⚠️ No eventType found in request")
@@ -171,18 +179,6 @@ def handle_hikvision_event():
 			return {
 				"status": "success",
 				"message": "No valid eventType found",
-				"timestamp": frappe.utils.now()
-			}
-		
-		# Handle heartbeat events - không log để tránh spam log
-		if event_type == 'heartBeat':
-			# logger.info(f"💓 Heartbeat event from device {event_data.get('ipAddress', 'unknown')}")
-			# logger.info("=" * 80)
-			return {
-				"status": "success",
-				"message": "Heartbeat received",
-				"event_type": "heartBeat",
-				"device_ip": event_data.get('ipAddress'),
 				"timestamp": frappe.utils.now()
 			}
 		
