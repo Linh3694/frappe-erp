@@ -146,10 +146,20 @@ def register_device_token():
                 token = auth_header[7:]  # Remove 'Bearer ' prefix
                 try:
                     import jwt
-                    # Try to decode JWT token to get user
+                    # Try to decode JWT token to get user (skip signature verification for now)
                     decoded = jwt.decode(token, options={"verify_signature": False})
-                    user = decoded.get('email') or decoded.get('sub') or decoded.get('username')
-                    frappe.logger().info(f"Mobile push registration - Extracted user from JWT: {user}")
+                    potential_user = decoded.get('email') or decoded.get('sub') or decoded.get('username')
+                    frappe.logger().info(f"Mobile push registration - Extracted user from JWT: {potential_user}")
+
+                    # Validate that this user exists in Frappe
+                    if potential_user and frappe.db.exists("User", potential_user):
+                        user = potential_user
+                        frappe.logger().info(f"Mobile push registration - User validated: {user}")
+                        # Set session user for this request
+                        frappe.session.user = user
+                    else:
+                        frappe.logger().warning(f"Mobile push registration - User from JWT does not exist: {potential_user}")
+
                 except Exception as jwt_error:
                     frappe.logger().warning(f"Mobile push registration - JWT decode failed: {str(jwt_error)}")
 
