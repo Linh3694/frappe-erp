@@ -260,6 +260,31 @@ def unregister_device_token():
 
 
 @frappe.whitelist(allow_guest=True)
+def test_device_registration():
+    """
+    Test API để verify mobile app có thể gọi được
+    """
+    try:
+        import json
+        user = frappe.session.user
+        headers = dict(frappe.request.headers) if hasattr(frappe.request, 'headers') else {}
+        auth_header = headers.get('Authorization', 'None')
+
+        frappe.logger().info(f"Test device registration called by user: {user}")
+        frappe.logger().info(f"Auth header: {auth_header[:50] if auth_header != 'None' else 'None'}")
+
+        return success_response({
+            "user": user,
+            "message": "Device registration API is working",
+            "timestamp": frappe.utils.now(),
+            "auth_header_present": auth_header != 'None',
+            "auth_type": auth_header.split(' ')[0] if auth_header != 'None' and ' ' in auth_header else 'None'
+        }, "Test successful")
+    except Exception as e:
+        frappe.logger().error(f"Test device registration error: {str(e)}")
+        return error_response(f"Test failed: {str(e)}")
+
+@frappe.whitelist(allow_guest=True)
 def test_mobile_api():
     """
     Test API để kiểm tra authentication
