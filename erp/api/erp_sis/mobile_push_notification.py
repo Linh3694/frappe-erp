@@ -114,7 +114,7 @@ def ensure_mobile_device_token_doctype():
 ensure_mobile_device_token_doctype()
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def register_device_token():
     """
     Đăng ký Expo push token cho mobile devices (iOS/Android)
@@ -134,8 +134,27 @@ def register_device_token():
     """
     try:
         user = frappe.session.user
+        frappe.logger().info(f"Mobile push registration - Session user: {user}")
+        frappe.logger().info(f"Mobile push registration - Request headers: {dict(frappe.request.headers) if hasattr(frappe.request, 'headers') else 'No headers'}")
+
         if not user or user == "Guest":
-            return error_response("Authentication required", code="NOT_AUTHENTICATED")
+            # Try to extract user from Authorization header for JWT tokens
+            auth_header = frappe.request.headers.get('Authorization', '')
+            frappe.logger().info(f"Mobile push registration - Auth header: {auth_header[:50] if auth_header else 'None'}")
+
+            if auth_header.startswith('Bearer '):
+                token = auth_header[7:]  # Remove 'Bearer ' prefix
+                try:
+                    import jwt
+                    # Try to decode JWT token to get user
+                    decoded = jwt.decode(token, options={"verify_signature": False})
+                    user = decoded.get('email') or decoded.get('sub') or decoded.get('username')
+                    frappe.logger().info(f"Mobile push registration - Extracted user from JWT: {user}")
+                except Exception as jwt_error:
+                    frappe.logger().warning(f"Mobile push registration - JWT decode failed: {str(jwt_error)}")
+
+            if not user or user == "Guest":
+                return error_response("Authentication required", code="NOT_AUTHENTICATED")
 
         # Parse request data
         if frappe.request.method == "POST":
