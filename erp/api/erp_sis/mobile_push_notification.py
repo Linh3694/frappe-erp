@@ -220,28 +220,72 @@ def register_device_token():
             "last_seen": frappe.utils.now(),
         }
 
-        # Temporarily switch to system user to avoid permission issues
-        original_user = frappe.session.user
+        # Use direct database operations to avoid module loading issues
         try:
-            frappe.session.user = 'Administrator'  # Use system user for database operations
-
             if existing:
-                # Update existing token
-                doc = frappe.get_doc("Mobile Device Token", existing)
-                doc.update(device_data)
-                doc.save(ignore_permissions=True)
+                # Update existing token using SQL
+                frappe.db.set_value("Mobile Device Token", existing, device_data)
+                frappe.db.commit()
                 message = "Device token updated successfully"
             else:
-                # Create new token
+                # Create new token using SQL
                 device_data["user"] = user
-                doc = frappe.get_doc({
-                    "doctype": "Mobile Device Token",
-                    **device_data
-                })
+                device_data["doctype"] = "Mobile Device Token"
+                doc = frappe.get_doc(device_data)
                 doc.insert(ignore_permissions=True)
-        finally:
-            # Restore original user
-            frappe.session.user = original_user
+                frappe.db.commit()
+                message = "Device token registered successfully"
+        except Exception as db_error:
+            frappe.logger().error(f"Database operation failed: {str(db_error)}")
+            # Try fallback method
+            try:
+                if existing:
+                    frappe.db.sql("""
+                        UPDATE `tabMobile Device Token`
+                        SET device_token=%s, platform=%s, device_name=%s, os=%s, os_version=%s,
+                            app_version=%s, language=%s, timezone=%s, last_seen=%s
+                        WHERE name=%s
+                    """, (
+                        device_data.get('device_token'),
+                        device_data.get('platform'),
+                        device_data.get('device_name'),
+                        device_data.get('os'),
+                        device_data.get('os_version'),
+                        device_data.get('app_version'),
+                        device_data.get('language'),
+                        device_data.get('timezone'),
+                        frappe.utils.now(),
+                        existing
+                    ))
+                else:
+                    frappe.db.sql("""
+                        INSERT INTO `tabMobile Device Token`
+                        (name, user, device_token, platform, device_name, os, os_version, app_version,
+                         language, timezone, is_active, last_seen, creation, modified, owner, modified_by)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        frappe.generate_hash(length=10),
+                        user,
+                        device_data.get('device_token'),
+                        device_data.get('platform'),
+                        device_data.get('device_name'),
+                        device_data.get('os'),
+                        device_data.get('os_version'),
+                        device_data.get('app_version'),
+                        device_data.get('language'),
+                        device_data.get('timezone'),
+                        1,
+                        frappe.utils.now(),
+                        frappe.utils.now(),
+                        frappe.utils.now(),
+                        user,
+                        user
+                    ))
+                frappe.db.commit()
+                message = "Device token registered successfully (SQL fallback)"
+            except Exception as sql_error:
+                frappe.logger().error(f"SQL fallback also failed: {str(sql_error)}")
+                raise sql_error
             message = "Device token registered successfully"
 
         frappe.db.commit()
