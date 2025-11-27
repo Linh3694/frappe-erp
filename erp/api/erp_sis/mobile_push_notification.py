@@ -119,6 +119,11 @@ def register_device_token():
     """
     Đăng ký Expo push token cho mobile devices (iOS/Android)
     Thay thế cho Web Push VAPID system
+    Allow guest để có thể validate JWT manually
+    """
+    """
+    Đăng ký Expo push token cho mobile devices (iOS/Android)
+    Thay thế cho Web Push VAPID system
 
     Request body:
     {
@@ -141,6 +146,14 @@ def register_device_token():
             # Try to extract user from Authorization header for JWT tokens
             auth_header = frappe.request.headers.get('Authorization', '')
             frappe.logger().info(f"Mobile push registration - Auth header: {auth_header[:50] if auth_header else 'None'}")
+
+            # Also check if JWT token is passed in the payload for mobile apps
+            if not auth_header or not auth_header.startswith('Bearer '):
+                # Try to get token from request payload
+                token_in_payload = frappe.form_dict.get('jwt_token') or frappe.local.form_dict.get('jwt_token')
+                if token_in_payload:
+                    frappe.logger().info(f"Mobile push registration - JWT token found in payload")
+                    auth_header = f"Bearer {token_in_payload}"
 
             if auth_header.startswith('Bearer '):
                 token = auth_header[7:]  # Remove 'Bearer ' prefix
