@@ -273,47 +273,30 @@ def send_staff_attendance_notification(
 			"isCheckIn": is_check_in
 		}
 		
-		# Create notification record - sử dụng Guest context vì Hikvision chạy dưới Guest context
-		# Không cần switch user vì ignore_permissions=True sẽ bypass permission checks
+		# Create notification record directly to avoid role validation issues
 		try:
-			notification_doc = create_notification(
-				title=title,
-				message=message,
-				recipient_user=staff_email,
-				recipients=[staff_email],
-				notification_type="attendance",
-				priority="low",
-				data=notification_data,
-				channel="push",
-				event_timestamp=timestamp
-			)
+			from frappe import get_doc
+			notification_doc = get_doc({
+				"doctype": "ERP Notification",
+				"title": title,
+				"message": message,
+				"recipient_user": staff_email,
+				"recipients": [staff_email],
+				"notification_type": "attendance",
+				"priority": "low",
+				"data": json.dumps(notification_data) if isinstance(notification_data, dict) else notification_data,
+				"channel": "push",
+				"status": "sent",
+				"delivery_status": "pending",
+				"sent_at": frappe.utils.now(),
+				"event_timestamp": timestamp
+			})
+			notification_doc.insert(ignore_permissions=True)
+			frappe.db.commit()
+			frappe.logger().info(f"✅ Created notification directly: {notification_doc.name}")
 		except Exception as create_error:
-			frappe.logger().error(f"❌ Failed to create notification document: {str(create_error)}")
-			# Try to create with different approach if creation fails
-			try:
-				# Create document directly without using create_notification function
-				from frappe import get_doc
-				notification_doc = get_doc({
-					"doctype": "ERP Notification",
-					"title": title,
-					"message": message,
-					"recipient_user": staff_email,
-					"recipients": [staff_email],
-					"notification_type": "attendance",
-					"priority": "low",
-					"data": notification_data,
-					"channel": "push",
-					"status": "sent",
-					"delivery_status": "pending",
-					"sent_at": frappe.utils.now(),
-					"event_timestamp": timestamp
-				})
-				notification_doc.insert(ignore_permissions=True)
-				frappe.db.commit()
-				frappe.logger().info(f"✅ Created notification directly: {notification_doc.name}")
-			except Exception as direct_error:
-				frappe.logger().error(f"❌ Failed to create notification directly: {str(direct_error)}")
-				return
+			frappe.logger().error(f"❌ Failed to create notification directly: {str(create_error)}")
+			return
 		
 		# Send realtime notification
 		emit_notification_to_user(staff_email, {

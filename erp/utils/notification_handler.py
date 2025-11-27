@@ -436,18 +436,25 @@ def send_bulk_parent_notifications(
             for parent_email in parent_emails:
                 frappe.logger().info(f"👤 [Bulk Handler] Processing parent: {parent_email}")
                 try:
-                    # Create notification record in DB
-                    notification_doc = create_notification(
-                        title=notification_title,
-                        message=notification_body,
-                        recipient_user=parent_email,
-                        recipients=[parent_email],
-                        notification_type=recipient_type,
-                        priority="medium",
-                        data=merged_data,
-                        channel="push",
-                        event_timestamp=frappe.utils.now()
-                    )
+                    # Create notification record directly to avoid role validation issues
+                    from frappe import get_doc
+                    notification_doc = get_doc({
+                        "doctype": "ERP Notification",
+                        "title": json.dumps(notification_title) if isinstance(notification_title, dict) else notification_title,
+                        "message": json.dumps(notification_body) if isinstance(notification_body, dict) else notification_body,
+                        "recipient_user": parent_email,
+                        "recipients": [parent_email],
+                        "notification_type": recipient_type,
+                        "priority": "medium",
+                        "data": json.dumps(merged_data) if isinstance(merged_data, dict) else merged_data,
+                        "channel": "push",
+                        "status": "sent",
+                        "delivery_status": "pending",
+                        "sent_at": frappe.utils.now(),
+                        "event_timestamp": frappe.utils.now()
+                    })
+                    notification_doc.insert(ignore_permissions=True)
+                    frappe.db.commit()
                     
                     # Send realtime notification via SocketIO
                     emit_notification_to_user(parent_email, {
