@@ -89,11 +89,11 @@ def handle_ticket_status_change(event_data):
 			frappe.logger().info(f"⚠️ [Ticket Status] No recipients for {ticket_code}")
 			return
 
-		# Get user emails for recipients (recipients are user IDs from ticket-service)
-		recipient_emails = get_user_emails_from_ids(recipients)
+		# Recipients are already email addresses from ticket-service
+		recipient_emails = recipients
 
 		if not recipient_emails:
-			frappe.logger().warning(f"⚠️ [Ticket Status] No valid emails found for recipients: {recipients}")
+			frappe.logger().warning(f"⚠️ [Ticket Status] No recipients provided")
 			return
 
 		frappe.logger().info(f"👥 [Ticket Status] Sending to {len(recipient_emails)} users: {recipient_emails}")
@@ -154,11 +154,11 @@ def handle_new_ticket_created(event_data):
 
 		frappe.logger().info(f"🆕 [New Ticket] Processing {ticket_code} for {len(recipients)} recipients")
 
-		# Get user emails for recipients
-		recipient_emails = get_user_emails_from_ids(recipients)
+		# Recipients are already email addresses from ticket-service
+		recipient_emails = recipients
 
 		if not recipient_emails:
-			frappe.logger().warning(f"⚠️ [New Ticket] No valid emails found for recipients: {recipients}")
+			frappe.logger().warning(f"⚠️ [New Ticket] No recipients provided")
 			return
 
 		# Create notification data
@@ -213,11 +213,11 @@ def handle_user_reply(event_data):
 
 		frappe.logger().info(f"💬 [User Reply] Processing {ticket_code}")
 
-		# Get user emails for recipients
-		recipient_emails = get_user_emails_from_ids(recipients)
+		# Recipients are already email addresses from ticket-service
+		recipient_emails = recipients
 
 		if not recipient_emails:
-			frappe.logger().warning(f"⚠️ [User Reply] No valid emails found for recipients: {recipients}")
+			frappe.logger().warning(f"⚠️ [User Reply] No recipients provided")
 			return
 
 		# Create notification data
@@ -270,11 +270,11 @@ def handle_ticket_cancelled(event_data):
 
 		frappe.logger().info(f"❌ [Ticket Cancelled] Processing {ticket_code}")
 
-		# Get user emails for recipients
-		recipient_emails = get_user_emails_from_ids(recipients)
+		# Recipients are already email addresses from ticket-service
+		recipient_emails = recipients
 
 		if not recipient_emails:
-			frappe.logger().warning(f"⚠️ [Ticket Cancelled] No valid emails found for recipients: {recipients}")
+			frappe.logger().warning(f"⚠️ [Ticket Cancelled] No recipients provided")
 			return
 
 		# Create notification data
@@ -327,11 +327,11 @@ def handle_completion_confirmed(event_data):
 
 		frappe.logger().info(f"✅ [Completion Confirmed] Processing {ticket_code}")
 
-		# Get user emails for recipients
-		recipient_emails = get_user_emails_from_ids(recipients)
+		# Recipients are already email addresses from ticket-service
+		recipient_emails = recipients
 
 		if not recipient_emails:
-			frappe.logger().warning(f"⚠️ [Completion Confirmed] No valid emails found for recipients: {recipients}")
+			frappe.logger().warning(f"⚠️ [Completion Confirmed] No recipients provided")
 			return
 
 		# Create notification data
@@ -385,11 +385,11 @@ def handle_ticket_feedback_received(event_data):
 
 		frappe.logger().info(f"⭐ [Feedback Received] Processing {ticket_code} - {rating} stars")
 
-		# Get user emails for recipients
-		recipient_emails = get_user_emails_from_ids(recipients)
+		# Recipients are already email addresses from ticket-service
+		recipient_emails = recipients
 
 		if not recipient_emails:
-			frappe.logger().warning(f"⚠️ [Feedback Received] No valid emails found for recipients: {recipients}")
+			frappe.logger().warning(f"⚠️ [Feedback Received] No recipients provided")
 			return
 
 		# Create notification data
@@ -505,44 +505,5 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 		frappe.log_error(message=str(e), title="Ticket Notification Error")
 
 
-def get_user_emails_from_ids(user_ids):
-	"""
-	Convert user IDs from ticket-service to email addresses in Frappe
-	"""
-	try:
-		emails = []
-
-		for user_id in user_ids:
-			try:
-				# Try to find user by ID first
-				user = frappe.db.get_value("User", user_id, "email")
-				if user:
-					emails.append(user)
-					continue
-
-				# Try to find user by employee_code
-				user = frappe.db.get_value("User", {"employee_code": user_id}, "email")
-				if user:
-					emails.append(user)
-					continue
-
-				# Try to find user by username
-				user = frappe.db.get_value("User", {"username": user_id}, "email")
-				if user:
-					emails.append(user)
-					continue
-
-				frappe.logger().warning(f"⚠️ Could not find email for user ID: {user_id}")
-
-			except Exception as e:
-				frappe.logger().error(f"❌ Error finding email for user {user_id}: {str(e)}")
-
-		# Remove duplicates and filter out None values
-		emails = list(set(filter(None, emails)))
-
-		frappe.logger().info(f"👥 Converted {len(user_ids)} IDs to {len(emails)} emails: {emails}")
-		return emails
-
-	except Exception as e:
-		frappe.logger().error(f"❌ Error in get_user_emails_from_ids: {str(e)}")
-		return []
+# Note: get_user_emails_from_ids function removed
+# Recipients are now sent as email addresses directly from ticket-service
