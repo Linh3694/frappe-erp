@@ -681,7 +681,6 @@ guest_method_whitelist = [
 # Request Events
 # ----------------
 before_request = [
-	"erp.common.jwt_auth.validate_jwt_auth",
 	"erp.utils.auth_middleware.jwt_auth_middleware",
 	"erp.hooks_handlers.api_logger.log_api_request_start"
 ]
