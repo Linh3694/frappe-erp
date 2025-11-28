@@ -83,7 +83,9 @@ app_license = "mit"
 # ------------
 
 # before_install = "erp.install.before_install"
-# after_install = "erp.install.after_install"
+after_install = [
+    "erp.api.notification.ticket.start_redis_listener"
+]
 
 # Uninstallation
 # ------------

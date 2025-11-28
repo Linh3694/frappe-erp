@@ -7,6 +7,7 @@ import frappe
 from frappe import _
 import json
 from datetime import datetime
+import redis
 from erp.common.doctype.erp_notification.erp_notification import create_notification
 from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
@@ -19,6 +20,13 @@ def handle_ticket_event():
 	Endpoint: /api/method/erp.api.notification.ticket.handle_ticket_event
 	"""
 	try:
+		# Verify service authentication
+		service_token = frappe.get_request_header('X-Service-Token') or frappe.get_request_header('Authorization', '').replace('Bearer ', '')
+
+		expected_token = frappe.conf.get('TICKET_SERVICE_TOKEN') or frappe.conf.get('JWT_SECRET')
+		if not service_token or service_token != expected_token:
+			frappe.throw(_("Unauthorized service"), frappe.PermissionError)
+
 		# Get request data
 		if frappe.request.method != 'POST':
 			frappe.throw(_("Method not allowed"), frappe.PermissionError)
@@ -30,7 +38,7 @@ def handle_ticket_event():
 		event_type = data.get('event_type')
 		event_data = data.get('event_data', {})
 
-		frappe.logger().info(f"🎫 [Ticket Event] Received {event_type}: {json.dumps(event_data, indent=2)}")
+		frappe.logger().info(f"🎫 [Ticket Event] Received API event: {event_type}")
 
 		if not event_type:
 			frappe.throw(_("Missing event_type"), frappe.ValidationError)
@@ -52,10 +60,10 @@ def handle_ticket_event():
 			frappe.logger().warning(f"⚠️ [Ticket Event] Unknown event type: {event_type}")
 			return {"success": False, "message": f"Unknown event type: {event_type}"}
 
-		return {"success": True, "message": f"Processed {event_type} event"}
+		return {"success": True, "message": f"Processed {event_type} event via API"}
 
 	except Exception as e:
-		frappe.logger().error(f"❌ [Ticket Event] Error processing event: {str(e)}")
+		frappe.logger().error(f"❌ [Ticket Event] Error processing API event: {str(e)}")
 		frappe.log_error(message=str(e), title="Ticket Event Processing Error")
 		return {"success": False, "message": str(e)}
 
@@ -505,5 +513,3 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 		frappe.log_error(message=str(e), title="Ticket Notification Error")
 
 
-# Note: get_user_emails_from_ids function removed
-# Recipients are now sent as email addresses directly from ticket-service
