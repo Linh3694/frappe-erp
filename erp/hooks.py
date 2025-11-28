@@ -87,6 +87,11 @@ after_install = [
     "erp.api.notification.ticket.start_redis_listener"
 ]
 
+# Start Redis listeners on app startup
+app_startup = [
+    "erp.api.notification.ticket.start_redis_listener"
+]
+
 # Uninstallation
 # ------------
 

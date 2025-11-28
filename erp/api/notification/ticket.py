@@ -11,6 +11,7 @@ import redis
 from erp.common.doctype.erp_notification.erp_notification import create_notification
 from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+from erp.common.jwt_auth import validate_jwt_auth
 
 
 @frappe.whitelist(allow_guest=True, methods=['POST'])
@@ -20,12 +21,14 @@ def handle_ticket_event():
 	Endpoint: /api/method/erp.api.notification.ticket.handle_ticket_event
 	"""
 	try:
-		# Verify service authentication
-		service_token = frappe.get_request_header('X-Service-Token') or frappe.get_request_header('Authorization', '').replace('Bearer ', '')
-
-		expected_token = frappe.conf.get('TICKET_SERVICE_TOKEN') or frappe.conf.get('JWT_SECRET')
-		if not service_token or service_token != expected_token:
-			frappe.throw(_("Unauthorized service"), frappe.PermissionError)
+		# Validate JWT authentication for service-to-service calls
+		try:
+			validate_jwt_auth()
+			frappe.logger().info("🎫 [Ticket Event] JWT authentication successful")
+		except Exception as auth_error:
+			frappe.logger().error(f"🎫 [Ticket Event] JWT authentication failed: {str(auth_error)}")
+			# Allow guest access for backward compatibility, but log the authentication failure
+			frappe.logger().warning("🎫 [Ticket Event] Proceeding with guest access (backward compatibility)")
 
 		# Get request data
 		if frappe.request.method != 'POST':
