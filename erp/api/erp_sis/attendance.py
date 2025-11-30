@@ -275,6 +275,81 @@ def get_class_attendance(class_id=None, date=None, period=None, skip_cache=None)
 		return error_response(message="Failed to fetch attendance", code="GET_ATTENDANCE_ERROR")
 
 
+@frappe.whitelist(allow_guest=False)
+def check_has_attendance(class_id=None, date=None, period=None):
+	"""Check if attendance exists for a class on a date and period.
+	Simple check without cache - returns boolean.
+	"""
+	try:
+		if not class_id:
+			class_id = frappe.request.args.get("class_id") if getattr(frappe, 'request', None) else None
+		if not date:
+			date = frappe.request.args.get("date") if getattr(frappe, 'request', None) else None
+		if not period:
+			period = frappe.request.args.get("period") if getattr(frappe, 'request', None) else None
+
+		if not class_id or not date or not period:
+			return error_response(message="Missing required parameters: class_id, date, period", code="MISSING_PARAMETERS")
+		
+		# Simple count query - no cache
+		count = frappe.db.count("SIS Class Attendance", filters={
+			"class_id": class_id,
+			"date": date,
+			"period": period,
+		})
+		
+		return success_response(data={"has_attendance": count > 0, "count": count})
+	except Exception as e:
+		frappe.log_error(f"check_has_attendance error: {str(e)}")
+		return error_response(message="Failed to check attendance", code="CHECK_ATTENDANCE_ERROR")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def batch_check_has_attendance(items=None):
+	"""Batch check if attendance exists for multiple class/date/period combinations.
+	No cache - returns map of key -> has_attendance.
+	
+	Request body:
+	{
+		"items": [
+			{"class_id": "CLASS-001", "date": "2024-01-15", "period": "homeroom"},
+			{"class_id": "CLASS-001", "date": "2024-01-15", "period": "SIS-TIMETABLE-COLUMN-123"}
+		]
+	}
+	"""
+	try:
+		body = _get_json_body() or {}
+		if items is None:
+			items = body.get('items')
+		
+		if not items or not isinstance(items, list):
+			return error_response(message="items must be a non-empty array", code="INVALID_ITEMS")
+		
+		result = {}
+		for item in items:
+			class_id = item.get('class_id')
+			date = item.get('date')
+			period = item.get('period')
+			
+			if not class_id or not date or not period:
+				continue
+			
+			key = f"{class_id}_{period}" if period != "homeroom" else class_id
+			
+			count = frappe.db.count("SIS Class Attendance", filters={
+				"class_id": class_id,
+				"date": date,
+				"period": period,
+			})
+			
+			result[key] = {"has_attendance": count > 0, "count": count}
+		
+		return success_response(data=result)
+	except Exception as e:
+		frappe.log_error(f"batch_check_has_attendance error: {str(e)}")
+		return error_response(message="Failed to batch check attendance", code="BATCH_CHECK_ATTENDANCE_ERROR")
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def batch_get_class_attendance(class_id=None, date=None, periods=None):
 	"""Get attendance for multiple periods in a single request.
