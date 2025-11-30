@@ -1274,6 +1274,125 @@ def test_homeroom_report_console(date=None):
 		return error_response(f"Test failed: {str(e)}", code="TEST_ERROR")
 
 
+# Scheduled job to remind teachers about homeroom attendance
+@frappe.whitelist()
+def remind_homeroom_attendance():
+	"""
+	Daily scheduled job to send push notification reminding teachers 
+	who haven't done homeroom attendance yet.
+	Called automatically every day at 8:00 AM
+	"""
+	try:
+		from datetime import datetime
+		today = datetime.now().strftime('%Y-%m-%d')
+		
+		frappe.logger().info(f"📢 Starting homeroom attendance reminder for {today}")
+		
+		# Get current school year
+		current_year = frappe.get_all(
+			"SIS School Year",
+			filters={"is_enable": 1},
+			fields=["name"],
+			limit=1
+		)
+		school_year_id = current_year[0].name if current_year else None
+		
+		# Get all teachers with homeroom classes
+		teachers_with_homeroom = frappe.db.sql("""
+			SELECT DISTINCT
+				t.name as teacher_name,
+				t.user_id as teacher_email,
+				c.name as class_id,
+				c.title as class_title
+			FROM `tabSIS Teacher` t
+			INNER JOIN `tabSIS Class` c ON (c.homeroom_teacher = t.name OR c.vice_homeroom_teacher = t.name)
+			WHERE t.user_id IS NOT NULL
+				AND t.user_id != ''
+				{school_year_filter}
+		""".format(
+			school_year_filter=f"AND c.school_year_id = '{school_year_id}'" if school_year_id else ""
+		), as_dict=True)
+		
+		# Group by teacher
+		teacher_classes = {}
+		for row in teachers_with_homeroom:
+			if row.teacher_email not in teacher_classes:
+				teacher_classes[row.teacher_email] = {
+					"teacher_name": row.teacher_name,
+					"classes": []
+				}
+			teacher_classes[row.teacher_email]["classes"].append({
+				"class_id": row.class_id,
+				"class_title": row.class_title
+			})
+		
+		frappe.logger().info(f"Found {len(teacher_classes)} teachers with homeroom classes")
+		
+		# Check each teacher's classes for attendance
+		notifications_sent = 0
+		for teacher_email, data in teacher_classes.items():
+			unattended_classes = []
+			
+			for cls in data["classes"]:
+				# Check if attendance exists for this class today
+				attendance_count = frappe.db.count("SIS Class Attendance", filters={
+					"class_id": cls["class_id"],
+					"date": today,
+					"period": "homeroom"
+				})
+				
+				if attendance_count == 0:
+					unattended_classes.append(cls["class_title"])
+			
+			# Send notification if there are unattended classes
+			if unattended_classes:
+				try:
+					from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+					
+					class_list = ", ".join(unattended_classes)
+					title = "📋 Nhắc điểm danh"
+					body = f"Bạn có {len(unattended_classes)} lớp chủ nhiệm chưa điểm danh: {class_list}"
+					
+					# Data for deep link navigation
+					notification_data = {
+						"type": "attendance_reminder",
+						"screen": "AttendanceHome",
+						"tab": "GVCN",
+						"date": today,
+						"classes": unattended_classes
+					}
+					
+					result = send_mobile_notification(
+						user_email=teacher_email,
+						title=title,
+						body=body,
+						data=notification_data
+					)
+					
+					if result.get("success"):
+						notifications_sent += 1
+						frappe.logger().info(f"✅ Sent reminder to {teacher_email} for classes: {class_list}")
+					else:
+						frappe.logger().warning(f"⚠️ Failed to send reminder to {teacher_email}: {result.get('message')}")
+						
+				except Exception as e:
+					frappe.logger().error(f"❌ Error sending notification to {teacher_email}: {str(e)}")
+		
+		frappe.logger().info(f"📢 Homeroom attendance reminder completed: {notifications_sent} notifications sent")
+		
+		return {
+			"success": True,
+			"message": f"Sent {notifications_sent} reminders",
+			"total_teachers": len(teacher_classes),
+			"notifications_sent": notifications_sent
+		}
+		
+	except Exception as e:
+		frappe.logger().error(f"❌ Error in remind_homeroom_attendance: {str(e)}")
+		frappe.log_error(f"Homeroom attendance reminder error: {str(e)}")
+		return {"success": False, "message": str(e)}
+
+
 # Scheduled job for daily homeroom attendance report
 @frappe.whitelist()
 def daily_homeroom_attendance_report():
