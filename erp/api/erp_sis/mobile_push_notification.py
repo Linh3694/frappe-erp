@@ -88,6 +88,26 @@ def ensure_mobile_device_token_doctype():
                     "label": "Last Seen",
                     "fieldtype": "Datetime",
                     "default": "Now"
+                },
+                {
+                    "fieldname": "app_type",
+                    "label": "App Type",
+                    "fieldtype": "Select",
+                    "options": "standalone\nexpo-go",
+                    "default": "standalone",
+                    "description": "standalone = TestFlight/App Store, expo-go = Expo Go development app"
+                },
+                {
+                    "fieldname": "device_id",
+                    "label": "Device ID",
+                    "fieldtype": "Data",
+                    "description": "Unique device identifier to track same physical device across app types"
+                },
+                {
+                    "fieldname": "bundle_id",
+                    "label": "Bundle ID",
+                    "fieldtype": "Data",
+                    "description": "iOS Bundle Identifier"
                 }
             ],
             "permissions": [
@@ -109,6 +129,44 @@ def ensure_mobile_device_token_doctype():
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
         frappe.logger().info("Created Mobile Device Token DocType")
+    else:
+        # Add new fields if they don't exist
+        try:
+            meta = frappe.get_meta("Mobile Device Token")
+            existing_fields = [f.fieldname for f in meta.fields]
+            
+            new_fields = []
+            if "app_type" not in existing_fields:
+                new_fields.append({
+                    "fieldname": "app_type",
+                    "label": "App Type",
+                    "fieldtype": "Select",
+                    "options": "standalone\nexpo-go",
+                    "default": "standalone"
+                })
+            if "device_id" not in existing_fields:
+                new_fields.append({
+                    "fieldname": "device_id",
+                    "label": "Device ID",
+                    "fieldtype": "Data"
+                })
+            if "bundle_id" not in existing_fields:
+                new_fields.append({
+                    "fieldname": "bundle_id",
+                    "label": "Bundle ID",
+                    "fieldtype": "Data"
+                })
+            
+            if new_fields:
+                for field in new_fields:
+                    frappe.db.sql(f"""
+                        ALTER TABLE `tabMobile Device Token`
+                        ADD COLUMN IF NOT EXISTS `{field['fieldname']}` VARCHAR(140)
+                    """)
+                frappe.db.commit()
+                frappe.logger().info(f"Added new fields to Mobile Device Token: {[f['fieldname'] for f in new_fields]}")
+        except Exception as e:
+            frappe.logger().warning(f"Could not add new fields to Mobile Device Token: {str(e)}")
 
 # Initialize on module load
 ensure_mobile_device_token_doctype()
@@ -197,11 +255,41 @@ def register_device_token():
         # Validate required fields
         device_token = data.get('deviceToken')
         platform = data.get('platform', 'expo')
+        app_type = data.get('appType', 'standalone')  # 'standalone' cho TestFlight/App Store, 'expo-go' cho Expo Go
+        device_id = data.get('deviceId', '')  # Unique device identifier
+        bundle_id = data.get('bundleId', 'com.wellspring.workspace')
 
         if not device_token:
             return error_response("deviceToken is required", code="MISSING_DEVICE_TOKEN")
 
-        # Check if user already has this token
+        frappe.logger().info(f"📱 Registering device token for {user}")
+        frappe.logger().info(f"📱 App type: {app_type}, Device ID: {device_id}, Bundle ID: {bundle_id}")
+        frappe.logger().info(f"📱 Token: {device_token[:50]}...")
+
+        # QUAN TRỌNG: Khi user đăng ký từ standalone app (TestFlight/App Store),
+        # cần deactivate token cũ từ expo-go để notification chỉ gửi đến standalone app
+        # và ngược lại
+        if device_id:
+            # Tìm và deactivate token cũ cùng device_id nhưng khác app_type
+            old_tokens = frappe.get_all("Mobile Device Token",
+                filters={
+                    "user": user,
+                    "device_id": device_id,
+                    "app_type": ["!=", app_type],
+                    "is_active": 1
+                },
+                fields=["name", "app_type", "device_token"]
+            )
+            
+            for old_token in old_tokens:
+                frappe.db.set_value("Mobile Device Token", old_token.name, "is_active", 0)
+                frappe.logger().info(f"📱 Deactivated old {old_token.app_type} token for {user}: {old_token.device_token[:30]}...")
+            
+            if old_tokens:
+                frappe.db.commit()
+                frappe.logger().info(f"📱 Deactivated {len(old_tokens)} old tokens for same device, different app type")
+
+        # Check if user already has this exact token
         existing = frappe.db.exists("Mobile Device Token", {
             "user": user,
             "device_token": device_token
@@ -218,6 +306,9 @@ def register_device_token():
             "timezone": data.get('timezone', 'UTC'),
             "is_active": 1,
             "last_seen": frappe.utils.now(),
+            "app_type": app_type,
+            "device_id": device_id,
+            "bundle_id": bundle_id,
         }
 
         # Use direct database operations to avoid module loading issues
@@ -226,7 +317,7 @@ def register_device_token():
                 # Update existing token using SQL
                 frappe.db.set_value("Mobile Device Token", existing, device_data)
                 frappe.db.commit()
-                message = "Device token updated successfully"
+                message = f"Device token updated successfully ({app_type})"
             else:
                 # Create new token using SQL
                 device_data["user"] = user
@@ -234,7 +325,7 @@ def register_device_token():
                 doc = frappe.get_doc(device_data)
                 doc.insert(ignore_permissions=True)
                 frappe.db.commit()
-                message = "Device token registered successfully"
+                message = f"Device token registered successfully ({app_type})"
         except Exception as db_error:
             frappe.logger().error(f"Database operation failed: {str(db_error)}")
             # Try fallback method
@@ -243,7 +334,8 @@ def register_device_token():
                     frappe.db.sql("""
                         UPDATE `tabMobile Device Token`
                         SET device_token=%s, platform=%s, device_name=%s, os=%s, os_version=%s,
-                            app_version=%s, language=%s, timezone=%s, last_seen=%s
+                            app_version=%s, language=%s, timezone=%s, last_seen=%s,
+                            app_type=%s, device_id=%s, bundle_id=%s, is_active=1
                         WHERE name=%s
                     """, (
                         device_data.get('device_token'),
@@ -255,14 +347,18 @@ def register_device_token():
                         device_data.get('language'),
                         device_data.get('timezone'),
                         frappe.utils.now(),
+                        device_data.get('app_type'),
+                        device_data.get('device_id'),
+                        device_data.get('bundle_id'),
                         existing
                     ))
                 else:
                     frappe.db.sql("""
                         INSERT INTO `tabMobile Device Token`
                         (name, user, device_token, platform, device_name, os, os_version, app_version,
-                         language, timezone, is_active, last_seen, creation, modified, owner, modified_by)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         language, timezone, is_active, last_seen, app_type, device_id, bundle_id,
+                         creation, modified, owner, modified_by)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         frappe.generate_hash(length=10),
                         user,
@@ -276,23 +372,29 @@ def register_device_token():
                         device_data.get('timezone'),
                         1,
                         frappe.utils.now(),
+                        device_data.get('app_type'),
+                        device_data.get('device_id'),
+                        device_data.get('bundle_id'),
                         frappe.utils.now(),
                         frappe.utils.now(),
                         user,
                         user
                     ))
                 frappe.db.commit()
-                message = "Device token registered successfully (SQL fallback)"
+                message = f"Device token registered successfully ({app_type}, SQL fallback)"
             except Exception as sql_error:
                 frappe.logger().error(f"SQL fallback also failed: {str(sql_error)}")
                 raise sql_error
-            message = "Device token registered successfully"
 
         frappe.db.commit()
+        frappe.logger().info(f"✅ {message} for user {user}")
 
         return success_response({
             "device_token": device_token,
             "platform": platform,
+            "app_type": app_type,
+            "device_id": device_id,
+            "bundle_id": bundle_id,
             "registered_at": frappe.utils.now()
         }, message)
 
@@ -399,14 +501,20 @@ def send_mobile_notification(user_email, title, body, data=None):
                 "user": user_email,
                 "is_active": 1
             },
-            fields=["device_token", "platform"]
+            fields=["device_token", "platform", "app_type", "device_id"]
         )
 
         if not tokens:
+            frappe.logger().warning(f"📱 No active device tokens found for user: {user_email}")
             return {
                 "success": False,
                 "message": f"No active device tokens found for user: {user_email}"
             }
+        
+        # Log all active tokens for debugging
+        frappe.logger().info(f"📱 Found {len(tokens)} active device token(s) for {user_email}:")
+        for t in tokens:
+            frappe.logger().info(f"   - Token: {t.device_token[:40]}... | Platform: {t.platform} | App Type: {t.get('app_type', 'unknown')}")
 
         # Prepare Expo notification payload
         messages = []
