@@ -208,11 +208,12 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_class_attendance(class_id=None, date=None, period=None):
+def get_class_attendance(class_id=None, date=None, period=None, skip_cache=None):
 	"""Return attendance records for a class on a date and period.
 	Params may be provided in query string or function args.
 	
 	⚡ Performance: Cached for 5 minutes (critical real-time data)
+	- skip_cache: if "1" or "true", bypass cache and fetch fresh data from DB
 	"""
 	try:
 		if not class_id:
@@ -221,23 +222,31 @@ def get_class_attendance(class_id=None, date=None, period=None):
 			date = frappe.request.args.get("date") if getattr(frappe, 'request', None) else None
 		if not period:
 			period = frappe.request.args.get("period") if getattr(frappe, 'request', None) else None
+		if skip_cache is None:
+			skip_cache = frappe.request.args.get("skip_cache") if getattr(frappe, 'request', None) else None
 
 		if not class_id or not date or not period:
 			return error_response(message="Missing required parameters: class_id, date, period", code="MISSING_PARAMETERS")
 		
+		# Check if we should skip cache
+		should_skip_cache = skip_cache in ["1", "true", True]
+		
 		# ⚡ CACHE: Check Redis cache first (5 min TTL - critical real-time data)
 		cache_key = f"attendance:{class_id}:{date}:{period}"
 		
-		try:
-			cached_data = frappe.cache().get_value(cache_key)
-			if cached_data:
-				frappe.logger().info(f"✅ Cache HIT for attendance {class_id}/{date}/{period}")
-				return success_response(
-					data=cached_data,
-					message="Attendance fetched successfully (cached)"
-				)
-		except Exception as cache_error:
-			frappe.logger().warning(f"Cache read failed: {cache_error}")
+		if not should_skip_cache:
+			try:
+				cached_data = frappe.cache().get_value(cache_key)
+				if cached_data:
+					frappe.logger().info(f"✅ Cache HIT for attendance {class_id}/{date}/{period}")
+					return success_response(
+						data=cached_data,
+						message="Attendance fetched successfully (cached)"
+					)
+			except Exception as cache_error:
+				frappe.logger().warning(f"Cache read failed: {cache_error}")
+		else:
+			frappe.logger().info(f"⏭️ Skipping cache for attendance {class_id}/{date}/{period}")
 		
 		frappe.logger().info(f"❌ Cache MISS for attendance {class_id}/{date}/{period} - fetching from DB")
 
@@ -518,28 +527,38 @@ def save_class_attendance(items=None, overwrite=None):
 		# ⚡ CACHE: Clear attendance cache after save (both single and batch)
 		try:
 			cache = frappe.cache()
-			redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
+			cache_cleared = 0
+			
+			# Get unique class/date/period combinations
+			cleared_keys = set()
+			for item in valid_items:
+				class_id = item['class_id']
+				date = item['date']
+				period = item['period']
+				
+				# Clear single period cache using delete_value (same method as set_value)
+				single_key = f"attendance:{class_id}:{date}:{period}"
+				if single_key not in cleared_keys:
+					cache.delete_value(single_key)
+					cleared_keys.add(single_key)
+					cache_cleared += 1
+					frappe.logger().info(f"🗑️ Cleared cache key: {single_key}")
+			
+			# Also try to clear using Redis directly for batch patterns
+			try:
+				redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else None
+				if redis_conn and hasattr(redis_conn, 'scan_iter'):
+					unique_class_dates = set((item['class_id'], item['date']) for item in valid_items)
+					for class_id, date in unique_class_dates:
+						batch_pattern = f"*attendance_batch:{class_id}:{date}:*"
+						batch_keys = list(redis_conn.scan_iter(match=batch_pattern, count=100))
+						if batch_keys:
+							redis_conn.delete(*batch_keys)
+							cache_cleared += len(batch_keys)
+			except Exception as redis_error:
+				frappe.logger().warning(f"Redis batch clear failed: {redis_error}")
 
-			if hasattr(redis_conn, 'scan_iter'):
-				# Clear all affected cache keys
-				cache_cleared = 0
-				for item in valid_items:
-					class_id = item['class_id']
-					date = item['date']
-					period = item['period']
-
-					# Clear single period cache
-					single_key = f"attendance:{class_id}:{date}:{period}"
-					cache.delete_key(single_key)
-
-					# Clear batch cache patterns for this class/date
-					batch_pattern = f"*attendance_batch:{class_id}:{date}:*"
-					batch_keys = list(redis_conn.scan_iter(match=batch_pattern, count=100))
-					if batch_keys:
-						redis_conn.delete(*batch_keys)
-						cache_cleared += len(batch_keys)
-
-				frappe.logger().info(f"✅ Cleared attendance cache after save ({cache_cleared} batch keys)")
+			frappe.logger().info(f"✅ Cleared {cache_cleared} attendance cache keys after save")
 		except Exception as cache_error:
 			frappe.logger().warning(f"Cache clear failed: {cache_error}")
 		
