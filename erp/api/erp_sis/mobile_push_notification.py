@@ -411,6 +411,15 @@ def send_mobile_notification(user_email, title, body, data=None):
         # Prepare Expo notification payload
         messages = []
         for token_doc in tokens:
+            # Determine channelId based on notification type
+            notification_type = data.get("type") if data else None
+            if notification_type == "attendance":
+                channel_id = "attendance"
+            elif notification_type == "ticket":
+                channel_id = "ticket"
+            else:
+                channel_id = "default"
+            
             message = {
                 "to": token_doc.device_token,
                 "title": title,
@@ -418,7 +427,7 @@ def send_mobile_notification(user_email, title, body, data=None):
                 "data": data or {},
                 "priority": "high",
                 "sound": "default",  # iOS default message sound (ting ting)
-                "channelId": "attendance" if data and data.get("type") == "attendance" else "default"
+                "channelId": channel_id
             }
 
             # Add platform-specific settings
@@ -426,7 +435,7 @@ def send_mobile_notification(user_email, title, body, data=None):
                 message["badge"] = 1
             elif token_doc.platform == "android":
                 message["android"] = {
-                    "channelId": "attendance" if data and data.get("type") == "attendance" else "default",
+                    "channelId": channel_id,
                     "priority": "high"
                 }
 

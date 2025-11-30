@@ -7,11 +7,9 @@ import frappe
 from frappe import _
 import json
 from datetime import datetime
-import redis
 from erp.common.doctype.erp_notification.erp_notification import create_notification
 from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
-from erp.common.jwt_auth import validate_jwt_auth
 
 
 @frappe.whitelist(allow_guest=True, methods=['POST'])
@@ -21,14 +19,15 @@ def handle_ticket_event():
 	Endpoint: /api/method/erp.api.notification.ticket.handle_ticket_event
 	"""
 	try:
-		# Validate JWT authentication for service-to-service calls
-		try:
-			validate_jwt_auth()
-			frappe.logger().info("🎫 [Ticket Event] JWT authentication successful")
-		except Exception as auth_error:
-			frappe.logger().error(f"🎫 [Ticket Event] JWT authentication failed: {str(auth_error)}")
-			# Allow guest access for backward compatibility, but log the authentication failure
-			frappe.logger().warning("🎫 [Ticket Event] Proceeding with guest access (backward compatibility)")
+		# Validate service-to-service call via custom header (simpler than JWT)
+		service_name = frappe.get_request_header("X-Service-Name", "")
+		request_source = frappe.get_request_header("X-Request-Source", "")
+		
+		if service_name == "ticket-service" and request_source == "service-to-service":
+			frappe.logger().info("🎫 [Ticket Event] Valid service-to-service call from ticket-service")
+		else:
+			frappe.logger().warning(f"🎫 [Ticket Event] Request from unknown source: service={service_name}, source={request_source}")
+			# Still allow for backward compatibility but log warning
 
 		# Get request data
 		if frappe.request.method != 'POST':
@@ -438,22 +437,28 @@ def handle_ticket_feedback_received(event_data):
 def send_ticket_notification_to_user(user_email, title, body, data, notification_type):
 	"""
 	Send ticket notification to a specific user
+	Flow giống như attendance notification để đảm bảo hoạt động
 	"""
 	try:
-		frappe.logger().info(f"📤 [Ticket Notification] Sending to {user_email}: {title}")
+		frappe.logger().info(f"📤 [Ticket Notification] START - Sending to {user_email}: {title}")
 
-		# Create notification data
+		# Create notification data with ticket type for channelId
 		notification_data = {
-			"type": data.get('type', notification_type),
+			"type": "ticket",  # Use "ticket" type for channelId routing
+			"notificationType": notification_type,
 			"ticketId": data.get('ticketId'),
 			"ticketCode": data.get('ticketCode'),
+			"action": data.get('type', notification_type),
 			"priority": data.get('priority', 'normal'),
 			"timestamp": data.get('timestamp', datetime.now().isoformat()),
 			# Include additional data based on notification type
 			**{k: v for k, v in data.items() if k not in ['type', 'ticketId', 'ticketCode', 'priority', 'timestamp']}
 		}
 
+		frappe.logger().info(f"📤 [Ticket Notification] notification_data: {notification_data}")
+
 		# Create ERP Notification record (similar to attendance)
+		notification_doc = None
 		try:
 			from frappe import get_doc
 			notification_doc = get_doc({
@@ -473,22 +478,29 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 			})
 			notification_doc.insert(ignore_permissions=True)
 			frappe.db.commit()
-			frappe.logger().info(f"✅ Created notification record: {notification_doc.name}")
+			frappe.logger().info(f"✅ [Ticket Notification] Created notification record: {notification_doc.name}")
 		except Exception as create_error:
-			frappe.logger().error(f"❌ Failed to create notification record: {str(create_error)}")
-			return
+			frappe.logger().error(f"❌ [Ticket Notification] Failed to create notification record: {str(create_error)}")
+			# Continue anyway to try sending push notification
 
-		# Send mobile push notification
+		# Send mobile push notification (CRITICAL - this sends to Expo)
 		try:
+			frappe.logger().info(f"📱 [Ticket Notification] Calling send_mobile_notification for {user_email}")
 			mobile_result = send_mobile_notification(
 				user_email=user_email,
 				title=title,
 				body=body,
 				data=notification_data
 			)
-			frappe.logger().info(f"📱 Mobile notification sent to {user_email}: {mobile_result}")
+			frappe.logger().info(f"📱 [Ticket Notification] send_mobile_notification result: {mobile_result}")
+			
+			# Log detailed result for debugging
+			if mobile_result.get('success'):
+				frappe.logger().info(f"✅ [Ticket Notification] Push sent successfully to {user_email}: {mobile_result.get('message')}")
+			else:
+				frappe.logger().warning(f"⚠️ [Ticket Notification] Push may have failed for {user_email}: {mobile_result.get('message')}")
 		except Exception as mobile_error:
-			frappe.logger().error(f"❌ Failed to send mobile notification to {user_email}: {str(mobile_error)}")
+			frappe.logger().error(f"❌ [Ticket Notification] Failed to send mobile notification to {user_email}: {str(mobile_error)}")
 
 		# Send realtime notification for PWA/web users
 		try:
@@ -514,5 +526,85 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 	except Exception as e:
 		frappe.logger().error(f"❌ [Ticket Notification] Error sending to {user_email}: {str(e)}")
 		frappe.log_error(message=str(e), title="Ticket Notification Error")
+
+
+@frappe.whitelist(allow_guest=True, methods=['GET', 'POST'])
+def test_ticket_notification():
+	"""
+	Test endpoint để verify ticket notification flow
+	GET: Kiểm tra endpoint có hoạt động không
+	POST: Gửi test notification đến user cụ thể
+	
+	POST body:
+	{
+		"user_email": "user@example.com",
+		"title": "Test Ticket",
+		"body": "This is a test notification"
+	}
+	"""
+	try:
+		if frappe.request.method == 'GET':
+			# Health check
+			return {
+				"success": True,
+				"message": "Ticket notification endpoint is working",
+				"timestamp": datetime.now().isoformat()
+			}
+		
+		# POST - Send test notification
+		data = frappe.form_dict
+		if not data:
+			data = json.loads(frappe.local.request.get_data() or '{}')
+		
+		user_email = data.get('user_email')
+		if not user_email:
+			return {"success": False, "message": "user_email is required"}
+		
+		title = data.get('title', '🎫 Test Ticket Notification')
+		body = data.get('body', 'This is a test notification from Frappe ticket system')
+		
+		# Check if user has device tokens
+		tokens = frappe.get_all("Mobile Device Token",
+			filters={"user": user_email, "is_active": 1},
+			fields=["device_token", "platform", "device_name"]
+		)
+		
+		frappe.logger().info(f"🧪 [Test] Found {len(tokens)} device tokens for {user_email}")
+		
+		if not tokens:
+			return {
+				"success": False,
+				"message": f"No active device tokens found for user: {user_email}",
+				"hint": "Make sure the user has registered their mobile device"
+			}
+		
+		# Send test notification
+		test_data = {
+			"type": "ticket",
+			"ticketId": "test-123",
+			"ticketCode": "TEST-001",
+			"action": "test_notification",
+			"priority": "normal",
+			"timestamp": datetime.now().isoformat()
+		}
+		
+		send_ticket_notification_to_user(
+			user_email=user_email,
+			title=title,
+			body=body,
+			data=test_data,
+			notification_type="test_ticket"
+		)
+		
+		return {
+			"success": True,
+			"message": f"Test notification sent to {user_email}",
+			"device_count": len(tokens),
+			"devices": [{"platform": t.platform, "device_name": t.device_name} for t in tokens]
+		}
+		
+	except Exception as e:
+		frappe.logger().error(f"❌ [Test] Error: {str(e)}")
+		return {"success": False, "message": str(e)}
 
 
