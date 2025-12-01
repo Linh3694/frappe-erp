@@ -459,19 +459,23 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 		}
 		mapped_priority = priority_map.get(raw_priority.lower() if raw_priority else 'medium', 'medium')
 
-		# Parse timestamp from ISO format to MySQL format
+		# Parse timestamp from ISO format (UTC) to MySQL format (Vietnam timezone UTC+7)
 		raw_timestamp = data.get('timestamp')
 		if raw_timestamp:
 			try:
-				# Handle ISO format with Z suffix: '2025-12-01T03:27:29.339Z'
+				# Handle ISO format with Z suffix: '2025-12-01T03:27:29.339Z' (UTC)
 				if isinstance(raw_timestamp, str):
-					# Remove Z suffix and parse
-					clean_timestamp = raw_timestamp.replace('Z', '+00:00')
-					parsed_dt = datetime.fromisoformat(clean_timestamp.replace('+00:00', ''))
-					event_timestamp = parsed_dt.strftime('%Y-%m-%d %H:%M:%S')
+					# Remove milliseconds and Z suffix, parse as UTC
+					clean_timestamp = raw_timestamp.replace('Z', '').split('.')[0]
+					parsed_dt = datetime.fromisoformat(clean_timestamp)
+					# Add 7 hours for Vietnam timezone (UTC+7)
+					from datetime import timedelta
+					vietnam_dt = parsed_dt + timedelta(hours=7)
+					event_timestamp = vietnam_dt.strftime('%Y-%m-%d %H:%M:%S')
 				else:
 					event_timestamp = frappe.utils.now()
-			except Exception:
+			except Exception as e:
+				frappe.logger().warning(f"Failed to parse timestamp {raw_timestamp}: {str(e)}")
 				event_timestamp = frappe.utils.now()
 		else:
 			event_timestamp = frappe.utils.now()
