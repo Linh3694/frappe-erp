@@ -438,6 +438,11 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 	"""
 	Send ticket notification to a specific user
 	Flow giống như attendance notification để đảm bảo hoạt động
+	
+	Args:
+		notification_type: The action type (e.g., 'ticket_status_changed', 'new_ticket_admin')
+		                   This is stored in data.action for reference, but ERP Notification
+		                   uses 'ticket' as the notification_type
 	"""
 	try:
 		frappe.logger().info(f"📤 [Ticket Notification] START - Sending to {user_email}: {title}")
@@ -445,10 +450,10 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 		# Create notification data with ticket type for channelId
 		notification_data = {
 			"type": "ticket",  # Use "ticket" type for channelId routing
-			"notificationType": notification_type,
+			"notificationType": notification_type,  # Keep original action for reference
 			"ticketId": data.get('ticketId'),
 			"ticketCode": data.get('ticketCode'),
-			"action": data.get('type', notification_type),
+			"action": notification_type,  # Store the action for frontend handling
 			"priority": data.get('priority', 'normal'),
 			"timestamp": data.get('timestamp', datetime.now().isoformat()),
 			# Include additional data based on notification type
@@ -467,7 +472,7 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 				"message": body,
 				"recipient_user": user_email,
 				"recipients": json.dumps([user_email]),
-				"notification_type": notification_type,
+				"notification_type": "ticket",  # Use "ticket" - valid DocType value
 				"priority": data.get('priority', 'normal'),
 				"data": json.dumps(notification_data),
 				"channel": "push",
@@ -504,9 +509,10 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 
 		# Send realtime notification for PWA/web users
 		try:
+			notification_id = notification_doc.name if notification_doc else f"TICKET-{frappe.generate_hash(length=8)}"
 			emit_notification_to_user(user_email, {
-				"id": notification_doc.name,
-				"type": notification_type,
+				"id": notification_id,
+				"type": "ticket",
 				"title": title,
 				"message": body,
 				"status": "unread",
@@ -515,8 +521,10 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 				"data": notification_data
 			})
 
-			# Update unread count
-			emit_unread_count_update(user_email)
+			# Update unread count - need to fetch current count first
+			from erp.common.doctype.erp_notification.erp_notification import get_unread_count
+			unread_count = get_unread_count(user_email)
+			emit_unread_count_update(user_email, unread_count)
 
 		except Exception as realtime_error:
 			frappe.logger().error(f"❌ Failed to send realtime notification to {user_email}: {str(realtime_error)}")
