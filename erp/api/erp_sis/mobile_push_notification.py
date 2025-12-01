@@ -482,31 +482,38 @@ def test_mobile_api():
 
 
 @frappe.whitelist(allow_guest=True)
-def debug_push_tokens(user_email=None):
+def debug_push_tokens(user_email=None, include_inactive=True):
     """
     Debug API để kiểm tra push tokens đã đăng ký
     """
     try:
-        filters = {"is_active": 1}
+        filters = {}
         if user_email:
             filters["user"] = user_email
+        if not include_inactive:
+            filters["is_active"] = 1
             
         tokens = frappe.get_all("Mobile Device Token",
             filters=filters,
-            fields=["user", "device_token", "platform", "app_type", "device_id", "device_name", "app_version", "last_seen", "is_active"],
-            order_by="last_seen desc",
+            fields=["name", "user", "device_token", "platform", "app_type", "device_id", "device_name", "app_version", "last_seen", "is_active", "creation"],
+            order_by="creation desc",
             limit=50
         )
         
         # Mask tokens for security
         for t in tokens:
             if t.get("device_token"):
-                t["device_token"] = t["device_token"][:30] + "..." if len(t["device_token"]) > 30 else t["device_token"]
+                t["device_token"] = t["device_token"][:40] + "..." if len(t["device_token"]) > 40 else t["device_token"]
+        
+        active_count = len([t for t in tokens if t.get("is_active")])
+        inactive_count = len([t for t in tokens if not t.get("is_active")])
         
         return success_response({
             "total_tokens": len(tokens),
+            "active_count": active_count,
+            "inactive_count": inactive_count,
             "tokens": tokens
-        }, f"Found {len(tokens)} active tokens")
+        }, f"Found {len(tokens)} tokens ({active_count} active, {inactive_count} inactive)")
     except Exception as e:
         return error_response(f"Error: {str(e)}")
 
