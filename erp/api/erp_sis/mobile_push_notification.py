@@ -237,18 +237,35 @@ def register_device_token():
             if not user or user == "Guest":
                 return error_response("Authentication required", code="NOT_AUTHENTICATED")
 
-        # Parse request data
+        # Parse request data - PHẢI parse từ raw body trước vì axios gửi JSON
         if frappe.request.method == "POST":
-            if hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
-                data = frappe.local.form_dict
-            else:
-                # Try to get from raw request body for JSON requests
-                import json
-                try:
-                    request_data = json.loads(frappe.request.get_data(as_text=True))
-                    data = request_data
-                except:
-                    return error_response("Invalid request format", code="INVALID_REQUEST")
+            import json
+            data = {}
+            
+            # Method 1: Try to get from raw request body (axios sends JSON)
+            try:
+                raw_data = frappe.request.get_data(as_text=True)
+                frappe.logger().info(f"📥 Raw request data: {raw_data[:200] if raw_data else 'None'}...")
+                if raw_data:
+                    data = json.loads(raw_data)
+                    frappe.logger().info(f"📥 Parsed JSON data keys: {list(data.keys())}")
+            except Exception as json_err:
+                frappe.logger().warning(f"📥 JSON parse failed: {str(json_err)}")
+            
+            # Method 2: Fallback to form_dict if JSON parse failed
+            if not data.get('deviceToken'):
+                frappe.logger().info(f"📥 Trying form_dict: {dict(frappe.local.form_dict) if hasattr(frappe.local, 'form_dict') else 'None'}")
+                if hasattr(frappe.local, 'form_dict') and frappe.local.form_dict:
+                    data = dict(frappe.local.form_dict)
+            
+            # Method 3: Try frappe.form_dict
+            if not data.get('deviceToken'):
+                frappe.logger().info(f"📥 Trying frappe.form_dict: {dict(frappe.form_dict) if frappe.form_dict else 'None'}")
+                if frappe.form_dict:
+                    data = dict(frappe.form_dict)
+                    
+            frappe.logger().info(f"📥 Final data keys: {list(data.keys()) if data else 'None'}")
+            frappe.logger().info(f"📥 deviceToken present: {bool(data.get('deviceToken'))}")
         else:
             return error_response("POST method required", code="METHOD_NOT_ALLOWED")
 
