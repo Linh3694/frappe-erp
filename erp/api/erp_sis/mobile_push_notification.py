@@ -480,6 +480,53 @@ def test_mobile_api():
         frappe.logger().error(f"Test mobile API error: {str(e)}")
         return error_response(f"Test failed: {str(e)}")
 
+
+@frappe.whitelist(allow_guest=True)
+def debug_push_tokens(user_email=None):
+    """
+    Debug API để kiểm tra push tokens đã đăng ký
+    """
+    try:
+        filters = {"is_active": 1}
+        if user_email:
+            filters["user"] = user_email
+            
+        tokens = frappe.get_all("Mobile Device Token",
+            filters=filters,
+            fields=["user", "device_token", "platform", "app_type", "device_id", "device_name", "app_version", "last_seen", "is_active"],
+            order_by="last_seen desc",
+            limit=50
+        )
+        
+        # Mask tokens for security
+        for t in tokens:
+            if t.get("device_token"):
+                t["device_token"] = t["device_token"][:30] + "..." if len(t["device_token"]) > 30 else t["device_token"]
+        
+        return success_response({
+            "total_tokens": len(tokens),
+            "tokens": tokens
+        }, f"Found {len(tokens)} active tokens")
+    except Exception as e:
+        return error_response(f"Error: {str(e)}")
+
+
+@frappe.whitelist()
+def test_send_push(user_email, title="Test Notification", body="This is a test push notification"):
+    """
+    Test gửi push notification đến user
+    """
+    try:
+        result = send_mobile_notification(
+            user_email=user_email,
+            title=title,
+            body=body,
+            data={"type": "test", "timestamp": frappe.utils.now()}
+        )
+        return success_response(result, "Push notification sent")
+    except Exception as e:
+        return error_response(f"Error: {str(e)}")
+
 @frappe.whitelist()
 def send_mobile_notification(user_email, title, body, data=None):
     """
