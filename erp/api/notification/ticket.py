@@ -158,7 +158,7 @@ def handle_new_ticket_created(event_data):
 		recipients = event_data.get('recipients', [])
 
 		notification = event_data.get('notification', {})
-		notification_title = notification.get('title', '🎫 Ticket mới')
+		notification_title = notification.get('title', 'Ticket mới')
 		body = notification.get('body', f'Ticket mới #{ticket_code}: {title}')
 		action = notification.get('action', 'new_ticket_admin')
 
@@ -217,7 +217,7 @@ def handle_user_reply(event_data):
 		recipients = event_data.get('recipients', [])
 
 		notification = event_data.get('notification', {})
-		notification_title = notification.get('title', '💬 Người dùng đã phản hồi')
+		notification_title = notification.get('title', 'Người dùng đã phản hồi')
 		body = notification.get('body', f'Ticket #{ticket_code} có phản hồi mới')
 		action = notification.get('action', 'user_reply')
 
@@ -274,7 +274,7 @@ def handle_ticket_cancelled(event_data):
 		recipients = event_data.get('recipients', [])
 
 		notification = event_data.get('notification', {})
-		notification_title = notification.get('title', '❌ Ticket đã bị hủy')
+		notification_title = notification.get('title', 'Ticket đã bị hủy')
 		body = notification.get('body', f'Ticket #{ticket_code} đã bị hủy')
 		action = notification.get('action', 'ticket_cancelled_admin')
 
@@ -331,7 +331,7 @@ def handle_completion_confirmed(event_data):
 		recipients = event_data.get('recipients', [])
 
 		notification = event_data.get('notification', {})
-		notification_title = notification.get('title', '✅ Ticket đã được xác nhận hoàn thành')
+		notification_title = notification.get('title', 'Ticket đã được xác nhận hoàn thành')
 		body = notification.get('body', f'Ticket #{ticket_code} đã được xác nhận hoàn thành')
 		action = notification.get('action', 'completion_confirmed')
 
@@ -389,7 +389,7 @@ def handle_ticket_feedback_received(event_data):
 		recipients = event_data.get('recipients', [])
 
 		notification = event_data.get('notification', {})
-		notification_title = notification.get('title', '⭐ Ticket nhận được đánh giá')
+		notification_title = notification.get('title', 'Ticket nhận được đánh giá')
 		body = notification.get('body', f'Ticket #{ticket_code} nhận được {rating} sao')
 		action = notification.get('action', 'ticket_feedback_received')
 
