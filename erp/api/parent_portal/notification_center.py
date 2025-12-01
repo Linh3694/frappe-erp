@@ -381,10 +381,18 @@ def map_db_type_to_frontend(db_type, data):
 	# Check data.type or data.notificationType first
 	custom_type = data.get('type') or data.get('notificationType')
 	
+	# Handle ticket type explicitly
+	if custom_type == 'ticket':
+		return 'ticket'
+	
 	if custom_type in ['contact_log', 'report_card', 'student_attendance', 'attendance', 'announcement', 'news', 'leave']:
 		if custom_type == 'student_attendance':
 			return 'attendance'
 		return custom_type
+	
+	# Check if it's a ticket-related action
+	if db_type and db_type.startswith('ticket_') or db_type in ['new_ticket_admin', 'user_reply', 'completion_confirmed']:
+		return 'ticket'
 	
 	# Fallback to db_type
 	type_mapping = {
@@ -393,7 +401,7 @@ def map_db_type_to_frontend(db_type, data):
 		'report_card': 'report_card',
 		'announcement': 'announcement',
 		'news': 'news',
-		'ticket': 'system',
+		'ticket': 'ticket',
 		'chat': 'system',
 		'post': 'news',
 		'system': 'system'
