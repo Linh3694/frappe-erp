@@ -58,16 +58,16 @@ def get_notifications(student_id=None, type=None, status=None, limit=10, offset=
 			if mapped_type:
 				filters["notification_type"] = mapped_type
 		
-		# Filter by read status
+		# Filter by read status - combine with archived exclusion
 		if status == 'unread':
-			filters["read_status"] = "unread"
+			filters["read_status"] = ["in", ["unread"]]
 		elif status == 'read':
-			filters["read_status"] = "read"
+			filters["read_status"] = ["in", ["read"]]
 		elif not include_read:
-			filters["read_status"] = "unread"
-		
-		# Exclude archived
-		filters["read_status"] = ["!=", "archived"]
+			filters["read_status"] = ["in", ["unread"]]
+		else:
+			# Include both read and unread, but exclude archived
+			filters["read_status"] = ["in", ["unread", "read"]]
 		
 		# Query notifications
 		raw_notifications = frappe.get_all(

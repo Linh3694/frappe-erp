@@ -447,6 +447,18 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 	try:
 		frappe.logger().info(f"📤 [Ticket Notification] START - Sending to {user_email}: {title}")
 
+		# Map priority to valid DocType values: low, medium, high, urgent
+		raw_priority = data.get('priority', 'medium')
+		priority_map = {
+			'low': 'low',
+			'normal': 'medium',
+			'medium': 'medium', 
+			'high': 'high',
+			'urgent': 'urgent',
+			'critical': 'urgent'
+		}
+		mapped_priority = priority_map.get(raw_priority.lower() if raw_priority else 'medium', 'medium')
+
 		# Create notification data with ticket type for channelId
 		notification_data = {
 			"type": "ticket",  # Use "ticket" type for channelId routing
@@ -454,7 +466,7 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 			"ticketId": data.get('ticketId'),
 			"ticketCode": data.get('ticketCode'),
 			"action": notification_type,  # Store the action for frontend handling
-			"priority": data.get('priority', 'normal'),
+			"priority": mapped_priority,
 			"timestamp": data.get('timestamp', datetime.now().isoformat()),
 			# Include additional data based on notification type
 			**{k: v for k, v in data.items() if k not in ['type', 'ticketId', 'ticketCode', 'priority', 'timestamp']}
@@ -473,7 +485,7 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 				"recipient_user": user_email,
 				"recipients": json.dumps([user_email]),
 				"notification_type": "ticket",  # Use "ticket" - valid DocType value
-				"priority": data.get('priority', 'normal'),
+				"priority": mapped_priority,
 				"data": json.dumps(notification_data),
 				"channel": "push",
 				"status": "sent",
@@ -516,7 +528,7 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 				"title": title,
 				"message": body,
 				"status": "unread",
-				"priority": data.get('priority', 'normal'),
+				"priority": mapped_priority,
 				"created_at": data.get('timestamp', datetime.now().isoformat()),
 				"data": notification_data
 			})
