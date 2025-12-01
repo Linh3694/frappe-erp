@@ -459,6 +459,23 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 		}
 		mapped_priority = priority_map.get(raw_priority.lower() if raw_priority else 'medium', 'medium')
 
+		# Parse timestamp from ISO format to MySQL format
+		raw_timestamp = data.get('timestamp')
+		if raw_timestamp:
+			try:
+				# Handle ISO format with Z suffix: '2025-12-01T03:27:29.339Z'
+				if isinstance(raw_timestamp, str):
+					# Remove Z suffix and parse
+					clean_timestamp = raw_timestamp.replace('Z', '+00:00')
+					parsed_dt = datetime.fromisoformat(clean_timestamp.replace('+00:00', ''))
+					event_timestamp = parsed_dt.strftime('%Y-%m-%d %H:%M:%S')
+				else:
+					event_timestamp = frappe.utils.now()
+			except Exception:
+				event_timestamp = frappe.utils.now()
+		else:
+			event_timestamp = frappe.utils.now()
+
 		# Create notification data with ticket type for channelId
 		notification_data = {
 			"type": "ticket",  # Use "ticket" type for channelId routing
@@ -467,7 +484,7 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 			"ticketCode": data.get('ticketCode'),
 			"action": notification_type,  # Store the action for frontend handling
 			"priority": mapped_priority,
-			"timestamp": data.get('timestamp', datetime.now().isoformat()),
+			"timestamp": event_timestamp,
 			# Include additional data based on notification type
 			**{k: v for k, v in data.items() if k not in ['type', 'ticketId', 'ticketCode', 'priority', 'timestamp']}
 		}
@@ -491,7 +508,7 @@ def send_ticket_notification_to_user(user_email, title, body, data, notification
 				"status": "sent",
 				"delivery_status": "pending",
 				"sent_at": frappe.utils.now(),
-				"event_timestamp": data.get('timestamp', frappe.utils.now())
+				"event_timestamp": event_timestamp
 			})
 			notification_doc.insert(ignore_permissions=True)
 			frappe.db.commit()
