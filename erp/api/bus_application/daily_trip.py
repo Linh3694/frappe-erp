@@ -164,7 +164,7 @@ def get_daily_trip_detail(trip_id=None):
         """, (trip_id,), as_dict=True)[0]
 
 
-        # Get student list with CRM details
+        # Get student list
         students = frappe.db.sql("""
             SELECT
                 dts.name,
@@ -178,19 +178,17 @@ def get_daily_trip_detail(trip_id=None):
                 dts.absent_reason,
                 dts.pickup_location,
                 dts.drop_off_location,
-                dts.notes,
-                cs.user_image as photo_url,
-                cs.dob,
-                cs.gender
+                dts.pickup_order,
+                dts.notes
             FROM `tabSIS Bus Daily Trip Student` dts
-            LEFT JOIN `tabCRM Student` cs ON dts.student_id = cs.name
             WHERE dts.daily_trip_id = %s
             ORDER BY dts.pickup_order ASC
         """, (trip_id,), as_dict=True)
 
-        # Add fallback photo from SIS Photo if needed
+        # Add photo from SIS Photo
         for student in students:
-            if not student.photo_url:
+            student.photo_url = None
+            try:
                 sis_photos = frappe.get_all(
                     "SIS Photo",
                     filters={"student_id": student.student_id, "type": "student", "status": "Active"},
@@ -200,6 +198,8 @@ def get_daily_trip_detail(trip_id=None):
                 )
                 if sis_photos:
                     student.photo_url = sis_photos[0].photo
+            except:
+                pass
 
         # Calculate statistics
         stats = {
