@@ -275,16 +275,22 @@ class CompreFaceService:
             Dict with recognition results
         """
         try:
+            frappe.logger().info(f"[CompreFace] recognize_face called with image length: {len(image_url) if image_url else 0}")
+            
             # Convert image to binary data
             image_data = self._get_image_data(image_url)
             if not image_data:
+                frappe.logger().error("[CompreFace] Failed to convert image to binary data")
                 return {
                     "success": False,
                     "error": "Failed to process image",
                     "message": "Could not convert image to binary data"
                 }
 
+            frappe.logger().info(f"[CompreFace] Image converted, size: {len(image_data)} bytes")
+
             url = f"{self.recognition_api}/recognize"
+            frappe.logger().info(f"[CompreFace] Sending to URL: {url}")
 
             # Use multipart/form-data for recognition too
             files = {
@@ -295,6 +301,10 @@ class CompreFaceService:
             }
 
             response = requests.post(url, files=files, data=data, headers={'x-api-key': self.api_key}, timeout=60)
+            
+            frappe.logger().info(f"[CompreFace] Response status: {response.status_code}")
+            frappe.logger().info(f"[CompreFace] Response body: {response.text[:500] if response.text else 'empty'}")
+            
             response.raise_for_status()
 
             result = response.json()
@@ -304,12 +314,35 @@ class CompreFaceService:
                 "message": "Face recognition completed"
             }
 
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"Cannot connect to CompreFace server at {self.base_url}"
+            frappe.log_error(f"[CompreFace] Connection error: {str(e)}", "CompreFace Service")
+            return {
+                "success": False,
+                "error": error_msg,
+                "message": "CompreFace server không khả dụng"
+            }
+        except requests.exceptions.Timeout as e:
+            frappe.log_error(f"[CompreFace] Timeout error: {str(e)}", "CompreFace Service")
+            return {
+                "success": False,
+                "error": "Request timeout",
+                "message": "Kết nối đến server nhận diện bị timeout"
+            }
+        except requests.exceptions.HTTPError as e:
+            error_detail = f"HTTP {e.response.status_code}: {e.response.text[:200] if e.response.text else 'No response body'}"
+            frappe.log_error(f"[CompreFace] HTTP error: {error_detail}", "CompreFace Service")
+            return {
+                "success": False,
+                "error": error_detail,
+                "message": f"Lỗi từ server nhận diện: {e.response.status_code}"
+            }
         except Exception as e:
-            frappe.log_error(f"Error recognizing face: {str(e)}", "CompreFace Service")
+            frappe.log_error(f"[CompreFace] Unexpected error: {str(e)}", "CompreFace Service")
             return {
                 "success": False,
                 "error": str(e),
-                "message": "Failed to recognize face"
+                "message": "Lỗi không xác định khi nhận diện"
             }
 
     def test_api_endpoints(self) -> Dict:
