@@ -396,6 +396,43 @@ class CompreFaceService:
                 "error": str(e)
             }
 
+    def list_subjects(self) -> Dict:
+        """
+        List all subjects in CompreFace
+        
+        Returns:
+            Dict with list of subjects
+        """
+        try:
+            url = f"{self.recognition_api}/subjects"
+            frappe.logger().info(f"[CompreFace] Listing subjects from: {url}")
+            
+            response = requests.get(url, headers=self._get_headers(), timeout=30)
+            response.raise_for_status()
+            
+            result = response.json()
+            subjects_list = result.get("subjects", [])
+            
+            return {
+                "success": True,
+                "data": subjects_list,
+                "count": len(subjects_list),
+                "message": f"Found {len(subjects_list)} subjects"
+            }
+        except requests.exceptions.ConnectionError as e:
+            return {
+                "success": False,
+                "error": f"Cannot connect to CompreFace server at {self.base_url}",
+                "message": "CompreFace server không khả dụng"
+            }
+        except Exception as e:
+            frappe.log_error(f"Error listing subjects: {str(e)}", "CompreFace Service")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Lỗi khi lấy danh sách subjects"
+            }
+
     def test_add_face(self) -> Dict:
         """
         Test add face functionality with a simple test

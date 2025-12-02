@@ -616,12 +616,17 @@ def verify_and_checkin():
         # Process recognition results
         recognition_data = recognition_result.get("data", {})
         recognized_faces = recognition_data.get("result", [])
+        
+        frappe.logger().info(f"[FaceRecognition] Recognition data: {json.dumps(recognition_data, default=str)[:500]}")
+        frappe.logger().info(f"[FaceRecognition] Number of faces detected: {len(recognized_faces)}")
 
         if not recognized_faces:
+            # Check if the response has no faces at all
+            frappe.logger().warning(f"[FaceRecognition] No faces in response. Full data: {json.dumps(recognition_data, default=str)}")
             return single_item_response({
                 "recognized": False,
                 "checked_in": False,
-                "message": "Không phát hiện khuôn mặt trong ảnh"
+                "message": "Không phát hiện khuôn mặt trong ảnh. Hãy đảm bảo khuôn mặt rõ ràng và đủ ánh sáng."
             }, "Không phát hiện khuôn mặt")
 
         # Get the best match
@@ -630,9 +635,12 @@ def verify_and_checkin():
 
         for face in recognized_faces:
             subjects = face.get("subjects", [])
+            frappe.logger().info(f"[FaceRecognition] Face subjects: {json.dumps(subjects, default=str)[:200]}")
+            
             if subjects:
                 subject = subjects[0]
                 similarity = subject.get("similarity", 0)
+                frappe.logger().info(f"[FaceRecognition] Subject: {subject.get('subject')}, similarity: {similarity}")
 
                 if similarity > best_similarity:
                     best_similarity = similarity
@@ -641,14 +649,26 @@ def verify_and_checkin():
                         "similarity": similarity,
                         "face_box": face.get("box", {})
                     }
+            else:
+                frappe.logger().warning(f"[FaceRecognition] Face detected but no matching subjects. Box: {face.get('box', {})}")
+
+        frappe.logger().info(f"[FaceRecognition] Best match: {best_match}, similarity: {best_similarity}")
 
         if not best_match or best_similarity < 0.7:
+            if not best_match:
+                message = "Phát hiện khuôn mặt nhưng không tìm thấy học sinh nào khớp trong hệ thống"
+            else:
+                message = f"Độ tương đồng quá thấp ({best_similarity:.0%}). Học sinh gần nhất: {best_match.get('student_code')}. Yêu cầu >= 70%"
+            
+            frappe.logger().warning(f"[FaceRecognition] Low similarity: {best_similarity}, match: {best_match}")
+            
             return single_item_response({
                 "recognized": False,
                 "checked_in": False,
                 "similarity": best_similarity if best_match else 0,
-                "message": "Không nhận diện được học sinh"
-            }, "Không nhận diện được học sinh")
+                "best_match": best_match.get('student_code') if best_match else None,
+                "message": message
+            }, message)
 
         student_code = best_match["student_code"]
 
@@ -746,3 +766,100 @@ def verify_and_checkin():
     except Exception as e:
         frappe.log_error(f"Error in verify_and_checkin: {str(e)}")
         return error_response(f"Lỗi điểm danh: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def test_compreface():
+    """
+    Test CompreFace connection and list available subjects
+    Returns diagnostic information about CompreFace setup
+    """
+    try:
+        user_email = frappe.session.user
+        
+        if not user_email or user_email == 'Guest':
+            return error_response("Authentication required", code="AUTH_REQUIRED")
+        
+        # Test API endpoints
+        test_result = compreFace_service.test_api_endpoints()
+        
+        # Get subjects list
+        subjects_result = compreFace_service.list_subjects()
+        
+        return single_item_response({
+            "compreface_url": compreFace_service.base_url,
+            "api_test": test_result,
+            "subjects": {
+                "success": subjects_result.get("success", False),
+                "count": len(subjects_result.get("data", [])) if subjects_result.get("success") else 0,
+                "sample": subjects_result.get("data", [])[:10] if subjects_result.get("success") else [],
+                "error": subjects_result.get("error") if not subjects_result.get("success") else None
+            }
+        }, "CompreFace diagnostic complete")
+    except Exception as e:
+        frappe.log_error(f"Error in test_compreface: {str(e)}")
+        return error_response(f"Error: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def check_trip_students_in_compreface():
+    """
+    Check which students in a trip are registered in CompreFace
+    Expected parameters:
+    - trip_id: Daily trip ID
+    """
+    try:
+        user_email = frappe.session.user
+        
+        if not user_email or user_email == 'Guest':
+            return error_response("Authentication required", code="AUTH_REQUIRED")
+        
+        # Get trip_id from params
+        trip_id = frappe.local.form_dict.get('trip_id')
+        if not trip_id:
+            return validation_error_response({"trip_id": ["Trip ID is required"]})
+        
+        # Get subjects from CompreFace
+        subjects_result = compreFace_service.list_subjects()
+        if not subjects_result.get("success"):
+            return error_response(f"Cannot connect to CompreFace: {subjects_result.get('error')}")
+        
+        compreface_subjects = set(subjects_result.get("data", []))
+        
+        # Get students in trip
+        trip_students = frappe.db.sql("""
+            SELECT dts.student_code, dts.student_name, dts.student_status
+            FROM `tabSIS Bus Daily Trip Student` dts
+            WHERE dts.daily_trip_id = %s
+        """, (trip_id,), as_dict=True)
+        
+        registered = []
+        not_registered = []
+        
+        for student in trip_students:
+            if student.student_code in compreface_subjects:
+                registered.append({
+                    "student_code": student.student_code,
+                    "student_name": student.student_name,
+                    "status": student.student_status
+                })
+            else:
+                not_registered.append({
+                    "student_code": student.student_code,
+                    "student_name": student.student_name,
+                    "status": student.student_status
+                })
+        
+        return single_item_response({
+            "trip_id": trip_id,
+            "total_students": len(trip_students),
+            "registered_in_compreface": len(registered),
+            "not_registered": len(not_registered),
+            "registered_students": registered,
+            "not_registered_students": not_registered,
+            "message": f"{len(registered)}/{len(trip_students)} học sinh đã có trong hệ thống nhận diện"
+        }, f"Checked {len(trip_students)} students")
+        
+    except Exception as e:
+        frappe.log_error(f"Error in check_trip_students_in_compreface: {str(e)}")
+        return error_response(f"Error: {str(e)}")
