@@ -693,12 +693,30 @@ def add_student_to_route():
 
 		try:
 			frappe.logger().info("🔍 STEP 2: Validating required fields...")
-			# Validate required fields
-			required_fields = ['route_id', 'student_id', 'weekday', 'trip_type', 'pickup_order', 'pickup_location', 'drop_off_location']
-			for field in required_fields:
+			# Validate base required fields
+			base_required_fields = ['route_id', 'student_id', 'weekday', 'trip_type', 'pickup_order']
+			for field in base_required_fields:
 				if not data.get(field):
 					return error_response(f"Field '{field}' is required")
-			frappe.logger().info("✅ All required fields validated")
+			
+			# Validate location based on trip_type
+			# Đón (pickup): pickup_location required, drop_off_location defaults to school
+			# Trả (drop-off): drop_off_location required, pickup_location defaults to school
+			trip_type = data.get('trip_type')
+			if trip_type == 'Đón':
+				if not data.get('pickup_location'):
+					return error_response("Chiều đón yêu cầu nhập địa điểm đón (pickup_location)")
+				# Default drop_off_location to school if empty
+				if not data.get('drop_off_location'):
+					data['drop_off_location'] = 'Trường'
+			elif trip_type == 'Trả':
+				if not data.get('drop_off_location'):
+					return error_response("Chiều trả yêu cầu nhập địa điểm trả (drop_off_location)")
+				# Default pickup_location to school if empty
+				if not data.get('pickup_location'):
+					data['pickup_location'] = 'Trường'
+			
+			frappe.logger().info(f"✅ All required fields validated. pickup_location={data.get('pickup_location')}, drop_off_location={data.get('drop_off_location')}")
 		except Exception as e:
 			frappe.logger().error(f"❌ STEP 2 FAILED: {str(e)}")
 			raise e
