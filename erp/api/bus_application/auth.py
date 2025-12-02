@@ -614,7 +614,7 @@ def login_with_password(phone_number, password):
         monitors = frappe.get_all(
             "SIS Bus Monitor",
             filters={"phone_number": ["in", phone_formats], "status": "Active"},
-            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address", "password"]
+            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address"]
         )
         
         if not monitors:
@@ -629,29 +629,26 @@ def login_with_password(phone_number, password):
         logs.append(f"✅ Found monitor: {monitor['full_name']} ({monitor['monitor_code']})")
         
         # Verify password
-        # If no password set, default password is the normalized phone number
-        stored_password = monitor.get('password')
-        
+        # Default password is the phone number (in various formats)
         # Normalize input password for comparison
-        normalized_password = normalize_phone_number(password) if password.replace('+', '').replace(' ', '').isdigit() else password
+        input_password = password.strip()
+        normalized_input_password = normalize_phone_number(input_password) if input_password.replace('+', '').replace(' ', '').replace('-', '').isdigit() else input_password
         
-        # Check password
-        # Accept: stored password, normalized phone, or original phone formats
+        # Valid passwords: phone number in different formats
         valid_passwords = [
-            stored_password if stored_password else None,
             normalized_phone,  # 84XXXXXXXXX
             f"0{normalized_phone[2:]}" if normalized_phone.startswith("84") else normalized_phone,  # 0XXXXXXXXX
-            phone_number.strip()  # Original input
+            phone_number.strip(),  # Original input phone
+            monitor['phone_number']  # Phone stored in DB
         ]
-        valid_passwords = [p for p in valid_passwords if p]  # Remove None values
+        # Remove duplicates
+        valid_passwords = list(set(p for p in valid_passwords if p))
         
-        password_valid = False
-        if stored_password:
-            # If password is set, check against stored password
-            password_valid = (password.strip() == stored_password)
-        else:
-            # If no password set, accept phone number as password
-            password_valid = (password.strip() in valid_passwords or normalized_password in valid_passwords)
+        # Check if password matches any valid format
+        password_valid = (
+            input_password in valid_passwords or 
+            normalized_input_password in valid_passwords
+        )
         
         if not password_valid:
             logs.append(f"❌ Invalid password")
