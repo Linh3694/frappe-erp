@@ -299,21 +299,22 @@ def start_daily_trip():
 
         # Update trip status to In Progress
         trip.trip_status = "In Progress"
-        trip.started_at = now_datetime()
         trip.save()
         frappe.db.commit()
+
+        started_time = now_datetime()
 
         # Log action
         frappe.get_doc({
             "doctype": "Activity Log",
             "subject": f"Trip {trip_id} started by {monitor_id}",
-            "communication_date": now_datetime()
+            "communication_date": started_time
         }).insert(ignore_permissions=True)
 
         return single_item_response({
             "trip_id": trip_id,
             "trip_status": "In Progress",
-            "started_at": trip.started_at
+            "started_at": str(started_time)
         }, "Trip started successfully")
 
     except frappe.DoesNotExistError:
@@ -426,14 +427,15 @@ def complete_daily_trip():
 
         # Complete trip
         trip.trip_status = "Completed"
-        trip.completed_at = now_datetime()
         trip.save()
         frappe.db.commit()
+
+        completed_time = now_datetime()
 
         # Generate trip report
         report_data = {
             "trip_id": trip_id,
-            "trip_date": trip.trip_date,
+            "trip_date": str(trip.trip_date),
             "trip_type": trip.trip_type,
             "route": trip.route_id,
             "total_students": total,
@@ -441,17 +443,14 @@ def complete_daily_trip():
             "dropped_off": sum(1 for s in students if s.student_status == "Dropped Off"),
             "absent": sum(1 for s in students if s.student_status == "Absent"),
             "completion_rate": completion_rate,
-            "started_at": trip.started_at,
-            "completed_at": trip.completed_at,
-            "duration_minutes": (trip.completed_at - trip.started_at).total_seconds() / 60 if trip.started_at else 0
+            "completed_at": str(completed_time)
         }
 
         # Log action
         frappe.get_doc({
             "doctype": "Activity Log",
             "subject": f"Trip {trip_id} completed by {monitor_id}",
-            "communication_date": now_datetime(),
-            "full_communication_content": json.dumps(report_data)
+            "communication_date": completed_time
         }).insert(ignore_permissions=True)
 
         # TODO: Send notifications (optional - future)
@@ -517,8 +516,6 @@ def get_monitor_trips_by_date_range():
                 dt.trip_type,
                 dt.trip_status,
                 dt.notes,
-                dt.started_at,
-                dt.completed_at,
                 br.name as route_id,
                 br.route_name,
                 bv.vehicle_code as bus_number,
