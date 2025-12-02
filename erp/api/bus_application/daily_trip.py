@@ -297,19 +297,24 @@ def start_daily_trip():
         if trip.trip_status != "Not Started":
             return validation_error_response({"trip_id": [f"Trip already {trip.trip_status}"]})
 
-        # Update trip status to In Progress
-        trip.trip_status = "In Progress"
-        trip.save()
-        frappe.db.commit()
+        # Update trip status to In Progress (run as Administrator to bypass permissions)
+        frappe.set_user("Administrator")
+        try:
+            trip.trip_status = "In Progress"
+            trip.flags.ignore_permissions = True
+            trip.save(ignore_permissions=True)
+            frappe.db.commit()
 
-        started_time = now_datetime()
+            started_time = now_datetime()
 
-        # Log action
-        frappe.get_doc({
-            "doctype": "Activity Log",
-            "subject": f"Trip {trip_id} started by {monitor_id}",
-            "communication_date": started_time
-        }).insert(ignore_permissions=True)
+            # Log action
+            frappe.get_doc({
+                "doctype": "Activity Log",
+                "subject": f"Trip {trip_id} started by {monitor_id}",
+                "communication_date": started_time
+            }).insert(ignore_permissions=True)
+        finally:
+            frappe.set_user("Guest")
 
         return single_item_response({
             "trip_id": trip_id,
@@ -425,12 +430,24 @@ def complete_daily_trip():
                     "can_force": True
                 }
 
-        # Complete trip
-        trip.trip_status = "Completed"
-        trip.save()
-        frappe.db.commit()
+        # Complete trip (run as Administrator to bypass permissions)
+        frappe.set_user("Administrator")
+        try:
+            trip.trip_status = "Completed"
+            trip.flags.ignore_permissions = True
+            trip.save(ignore_permissions=True)
+            frappe.db.commit()
 
-        completed_time = now_datetime()
+            completed_time = now_datetime()
+
+            # Log action
+            frappe.get_doc({
+                "doctype": "Activity Log",
+                "subject": f"Trip {trip_id} completed by {monitor_id}",
+                "communication_date": completed_time
+            }).insert(ignore_permissions=True)
+        finally:
+            frappe.set_user("Guest")
 
         # Generate trip report
         report_data = {
@@ -445,13 +462,6 @@ def complete_daily_trip():
             "completion_rate": completion_rate,
             "completed_at": str(completed_time)
         }
-
-        # Log action
-        frappe.get_doc({
-            "doctype": "Activity Log",
-            "subject": f"Trip {trip_id} completed by {monitor_id}",
-            "communication_date": completed_time
-        }).insert(ignore_permissions=True)
 
         # TODO: Send notifications (optional - future)
         # send_parent_notifications(trip, students)
@@ -640,31 +650,37 @@ def update_student_status():
             if trip.monitor1_id != monitor_id and trip.monitor2_id != monitor_id:
                 return forbidden_response("Access denied to this trip")
 
-        # Update the record
+        # Update the record (run as Administrator to bypass permissions)
         current_time = now_datetime()
-        trip_student.student_status = student_status
+        
+        frappe.set_user("Administrator")
+        try:
+            trip_student.student_status = student_status
 
-        if student_status == 'Boarded':
-            trip_student.boarding_time = current_time
-            trip_student.boarding_method = 'manual'
-        elif student_status == 'Dropped Off':
-            trip_student.drop_off_time = current_time
-            trip_student.drop_off_method = 'manual'
-        elif student_status == 'Absent' and absent_reason:
-            trip_student.absent_reason = absent_reason
+            if student_status == 'Boarded':
+                trip_student.boarding_time = current_time
+                trip_student.boarding_method = 'manual'
+            elif student_status == 'Dropped Off':
+                trip_student.drop_off_time = current_time
+                trip_student.drop_off_method = 'manual'
+            elif student_status == 'Absent' and absent_reason:
+                trip_student.absent_reason = absent_reason
 
-        if notes:
-            trip_student.notes = notes
+            if notes:
+                trip_student.notes = notes
 
-        trip_student.save()
-        frappe.db.commit()
+            trip_student.flags.ignore_permissions = True
+            trip_student.save(ignore_permissions=True)
+            frappe.db.commit()
+        finally:
+            frappe.set_user("Guest")
 
         return single_item_response({
             "daily_trip_student_id": daily_trip_student_id,
             "student_id": trip_student.student_id,
             "student_name": trip_student.student_name,
             "student_status": student_status,
-            "updated_at": current_time
+            "updated_at": str(current_time)
         }, f"Đã cập nhật trạng thái học sinh thành {student_status}")
 
     except frappe.DoesNotExistError:

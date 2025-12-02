@@ -340,8 +340,14 @@ def check_student_in_trip():
             trip_student.drop_off_time = current_time
             trip_student.drop_off_method = method
 
-        trip_student.save()
-        frappe.db.commit()
+        # Save with Administrator permissions
+        frappe.set_user("Administrator")
+        try:
+            trip_student.flags.ignore_permissions = True
+            trip_student.save(ignore_permissions=True)
+            frappe.db.commit()
+        finally:
+            frappe.set_user("Guest")
 
         # Update trip statistics
         _update_trip_statistics(trip_id)
@@ -455,12 +461,17 @@ def mark_student_absent():
 
         trip_student = frappe.get_doc("SIS Bus Daily Trip Student", trip_students[0].name)
 
-        # Mark as absent
+        # Mark as absent (with Administrator permissions)
         trip_student.student_status = "Absent"
         trip_student.absent_reason = reason
 
-        trip_student.save()
-        frappe.db.commit()
+        frappe.set_user("Administrator")
+        try:
+            trip_student.flags.ignore_permissions = True
+            trip_student.save(ignore_permissions=True)
+            frappe.db.commit()
+        finally:
+            frappe.set_user("Guest")
 
         # Update trip statistics
         _update_trip_statistics(trip_id)
@@ -677,8 +688,16 @@ def verify_and_checkin():
                     trip_student.student_status = "Boarded"
                     trip_student.boarding_time = current_time
                     trip_student.boarding_method = "face_recognition"
-                    trip_student.save()
-                    frappe.db.commit()
+                    
+                    # Save with Administrator permissions
+                    frappe.set_user("Administrator")
+                    try:
+                        trip_student.flags.ignore_permissions = True
+                        trip_student.save(ignore_permissions=True)
+                        frappe.db.commit()
+                    finally:
+                        frappe.set_user("Guest")
+                    
                     _update_trip_statistics(trip_id)
                     result["checked_in"] = True
                     result["new_status"] = "Boarded"
@@ -691,8 +710,16 @@ def verify_and_checkin():
                     trip_student.student_status = "Dropped Off"
                     trip_student.drop_off_time = current_time
                     trip_student.drop_off_method = "face_recognition"
-                    trip_student.save()
-                    frappe.db.commit()
+                    
+                    # Save with Administrator permissions
+                    frappe.set_user("Administrator")
+                    try:
+                        trip_student.flags.ignore_permissions = True
+                        trip_student.save(ignore_permissions=True)
+                        frappe.db.commit()
+                    finally:
+                        frappe.set_user("Guest")
+                    
                     _update_trip_statistics(trip_id)
                     result["checked_in"] = True
                     result["new_status"] = "Dropped Off"
