@@ -373,11 +373,19 @@ def update_bus_student(name, **data):
 def delete_bus_student(name=None):
 	"""Delete a bus student"""
 	try:
-		# Get name from multiple sources
+		# Get name from multiple sources (handle both GET and POST)
 		if not name:
-			name = frappe.form_dict.get('name') or frappe.local.form_dict.get('name')
+			# Try frappe.form_dict first (works for most cases)
+			name = frappe.form_dict.get('name')
 		
 		if not name:
+			# Try request args for GET requests
+			if hasattr(frappe, 'request') and frappe.request:
+				name = frappe.request.args.get('name')
+		
+		if not name:
+			# Debug: log what we received
+			frappe.logger().error(f"delete_bus_student: No name received. form_dict: {dict(frappe.form_dict)}")
 			return error_response("Student name/ID is required")
 		
 		# Get student info before deletion for CompreFace cleanup
