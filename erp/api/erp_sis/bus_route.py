@@ -1645,3 +1645,257 @@ def get_student_bus_routes():
 	except Exception as e:
 		frappe.log_error(f"Error fetching student bus routes: {str(e)}")
 		return error_response(f"Failed to fetch student bus routes: {str(e)}")
+
+@frappe.whitelist()
+def add_student_to_daily_trip():
+	"""Add a student to a specific daily trip"""
+	try:
+		# Get data from request
+		data = {}
+		if frappe.request.data:
+			try:
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+				if json_data:
+					data = json_data
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+				data = frappe.local.form_dict
+		else:
+			data = frappe.local.form_dict
+
+		# Validate required fields
+		daily_trip_id = data.get('daily_trip_id')
+		student_id = data.get('student_id')
+		
+		if not daily_trip_id:
+			return error_response("Daily trip ID is required")
+		if not student_id:
+			return error_response("Student ID is required")
+
+		# Check if daily trip exists
+		if not frappe.db.exists("SIS Bus Daily Trip", daily_trip_id):
+			return error_response("Daily trip not found")
+
+		# Check if student is already in this daily trip
+		existing = frappe.db.sql("""
+			SELECT name FROM `tabSIS Bus Daily Trip Student`
+			WHERE daily_trip_id = %s AND student_id = %s
+			LIMIT 1
+		""", (daily_trip_id, student_id))
+		
+		if existing:
+			return error_response("Học sinh đã tồn tại trong chuyến xe này")
+
+		# Get student info
+		student = frappe.get_doc("CRM Student", student_id)
+		
+		# Get class info if available
+		class_name = ""
+		class_student_id = data.get('class_student_id')
+		if class_student_id:
+			try:
+				class_student = frappe.get_doc("SIS Class Student", class_student_id)
+				if class_student.class_id:
+					class_doc = frappe.get_doc("SIS Class", class_student.class_id)
+					class_name = class_doc.title or class_doc.name
+			except:
+				pass
+
+		# Create daily trip student
+		student_data = {
+			"doctype": "SIS Bus Daily Trip Student",
+			"daily_trip_id": daily_trip_id,
+			"student_id": student_id,
+			"class_student_id": class_student_id or "",
+			"student_image": "",
+			"student_name": student.student_name,
+			"student_code": student.student_code,
+			"class_name": class_name,
+			"pickup_order": data.get('pickup_order', 0),
+			"pickup_location": data.get('pickup_location', ''),
+			"drop_off_location": data.get('drop_off_location', ''),
+			"student_status": "Not Boarded",
+			"notes": data.get('notes', '')
+		}
+
+		doc = frappe.get_doc(student_data)
+		doc.insert()
+		frappe.db.commit()
+
+		return success_response(
+			data=doc.as_dict(),
+			message="Đã thêm học sinh vào chuyến xe"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error adding student to daily trip: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Không thể thêm học sinh: {str(e)}")
+
+@frappe.whitelist()
+def remove_student_from_daily_trip():
+	"""Remove a student from a specific daily trip"""
+	try:
+		daily_trip_student_id = frappe.local.form_dict.get('daily_trip_student_id') or frappe.request.args.get('daily_trip_student_id')
+
+		if not daily_trip_student_id:
+			return error_response("Daily trip student ID is required")
+
+		# Check if record exists
+		if not frappe.db.exists("SIS Bus Daily Trip Student", daily_trip_student_id):
+			return error_response("Không tìm thấy học sinh trong chuyến xe")
+
+		# Delete the record
+		frappe.delete_doc("SIS Bus Daily Trip Student", daily_trip_student_id, force=True)
+		frappe.db.commit()
+
+		return success_response(
+			message="Đã xóa học sinh khỏi chuyến xe"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error removing student from daily trip: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Không thể xóa học sinh: {str(e)}")
+
+@frappe.whitelist()
+def update_daily_trip_personnel():
+	"""Update driver/monitors for a specific daily trip"""
+	try:
+		# Get data from request
+		data = {}
+		if frappe.request.data:
+			try:
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+				if json_data:
+					data = json_data
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+				data = frappe.local.form_dict
+		else:
+			data = frappe.local.form_dict
+
+		daily_trip_id = data.get('daily_trip_id') or data.get('name')
+		
+		if not daily_trip_id:
+			return error_response("Daily trip ID is required")
+
+		# Check if daily trip exists
+		if not frappe.db.exists("SIS Bus Daily Trip", daily_trip_id):
+			return error_response("Daily trip not found")
+
+		# Build update fields
+		update_fields = []
+		update_values = []
+
+		if 'vehicle_id' in data:
+			update_fields.append("vehicle_id = %s")
+			update_values.append(data['vehicle_id'])
+		
+		if 'driver_id' in data:
+			update_fields.append("driver_id = %s")
+			update_values.append(data['driver_id'])
+		
+		if 'monitor1_id' in data:
+			update_fields.append("monitor1_id = %s")
+			update_values.append(data['monitor1_id'])
+		
+		if 'monitor2_id' in data:
+			update_fields.append("monitor2_id = %s")
+			update_values.append(data['monitor2_id'])
+
+		if not update_fields:
+			return error_response("No fields to update")
+
+		update_values.append(daily_trip_id)
+
+		# Update the daily trip
+		query = f"""
+			UPDATE `tabSIS Bus Daily Trip`
+			SET {', '.join(update_fields)}, modified = NOW()
+			WHERE name = %s
+		"""
+		frappe.db.sql(query, update_values)
+		frappe.db.commit()
+
+		# Get updated data with enriched info
+		updated_trip = frappe.db.sql("""
+			SELECT
+				dt.name, dt.route_id, dt.trip_date, dt.weekday, dt.trip_type,
+				dt.vehicle_id, dt.driver_id, dt.monitor1_id, dt.monitor2_id,
+				dt.trip_status, dt.campus_id, dt.school_year_id,
+				v.vehicle_code, v.license_plate,
+				d.full_name as driver_name, d.phone_number as driver_phone,
+				m1.full_name as monitor1_name, m1.phone_number as monitor1_phone,
+				m2.full_name as monitor2_name, m2.phone_number as monitor2_phone
+			FROM `tabSIS Bus Daily Trip` dt
+			LEFT JOIN `tabSIS Bus Transportation` v ON dt.vehicle_id = v.name
+			LEFT JOIN `tabSIS Bus Driver` d ON dt.driver_id = d.name
+			LEFT JOIN `tabSIS Bus Monitor` m1 ON dt.monitor1_id = m1.name
+			LEFT JOIN `tabSIS Bus Monitor` m2 ON dt.monitor2_id = m2.name
+			WHERE dt.name = %s
+		""", (daily_trip_id,), as_dict=True)
+
+		return success_response(
+			data=updated_trip[0] if updated_trip else {},
+			message="Cập nhật nhân sự chuyến xe thành công"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error updating daily trip personnel: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Không thể cập nhật nhân sự: {str(e)}")
+
+@frappe.whitelist()
+def get_available_students_for_daily_trip():
+	"""Get students that can be added to a daily trip (from the route but not yet in the trip)"""
+	try:
+		daily_trip_id = frappe.local.form_dict.get('daily_trip_id') or frappe.request.args.get('daily_trip_id')
+		
+		if not daily_trip_id:
+			return error_response("Daily trip ID is required")
+
+		# Get daily trip info
+		trip_info = frappe.db.sql("""
+			SELECT route_id, weekday, trip_type
+			FROM `tabSIS Bus Daily Trip`
+			WHERE name = %s
+		""", (daily_trip_id,), as_dict=True)
+
+		if not trip_info:
+			return error_response("Daily trip not found")
+
+		trip = trip_info[0]
+
+		# Get students from route that match weekday/trip_type but not already in daily trip
+		available_students = frappe.db.sql("""
+			SELECT 
+				brs.student_id,
+				brs.pickup_order,
+				brs.pickup_location,
+				brs.drop_off_location,
+				s.student_name,
+				s.student_code,
+				COALESCE(c.title, '') as class_name
+			FROM `tabSIS Bus Route Student` brs
+			INNER JOIN `tabCRM Student` s ON brs.student_id = s.name
+			LEFT JOIN `tabSIS Class Student` cs ON brs.class_student_id = cs.name
+			LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
+			WHERE brs.route_id = %s
+				AND brs.weekday = %s
+				AND brs.trip_type = %s
+				AND brs.student_id NOT IN (
+					SELECT student_id FROM `tabSIS Bus Daily Trip Student`
+					WHERE daily_trip_id = %s
+				)
+			ORDER BY brs.pickup_order
+		""", (trip.route_id, trip.weekday, trip.trip_type, daily_trip_id), as_dict=True)
+
+		return success_response(
+			data=available_students,
+			message=f"Tìm thấy {len(available_students)} học sinh có thể thêm"
+		)
+	except Exception as e:
+		frappe.log_error(f"Error getting available students for daily trip: {str(e)}")
+		return error_response(f"Lỗi: {str(e)}")

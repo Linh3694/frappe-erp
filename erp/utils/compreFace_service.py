@@ -13,7 +13,7 @@ class CompreFaceService:
     """Service to handle CompreFace API interactions for face recognition"""
 
     def __init__(self):
-        self.base_url = "http://172.16.20.116:8080"
+        self.base_url = "http://172.16.20.114:8000"
         self.api_key = "00000000-0000-0000-0000-000000000002"  # Default demo API key
         self.recognition_api = f"{self.base_url}/api/v1/recognition"
 

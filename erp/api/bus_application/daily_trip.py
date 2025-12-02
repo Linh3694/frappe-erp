@@ -464,3 +464,214 @@ def complete_daily_trip():
     except Exception as e:
         frappe.log_error(f"Error completing daily trip: {str(e)}")
         return error_response(f"Error completing trip: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_monitor_trips_by_date_range():
+    """
+    Get daily trips for current bus monitor within a date range
+    Expected parameters (optional):
+    - start_date: Start date (YYYY-MM-DD), defaults to today
+    - end_date: End date (YYYY-MM-DD), defaults to 7 days from start_date
+    """
+    try:
+        user_email = frappe.session.user
+
+        if not user_email or user_email == 'Guest':
+            return error_response("Authentication required", code="AUTH_REQUIRED")
+
+        # Get date parameters
+        start_date = get_request_param('start_date') or nowdate()
+        end_date = get_request_param('end_date') or add_days(start_date, 7)
+
+        # Validate dates
+        start_date = getdate(start_date)
+        end_date = getdate(end_date)
+
+        if end_date < start_date:
+            return validation_error_response({"end_date": ["End date must be after start date"]})
+
+        # Find bus monitor by user email
+        if "@busmonitor.wellspring.edu.vn" not in user_email:
+            return error_response("Invalid user account format", code="INVALID_USER")
+
+        monitor_code = user_email.split("@")[0]
+
+        monitors = frappe.get_all(
+            "SIS Bus Monitor",
+            filters={"monitor_code": monitor_code, "status": "Active"},
+            fields=["name", "campus_id", "full_name"]
+        )
+
+        if not monitors:
+            return not_found_response("Bus monitor not found")
+
+        monitor_id = monitors[0].name
+
+        # Get daily trips for this monitor in date range
+        trips = frappe.db.sql("""
+            SELECT
+                dt.name,
+                dt.trip_date,
+                dt.weekday,
+                dt.trip_type,
+                dt.trip_status,
+                dt.notes,
+                dt.started_at,
+                dt.completed_at,
+                br.name as route_id,
+                br.route_name,
+                bv.vehicle_code as bus_number,
+                bv.license_plate,
+                bd.full_name as driver_name,
+                bd.phone_number as driver_phone,
+                COUNT(dts.name) as total_students,
+                SUM(CASE WHEN dts.student_status = 'Boarded' THEN 1 ELSE 0 END) as boarded_count,
+                SUM(CASE WHEN dts.student_status = 'Dropped Off' THEN 1 ELSE 0 END) as dropped_count,
+                SUM(CASE WHEN dts.student_status = 'Absent' THEN 1 ELSE 0 END) as absent_count,
+                SUM(CASE WHEN dts.student_status = 'Not Boarded' THEN 1 ELSE 0 END) as not_boarded_count
+            FROM `tabSIS Bus Daily Trip` dt
+            LEFT JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
+            LEFT JOIN `tabSIS Bus Transportation` bv ON dt.vehicle_id = bv.name
+            LEFT JOIN `tabSIS Bus Driver` bd ON dt.driver_id = bd.name
+            LEFT JOIN `tabSIS Bus Daily Trip Student` dts ON dts.daily_trip_id = dt.name
+            WHERE (dt.monitor1_id = %s OR dt.monitor2_id = %s)
+              AND dt.trip_date BETWEEN %s AND %s
+              AND dt.docstatus != 2
+            GROUP BY dt.name
+            ORDER BY dt.trip_date ASC, dt.trip_type DESC
+        """, (monitor_id, monitor_id, start_date, end_date), as_dict=True)
+
+        # Group trips by date
+        trips_by_date = {}
+        for trip in trips:
+            date_str = str(trip.trip_date)
+            if date_str not in trips_by_date:
+                trips_by_date[date_str] = {
+                    "date": date_str,
+                    "weekday": trip.weekday,
+                    "trips": []
+                }
+
+            # Calculate completion percentage
+            total = trip.total_students or 0
+            if total > 0:
+                if trip.trip_type == "Đón":
+                    completed = (trip.boarded_count or 0) + (trip.absent_count or 0)
+                else:
+                    completed = (trip.dropped_count or 0) + (trip.absent_count or 0)
+                trip.completion_percentage = round((completed / total) * 100, 1)
+            else:
+                trip.completion_percentage = 0
+
+            trips_by_date[date_str]["trips"].append(trip)
+
+        # Convert to list and sort by date
+        result = list(trips_by_date.values())
+        result.sort(key=lambda x: x["date"])
+
+        return list_response(result, f"Found {len(trips)} trips from {start_date} to {end_date}")
+
+    except Exception as e:
+        frappe.log_error(f"Error getting monitor trips by date range: {str(e)}")
+        return error_response(f"Error getting trips: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def update_student_status():
+    """
+    Update student status in a daily trip (for both mobile and web)
+    Expected parameters (JSON):
+    - daily_trip_student_id: The ID of the daily trip student record
+    - student_status: New status (Not Boarded, Boarded, Dropped Off, Absent)
+    - absent_reason: Reason if marking as absent (Nghỉ học, Nghỉ ốm, Nghỉ phép, Lý do khác)
+    - notes: Optional notes
+    """
+    try:
+        user_email = frappe.session.user
+
+        if not user_email or user_email == 'Guest':
+            return error_response("Authentication required", code="AUTH_REQUIRED")
+
+        # Get request data
+        data = {}
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                data = frappe.local.form_dict
+        else:
+            data = frappe.local.form_dict
+
+        daily_trip_student_id = data.get('daily_trip_student_id')
+        student_status = data.get('student_status')
+        absent_reason = data.get('absent_reason')
+        notes = data.get('notes')
+
+        if not daily_trip_student_id:
+            return validation_error_response({"daily_trip_student_id": ["ID is required"]})
+
+        if not student_status:
+            return validation_error_response({"student_status": ["Status is required"]})
+
+        valid_statuses = ['Not Boarded', 'Boarded', 'Dropped Off', 'Absent']
+        if student_status not in valid_statuses:
+            return validation_error_response({"student_status": [f"Must be one of: {', '.join(valid_statuses)}"]})
+
+        # Get the trip student record
+        trip_student = frappe.get_doc("SIS Bus Daily Trip Student", daily_trip_student_id)
+        trip_id = trip_student.daily_trip_id
+
+        # Check permissions (monitor or web user)
+        is_monitor = "@busmonitor.wellspring.edu.vn" in user_email
+
+        if is_monitor:
+            monitor_code = user_email.split("@")[0]
+            monitors = frappe.get_all(
+                "SIS Bus Monitor",
+                filters={"monitor_code": monitor_code, "status": "Active"},
+                fields=["name"]
+            )
+            if not monitors:
+                return not_found_response("Bus monitor not found")
+
+            monitor_id = monitors[0].name
+            trip = frappe.get_doc("SIS Bus Daily Trip", trip_id)
+
+            if trip.monitor1_id != monitor_id and trip.monitor2_id != monitor_id:
+                return forbidden_response("Access denied to this trip")
+
+        # Update the record
+        current_time = now_datetime()
+        trip_student.student_status = student_status
+
+        if student_status == 'Boarded':
+            trip_student.boarding_time = current_time
+            trip_student.boarding_method = 'manual'
+        elif student_status == 'Dropped Off':
+            trip_student.drop_off_time = current_time
+            trip_student.drop_off_method = 'manual'
+        elif student_status == 'Absent' and absent_reason:
+            trip_student.absent_reason = absent_reason
+
+        if notes:
+            trip_student.notes = notes
+
+        trip_student.save()
+        frappe.db.commit()
+
+        return single_item_response({
+            "daily_trip_student_id": daily_trip_student_id,
+            "student_id": trip_student.student_id,
+            "student_name": trip_student.student_name,
+            "student_status": student_status,
+            "updated_at": current_time
+        }, f"Đã cập nhật trạng thái học sinh thành {student_status}")
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Record not found")
+    except Exception as e:
+        frappe.log_error(f"Error updating student status: {str(e)}")
+        return error_response(f"Error updating status: {str(e)}")

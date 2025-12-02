@@ -383,13 +383,30 @@ def mark_student_absent():
     Expected parameters (JSON):
     - student_id: Student ID
     - trip_id: Daily trip ID
-    - reason: Absent reason
+    - reason: Absent reason (Nghỉ học, Nghỉ ốm, Nghỉ phép, Lý do khác)
     """
     try:
         user_email = frappe.session.user
 
         if not user_email or user_email == 'Guest':
             return error_response("Authentication required", code="AUTH_REQUIRED")
+
+        # Get current monitor
+        if "@busmonitor.wellspring.edu.vn" not in user_email:
+            return error_response("Invalid user account format", code="INVALID_USER")
+
+        monitor_code = user_email.split("@")[0]
+
+        monitors = frappe.get_all(
+            "SIS Bus Monitor",
+            filters={"monitor_code": monitor_code, "status": "Active"},
+            fields=["name"]
+        )
+
+        if not monitors:
+            return not_found_response("Bus monitor not found")
+
+        monitor_id = monitors[0].name
 
         # Get request data
         data = {}
@@ -409,7 +426,7 @@ def mark_student_absent():
 
         student_id = data.get('student_id')
         trip_id = data.get('trip_id')
-        reason = data.get('reason', 'Other')
+        reason = data.get('reason', 'Lý do khác')
 
         if not student_id:
             return validation_error_response({"student_id": ["Student ID is required"]})
@@ -503,3 +520,194 @@ def _update_trip_statistics(trip_id):
 
     except Exception as e:
         frappe.log_error(f"Error updating trip statistics: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+@rate_limit(limit=100, seconds=600)
+def verify_and_checkin():
+    """
+    Verify student face and automatically check them in if recognized.
+    Combines recognize_student_face and check_student_in_trip in one call.
+    
+    Expected parameters (JSON):
+    - image: Base64 encoded image data
+    - trip_id: Daily trip ID (required)
+    - auto_checkin: Boolean, if true automatically checks in on successful recognition (default: true)
+    """
+    try:
+        user_email = frappe.session.user
+
+        if not user_email or user_email == 'Guest':
+            return error_response("Authentication required", code="AUTH_REQUIRED")
+
+        # Get current monitor
+        if "@busmonitor.wellspring.edu.vn" not in user_email:
+            return error_response("Invalid user account format", code="INVALID_USER")
+
+        monitor_code = user_email.split("@")[0]
+
+        monitors = frappe.get_all(
+            "SIS Bus Monitor",
+            filters={"monitor_code": monitor_code, "status": "Active"},
+            fields=["name", "campus_id", "school_year_id"]
+        )
+
+        if not monitors:
+            return not_found_response("Bus monitor not found")
+
+        monitor = monitors[0]
+        monitor_id = monitor.name
+
+        # Get request data
+        data = {}
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                if json_data:
+                    data = json_data
+            except (json.JSONDecodeError, TypeError):
+                data = frappe.local.form_dict
+        else:
+            data = frappe.local.form_dict
+
+        image_b64 = data.get('image')
+        trip_id = data.get('trip_id')
+        auto_checkin = data.get('auto_checkin', True)
+
+        if not image_b64:
+            return validation_error_response({"image": ["Image data is required"]})
+
+        if not trip_id:
+            return validation_error_response({"trip_id": ["Trip ID is required"]})
+
+        # Verify monitor has access to this trip
+        trip = frappe.get_doc("SIS Bus Daily Trip", trip_id)
+
+        if trip.monitor1_id != monitor_id and trip.monitor2_id != monitor_id:
+            return forbidden_response("Access denied to this trip")
+
+        # Send image to CompreFace for recognition
+        recognition_result = compreFace_service.recognize_face(image_b64, limit=1)
+
+        if not recognition_result.get("success"):
+            return error_response(
+                f"Nhận diện khuôn mặt thất bại: {recognition_result.get('message', 'Unknown error')}"
+            )
+
+        # Process recognition results
+        recognition_data = recognition_result.get("data", {})
+        recognized_faces = recognition_data.get("result", [])
+
+        if not recognized_faces:
+            return single_item_response({
+                "recognized": False,
+                "checked_in": False,
+                "message": "Không phát hiện khuôn mặt trong ảnh"
+            }, "Không phát hiện khuôn mặt")
+
+        # Get the best match
+        best_match = None
+        best_similarity = 0
+
+        for face in recognized_faces:
+            subjects = face.get("subjects", [])
+            if subjects:
+                subject = subjects[0]
+                similarity = subject.get("similarity", 0)
+
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_match = {
+                        "student_code": subject.get("subject"),
+                        "similarity": similarity,
+                        "face_box": face.get("box", {})
+                    }
+
+        if not best_match or best_similarity < 0.7:
+            return single_item_response({
+                "recognized": False,
+                "checked_in": False,
+                "similarity": best_similarity if best_match else 0,
+                "message": "Không nhận diện được học sinh"
+            }, "Không nhận diện được học sinh")
+
+        student_code = best_match["student_code"]
+
+        # Find student in this trip
+        trip_students = frappe.db.sql("""
+            SELECT dts.name, dts.student_id, dts.student_name, dts.student_status,
+                   dts.class_name, dts.student_code
+            FROM `tabSIS Bus Daily Trip Student` dts
+            WHERE dts.daily_trip_id = %s AND dts.student_code = %s
+        """, (trip_id, student_code), as_dict=True)
+
+        if not trip_students:
+            return single_item_response({
+                "recognized": True,
+                "checked_in": False,
+                "student_code": student_code,
+                "similarity": best_similarity,
+                "message": "Học sinh không thuộc chuyến xe này"
+            }, "Học sinh không thuộc chuyến xe này")
+
+        trip_student_record = trip_students[0]
+
+        result = {
+            "recognized": True,
+            "student": {
+                "student_id": trip_student_record.student_id,
+                "student_code": trip_student_record.student_code,
+                "student_name": trip_student_record.student_name,
+                "class_name": trip_student_record.class_name,
+                "current_status": trip_student_record.student_status
+            },
+            "recognition": {
+                "similarity": best_similarity,
+                "confidence": "high" if best_similarity >= 0.95 else "medium" if best_similarity >= 0.85 else "low"
+            }
+        }
+
+        # Auto check-in if enabled
+        if auto_checkin:
+            trip_student = frappe.get_doc("SIS Bus Daily Trip Student", trip_student_record.name)
+            current_time = now_datetime()
+
+            if trip.trip_type == "Đón":  # Pickup
+                if trip_student.student_status != "Boarded":
+                    trip_student.student_status = "Boarded"
+                    trip_student.boarding_time = current_time
+                    trip_student.boarding_method = "face_recognition"
+                    trip_student.save()
+                    frappe.db.commit()
+                    _update_trip_statistics(trip_id)
+                    result["checked_in"] = True
+                    result["new_status"] = "Boarded"
+                    result["message"] = f"Đã điểm danh {trip_student_record.student_name} lên xe"
+                else:
+                    result["checked_in"] = False
+                    result["message"] = f"{trip_student_record.student_name} đã điểm danh rồi"
+            else:  # Drop-off
+                if trip_student.student_status != "Dropped Off":
+                    trip_student.student_status = "Dropped Off"
+                    trip_student.drop_off_time = current_time
+                    trip_student.drop_off_method = "face_recognition"
+                    trip_student.save()
+                    frappe.db.commit()
+                    _update_trip_statistics(trip_id)
+                    result["checked_in"] = True
+                    result["new_status"] = "Dropped Off"
+                    result["message"] = f"Đã điểm danh {trip_student_record.student_name} xuống xe"
+                else:
+                    result["checked_in"] = False
+                    result["message"] = f"{trip_student_record.student_name} đã xuống xe rồi"
+        else:
+            result["checked_in"] = False
+            result["message"] = f"Nhận diện thành công: {trip_student_record.student_name}"
+
+        return single_item_response(result, result.get("message", "Success"))
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Trip not found")
+    except Exception as e:
+        frappe.log_error(f"Error in verify_and_checkin: {str(e)}")
+        return error_response(f"Lỗi điểm danh: {str(e)}")

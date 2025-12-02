@@ -183,7 +183,10 @@ class SISBusRoute(Document):
 			frappe.logger().info(f"⏭️ Skipping daily trips creation - route status is {self.status}")
 
 	def on_update(self):
-		"""Create daily trips when status changes to Active"""
+		"""Handle route updates - create daily trips or update existing ones"""
+		from datetime import datetime
+		
+		# Case 1: Status changed to Active - create new daily trips
 		if self.has_value_changed("status") and self.status == "Active":
 			try:
 				frappe.logger().info(f"🚀 Starting daily trips creation for updated route {self.name}")
@@ -195,6 +198,62 @@ class SISBusRoute(Document):
 				frappe.log_error(error_msg, "Bus Route Daily Trips Creation Error")
 				frappe.logger().error(error_msg)
 				# Don't raise exception to avoid blocking route update
+		
+		# Case 2: Personnel/vehicle changes - update future daily trips
+		# Only update if the route is Active
+		if self.status == "Active":
+			personnel_changed = (
+				self.has_value_changed("vehicle_id") or
+				self.has_value_changed("driver_id") or
+				self.has_value_changed("monitor1_id") or
+				self.has_value_changed("monitor2_id")
+			)
+			
+			if personnel_changed:
+				try:
+					self.update_future_daily_trips()
+				except Exception as e:
+					error_msg = f"❌ Failed to update future daily trips for route {self.name}: {str(e)}"
+					frappe.log_error(error_msg, "Bus Route Daily Trips Update Error")
+					frappe.logger().error(error_msg)
+	
+	def update_future_daily_trips(self):
+		"""Update all future daily trips (from today onwards) with new personnel/vehicle"""
+		from datetime import datetime
+		
+		today = datetime.now().date()
+		
+		frappe.logger().info(f"🔄 Updating future daily trips for route {self.name} from {today}")
+		frappe.logger().info(f"📌 New values: vehicle={self.vehicle_id}, driver={self.driver_id}, monitor1={self.monitor1_id}, monitor2={self.monitor2_id}")
+		
+		# Get all future daily trips for this route
+		future_trips = frappe.db.sql("""
+			SELECT name, trip_date, trip_type
+			FROM `tabSIS Bus Daily Trip`
+			WHERE route_id = %s AND trip_date >= %s
+			ORDER BY trip_date
+		""", (self.name, today), as_dict=True)
+		
+		if not future_trips:
+			frappe.logger().info(f"ℹ️ No future daily trips found for route {self.name}")
+			return
+		
+		frappe.logger().info(f"📋 Found {len(future_trips)} future daily trips to update")
+		
+		updated_count = 0
+		for trip in future_trips:
+			try:
+				frappe.db.sql("""
+					UPDATE `tabSIS Bus Daily Trip`
+					SET vehicle_id = %s, driver_id = %s, monitor1_id = %s, monitor2_id = %s, modified = NOW()
+					WHERE name = %s
+				""", (self.vehicle_id, self.driver_id, self.monitor1_id, self.monitor2_id, trip.name))
+				updated_count += 1
+			except Exception as e:
+				frappe.logger().error(f"  ❌ Failed to update trip {trip.name}: {str(e)}")
+		
+		frappe.db.commit()
+		frappe.logger().info(f"✅ Updated {updated_count}/{len(future_trips)} future daily trips for route {self.name}")
 
 	def create_daily_trips(self):
 		"""Create daily trips for the next 30 days (weekdays only)"""

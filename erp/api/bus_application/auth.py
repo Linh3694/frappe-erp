@@ -570,3 +570,194 @@ def refresh_token():
             "success": False,
             "message": f"Lỗi hệ thống: {str(e)}"
         }
+
+
+@frappe.whitelist(allow_guest=True)
+def login_with_password(phone_number, password):
+    """
+    Login bus monitor with phone number and password
+    Default password is the phone number itself
+    
+    Args:
+        phone_number: Bus monitor's phone number
+        password: Password (default is phone number)
+    
+    Returns:
+        dict: Response with JWT token and monitor info
+    """
+    logs = []
+    
+    try:
+        logs.append(f"📞 Login attempt with phone: {phone_number}")
+        
+        # Validate inputs
+        if not phone_number or not password:
+            return {
+                "success": False,
+                "message": "Số điện thoại và mật khẩu không được để trống",
+                "logs": logs
+            }
+        
+        # Normalize phone number
+        normalized_phone = normalize_phone_number(phone_number)
+        logs.append(f"📱 Normalized phone: {normalized_phone}")
+        
+        # Create alternative phone formats for searching
+        phone_formats = [
+            normalized_phone,  # 84XXXXXXXXX
+            f"+{normalized_phone}",  # +84XXXXXXXXX
+            f"0{normalized_phone[2:]}" if normalized_phone.startswith("84") else normalized_phone  # 09XXXXXXXX
+        ]
+        logs.append(f"🔍 Searching with phone formats: {phone_formats}")
+        
+        # Find bus monitor by phone number
+        monitors = frappe.get_all(
+            "SIS Bus Monitor",
+            filters={"phone_number": ["in", phone_formats], "status": "Active"},
+            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address", "password"]
+        )
+        
+        if not monitors:
+            logs.append(f"❌ No active bus monitor found")
+            return {
+                "success": False,
+                "message": "Không tìm thấy giám sát viên với số điện thoại này",
+                "logs": logs
+            }
+        
+        monitor = monitors[0]
+        logs.append(f"✅ Found monitor: {monitor['full_name']} ({monitor['monitor_code']})")
+        
+        # Verify password
+        # If no password set, default password is the normalized phone number
+        stored_password = monitor.get('password')
+        
+        # Normalize input password for comparison
+        normalized_password = normalize_phone_number(password) if password.replace('+', '').replace(' ', '').isdigit() else password
+        
+        # Check password
+        # Accept: stored password, normalized phone, or original phone formats
+        valid_passwords = [
+            stored_password if stored_password else None,
+            normalized_phone,  # 84XXXXXXXXX
+            f"0{normalized_phone[2:]}" if normalized_phone.startswith("84") else normalized_phone,  # 0XXXXXXXXX
+            phone_number.strip()  # Original input
+        ]
+        valid_passwords = [p for p in valid_passwords if p]  # Remove None values
+        
+        password_valid = False
+        if stored_password:
+            # If password is set, check against stored password
+            password_valid = (password.strip() == stored_password)
+        else:
+            # If no password set, accept phone number as password
+            password_valid = (password.strip() in valid_passwords or normalized_password in valid_passwords)
+        
+        if not password_valid:
+            logs.append(f"❌ Invalid password")
+            return {
+                "success": False,
+                "message": "Mật khẩu không đúng",
+                "logs": logs
+            }
+        
+        logs.append(f"✅ Password verified")
+        
+        # Get or create User for this monitor
+        user_email = f"{monitor['monitor_code']}@busmonitor.wellspring.edu.vn"
+        
+        if not frappe.db.exists("User", user_email):
+            logs.append(f"📝 Creating new User for monitor: {user_email}")
+            
+            # Create user
+            user_doc = frappe.get_doc({
+                "doctype": "User",
+                "email": user_email,
+                "first_name": monitor["full_name"],
+                "enabled": 1,
+                "user_type": "Website User",
+                "send_welcome_email": 0
+            })
+            user_doc.flags.ignore_permissions = True
+            user_doc.insert(ignore_permissions=True)
+            
+            # Add Bus Monitor role
+            user_doc.add_roles("Bus Monitor")
+            user_doc.add_roles("Mobile Monitor")
+            
+            logs.append(f"✅ User created: {user_email}")
+        else:
+            logs.append(f"✅ User already exists: {user_email}")
+            # Ensure Mobile Monitor role exists
+            user_doc = frappe.get_doc("User", user_email)
+            if "Mobile Monitor" not in [r.role for r in user_doc.roles]:
+                user_doc.add_roles("Mobile Monitor")
+        
+        # Generate JWT token
+        from erp.api.erp_common_user.auth import generate_jwt_token
+        token = generate_jwt_token(user_email)
+        logs.append("✅ JWT token generated")
+        
+        # Get campus and school year details
+        campus_info = {}
+        school_year_info = {}
+        
+        if monitor.get("campus_id"):
+            try:
+                campus = frappe.get_doc("SIS Campus", monitor["campus_id"])
+                campus_info = {
+                    "name": campus.name,
+                    "title_vn": campus.title_vn,
+                    "title_en": campus.title_en,
+                    "short_title": campus.short_title
+                }
+            except:
+                pass
+        
+        if monitor.get("school_year_id"):
+            try:
+                school_year = frappe.get_doc("SIS School Year", monitor["school_year_id"])
+                school_year_info = {
+                    "name": school_year.name,
+                    "title_vn": school_year.title_vn,
+                    "title_en": school_year.title_en
+                }
+            except:
+                pass
+        
+        # Return success response
+        return {
+            "success": True,
+            "message": "Đăng nhập thành công",
+            "data": {
+                "monitor": {
+                    "name": monitor["name"],
+                    "monitor_code": monitor["monitor_code"],
+                    "full_name": monitor["full_name"],
+                    "phone_number": monitor["phone_number"],
+                    "campus_id": monitor["campus_id"],
+                    "school_year_id": monitor["school_year_id"],
+                    "contractor": monitor.get("contractor", ""),
+                    "address": monitor.get("address", "")
+                },
+                "user": {
+                    "email": user_email,
+                    "full_name": monitor["full_name"],
+                    "roles": ["Mobile Monitor", "Bus Monitor"]
+                },
+                "campus": campus_info,
+                "school_year": school_year_info,
+                "token": token,
+                "expires_in": 365 * 24 * 60 * 60  # 365 days in seconds
+            },
+            "logs": logs
+        }
+    
+    except Exception as e:
+        logs.append(f"❌ Error: {str(e)}")
+        frappe.log_error(f"Login with Password Error: {str(e)}\nLogs: {json.dumps(logs)}", "Bus Application Login")
+        return {
+            "success": False,
+            "message": f"Lỗi hệ thống: {str(e)}",
+            "logs": logs
+        }
