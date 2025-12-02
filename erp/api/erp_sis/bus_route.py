@@ -1585,13 +1585,27 @@ def trigger_create_daily_trips():
 def update_student_status_in_trip():
 	"""Update student status in a daily trip"""
 	try:
-		# Get data from request
-		daily_trip_student_id = frappe.local.form_dict.get('daily_trip_student_id') or frappe.request.args.get('daily_trip_student_id')
-		student_status = frappe.local.form_dict.get('student_status') or frappe.request.args.get('student_status')
-		boarding_time = frappe.local.form_dict.get('boarding_time') or frappe.request.args.get('boarding_time')
-		drop_off_time = frappe.local.form_dict.get('drop_off_time') or frappe.request.args.get('drop_off_time')
-		absent_reason = frappe.local.form_dict.get('absent_reason') or frappe.request.args.get('absent_reason')
-		notes = frappe.local.form_dict.get('notes') or frappe.request.args.get('notes')
+		# Get data from request - handle both JSON and form-encoded data
+		data = {}
+		if frappe.request.data:
+			try:
+				if isinstance(frappe.request.data, bytes):
+					json_data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					json_data = json.loads(frappe.request.data)
+				if json_data:
+					data = json_data
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+				data = frappe.local.form_dict
+		else:
+			data = frappe.local.form_dict
+
+		daily_trip_student_id = data.get('daily_trip_student_id') or frappe.request.args.get('daily_trip_student_id')
+		student_status = data.get('student_status') or frappe.request.args.get('student_status')
+		boarding_time = data.get('boarding_time') or frappe.request.args.get('boarding_time')
+		drop_off_time = data.get('drop_off_time') or frappe.request.args.get('drop_off_time')
+		absent_reason = data.get('absent_reason') or frappe.request.args.get('absent_reason')
+		notes = data.get('notes') or frappe.request.args.get('notes')
 
 		if not daily_trip_student_id:
 			return error_response("Daily trip student ID is required")
