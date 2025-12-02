@@ -817,7 +817,7 @@ def check_trip_students_in_compreface():
         # Get trip_id from params
         trip_id = frappe.local.form_dict.get('trip_id')
         if not trip_id:
-            return validation_error_response({"trip_id": ["Trip ID is required"]})
+            return error_response("Trip ID is required", code="VALIDATION_ERROR")
         
         # Get subjects from CompreFace
         subjects_result = compreFace_service.list_subjects()
