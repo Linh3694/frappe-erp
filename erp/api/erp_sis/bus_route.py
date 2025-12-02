@@ -1823,6 +1823,23 @@ def add_student_to_daily_trip():
 		if existing:
 			return error_response("Học sinh đã tồn tại trong chuyến xe này")
 
+		# Get trip_type from daily trip to set default locations
+		daily_trip = frappe.get_doc("SIS Bus Daily Trip", daily_trip_id)
+		trip_type = daily_trip.trip_type
+		
+		# Set default locations based on trip_type
+		# Đón (pickup): pickup_location = user input, drop_off_location = school
+		# Trả (drop-off): pickup_location = school, drop_off_location = user input
+		pickup_location = data.get('pickup_location', '')
+		drop_off_location = data.get('drop_off_location', '')
+		
+		if trip_type == 'Đón':
+			if not drop_off_location:
+				drop_off_location = 'Trường'
+		elif trip_type == 'Trả':
+			if not pickup_location:
+				pickup_location = 'Trường'
+
 		# Create daily trip student
 		student_data = {
 			"doctype": "SIS Bus Daily Trip Student",
@@ -1834,8 +1851,8 @@ def add_student_to_daily_trip():
 			"student_code": crm_student['student_code'],
 			"class_name": class_name,
 			"pickup_order": data.get('pickup_order', 0),
-			"pickup_location": data.get('pickup_location', ''),
-			"drop_off_location": data.get('drop_off_location', ''),
+			"pickup_location": pickup_location,
+			"drop_off_location": drop_off_location,
 			"student_status": "Not Boarded",
 			"notes": data.get('notes', '')
 		}
