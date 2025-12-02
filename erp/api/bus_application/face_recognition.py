@@ -802,7 +802,7 @@ def test_compreface():
 
 
 @frappe.whitelist(allow_guest=False)
-def check_trip_students_in_compreface():
+def check_trip_students_in_compreface(trip_id=None):
     """
     Check which students in a trip are registered in CompreFace
     Expected parameters:
@@ -814,8 +814,10 @@ def check_trip_students_in_compreface():
         if not user_email or user_email == 'Guest':
             return error_response("Authentication required", code="AUTH_REQUIRED")
         
-        # Get trip_id from params
-        trip_id = frappe.local.form_dict.get('trip_id')
+        # Get trip_id from params (try multiple sources)
+        if not trip_id:
+            trip_id = frappe.form_dict.get('trip_id') or frappe.local.form_dict.get('trip_id')
+        
         if not trip_id:
             return error_response("Trip ID is required", code="VALIDATION_ERROR")
         
