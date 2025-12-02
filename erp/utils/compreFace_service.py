@@ -14,7 +14,7 @@ class CompreFaceService:
 
     def __init__(self):
         self.base_url = "http://172.16.20.114:8000"
-        self.api_key = "00000000-0000-0000-0000-000000000002"  # Default demo API key
+        self.api_key = "e0e63236-c454-4cc6-a0ea-15dd7bd84bc2"  # sis-bus-recognition service
         self.recognition_api = f"{self.base_url}/api/v1/recognition"
 
     def _get_headers(self) -> Dict[str, str]:
