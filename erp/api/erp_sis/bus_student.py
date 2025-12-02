@@ -1144,3 +1144,205 @@ def remove_student_from_compreface_background(student_code: str):
 
 	except Exception as e:
 		frappe.log_error(f"Background removal error for student {student_code}: {str(e)}", "Bus Student Background Job")
+
+
+@frappe.whitelist()
+def sync_all_students_to_compreface(force_update=False):
+	"""
+	Sync all bus students to CompreFace
+	- Creates subjects for students not in CompreFace
+	- Updates photos for students with changed images (if force_update=True)
+	
+	Args:
+		force_update: If True, re-sync even students already registered
+	
+	Returns:
+		Summary of sync operation
+	"""
+	try:
+		import time
+		
+		# Get current user's campus
+		campus_id = get_current_campus_from_context()
+		if not campus_id:
+			campus_id = "campus-1"
+		
+		# Parse force_update
+		if isinstance(force_update, str):
+			force_update = force_update.lower() in ('true', '1', 'yes')
+		
+		# Get all bus students
+		students = frappe.db.sql("""
+			SELECT bs.name, bs.student_code, bs.full_name, bs.compreface_registered
+			FROM `tabSIS Bus Student` bs
+			WHERE bs.campus_id = %s AND bs.student_code IS NOT NULL
+			ORDER BY bs.full_name ASC
+		""", (campus_id,), as_dict=True)
+		
+		if not students:
+			return success_response(
+				data={"total": 0, "synced": 0, "skipped": 0, "failed": 0},
+				message="Không có học sinh nào để sync"
+			)
+		
+		# Get existing subjects from CompreFace
+		subjects_result = compreFace_service.list_subjects()
+		existing_subjects = set()
+		if subjects_result.get("success"):
+			existing_subjects = set(subjects_result.get("data", []))
+		
+		results = {
+			"total": len(students),
+			"synced": 0,
+			"skipped": 0,
+			"failed": 0,
+			"already_registered": 0,
+			"details": []
+		}
+		
+		for student in students:
+			student_code = student.get("student_code")
+			student_name = student.get("full_name")
+			
+			try:
+				# Check if already in CompreFace
+				in_compreface = student_code in existing_subjects
+				
+				# Skip if already registered and not force update
+				if in_compreface and not force_update:
+					# Verify it has photos
+					status_check = compreFace_service.check_subject_complete(student_code)
+					if status_check.get("success"):
+						status_data = status_check.get("data", {})
+						if status_data.get("has_photos"):
+							results["already_registered"] += 1
+							results["skipped"] += 1
+							continue
+				
+				# Get student photo
+				photo_result = get_student_photo_for_compreface(student.get("name"))
+				
+				if not photo_result.get("success") or not photo_result.get("photo_url"):
+					results["failed"] += 1
+					results["details"].append({
+						"student_code": student_code,
+						"student_name": student_name,
+						"status": "failed",
+						"reason": "Không tìm thấy ảnh học sinh"
+					})
+					continue
+				
+				photo_url = photo_result["photo_url"]
+				
+				# Sync to CompreFace
+				if in_compreface and force_update:
+					# Delete existing and re-add
+					compreFace_service.delete_subject(student_code)
+					time.sleep(0.5)
+				
+				# Add to CompreFace
+				sync_result = compreFace_service.add_face_to_subject(student_code, photo_url)
+				
+				if sync_result.get("success"):
+					# Mark as registered in database
+					frappe.db.set_value("SIS Bus Student", student.get("name"), "compreface_registered", 1)
+					results["synced"] += 1
+					results["details"].append({
+						"student_code": student_code,
+						"student_name": student_name,
+						"status": "synced"
+					})
+				else:
+					results["failed"] += 1
+					results["details"].append({
+						"student_code": student_code,
+						"student_name": student_name,
+						"status": "failed",
+						"reason": sync_result.get("message", "Unknown error")
+					})
+				
+				# Small delay to avoid overwhelming CompreFace
+				time.sleep(0.3)
+				
+			except Exception as e:
+				results["failed"] += 1
+				results["details"].append({
+					"student_code": student_code,
+					"student_name": student_name,
+					"status": "failed",
+					"reason": str(e)
+				})
+		
+		frappe.db.commit()
+		
+		message = f"Đã sync {results['synced']}/{results['total']} học sinh. "
+		if results["already_registered"] > 0:
+			message += f"Đã có sẵn: {results['already_registered']}. "
+		if results["failed"] > 0:
+			message += f"Thất bại: {results['failed']}."
+		
+		return success_response(
+			data=results,
+			message=message
+		)
+		
+	except Exception as e:
+		frappe.log_error(f"Error syncing all students to CompreFace: {str(e)}")
+		return error_response(f"Lỗi sync: {str(e)}")
+
+
+@frappe.whitelist()
+def get_compreface_sync_status():
+	"""
+	Get sync status summary for all bus students
+	Returns count of registered, not registered, and pending students
+	"""
+	try:
+		campus_id = get_current_campus_from_context()
+		if not campus_id:
+			campus_id = "campus-1"
+		
+		# Get all bus students
+		students = frappe.db.sql("""
+			SELECT bs.student_code
+			FROM `tabSIS Bus Student` bs
+			WHERE bs.campus_id = %s AND bs.student_code IS NOT NULL
+		""", (campus_id,), as_dict=True)
+		
+		if not students:
+			return success_response(
+				data={
+					"total": 0,
+					"registered": 0,
+					"not_registered": 0,
+					"percentage": 0
+				},
+				message="Không có học sinh nào"
+			)
+		
+		# Get subjects from CompreFace
+		subjects_result = compreFace_service.list_subjects()
+		existing_subjects = set()
+		if subjects_result.get("success"):
+			existing_subjects = set(subjects_result.get("data", []))
+		
+		student_codes = [s.get("student_code") for s in students if s.get("student_code")]
+		registered = len([c for c in student_codes if c in existing_subjects])
+		not_registered = len(student_codes) - registered
+		
+		percentage = round((registered / len(student_codes)) * 100, 1) if student_codes else 0
+		
+		return success_response(
+			data={
+				"total": len(student_codes),
+				"registered": registered,
+				"not_registered": not_registered,
+				"percentage": percentage,
+				"compreface_total": len(existing_subjects)
+			},
+			message=f"{registered}/{len(student_codes)} học sinh đã đăng ký FaceID ({percentage}%)"
+		)
+		
+	except Exception as e:
+		frappe.log_error(f"Error getting CompreFace sync status: {str(e)}")
+		return error_response(f"Lỗi: {str(e)}")
