@@ -598,11 +598,19 @@ def verify_and_checkin():
             return forbidden_response("Access denied to this trip")
 
         # Send image to CompreFace for recognition
+        frappe.logger().info(f"[FaceRecognition] Sending image to CompreFace for recognition")
+        frappe.logger().info(f"[FaceRecognition] Image data length: {len(image_b64) if image_b64 else 0}")
+        
         recognition_result = compreFace_service.recognize_face(image_b64, limit=1)
+        
+        frappe.logger().info(f"[FaceRecognition] CompreFace result: {json.dumps(recognition_result, default=str)[:500]}")
 
         if not recognition_result.get("success"):
+            error_detail = recognition_result.get('error', 'Unknown error')
+            error_msg = recognition_result.get('message', 'Unknown error')
+            frappe.logger().error(f"[FaceRecognition] Recognition failed: {error_detail} - {error_msg}")
             return error_response(
-                f"Nhận diện khuôn mặt thất bại: {recognition_result.get('message', 'Unknown error')}"
+                f"Nhận diện khuôn mặt thất bại: {error_msg}. Chi tiết: {error_detail}"
             )
 
         # Process recognition results
