@@ -1728,7 +1728,12 @@ def get_student_bus_routes():
 
 @frappe.whitelist()
 def add_student_to_daily_trip():
-	"""Add a student to a specific daily trip"""
+	"""Add a student to a specific daily trip
+	
+	Accepts either:
+	- student_id: SIS Bus Student name (e.g., 'BUS-STU-00001')
+	- OR student_id as CRM Student ID (legacy support)
+	"""
 	try:
 		# Get data from request
 		data = {}
@@ -1758,30 +1763,65 @@ def add_student_to_daily_trip():
 		if not frappe.db.exists("SIS Bus Daily Trip", daily_trip_id):
 			return error_response("Daily trip not found")
 
-		# Check if student is already in this daily trip
+		# Determine if student_id is a SIS Bus Student or CRM Student
+		bus_student = None
+		crm_student = None
+		class_name = ""
+		class_student_id = data.get('class_student_id')
+		
+		# Try to get as SIS Bus Student first
+		if frappe.db.exists("SIS Bus Student", student_id):
+			bus_student = frappe.get_doc("SIS Bus Student", student_id)
+			# Get CRM Student using student_code
+			crm_students = frappe.get_all("CRM Student", 
+				filters={"student_code": bus_student.student_code},
+				fields=["name", "student_name", "student_code"],
+				limit=1
+			)
+			if crm_students:
+				crm_student = crm_students[0]
+				student_id = crm_student.name  # Use CRM Student ID for storage
+			else:
+				return error_response(f"Không tìm thấy học sinh với mã {bus_student.student_code}")
+			
+			# Get class name from bus student
+			if bus_student.class_id:
+				try:
+					class_doc = frappe.get_doc("SIS Class", bus_student.class_id)
+					class_name = class_doc.title or class_doc.name
+				except:
+					class_name = bus_student.class_name or ""
+			else:
+				class_name = bus_student.class_name or ""
+		elif frappe.db.exists("CRM Student", student_id):
+			# Legacy: student_id is CRM Student ID
+			crm_student_doc = frappe.get_doc("CRM Student", student_id)
+			crm_student = {
+				"name": crm_student_doc.name,
+				"student_name": crm_student_doc.student_name,
+				"student_code": crm_student_doc.student_code
+			}
+			# Get class info if class_student_id provided
+			if class_student_id:
+				try:
+					class_student = frappe.get_doc("SIS Class Student", class_student_id)
+					if class_student.class_id:
+						class_doc = frappe.get_doc("SIS Class", class_student.class_id)
+						class_name = class_doc.title or class_doc.name
+				except:
+					pass
+		else:
+			return error_response(f"Không tìm thấy học sinh với ID: {student_id}")
+
+		# Check if student is already in this daily trip (by student_code)
 		existing = frappe.db.sql("""
 			SELECT name FROM `tabSIS Bus Daily Trip Student`
-			WHERE daily_trip_id = %s AND student_id = %s
+			WHERE daily_trip_id = %s AND student_code = %s
 			LIMIT 1
-		""", (daily_trip_id, student_id))
+		""", (daily_trip_id, crm_student['student_code']))
 		
 		if existing:
 			return error_response("Học sinh đã tồn tại trong chuyến xe này")
-
-		# Get student info
-		student = frappe.get_doc("CRM Student", student_id)
-		
-		# Get class info if available
-		class_name = ""
-		class_student_id = data.get('class_student_id')
-		if class_student_id:
-			try:
-				class_student = frappe.get_doc("SIS Class Student", class_student_id)
-				if class_student.class_id:
-					class_doc = frappe.get_doc("SIS Class", class_student.class_id)
-					class_name = class_doc.title or class_doc.name
-			except:
-				pass
 
 		# Create daily trip student
 		student_data = {
@@ -1790,8 +1830,8 @@ def add_student_to_daily_trip():
 			"student_id": student_id,
 			"class_student_id": class_student_id or "",
 			"student_image": "",
-			"student_name": student.student_name,
-			"student_code": student.student_code,
+			"student_name": crm_student['student_name'],
+			"student_code": crm_student['student_code'],
 			"class_name": class_name,
 			"pickup_order": data.get('pickup_order', 0),
 			"pickup_location": data.get('pickup_location', ''),
