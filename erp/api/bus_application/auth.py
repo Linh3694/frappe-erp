@@ -663,64 +663,80 @@ def login_with_password(phone_number, password):
         # Get or create User for this monitor
         user_email = f"{monitor['monitor_code']}@busmonitor.wellspring.edu.vn"
         
-        if not frappe.db.exists("User", user_email):
-            logs.append(f"📝 Creating new User for monitor: {user_email}")
-            
-            # Create user
-            user_doc = frappe.get_doc({
-                "doctype": "User",
-                "email": user_email,
-                "first_name": monitor["full_name"],
-                "enabled": 1,
-                "user_type": "Website User",
-                "send_welcome_email": 0
-            })
-            user_doc.flags.ignore_permissions = True
-            user_doc.insert(ignore_permissions=True)
-            
-            # Add Bus Monitor role
-            user_doc.add_roles("Bus Monitor")
-            user_doc.add_roles("Mobile Monitor")
-            
-            logs.append(f"✅ User created: {user_email}")
-        else:
-            logs.append(f"✅ User already exists: {user_email}")
-            # Ensure Mobile Monitor role exists
-            user_doc = frappe.get_doc("User", user_email)
-            if "Mobile Monitor" not in [r.role for r in user_doc.roles]:
+        # Use run_as to bypass Guest permission restrictions
+        frappe.set_user("Administrator")
+        
+        try:
+            if not frappe.db.exists("User", user_email):
+                logs.append(f"📝 Creating new User for monitor: {user_email}")
+                
+                # Create user
+                user_doc = frappe.get_doc({
+                    "doctype": "User",
+                    "email": user_email,
+                    "first_name": monitor["full_name"],
+                    "enabled": 1,
+                    "user_type": "Website User",
+                    "send_welcome_email": 0
+                })
+                user_doc.flags.ignore_permissions = True
+                user_doc.insert(ignore_permissions=True)
+                
+                # Add Mobile Monitor role (main role for bus monitors)
                 user_doc.add_roles("Mobile Monitor")
+                frappe.db.commit()
+                
+                logs.append(f"✅ User created with Mobile Monitor role: {user_email}")
+            else:
+                logs.append(f"✅ User already exists: {user_email}")
+                # Ensure Mobile Monitor role exists
+                user_doc = frappe.get_doc("User", user_email)
+                user_doc.flags.ignore_permissions = True
+                
+                current_roles = [r.role for r in user_doc.roles]
+                if "Mobile Monitor" not in current_roles:
+                    user_doc.add_roles("Mobile Monitor")
+                    frappe.db.commit()
+                    logs.append(f"✅ Added Mobile Monitor role to user")
+        finally:
+            # Reset to Guest after operations
+            frappe.set_user("Guest")
         
         # Generate JWT token
         from erp.api.erp_common_user.auth import generate_jwt_token
         token = generate_jwt_token(user_email)
         logs.append("✅ JWT token generated")
         
-        # Get campus and school year details
+        # Get campus and school year details (use Administrator to bypass permissions)
+        frappe.set_user("Administrator")
         campus_info = {}
         school_year_info = {}
         
-        if monitor.get("campus_id"):
-            try:
-                campus = frappe.get_doc("SIS Campus", monitor["campus_id"])
-                campus_info = {
-                    "name": campus.name,
-                    "title_vn": campus.title_vn,
-                    "title_en": campus.title_en,
-                    "short_title": campus.short_title
-                }
-            except:
-                pass
-        
-        if monitor.get("school_year_id"):
-            try:
-                school_year = frappe.get_doc("SIS School Year", monitor["school_year_id"])
-                school_year_info = {
-                    "name": school_year.name,
-                    "title_vn": school_year.title_vn,
-                    "title_en": school_year.title_en
-                }
-            except:
-                pass
+        try:
+            if monitor.get("campus_id"):
+                try:
+                    campus = frappe.get_doc("SIS Campus", monitor["campus_id"])
+                    campus_info = {
+                        "name": campus.name,
+                        "title_vn": getattr(campus, 'title_vn', ''),
+                        "title_en": getattr(campus, 'title_en', ''),
+                        "short_title": getattr(campus, 'short_title', '')
+                    }
+                except:
+                    pass
+            
+            if monitor.get("school_year_id"):
+                try:
+                    school_year = frappe.get_doc("SIS School Year", monitor["school_year_id"])
+                    school_year_info = {
+                        "name": school_year.name,
+                        "title_vn": getattr(school_year, 'title_vn', ''),
+                        "title_en": getattr(school_year, 'title_en', '')
+                    }
+                except:
+                    pass
+        finally:
+            frappe.set_user("Guest")
         
         # Return success response
         return {
@@ -753,6 +769,11 @@ def login_with_password(phone_number, password):
     except Exception as e:
         logs.append(f"❌ Error: {str(e)}")
         frappe.log_error(f"Login with Password Error: {str(e)}\nLogs: {json.dumps(logs)}", "Bus Application Login")
+        # Ensure we reset to Guest on error
+        try:
+            frappe.set_user("Guest")
+        except:
+            pass
         return {
             "success": False,
             "message": f"Lỗi hệ thống: {str(e)}",
