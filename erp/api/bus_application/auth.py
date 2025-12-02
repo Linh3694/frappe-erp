@@ -756,7 +756,7 @@ def login_with_password(phone_number, password):
                 "user": {
                     "email": user_email,
                     "full_name": monitor["full_name"],
-                    "roles": ["Mobile Monitor", "Bus Monitor"]
+                    "roles": ["Mobile Monitor"]
                 },
                 "campus": campus_info,
                 "school_year": school_year_info,
