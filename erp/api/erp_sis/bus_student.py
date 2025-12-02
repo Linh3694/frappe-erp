@@ -1173,7 +1173,8 @@ def sync_all_students_to_compreface(force_update=False):
 		
 		# Get all bus students
 		students = frappe.db.sql("""
-			SELECT bs.name, bs.student_code, bs.full_name, bs.compreface_registered
+			SELECT bs.name, bs.student_code, bs.full_name, bs.compreface_registered,
+				   bs.campus_id, bs.school_year_id
 			FROM `tabSIS Bus Student` bs
 			WHERE bs.campus_id = %s AND bs.student_code IS NOT NULL
 			ORDER BY bs.full_name ASC
@@ -1220,9 +1221,13 @@ def sync_all_students_to_compreface(force_update=False):
 							continue
 				
 				# Get student photo
-				photo_result = get_student_photo_for_compreface(student.get("name"))
+				photo_url = get_student_photo_url(
+					student_code, 
+					student.get("campus_id") or campus_id, 
+					student.get("school_year_id")
+				)
 				
-				if not photo_result.get("success") or not photo_result.get("photo_url"):
+				if not photo_url:
 					results["failed"] += 1
 					results["details"].append({
 						"student_code": student_code,
@@ -1231,8 +1236,6 @@ def sync_all_students_to_compreface(force_update=False):
 						"reason": "Không tìm thấy ảnh học sinh"
 					})
 					continue
-				
-				photo_url = photo_result["photo_url"]
 				
 				# Sync to CompreFace
 				if in_compreface and force_update:
