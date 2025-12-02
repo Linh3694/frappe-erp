@@ -370,9 +370,16 @@ def update_bus_student(name, **data):
 		return error_response(f"Failed to update bus student: {str(e)}")
 
 @frappe.whitelist()
-def delete_bus_student(name):
+def delete_bus_student(name=None):
 	"""Delete a bus student"""
 	try:
+		# Get name from multiple sources
+		if not name:
+			name = frappe.form_dict.get('name') or frappe.local.form_dict.get('name')
+		
+		if not name:
+			return error_response("Student name/ID is required")
+		
 		# Get student info before deletion for CompreFace cleanup
 		doc = frappe.get_doc("SIS Bus Student", name)
 		student_code = doc.student_code
