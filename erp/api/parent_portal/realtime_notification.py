@@ -259,9 +259,32 @@ def format_notification_for_realtime(notification_doc):
 
 
 def get_notification_text(text_or_obj, language='vi'):
-	"""Get notification text in specific language"""
+	"""Get notification text in specific language
+	
+	Handles both dict and JSON string formats:
+	- dict: {"vi": "Điểm danh", "en": "Attendance"}
+	- JSON string: '{"vi": "Điểm danh", "en": "Attendance"}'
+	- plain string: "Điểm danh"
+	"""
+	# If it's already a dict, extract the language
 	if isinstance(text_or_obj, dict):
 		return text_or_obj.get(language) or text_or_obj.get('vi') or text_or_obj.get('en') or str(text_or_obj)
+	
+	# If it's a string, try to parse as JSON first
+	if isinstance(text_or_obj, str):
+		# Check if it looks like JSON (starts with { and ends with })
+		stripped = text_or_obj.strip()
+		if stripped.startswith('{') and stripped.endswith('}'):
+			try:
+				parsed = json.loads(stripped)
+				if isinstance(parsed, dict):
+					return parsed.get(language) or parsed.get('vi') or parsed.get('en') or str(parsed)
+			except (json.JSONDecodeError, ValueError):
+				pass  # Not valid JSON, return as-is
+		
+		# Return plain string as-is
+		return text_or_obj
+	
 	return str(text_or_obj)
 
 
