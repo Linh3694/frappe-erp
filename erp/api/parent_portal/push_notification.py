@@ -23,7 +23,7 @@ except ImportError:
             self.response = response
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)  # Allow guest to handle JWT auth manually
 def save_push_subscription(subscription_json=None):
     """
     Lưu push subscription của user
@@ -37,6 +37,34 @@ def save_push_subscription(subscription_json=None):
     """
     try:
         user = frappe.session.user
+        
+        # Handle JWT authentication for PWA (similar to register_device_token)
+        if not user or user == "Guest":
+            auth_header = frappe.request.headers.get('Authorization', '')
+            
+            if auth_header.startswith('Bearer '):
+                token = auth_header[7:]  # Remove 'Bearer ' prefix
+                try:
+                    import jwt
+                    # Decode JWT token to get user (skip signature verification)
+                    decoded = jwt.decode(token, options={"verify_signature": False})
+                    potential_user = decoded.get('email') or decoded.get('sub') or decoded.get('username')
+                    
+                    # Validate that this user exists in Frappe
+                    if potential_user and frappe.db.exists("User", potential_user):
+                        user = potential_user
+                        frappe.session.user = user
+                        frappe.logger().info(f"📱 [Push Subscription] Authenticated via JWT: {user}")
+                    else:
+                        frappe.logger().warning(f"📱 [Push Subscription] User from JWT not found: {potential_user}")
+                except Exception as jwt_error:
+                    frappe.logger().warning(f"📱 [Push Subscription] JWT decode failed: {str(jwt_error)}")
+        
+        if not user or user == "Guest":
+            return {
+                "success": False,
+                "message": "Authentication required"
+            }
 
         # Nếu subscription_json không được truyền như argument, thử lấy từ request body
         if subscription_json is None:
@@ -125,7 +153,7 @@ def save_push_subscription(subscription_json=None):
         }
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)  # Allow guest to handle JWT auth manually
 def delete_push_subscription():
     """
     Xóa push subscription của user hiện tại
@@ -135,6 +163,29 @@ def delete_push_subscription():
     """
     try:
         user = frappe.session.user
+        
+        # Handle JWT authentication for PWA
+        if not user or user == "Guest":
+            auth_header = frappe.request.headers.get('Authorization', '')
+            
+            if auth_header.startswith('Bearer '):
+                token = auth_header[7:]
+                try:
+                    import jwt
+                    decoded = jwt.decode(token, options={"verify_signature": False})
+                    potential_user = decoded.get('email') or decoded.get('sub') or decoded.get('username')
+                    
+                    if potential_user and frappe.db.exists("User", potential_user):
+                        user = potential_user
+                        frappe.session.user = user
+                except Exception as jwt_error:
+                    frappe.logger().warning(f"JWT decode failed: {str(jwt_error)}")
+        
+        if not user or user == "Guest":
+            return {
+                "success": False,
+                "message": "Authentication required"
+            }
         
         existing = frappe.db.exists("Push Subscription", {"user": user})
         
