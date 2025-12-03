@@ -620,7 +620,10 @@ def get_historical_attendance_threshold_minutes():
 	"""
 	Get threshold in minutes for determining historical attendance data.
 	Attendance older than this threshold will be silently synced without notification.
-	Default: 60 minutes (1 hour)
+	Default: 1440 minutes (24 hours / 1 day)
+	
+	This prevents notifications for old data from newly connected devices
+	while still allowing same-day delayed syncs to trigger notifications.
 	"""
 	try:
 		# Allow configuration via site config
@@ -629,7 +632,7 @@ def get_historical_attendance_threshold_minutes():
 			return int(threshold)
 	except:
 		pass
-	return 60  # Default 1 hour
+	return 1440  # Default 24 hours (1 day) - safe for same-day delayed syncs
 
 
 def is_historical_attendance(attendance_timestamp, threshold_minutes=None):
