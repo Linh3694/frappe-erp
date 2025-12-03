@@ -333,34 +333,18 @@ def handle_hikvision_event():
 				if employee_code not in processed_students:
 					processed_students.add(employee_code)
 
-					try:
-						# Import and call notification function directly
-						from erp.api.attendance.notification import publish_attendance_notification
-
-						# Call immediately for instant push notification
-						logger.info(f"📢 [HIKVISION] About to call publish_attendance_notification for {employee_code}")
-						publish_attendance_notification(
-							employee_code=employee_code,
-							employee_name=employee_name,
-							timestamp=parsed_timestamp.isoformat(),
-							device_id=device_id,
-							device_name=device_name,
-							check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-							check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-							total_check_ins=attendance_doc.total_check_ins,
-							date=str(attendance_doc.date)
-						)
-
-						logger.info(f"✅ [HIKVISION] Push notification sent immediately for {employee_code}")
-
-					except Exception as notify_error:
-						logger.warning(f"⚠️ Failed to send immediate notification: {str(notify_error)}")
-						# Fallback to enqueue if immediate send fails
+					# CHECK: Skip notification for historical attendance data (from newly connected devices syncing old data)
+					if is_historical_attendance(parsed_timestamp):
+						threshold = get_historical_attendance_threshold_minutes()
+						logger.info(f"🔇 [SILENT SYNC] Skipping notification for {employee_code} - historical data (>{threshold} min old), timestamp: {format_vn_time(parsed_timestamp)}")
+					else:
 						try:
-							frappe.enqueue(
-								"erp.api.attendance.notification.publish_attendance_notification",
-								queue="default",
-								timeout=300,
+							# Import and call notification function directly
+							from erp.api.attendance.notification import publish_attendance_notification
+
+							# Call immediately for instant push notification
+							logger.info(f"📢 [HIKVISION] About to call publish_attendance_notification for {employee_code}")
+							publish_attendance_notification(
 								employee_code=employee_code,
 								employee_name=employee_name,
 								timestamp=parsed_timestamp.isoformat(),
@@ -371,9 +355,30 @@ def handle_hikvision_event():
 								total_check_ins=attendance_doc.total_check_ins,
 								date=str(attendance_doc.date)
 							)
-							logger.info(f"📋 Fallback: Notification enqueued for {employee_code}")
-						except Exception as enqueue_error:
-							logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
+
+							logger.info(f"✅ [HIKVISION] Push notification sent immediately for {employee_code}")
+
+						except Exception as notify_error:
+							logger.warning(f"⚠️ Failed to send immediate notification: {str(notify_error)}")
+							# Fallback to enqueue if immediate send fails
+							try:
+								frappe.enqueue(
+									"erp.api.attendance.notification.publish_attendance_notification",
+									queue="default",
+									timeout=300,
+									employee_code=employee_code,
+									employee_name=employee_name,
+									timestamp=parsed_timestamp.isoformat(),
+									device_id=device_id,
+									device_name=device_name,
+									check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
+									check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
+									total_check_ins=attendance_doc.total_check_ins,
+									date=str(attendance_doc.date)
+								)
+								logger.info(f"📋 Fallback: Notification enqueued for {employee_code}")
+							except Exception as enqueue_error:
+								logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
 				else:
 					logger.info(f"⏭️ Skipping duplicate notification for {employee_code} in this request")
 				
@@ -507,26 +512,31 @@ def upload_attendance_batch():
 				if fingerprint_code not in processed_students:
 					processed_students.add(fingerprint_code)
 
-					try:
-						frappe.enqueue(
-							"erp.api.attendance.notification.publish_attendance_notification",
-							queue="default",
-							timeout=300,
-							employee_code=fingerprint_code,
-							employee_name=employee_name,
-							timestamp=timestamp.isoformat(),
-							device_id=device_id,
-							device_name=device_name,
-							check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-							check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-							total_check_ins=attendance_doc.total_check_ins,
-							date=str(attendance_doc.date),
-							event_type="batch_upload",
-							tracker_id=tracker_id
-						)
-						logger.info(f"📋 Notification enqueued for {fingerprint_code} (batch)")
-					except Exception as enqueue_error:
-						logger.warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
+					# CHECK: Skip notification for historical attendance data (from newly connected devices syncing old data)
+					if is_historical_attendance(timestamp):
+						threshold = get_historical_attendance_threshold_minutes()
+						logger.info(f"🔇 [SILENT SYNC] Skipping notification for {fingerprint_code} - historical data (>{threshold} min old), timestamp: {format_vn_time(timestamp)}")
+					else:
+						try:
+							frappe.enqueue(
+								"erp.api.attendance.notification.publish_attendance_notification",
+								queue="default",
+								timeout=300,
+								employee_code=fingerprint_code,
+								employee_name=employee_name,
+								timestamp=timestamp.isoformat(),
+								device_id=device_id,
+								device_name=device_name,
+								check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
+								check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
+								total_check_ins=attendance_doc.total_check_ins,
+								date=str(attendance_doc.date),
+								event_type="batch_upload",
+								tracker_id=tracker_id
+							)
+							logger.info(f"📋 Notification enqueued for {fingerprint_code} (batch)")
+						except Exception as enqueue_error:
+							logger.warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
 				else:
 					logger.info(f"⏭️ Skipping duplicate notification for {fingerprint_code} in batch")
 				
@@ -604,3 +614,56 @@ def format_vn_time(dt):
 	vn_time = dt.astimezone(vn_tz)
 
 	return vn_time.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def get_historical_attendance_threshold_minutes():
+	"""
+	Get threshold in minutes for determining historical attendance data.
+	Attendance older than this threshold will be silently synced without notification.
+	Default: 60 minutes (1 hour)
+	"""
+	try:
+		# Allow configuration via site config
+		threshold = frappe.get_system_settings("historical_attendance_threshold_minutes")
+		if threshold:
+			return int(threshold)
+	except:
+		pass
+	return 60  # Default 1 hour
+
+
+def is_historical_attendance(attendance_timestamp, threshold_minutes=None):
+	"""
+	Check if attendance timestamp is historical (older than threshold).
+	Used to determine if notification should be skipped for newly connected devices
+	that are syncing old data.
+	
+	Args:
+		attendance_timestamp: The parsed attendance timestamp (datetime)
+		threshold_minutes: Optional threshold in minutes. If None, uses system config.
+	
+	Returns:
+		True if attendance is historical and should be silently synced
+		False if attendance is recent and should trigger notification
+	"""
+	if not attendance_timestamp:
+		return False
+	
+	if threshold_minutes is None:
+		threshold_minutes = get_historical_attendance_threshold_minutes()
+	
+	# Get current time in VN timezone
+	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+	now = datetime.now(vn_tz)
+	
+	# Ensure attendance_timestamp is timezone-aware
+	if attendance_timestamp.tzinfo is None:
+		# Assume VN time for naive datetime
+		attendance_timestamp = vn_tz.localize(attendance_timestamp)
+	
+	# Calculate time difference
+	time_diff = now - attendance_timestamp
+	diff_minutes = time_diff.total_seconds() / 60
+	
+	# If attendance is older than threshold, it's historical
+	return diff_minutes > threshold_minutes
