@@ -6,26 +6,22 @@ from frappe import _
 from erp.utils.api_response import success_response, error_response
 from erp.utils.campus_utils import get_current_campus_from_context
 
-from datetime import datetime, date
-
 def add_student_to_daily_trips(route_id, route_student_data):
-	"""Add student to all corresponding daily trips FROM TODAY onwards"""
+	"""Add student to all corresponding daily trips"""
 	logs = []
 	try:
-		today = date.today()
-		logs.append(f"📅 Thêm học sinh vào daily trips từ ngày {today} trở đi")
-		
-		# Get all daily trips for this route with matching weekday and trip_type FROM TODAY onwards
-		daily_trips = frappe.db.sql("""
-			SELECT name, trip_date FROM `tabSIS Bus Daily Trip`
-			WHERE route_id = %s 
-			AND weekday = %s 
-			AND trip_type = %s
-			AND trip_date >= %s
-			ORDER BY trip_date
-		""", (route_id, route_student_data['weekday'], route_student_data['trip_type'], today), as_dict=True)
+		# Get all daily trips for this route with matching weekday and trip_type
+		daily_trips = frappe.get_all(
+			"SIS Bus Daily Trip",
+			filters={
+				"route_id": route_id,
+				"weekday": route_student_data['weekday'],
+				"trip_type": route_student_data['trip_type']
+			},
+			fields=["name", "trip_date"]
+		)
 
-		logs.append(f"🔍 Tìm thấy {len(daily_trips)} daily trips từ ngày {today} cho route {route_id}, weekday={route_student_data['weekday']}, trip_type={route_student_data['trip_type']}")
+		logs.append(f"🔍 Tìm thấy {len(daily_trips)} daily trips cho route {route_id}, weekday={route_student_data['weekday']}, trip_type={route_student_data['trip_type']}")
 		
 		if len(daily_trips) == 0:
 			logs.append(f"⚠️ KHÔNG có daily trips nào matching - có thể chưa tạo daily trips hoặc weekday/trip_type không khớp")
@@ -95,48 +91,6 @@ def add_student_to_daily_trips(route_id, route_student_data):
 		logs.append(f"❌ LỖI: {str(e)}")
 		frappe.log_error(f"Error adding student to daily trips: {str(e)}")
 		return {"success": False, "logs": logs, "added_count": 0}
-
-
-def remove_student_from_daily_trips(route_id, student_id, weekday, trip_type):
-	"""Remove student from all corresponding daily trips FROM TODAY onwards"""
-	logs = []
-	try:
-		today = date.today()
-		logs.append(f"📅 Xóa học sinh khỏi daily trips từ ngày {today} trở đi")
-		
-		# Find daily trip students to remove (from today onwards)
-		students_to_remove = frappe.db.sql("""
-			SELECT dts.name, dt.trip_date
-			FROM `tabSIS Bus Daily Trip Student` dts
-			INNER JOIN `tabSIS Bus Daily Trip` dt ON dts.daily_trip_id = dt.name
-			WHERE dt.route_id = %s 
-			AND dt.weekday = %s 
-			AND dt.trip_type = %s
-			AND dt.trip_date >= %s
-			AND dts.student_id = %s
-			ORDER BY dt.trip_date
-		""", (route_id, weekday, trip_type, today, student_id), as_dict=True)
-
-		logs.append(f"🔍 Tìm thấy {len(students_to_remove)} daily trip students cần xóa")
-
-		removed_count = 0
-		for record in students_to_remove:
-			try:
-				frappe.delete_doc("SIS Bus Daily Trip Student", record.name, ignore_permissions=True)
-				logs.append(f"   ✅ Đã xóa khỏi daily trip ngày {record.trip_date}")
-				removed_count += 1
-			except Exception as e:
-				logs.append(f"   ❌ Lỗi xóa {record.name}: {str(e)}")
-
-		frappe.db.commit()
-		logs.append(f"📊 Tổng kết: Đã xóa khỏi {removed_count} daily trips")
-		
-		return {"success": True, "logs": logs, "removed_count": removed_count}
-
-	except Exception as e:
-		logs.append(f"❌ LỖI: {str(e)}")
-		frappe.log_error(f"Error removing student from daily trips: {str(e)}")
-		return {"success": False, "logs": logs, "removed_count": 0}
 
 @frappe.whitelist()
 def get_all_bus_routes():
@@ -693,30 +647,12 @@ def add_student_to_route():
 
 		try:
 			frappe.logger().info("🔍 STEP 2: Validating required fields...")
-			# Validate base required fields
-			base_required_fields = ['route_id', 'student_id', 'weekday', 'trip_type', 'pickup_order']
-			for field in base_required_fields:
+			# Validate required fields
+			required_fields = ['route_id', 'student_id', 'weekday', 'trip_type', 'pickup_order', 'pickup_location', 'drop_off_location']
+			for field in required_fields:
 				if not data.get(field):
 					return error_response(f"Field '{field}' is required")
-			
-			# Validate location based on trip_type
-			# Đón (pickup): pickup_location required, drop_off_location defaults to school
-			# Trả (drop-off): drop_off_location required, pickup_location defaults to school
-			trip_type = data.get('trip_type')
-			if trip_type == 'Đón':
-				if not data.get('pickup_location'):
-					return error_response("Chiều đón yêu cầu nhập địa điểm đón (pickup_location)")
-				# Default drop_off_location to school if empty
-				if not data.get('drop_off_location'):
-					data['drop_off_location'] = 'Trường'
-			elif trip_type == 'Trả':
-				if not data.get('drop_off_location'):
-					return error_response("Chiều trả yêu cầu nhập địa điểm trả (drop_off_location)")
-				# Default pickup_location to school if empty
-				if not data.get('pickup_location'):
-					data['pickup_location'] = 'Trường'
-			
-			frappe.logger().info(f"✅ All required fields validated. pickup_location={data.get('pickup_location')}, drop_off_location={data.get('drop_off_location')}")
+			frappe.logger().info("✅ All required fields validated")
 		except Exception as e:
 			frappe.logger().error(f"❌ STEP 2 FAILED: {str(e)}")
 			raise e
@@ -880,29 +816,13 @@ def remove_student_from_route():
 		if not route_student_id:
 			return error_response("Route student ID is required")
 
-		# Get route student info before deleting
-		route_student = frappe.get_doc("SIS Bus Route Student", route_student_id)
-		route_id = route_student.route_id
-		student_id = route_student.student_id
-		weekday = route_student.weekday
-		trip_type = route_student.trip_type
-
-		# Delete the SIS Bus Route Student document
+		# Delete the SIS Bus Route Student document directly
+		# (It's a standalone DocType, not a child table)
 		frappe.delete_doc("SIS Bus Route Student", route_student_id)
-		
-		# Also remove from daily trips (from today onwards)
-		daily_trips_result = remove_student_from_daily_trips(route_id, student_id, weekday, trip_type)
-		
 		frappe.db.commit()
 
-		message = "Student removed from route successfully"
-		if daily_trips_result and daily_trips_result.get('success'):
-			removed_count = daily_trips_result.get('removed_count', 0)
-			message += f" and removed from {removed_count} daily trips"
-
 		return success_response(
-			message=message,
-			logs=daily_trips_result.get('logs', []) if daily_trips_result else []
+			message="Student removed from route successfully"
 		)
 	except Exception as e:
 		frappe.log_error(f"Error removing student from route: {str(e)}")
@@ -1585,27 +1505,13 @@ def trigger_create_daily_trips():
 def update_student_status_in_trip():
 	"""Update student status in a daily trip"""
 	try:
-		# Get data from request - handle both JSON and form-encoded data
-		data = {}
-		if frappe.request.data:
-			try:
-				if isinstance(frappe.request.data, bytes):
-					json_data = json.loads(frappe.request.data.decode('utf-8'))
-				else:
-					json_data = json.loads(frappe.request.data)
-				if json_data:
-					data = json_data
-			except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
-				data = frappe.local.form_dict
-		else:
-			data = frappe.local.form_dict
-
-		daily_trip_student_id = data.get('daily_trip_student_id') or frappe.request.args.get('daily_trip_student_id')
-		student_status = data.get('student_status') or frappe.request.args.get('student_status')
-		boarding_time = data.get('boarding_time') or frappe.request.args.get('boarding_time')
-		drop_off_time = data.get('drop_off_time') or frappe.request.args.get('drop_off_time')
-		absent_reason = data.get('absent_reason') or frappe.request.args.get('absent_reason')
-		notes = data.get('notes') or frappe.request.args.get('notes')
+		# Get data from request
+		daily_trip_student_id = frappe.local.form_dict.get('daily_trip_student_id') or frappe.request.args.get('daily_trip_student_id')
+		student_status = frappe.local.form_dict.get('student_status') or frappe.request.args.get('student_status')
+		boarding_time = frappe.local.form_dict.get('boarding_time') or frappe.request.args.get('boarding_time')
+		drop_off_time = frappe.local.form_dict.get('drop_off_time') or frappe.request.args.get('drop_off_time')
+		absent_reason = frappe.local.form_dict.get('absent_reason') or frappe.request.args.get('absent_reason')
+		notes = frappe.local.form_dict.get('notes') or frappe.request.args.get('notes')
 
 		if not daily_trip_student_id:
 			return error_response("Daily trip student ID is required")
@@ -1742,12 +1648,7 @@ def get_student_bus_routes():
 
 @frappe.whitelist()
 def add_student_to_daily_trip():
-	"""Add a student to a specific daily trip
-	
-	Accepts either:
-	- student_id: SIS Bus Student name (e.g., 'BUS-STU-00001')
-	- OR student_id as CRM Student ID (legacy support)
-	"""
+	"""Add a student to a specific daily trip"""
 	try:
 		# Get data from request
 		data = {}
@@ -1777,82 +1678,30 @@ def add_student_to_daily_trip():
 		if not frappe.db.exists("SIS Bus Daily Trip", daily_trip_id):
 			return error_response("Daily trip not found")
 
-		# Determine if student_id is a SIS Bus Student or CRM Student
-		bus_student = None
-		crm_student = None
-		class_name = ""
-		class_student_id = data.get('class_student_id')
-		
-		# Try to get as SIS Bus Student first
-		if frappe.db.exists("SIS Bus Student", student_id):
-			bus_student = frappe.get_doc("SIS Bus Student", student_id)
-			# Get CRM Student using student_code
-			crm_students = frappe.get_all("CRM Student", 
-				filters={"student_code": bus_student.student_code},
-				fields=["name", "student_name", "student_code"],
-				limit=1
-			)
-			if crm_students:
-				crm_student = crm_students[0]
-				student_id = crm_student.name  # Use CRM Student ID for storage
-			else:
-				return error_response(f"Không tìm thấy học sinh với mã {bus_student.student_code}")
-			
-			# Get class name from bus student
-			if bus_student.class_id:
-				try:
-					class_doc = frappe.get_doc("SIS Class", bus_student.class_id)
-					class_name = class_doc.title or class_doc.name
-				except:
-					class_name = bus_student.class_name or ""
-			else:
-				class_name = bus_student.class_name or ""
-		elif frappe.db.exists("CRM Student", student_id):
-			# Legacy: student_id is CRM Student ID
-			crm_student_doc = frappe.get_doc("CRM Student", student_id)
-			crm_student = {
-				"name": crm_student_doc.name,
-				"student_name": crm_student_doc.student_name,
-				"student_code": crm_student_doc.student_code
-			}
-			# Get class info if class_student_id provided
-			if class_student_id:
-				try:
-					class_student = frappe.get_doc("SIS Class Student", class_student_id)
-					if class_student.class_id:
-						class_doc = frappe.get_doc("SIS Class", class_student.class_id)
-						class_name = class_doc.title or class_doc.name
-				except:
-					pass
-		else:
-			return error_response(f"Không tìm thấy học sinh với ID: {student_id}")
-
-		# Check if student is already in this daily trip (by student_code)
+		# Check if student is already in this daily trip
 		existing = frappe.db.sql("""
 			SELECT name FROM `tabSIS Bus Daily Trip Student`
-			WHERE daily_trip_id = %s AND student_code = %s
+			WHERE daily_trip_id = %s AND student_id = %s
 			LIMIT 1
-		""", (daily_trip_id, crm_student['student_code']))
+		""", (daily_trip_id, student_id))
 		
 		if existing:
 			return error_response("Học sinh đã tồn tại trong chuyến xe này")
 
-		# Get trip_type from daily trip to set default locations
-		daily_trip = frappe.get_doc("SIS Bus Daily Trip", daily_trip_id)
-		trip_type = daily_trip.trip_type
+		# Get student info
+		student = frappe.get_doc("CRM Student", student_id)
 		
-		# Set default locations based on trip_type
-		# Đón (pickup): pickup_location = user input, drop_off_location = school
-		# Trả (drop-off): pickup_location = school, drop_off_location = user input
-		pickup_location = data.get('pickup_location', '')
-		drop_off_location = data.get('drop_off_location', '')
-		
-		if trip_type == 'Đón':
-			if not drop_off_location:
-				drop_off_location = 'Trường'
-		elif trip_type == 'Trả':
-			if not pickup_location:
-				pickup_location = 'Trường'
+		# Get class info if available
+		class_name = ""
+		class_student_id = data.get('class_student_id')
+		if class_student_id:
+			try:
+				class_student = frappe.get_doc("SIS Class Student", class_student_id)
+				if class_student.class_id:
+					class_doc = frappe.get_doc("SIS Class", class_student.class_id)
+					class_name = class_doc.title or class_doc.name
+			except:
+				pass
 
 		# Create daily trip student
 		student_data = {
@@ -1861,12 +1710,12 @@ def add_student_to_daily_trip():
 			"student_id": student_id,
 			"class_student_id": class_student_id or "",
 			"student_image": "",
-			"student_name": crm_student['student_name'],
-			"student_code": crm_student['student_code'],
+			"student_name": student.student_name,
+			"student_code": student.student_code,
 			"class_name": class_name,
 			"pickup_order": data.get('pickup_order', 0),
-			"pickup_location": pickup_location,
-			"drop_off_location": drop_off_location,
+			"pickup_location": data.get('pickup_location', ''),
+			"drop_off_location": data.get('drop_off_location', ''),
 			"student_status": "Not Boarded",
 			"notes": data.get('notes', '')
 		}

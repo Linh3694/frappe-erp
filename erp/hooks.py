@@ -776,12 +776,9 @@ scheduler_events = {
         "*/30 * * * *": [
             "erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
         ],
-        # Nhắc giáo viên điểm danh lớp chủ nhiệm lúc 8:00 AM
+        # Nhắc giáo viên điểm danh + Báo cáo điểm danh homeroom lúc 8:00 AM
         "0 8 * * *": [
-            "erp.api.erp_sis.attendance.remind_homeroom_attendance"
-        ],
-        # Báo cáo điểm danh homeroom hàng ngày lúc 5:00 PM
-        "0 17 * * *": [
+            "erp.api.erp_sis.attendance.remind_homeroom_attendance",
             "erp.api.erp_sis.attendance.daily_homeroom_attendance_report"
         ]
     }
