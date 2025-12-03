@@ -23,14 +23,56 @@ except ImportError:
             self.response = response
 
 
+def get_device_name_from_user_agent():
+    """
+    Trích xuất tên thiết bị từ User-Agent header
+    """
+    try:
+        user_agent = frappe.request.headers.get('User-Agent', 'Unknown Device')
+        
+        # Parse common patterns
+        if 'iPhone' in user_agent:
+            return 'iPhone'
+        elif 'iPad' in user_agent:
+            return 'iPad'
+        elif 'Android' in user_agent:
+            if 'Mobile' in user_agent:
+                return 'Android Phone'
+            return 'Android Tablet'
+        elif 'Mac OS' in user_agent or 'Macintosh' in user_agent:
+            if 'Chrome' in user_agent:
+                return 'Mac - Chrome'
+            elif 'Safari' in user_agent:
+                return 'Mac - Safari'
+            elif 'Firefox' in user_agent:
+                return 'Mac - Firefox'
+            return 'Mac'
+        elif 'Windows' in user_agent:
+            if 'Chrome' in user_agent:
+                return 'Windows - Chrome'
+            elif 'Edge' in user_agent:
+                return 'Windows - Edge'
+            elif 'Firefox' in user_agent:
+                return 'Windows - Firefox'
+            return 'Windows'
+        elif 'Linux' in user_agent:
+            return 'Linux'
+        else:
+            return 'Unknown Device'
+    except:
+        return 'Unknown Device'
+
+
 @frappe.whitelist(allow_guest=True)  # Allow guest to handle JWT auth manually
-def save_push_subscription(subscription_json=None):
+def save_push_subscription(subscription_json=None, device_name=None):
     """
     Lưu push subscription của user
+    Hỗ trợ multi-device: mỗi thiết bị có endpoint riêng biệt
     Also removes any expired subscription notifications
 
     Args:
         subscription_json: JSON string của push subscription từ frontend
+        device_name: Tên thiết bị (optional, tự động detect nếu không có)
 
     Returns:
         dict: {"success": True, "message": "..."}
@@ -76,6 +118,7 @@ def save_push_subscription(subscription_json=None):
                 try:
                     request_data = json.loads(frappe.request.get_data(as_text=True))
                     subscription_json = request_data.get('subscription_json')
+                    device_name = request_data.get('device_name') or device_name
                 except:
                     pass
 
@@ -88,32 +131,45 @@ def save_push_subscription(subscription_json=None):
         subscription = json.loads(subscription_json) if isinstance(subscription_json, str) else subscription_json
 
         # Validate subscription data
-        if not subscription.get("endpoint"):
+        endpoint = subscription.get("endpoint")
+        if not endpoint:
             return {
                 "success": False,
                 "message": "Invalid subscription data - missing endpoint"
             }
 
-        # Kiểm tra xem user đã có subscription chưa
-        existing = frappe.db.exists("Push Subscription", {"user": user})
+        # Auto-detect device name if not provided
+        if not device_name:
+            device_name = get_device_name_from_user_agent()
+
+        # Kiểm tra xem endpoint này đã tồn tại chưa (multi-device support)
+        # Dùng endpoint để identify vì mỗi browser/device có endpoint unique
+        existing = frappe.db.exists("Push Subscription", {"endpoint": endpoint})
 
         if existing:
-            # Update existing subscription
+            # Update existing subscription (same endpoint = same device)
             doc = frappe.get_doc("Push Subscription", existing)
             doc.subscription_json = json.dumps(subscription)
-            doc.endpoint = subscription.get("endpoint")
+            doc.user = user  # Update user in case re-login with different account
+            doc.device_name = device_name
             doc.save(ignore_permissions=True)
             message = "Push subscription updated successfully"
+            frappe.logger().info(f"📱 [Push Subscription] Updated for {user} on {device_name}")
         else:
-            # Create new subscription
+            # Create new subscription for this device
             doc = frappe.get_doc({
                 "doctype": "Push Subscription",
                 "user": user,
-                "endpoint": subscription.get("endpoint"),
+                "endpoint": endpoint,
+                "device_name": device_name,
                 "subscription_json": json.dumps(subscription)
             })
             doc.insert(ignore_permissions=True)
             message = "Push subscription created successfully"
+            frappe.logger().info(f"📱 [Push Subscription] Created for {user} on {device_name}")
+
+        # Count total subscriptions for this user (for logging)
+        total_devices = frappe.db.count("Push Subscription", {"user": user})
 
         # Remove any "expired subscription" notifications for this user
         try:
@@ -141,7 +197,9 @@ def save_push_subscription(subscription_json=None):
         return {
             "success": True,
             "message": message,
-            "log": f"Saved push subscription for user: {user}"
+            "log": f"Saved push subscription for user: {user} on {device_name}. Total devices: {total_devices}",
+            "device_name": device_name,
+            "total_devices": total_devices
         }
 
     except Exception as e:
@@ -154,9 +212,15 @@ def save_push_subscription(subscription_json=None):
 
 
 @frappe.whitelist(allow_guest=True)  # Allow guest to handle JWT auth manually
-def delete_push_subscription():
+def delete_push_subscription(endpoint=None, delete_all=False):
     """
     Xóa push subscription của user hiện tại
+    Hỗ trợ multi-device: xóa theo endpoint cụ thể hoặc xóa tất cả
+    
+    Args:
+        endpoint: Endpoint của subscription cần xóa (optional)
+                 Nếu không truyền, sẽ xóa subscription của thiết bị hiện tại
+        delete_all: Nếu True, xóa TẤT CẢ subscriptions của user (dùng khi logout)
     
     Returns:
         dict: {"success": True, "message": "..."}
@@ -186,20 +250,68 @@ def delete_push_subscription():
                 "success": False,
                 "message": "Authentication required"
             }
+
+        # Lấy endpoint từ request body nếu không truyền qua argument
+        if endpoint is None and not delete_all:
+            try:
+                request_data = json.loads(frappe.request.get_data(as_text=True))
+                endpoint = request_data.get('endpoint')
+                delete_all = request_data.get('delete_all', False)
+            except:
+                pass
         
-        existing = frappe.db.exists("Push Subscription", {"user": user})
+        deleted_count = 0
         
-        if existing:
-            frappe.delete_doc("Push Subscription", existing, ignore_permissions=True)
-            frappe.db.commit()
-            message = "Push subscription deleted successfully"
+        if delete_all:
+            # Xóa TẤT CẢ subscriptions của user (logout scenario)
+            subscriptions = frappe.db.get_all(
+                "Push Subscription",
+                filters={"user": user},
+                pluck="name"
+            )
+            
+            for sub_name in subscriptions:
+                frappe.delete_doc("Push Subscription", sub_name, ignore_permissions=True)
+                deleted_count += 1
+            
+            message = f"Deleted all {deleted_count} push subscription(s)" if deleted_count > 0 else "No subscriptions found"
+            frappe.logger().info(f"📱 [Push Subscription] Deleted all {deleted_count} subscriptions for {user}")
+            
+        elif endpoint:
+            # Xóa subscription theo endpoint cụ thể
+            existing = frappe.db.exists("Push Subscription", {"endpoint": endpoint, "user": user})
+            
+            if existing:
+                frappe.delete_doc("Push Subscription", existing, ignore_permissions=True)
+                deleted_count = 1
+                message = "Push subscription deleted successfully"
+                frappe.logger().info(f"📱 [Push Subscription] Deleted subscription for {user} (endpoint matched)")
+            else:
+                message = "No subscription found for this endpoint"
         else:
-            message = "No subscription found"
+            # Fallback: Xóa subscription đầu tiên tìm được (cho backward compatibility)
+            existing = frappe.db.exists("Push Subscription", {"user": user})
+            
+            if existing:
+                frappe.delete_doc("Push Subscription", existing, ignore_permissions=True)
+                deleted_count = 1
+                message = "Push subscription deleted successfully"
+                frappe.logger().info(f"📱 [Push Subscription] Deleted subscription for {user} (fallback)")
+            else:
+                message = "No subscription found"
+        
+        if deleted_count > 0:
+            frappe.db.commit()
+        
+        # Count remaining subscriptions
+        remaining = frappe.db.count("Push Subscription", {"user": user})
         
         return {
             "success": True,
             "message": message,
-            "log": f"Deleted push subscription for user: {user}"
+            "log": f"Deleted {deleted_count} push subscription(s) for user: {user}. Remaining: {remaining}",
+            "deleted_count": deleted_count,
+            "remaining_devices": remaining
         }
         
     except Exception as e:
@@ -243,10 +355,81 @@ def get_vapid_public_key():
         }
 
 
+def send_push_to_single_subscription(subscription_doc, payload, vapid_private_key, vapid_claims_email, user_email):
+    """
+    Helper: Gửi push notification đến một subscription cụ thể
+    
+    Returns:
+        dict: {"success": bool, "subscription_name": str, "device_name": str, "error": str|None, "expired": bool}
+    """
+    try:
+        subscription = json.loads(subscription_doc.get("subscription_json"))
+        device_name = subscription_doc.get("device_name", "Unknown Device")
+        subscription_name = subscription_doc.get("name")
+        
+        # Gửi push notification
+        if USE_PYWEBPUSH:
+            response = webpush(
+                subscription_info=subscription,
+                data=json.dumps(payload),
+                vapid_private_key=vapid_private_key,
+                vapid_claims={
+                    "sub": f"mailto:{vapid_claims_email}"
+                }
+            )
+        else:
+            response = send_web_push(
+                subscription_info=subscription,
+                data=json.dumps(payload),
+                vapid_private_key=vapid_private_key,
+                vapid_claims={
+                    "sub": f"mailto:{vapid_claims_email}"
+                }
+            )
+        
+        return {
+            "success": True,
+            "subscription_name": subscription_name,
+            "device_name": device_name,
+            "error": None,
+            "expired": False
+        }
+        
+    except WebPushException as e:
+        error_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
+        
+        if error_code == 410:
+            # Subscription expired - mark for deletion
+            return {
+                "success": False,
+                "subscription_name": subscription_doc.get("name"),
+                "device_name": subscription_doc.get("device_name", "Unknown"),
+                "error": "Subscription expired",
+                "expired": True
+            }
+        
+        return {
+            "success": False,
+            "subscription_name": subscription_doc.get("name"),
+            "device_name": subscription_doc.get("device_name", "Unknown"),
+            "error": str(e),
+            "expired": False
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "subscription_name": subscription_doc.get("name"),
+            "device_name": subscription_doc.get("device_name", "Unknown"),
+            "error": str(e),
+            "expired": False
+        }
+
+
 @frappe.whitelist()
 def send_push_notification(user_email, title, body, icon=None, data=None, tag=None, actions=None):
     """
-    Gửi push notification đến một user cụ thể (exposed as API for testing)
+    Gửi push notification đến TẤT CẢ thiết bị của một user (multi-device support)
     
     Args:
         user_email: Email của user cần gửi notification
@@ -258,25 +441,24 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
         actions: Array of action buttons (optional)
         
     Returns:
-        dict: {"success": True/False, "message": "...", "log": "..."}
+        dict: {"success": True/False, "message": "...", "log": "...", "devices_sent": int, "devices_failed": int}
     """
     try:
-        # Lấy subscription của user
-        subscription_doc = frappe.db.get_value(
+        # Lấy TẤT CẢ subscriptions của user (multi-device)
+        subscription_docs = frappe.db.get_all(
             "Push Subscription",
-            {"user": user_email},
-            ["name", "subscription_json"],
-            as_dict=True
+            filters={"user": user_email},
+            fields=["name", "subscription_json", "device_name", "endpoint"]
         )
         
-        if not subscription_doc:
+        if not subscription_docs:
             return {
                 "success": False,
                 "message": f"No push subscription found for user: {user_email}",
-                "log": f"User {user_email} has not subscribed to push notifications"
+                "log": f"User {user_email} has not subscribed to push notifications",
+                "devices_sent": 0,
+                "devices_failed": 0
             }
-        
-        subscription = json.loads(subscription_doc.subscription_json)
         
         # VAPID keys từ site config
         vapid_private_key = frappe.conf.get("vapid_private_key")
@@ -287,7 +469,9 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
             return {
                 "success": False,
                 "message": "VAPID keys not configured",
-                "log": "Please configure VAPID keys in site_config.json"
+                "log": "Please configure VAPID keys in site_config.json",
+                "devices_sent": 0,
+                "devices_failed": 0
             }
         
         # Tạo payload
@@ -304,110 +488,94 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
         if actions:
             payload["actions"] = actions
         
-        # Gửi push notification
-        if USE_PYWEBPUSH:
-            # Sử dụng pywebpush nếu có
-            response = webpush(
-                subscription_info=subscription,
-                data=json.dumps(payload),
-                vapid_private_key=vapid_private_key,
-                vapid_claims={
-                    "sub": f"mailto:{vapid_claims_email}"
-                }
-            )
-        else:
-            # Fallback sang implementation đơn giản
-            response = send_web_push(
-                subscription_info=subscription,
-                data=json.dumps(payload),
-                vapid_private_key=vapid_private_key,
-                vapid_claims={
-                    "sub": f"mailto:{vapid_claims_email}"
-                }
-            )
+        # Gửi đến TẤT CẢ devices
+        devices_sent = 0
+        devices_failed = 0
+        expired_subscriptions = []
+        device_results = []
         
-        # Log success
-        log_message = f"Push notification sent to {user_email}: {title}"
+        for sub_doc in subscription_docs:
+            result = send_push_to_single_subscription(
+                sub_doc, payload, vapid_private_key, vapid_claims_email, user_email
+            )
+            
+            device_results.append({
+                "device": result["device_name"],
+                "success": result["success"],
+                "error": result["error"]
+            })
+            
+            if result["success"]:
+                devices_sent += 1
+            else:
+                devices_failed += 1
+                if result["expired"]:
+                    expired_subscriptions.append(result["subscription_name"])
+        
+        # Xóa các subscriptions đã expired
+        if expired_subscriptions:
+            for sub_name in expired_subscriptions:
+                try:
+                    frappe.delete_doc("Push Subscription", sub_name, ignore_permissions=True)
+                except:
+                    pass
+            
+            frappe.logger().info(f"📱 [Push Notification] Deleted {len(expired_subscriptions)} expired subscriptions for {user_email}")
+            
+            # Nếu TẤT CẢ subscriptions đều expired, tạo notification yêu cầu re-enable
+            remaining = frappe.db.count("Push Subscription", {"user": user_email})
+            if remaining == 0:
+                try:
+                    from erp.common.doctype.erp_notification.erp_notification import create_notification
+                    
+                    create_notification(
+                        title="Cần bật lại thông báo đẩy",
+                        message="Thông báo đẩy của bạn đã hết hạn trên tất cả thiết bị. Vui lòng truy cập trang Hồ sơ để bật lại.",
+                        recipient_user=user_email,
+                        recipients=[user_email],
+                        notification_type="system",
+                        priority="medium",
+                        data={
+                            "type": "push_subscription_expired",
+                            "action_required": "reenable_push",
+                            "url": "/profile"
+                        },
+                        channel="database",
+                        event_timestamp=frappe.utils.now()
+                    )
+                except Exception as notif_error:
+                    frappe.logger().error(f"Failed to create re-enable notification: {str(notif_error)}")
+        
+        frappe.db.commit()
+        
+        # Log result
+        total_devices = len(subscription_docs)
+        log_message = f"Push notification sent to {devices_sent}/{total_devices} devices for {user_email}: {title}"
+        
+        # Determine overall success
+        overall_success = devices_sent > 0
         
         return {
-            "success": True,
-            "message": "Push notification sent successfully",
+            "success": overall_success,
+            "message": f"Sent to {devices_sent}/{total_devices} device(s)" if overall_success else "Failed to send to all devices",
             "log": log_message,
-            "response": str(response)
-        }
-        
-    except WebPushException as e:
-        # Handle specific error codes
-        error_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
-        
-        # 410 Gone = subscription expired, should delete and notify user
-        if error_code == 410:
-            frappe.logger().warning(f"Push subscription expired for {user_email}, deleting and creating notification...")
-
-            # Delete expired subscription
-            try:
-                frappe.db.delete("Push Subscription", {"user": user_email})
-                frappe.db.commit()
-            except Exception as del_error:
-                frappe.logger().error(f"Failed to delete expired subscription: {str(del_error)}")
-
-            # Create notification to inform user to re-enable push notifications
-            try:
-                from erp.common.doctype.erp_notification.erp_notification import create_notification
-
-                create_notification(
-                    title="Cần bật lại thông báo đẩy",
-                    message="Thông báo đẩy của bạn đã hết hạn. Vui lòng truy cập trang Hồ sơ để bật lại thông báo đẩy.",
-                    recipient_user=user_email,
-                    recipients=[user_email],
-                    notification_type="system",
-                    priority="medium",
-                    data={
-                        "type": "push_subscription_expired",
-                        "action_required": "reenable_push",
-                        "url": "/profile"
-                    },
-                    channel="database",  # Only show in notification list, no push
-                    event_timestamp=frappe.utils.now()
-                )
-
-                frappe.db.commit()
-                frappe.logger().info(f"Created re-enable notification for {user_email}")
-
-            except Exception as notif_error:
-                frappe.logger().error(f"Failed to create re-enable notification: {str(notif_error)}")
-
-            return {
-                "success": False,
-                "message": "Push subscription expired and has been removed. User notified to re-enable.",
-                "log": f"Subscription for {user_email} was expired (410 Gone) - user notified",
-                "subscription_expired": True
-            }
-        
-        # Other errors
-        return {
-            "success": False,
-            "message": f"Failed to send push notification: {str(e)}",
-            "log": f"WebPushException for {user_email}: {str(e)}"
+            "devices_sent": devices_sent,
+            "devices_failed": devices_failed,
+            "total_devices": total_devices,
+            "expired_removed": len(expired_subscriptions),
+            "device_results": device_results
         }
         
     except Exception as e:
         error_message = f"Error sending push notification to {user_email}: {str(e)}"
         frappe.log_error(error_message, "Push Notification Error")
         
-        # Try to clean up expired subscription if possible
-        try:
-            if hasattr(e, 'response') and hasattr(e.response, 'status_code') and e.response.status_code in [404, 410]:
-                frappe.db.delete("Push Subscription", {"user": user_email})
-                frappe.db.commit()
-                error_message += " (Subscription removed as invalid)"
-        except:
-            pass
-        
         return {
             "success": False,
             "message": f"Error: {str(e)}",
-            "log": error_message
+            "log": error_message,
+            "devices_sent": 0,
+            "devices_failed": 0
         }
 
 
