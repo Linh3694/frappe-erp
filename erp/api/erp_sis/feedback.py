@@ -225,16 +225,32 @@ def admin_get():
 
         # Include all replies (including internal notes for admin)
         if feedback.replies:
-            feedback_data["replies"] = [
-                {
+            replies_data = []
+            for reply in feedback.replies:
+                reply_data = {
                     "content": reply.content,
                     "reply_by": reply.reply_by,
                     "reply_by_type": reply.reply_by_type,
                     "reply_date": reply.reply_date,
-                    "is_internal": reply.is_internal
+                    "is_internal": reply.is_internal,
+                    "reply_by_full_name": None
                 }
-                for reply in feedback.replies
-            ]
+                # Get full_name for staff replies
+                if reply.reply_by_type == "Staff" and reply.reply_by:
+                    try:
+                        reply_user = frappe.get_doc("User", reply.reply_by)
+                        reply_data["reply_by_full_name"] = reply_user.full_name
+                    except frappe.DoesNotExistError:
+                        reply_data["reply_by_full_name"] = reply.reply_by
+                # Get guardian name for guardian replies
+                elif reply.reply_by_type == "Guardian" and feedback.guardian:
+                    try:
+                        guardian_doc = frappe.get_doc("CRM Guardian", feedback.guardian)
+                        reply_data["reply_by_full_name"] = guardian_doc.guardian_name
+                    except frappe.DoesNotExistError:
+                        reply_data["reply_by_full_name"] = "Phụ huynh"
+                replies_data.append(reply_data)
+            feedback_data["replies"] = replies_data
 
         # Include assigned user information (full_name, jobtitle, avatar)
         if feedback.assigned_to:
@@ -983,11 +999,11 @@ def export():
 
 @frappe.whitelist(allow_guest=False)
 def get_users_for_assignment():
-    """Get users with SIS IT role for feedback assignment selection"""
+    """Get users with SIS IT or Mobile IT role for feedback assignment selection"""
     try:
         _check_staff_permission()
 
-        # Get enabled users with SIS IT role using SQL join for better performance
+        # Get enabled users with SIS IT or Mobile IT role using SQL join for better performance
         users = frappe.db.sql("""
             SELECT DISTINCT
                 u.name,
@@ -1001,7 +1017,7 @@ def get_users_for_assignment():
             FROM `tabUser` u
             INNER JOIN `tabHas Role` hr ON hr.parent = u.name
             WHERE u.enabled = 1
-                AND hr.role = 'SIS IT'
+                AND hr.role IN ('SIS IT', 'Mobile IT')
             ORDER BY u.full_name ASC
         """, as_dict=True)
 
@@ -1015,7 +1031,7 @@ def get_users_for_assignment():
 
         return success_response(
             data=processed_users,
-            message="Lấy danh sách user SIS IT thành công"
+            message="Lấy danh sách user SIS IT/Mobile IT thành công"
         )
 
     except Exception as e:
