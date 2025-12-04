@@ -351,6 +351,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 	created_count = 0
 	updated_count = 0
 	conflicts = []  # Track conflicts for user resolution
+	affected_row_ids = []  # ⚡ FIX: Track created/updated override row IDs for sync
 	
 	try:
 		# NOTE: Don't begin transaction here - caller manages transaction
@@ -420,6 +421,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							if teacher_id:
 								existing_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 1})
 						existing_doc.save(ignore_permissions=True)
+						affected_row_ids.append(existing_doc.name)  # ⚡ FIX: Track for sync
 						updated_count += 1
 						debug_info.append(
 							f"✅ Replaced {replace_slot} on {date} - {pattern_row.timetable_column_id} (subject: {pattern_row.subject_id})"
@@ -452,6 +454,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						"sort_order": len(existing_doc.teachers)
 					})
 					existing_doc.save(ignore_permissions=True)
+					affected_row_ids.append(existing_doc.name)  # ⚡ FIX: Track for sync
 					updated_count += 1
 				elif not existing.teacher_1_id:
 					# teacher_1 is empty (edge case) → Add to teacher_1
@@ -462,6 +465,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						"sort_order": len(existing_doc.teachers)
 					})
 					existing_doc.save(ignore_permissions=True)
+					affected_row_ids.append(existing_doc.name)  # ⚡ FIX: Track for sync
 					updated_count += 1
 			else:
 				# No existing override row - need to create one
@@ -529,6 +533,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 					# Save to persist child table
 					if teacher_1 or teacher_2:
 						override_doc.save(ignore_permissions=True)
+					affected_row_ids.append(override_doc.name)  # ⚡ FIX: Track for sync
 					created_count += 1
 					debug_info.append(
 						f"✅ Created override with {replace_slot} replaced on {date} (subject: {pattern_row.subject_id})"
@@ -580,6 +585,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 				
 				# Save to persist child table
 				override_doc.save(ignore_permissions=True)
+				affected_row_ids.append(override_doc.name)  # ⚡ FIX: Track for sync
 				created_count += 1
 		
 		# Check if there are unresolved conflicts
@@ -639,27 +645,28 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 		debug_info.append(f"✅ Created {created_count} override rows")
 		debug_info.append(f"✅ Updated {updated_count} override rows")
 		
-		# Sync materialized view immediately for small updates (< 50 rows)
-		# For larger updates, enqueue async to avoid blocking
-		if created_count > 0 or updated_count > 0:
-			override_row_names = [spec[1].name for spec in override_specs]
-			total_changes = created_count + updated_count
+		# ⚡ FIX: Sync affected override rows (created/updated), NOT pattern rows
+		if affected_row_ids:
+			total_changes = len(affected_row_ids)
+			debug_info.append(f"📋 Affected row IDs to sync: {affected_row_ids}")
 			
-		# ⚡ CRITICAL: Always sync immediately (no async!)
-		# Background jobs are unreliable - we need immediate feedback
-		try:
-			from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
-			frappe.logger().info(f"🔄 Syncing Teacher Timetable for {total_changes} override rows")
-			sync_for_rows(override_row_names)
-			debug_info.append(f"✅ Synced materialized view for {total_changes} override rows")
-		except Exception as sync_err:
-			error_msg = f"Teacher Timetable sync failed for {total_changes} override rows: {str(sync_err)}"
-			frappe.log_error(error_msg, "Materialized View Sync Error")
-			debug_info.append(f"❌ {error_msg}")
-			
-			# ⚡ THROW EXCEPTION to trigger transaction rollback
-			# This ensures override rows are not created if timetable sync fails
-			raise Exception(f"Failed to sync Teacher Timetable: {str(sync_err)}")
+			# ⚡ CRITICAL: Always sync immediately (no async!)
+			# Background jobs are unreliable - we need immediate feedback
+			try:
+				from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
+				frappe.logger().info(f"🔄 Syncing Teacher Timetable for {total_changes} override rows: {affected_row_ids}")
+				sync_for_rows(affected_row_ids)
+				debug_info.append(f"✅ Synced materialized view for {total_changes} override rows")
+			except Exception as sync_err:
+				error_msg = f"Teacher Timetable sync failed for {total_changes} override rows: {str(sync_err)}"
+				frappe.log_error(error_msg, "Materialized View Sync Error")
+				debug_info.append(f"❌ {error_msg}")
+				
+				# ⚡ THROW EXCEPTION to trigger transaction rollback
+				# This ensures override rows are not created if timetable sync fails
+				raise Exception(f"Failed to sync Teacher Timetable: {str(sync_err)}")
+		else:
+			debug_info.append("⚠️ No override rows were created/updated - skipping sync")
 		
 		return {
 			"success": True,
