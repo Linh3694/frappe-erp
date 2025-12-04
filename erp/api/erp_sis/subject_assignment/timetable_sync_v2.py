@@ -724,14 +724,25 @@ def find_pattern_rows(class_id: str, actual_subject_id: str, campus_id: str) -> 
 	"""
 	Find pattern rows (date=NULL) cho class + subject.
 	
+	⚡ FIX: Now searches ALL SIS Subjects that map to the same Actual Subject.
+	This fixes the bug where sync fails because different education_stages have
+	different SIS Subjects for the same Actual Subject.
+	
 	Returns list of dicts with fields: name, parent, subject_id, day_of_week,
 	timetable_column_id, period_priority, period_name, teacher_1_id, teacher_2_id, room_id
 	"""
-	# First, get SIS Subject ID from Actual Subject ID
-	subject_id = get_subject_id_from_actual(actual_subject_id, campus_id)
+	# ⚡ FIX: Get ALL SIS Subject IDs from Actual Subject (across education_stages)
+	subject_ids = get_all_subject_ids_from_actual(actual_subject_id, campus_id)
 	
-	if not subject_id:
+	if not subject_ids:
+		frappe.logger().warning(
+			f"find_pattern_rows: No SIS Subjects found for actual_subject={actual_subject_id}, campus={campus_id}"
+		)
 		return []
+	
+	frappe.logger().info(
+		f"find_pattern_rows: Found {len(subject_ids)} SIS Subjects for actual_subject={actual_subject_id}: {subject_ids}"
+	)
 	
 	# Get instances for this class
 	instances = frappe.get_all(
@@ -741,22 +752,32 @@ def find_pattern_rows(class_id: str, actual_subject_id: str, campus_id: str) -> 
 	)
 	
 	if not instances:
+		frappe.logger().warning(
+			f"find_pattern_rows: No timetable instances for class={class_id}, campus={campus_id}"
+		)
 		return []
 	
-	# Get pattern rows (date IS NULL)
+	# ⚡ FIX: Get pattern rows for ANY of the subject_ids (date IS NULL)
 	rows = frappe.db.sql("""
 		SELECT 
 			name, parent, subject_id, day_of_week,
 			timetable_column_id, period_priority, period_name,
 			teacher_1_id, teacher_2_id, room_id
 		FROM `tabSIS Timetable Instance Row`
-		WHERE parent IN ({})
-		  AND subject_id = %s
+		WHERE parent IN ({instances})
+		  AND subject_id IN ({subjects})
 		  AND date IS NULL
 		ORDER BY day_of_week, period_priority
-	""".format(','.join(['%s'] * len(instances))),
-	tuple(instances + [subject_id]),
+	""".format(
+		instances=','.join(['%s'] * len(instances)),
+		subjects=','.join(['%s'] * len(subject_ids))
+	),
+	tuple(instances + subject_ids),
 	as_dict=True)
+	
+	frappe.logger().info(
+		f"find_pattern_rows: Found {len(rows)} pattern rows for class={class_id}, subjects={subject_ids}"
+	)
 	
 	return rows
 
@@ -766,6 +787,10 @@ def get_subject_id_from_actual(actual_subject_id: str, campus_id: str) -> Option
 	Get SIS Subject từ Actual Subject.
 	
 	Returns first matching SIS Subject for this campus.
+	
+	⚠️ DEPRECATED: Use get_all_subject_ids_from_actual() for reliable matching.
+	This function may return wrong subject when multiple SIS Subjects exist
+	for different education_stages.
 	"""
 	subject_id = frappe.db.get_value(
 		"SIS Subject",
@@ -773,6 +798,28 @@ def get_subject_id_from_actual(actual_subject_id: str, campus_id: str) -> Option
 		"name"
 	)
 	return subject_id
+
+
+def get_all_subject_ids_from_actual(actual_subject_id: str, campus_id: str) -> List[str]:
+	"""
+	Get ALL SIS Subjects từ Actual Subject.
+	
+	⚡ FIX: Returns ALL matching SIS Subjects for this campus (across education_stages).
+	This ensures we find pattern rows regardless of which SIS Subject was used in timetable.
+	
+	Args:
+		actual_subject_id: SIS Actual Subject ID
+		campus_id: Campus ID
+		
+	Returns:
+		List of SIS Subject IDs
+	"""
+	subjects = frappe.db.get_all(
+		"SIS Subject",
+		filters={"actual_subject_id": actual_subject_id, "campus_id": campus_id},
+		pluck="name"
+	)
+	return subjects or []
 
 
 def calculate_dates_for_day(
