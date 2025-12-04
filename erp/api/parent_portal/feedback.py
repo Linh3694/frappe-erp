@@ -75,33 +75,24 @@ def _process_attachments(feedback_name):
                     file_content = file_obj.stream.read()
                     file_obj.stream.seek(0)  # Reset stream for potential re-read
                     
-                    # Create File doc (similar to leave.py approach)
+                    # Create File doc - use is_private=0 for public access
                     file_doc = frappe.get_doc({
                         "doctype": "File",
                         "file_name": file_obj.filename,
                         "attached_to_doctype": "Feedback",
                         "attached_to_name": feedback_name,
                         "content": file_content,
-                        "is_private": 1
+                        "is_private": 0  # Public file for easy access
                     })
 
                     file_doc.insert(ignore_permissions=True)
 
                     if file_doc.file_url:
-                        # Extract relative path from /files onwards (remove /private/ prefix)
-                        file_url = file_doc.file_url
-                        if '/private/files/' in file_url:
-                            # Extract from /files onwards: /private/files/xxx -> /files/xxx
-                            file_url = '/files/' + file_url.split('/private/files/')[-1]
-                        elif '/files/' not in file_url:
-                            # Fallback: ensure starts with /files/
-                            file_url = '/files/' + file_obj.filename
-                        
-                        # Store file metadata with relative path only
+                        # Store file metadata with the URL as-is (public files use /files/xxx)
                         attachment_data.append({
                             "name": file_doc.name,
                             "file_name": file_obj.filename,
-                            "file_url": file_url,
+                            "file_url": file_doc.file_url,
                             "file_size": len(file_content),
                             "file_type": file_obj.content_type or "application/octet-stream",
                             "creation": file_doc.creation
@@ -559,9 +550,58 @@ def delete():
         )
 
 
+def _process_guardian_reply_attachments(feedback_name):
+    """Process file attachments from guardian reply"""
+    import uuid
+    attachment_urls = []
+
+    if not frappe.request.files:
+        return attachment_urls
+
+    for file_key, file_list in frappe.request.files.items(multi=True):
+        if not isinstance(file_list, list):
+            file_list = [file_list]
+            
+        for file_obj in file_list:
+            if file_obj and file_obj.filename:
+                try:
+                    file_content = file_obj.read()
+                    if not file_content:
+                        continue
+
+                    # Generate unique filename
+                    unique_id = str(uuid.uuid4())[:8]
+                    original_name = file_obj.filename
+                    name_parts = original_name.rsplit('.', 1)
+                    if len(name_parts) == 2:
+                        new_filename = f"{name_parts[0]}_{unique_id}.{name_parts[1]}"
+                    else:
+                        new_filename = f"{original_name}_{unique_id}"
+
+                    file_doc = frappe.get_doc({
+                        "doctype": "File",
+                        "file_name": new_filename,
+                        "content": file_content,
+                        "attached_to_doctype": "Feedback",
+                        "attached_to_name": feedback_name,
+                        "attached_to_field": "replies",
+                        "is_private": 0  # Public file for easy access
+                    })
+                    file_doc.insert(ignore_permissions=True)
+
+                    file_url = file_doc.file_url
+                    if file_url:
+                        attachment_urls.append(file_url)
+
+                except Exception as e:
+                    frappe.logger().error(f"Error processing guardian attachment {file_key}: {str(e)}")
+
+    return attachment_urls
+
+
 @frappe.whitelist(allow_guest=False)
 def add_reply():
-    """Add reply to feedback conversation"""
+    """Add reply to feedback conversation (supports file attachments)"""
     try:
         guardian = _get_current_guardian()
         if not guardian:
@@ -572,18 +612,25 @@ def add_reply():
         
         data = _get_request_data()
         feedback_name = data.get("name")
-        content = data.get("content")
-        request_close = data.get("request_close", False)
+        content = data.get("content", "")
+        
+        # Parse request_close properly (FormData sends strings)
+        request_close_raw = data.get("request_close", False)
+        request_close = request_close_raw in [True, 1, "1", "true", "True"]
         
         if not feedback_name:
             return validation_error_response(
                 "name là bắt buộc",
                 {"name": ["name là bắt buộc"]}
             )
-        if not content:
+        
+        # Check if there are files
+        has_files = frappe.request.files and len(frappe.request.files) > 0
+        
+        if not content and not has_files:
             return validation_error_response(
-                "content là bắt buộc",
-                {"content": ["content là bắt buộc"]}
+                "content hoặc file đính kèm là bắt buộc",
+                {"content": ["Vui lòng nhập nội dung hoặc đính kèm ảnh/video"]}
             )
         
         # Get feedback
@@ -596,12 +643,21 @@ def add_reply():
                 code="PERMISSION_DENIED"
             )
         
-        # Cho phép phản hồi cho cả Góp ý và Đánh giá (đặc biệt đánh giá thấp cần làm rõ)
+        # Process file attachments
+        attachment_urls = _process_guardian_reply_attachments(feedback_name)
+        
+        # Build final content with attachments
+        final_content = content or ""
+        if attachment_urls:
+            attachments_html = "\n\n---\n**File đính kèm:**\n"
+            for url in attachment_urls:
+                attachments_html += f'- <a href="{url}" target="_blank">{url.split("/")[-1]}</a>\n'
+            final_content += attachments_html
         
         # Add reply
-        reply_content = content
+        reply_content = final_content
         if request_close:
-            reply_content = f"{content}\n\n[Phụ huynh yêu cầu đóng yêu cầu]"
+            reply_content = f"{final_content}\n\n[Phụ huynh yêu cầu đóng yêu cầu]"
         
         feedback.append("replies", {
             "content": reply_content,
