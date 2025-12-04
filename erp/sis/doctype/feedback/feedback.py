@@ -44,9 +44,8 @@ class Feedback(Document):
 			if hasattr(self, 'priority'):
 				self.priority = None
 		
-		# Auto-set status for Rating type
-		if self.feedback_type == "Đánh giá" and self.status == "Mới":
-			self.status = "Hoàn thành"
+		# Note: "Đánh giá" feedback now stays at "Mới" status
+		# so staff can review and respond if needed (especially for low ratings)
 		
 		# Update conversation count
 		if self.replies:
