@@ -362,8 +362,8 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
                 for entry in existing_entries:
                     try:
                         frappe.delete_doc("SIS Teacher Timetable", entry.name, ignore_permissions=True)
-                    except Exception as e:
-                        pass
+                    except Exception:
+                        pass  # Ignore delete errors for individual entries
 
         # 2. Create new teacher timetable entries
         teachers_to_add = []
@@ -406,9 +406,9 @@ def _sync_related_timetables(row, instance, old_teacher_1_id=None, old_teacher_2
 
                     teacher_timetable.insert(ignore_permissions=True)
 
-                except Exception as e:
-                    pass
+                except Exception:
+                    pass  # Continue if teacher entry creation fails
 
-    except Exception as e:
-        pass
+    except Exception:
+        pass  # Continue if sync fails
 

@@ -368,6 +368,34 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
         
         if not overrides:
             return entries
+        
+        # ⚡ BULK: Preload subjects and teachers for all overrides (avoid N+1)
+        subject_ids = list({o.get("subject_id") for o in overrides if o.get("subject_id")})
+        teacher_ids = list({o.get("teacher_1_id") for o in overrides if o.get("teacher_1_id")} | 
+                          {o.get("teacher_2_id") for o in overrides if o.get("teacher_2_id")})
+        
+        # Bulk load subjects
+        subject_title_map = {}
+        if subject_ids:
+            subjects = frappe.get_all("SIS Subject", fields=["name", "title"], filters={"name": ["in", subject_ids]})
+            for s in subjects:
+                subject_title_map[s.name] = s.title
+        
+        # Bulk load teachers and their users
+        teacher_display_map = {}
+        if teacher_ids:
+            teachers = frappe.get_all("SIS Teacher", fields=["name", "user_id"], filters={"name": ["in", teacher_ids]})
+            user_ids = [t.user_id for t in teachers if t.get("user_id")]
+            
+            user_display_map = {}
+            if user_ids:
+                users = frappe.get_all("User", fields=["name", "full_name", "first_name", "last_name"], filters={"name": ["in", user_ids]})
+                for u in users:
+                    display = u.full_name or f"{u.first_name or ''} {u.last_name or ''}".strip() or u.name
+                    user_display_map[u.name] = display
+            
+            for t in teachers:
+                teacher_display_map[t.name] = user_display_map.get(t.user_id, t.name)
             
         # Build override map: {date: {timetable_column_id: override_data}}
         override_map = {}
@@ -375,10 +403,8 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
             # Convert date to string format to match entries
             date = override["date"]
             if hasattr(date, 'strftime'):
-                # If it's a datetime object, convert to string
                 date = date.strftime("%Y-%m-%d")
             else:
-                # If it's already a string, ensure it's in correct format
                 date = str(date)
                 
             column_id = override["timetable_column_id"]
@@ -386,35 +412,14 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
             if date not in override_map:
                 override_map[date] = {}
                 
-            # Enrich override with display data
-            subject_title = ""
-            if override.get("subject_id"):
-                try:
-                    subject = frappe.get_doc("SIS Subject", override["subject_id"])
-                    subject_title = subject.title
-                except:
-                    subject_title = ""
-                
+            # Use preloaded data instead of individual queries
+            subject_title = subject_title_map.get(override.get("subject_id"), "")
+            
             teacher_names = []
-            if override.get("teacher_1_id"):
-                try:
-                    teacher1 = frappe.get_doc("SIS Teacher", override["teacher_1_id"])
-                    if teacher1.user_id:
-                        user1 = frappe.get_doc("User", teacher1.user_id)
-                        display_name1 = user1.full_name or f"{user1.first_name or ''} {user1.last_name or ''}".strip()
-                        teacher_names.append(display_name1)
-                except:
-                    pass  # Skip if teacher not found
-                    
-            if override.get("teacher_2_id"):
-                try:
-                    teacher2 = frappe.get_doc("SIS Teacher", override["teacher_2_id"])
-                    if teacher2.user_id:
-                        user2 = frappe.get_doc("User", teacher2.user_id)
-                        display_name2 = user2.full_name or f"{user2.first_name or ''} {user2.last_name or ''}".strip()
-                        teacher_names.append(display_name2)
-                except:
-                    pass  # Skip if teacher not found
+            if override.get("teacher_1_id") and override["teacher_1_id"] in teacher_display_map:
+                teacher_names.append(teacher_display_map[override["teacher_1_id"]])
+            if override.get("teacher_2_id") and override["teacher_2_id"] in teacher_display_map:
+                teacher_names.append(teacher_display_map[override["teacher_2_id"]])
                     
             # Determine class_id based on override type
             class_id_for_override = ""
@@ -505,7 +510,7 @@ def _apply_timetable_overrides(entries: list[dict], target_type: str, target_id,
                                 "period_priority": column.period_priority,
                                 "period_name": column.period_name
                             }
-                        except:
+                        except Exception:
                             pass
                         
                         # Create new entry for the override

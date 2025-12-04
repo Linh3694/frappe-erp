@@ -176,25 +176,20 @@ def update_timetable_column():
         if start_time and start_time.strip():
             if start_time != current_start_time:
                 try:
-                    start_time_obj = get_time(start_time)
+                    get_time(start_time)  # Validate time format
                     timetable_column_doc.start_time = start_time
                     updates_made.append(f"start_time: {start_time}")
-                except Exception as e:
-
+                except Exception:
                     return validation_error_response("Validation failed", {"start_time": ["Invalid start time format"]})
-                else:
-                    pass
 
         if end_time and end_time.strip():
             if end_time != current_end_time:
                 try:
-                    end_time_obj = get_time(end_time)
+                    get_time(end_time)  # Validate time format
                     timetable_column_doc.end_time = end_time
                     updates_made.append(f"end_time: {end_time}")
-                except Exception as e:
+                except Exception:
                     return validation_error_response("Validation failed", {"end_time": ["Invalid end time format"]})
-            else:
-                pass
 
         # Validate time range after updates
         if hasattr(timetable_column_doc, 'start_time') and hasattr(timetable_column_doc, 'end_time') and timetable_column_doc.start_time and timetable_column_doc.end_time:

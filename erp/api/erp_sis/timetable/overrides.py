@@ -181,12 +181,12 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
         if teacher_1_id:
             try:
                 teacher1 = frappe.get_doc("SIS Teacher", teacher_1_id)
-                if teacher1.user_id:
-                    user1 = frappe.get_doc("User", teacher1.user_id)
-                    display_name1 = user1.full_name or f"{user1.first_name or ''} {user1.last_name or ''}".strip()
-                    if display_name1:
-                        teacher_names.append(display_name1)
-            except:
+            if teacher1.user_id:
+                        user1 = frappe.get_doc("User", teacher1.user_id)
+                        display_name1 = user1.full_name or f"{user1.first_name or ''} {user1.last_name or ''}".strip()
+                        if display_name1:
+                            teacher_names.append(display_name1)
+            except Exception:
                 pass  # Skip if teacher not found
         if teacher_2_id:
             try:
@@ -196,7 +196,7 @@ def create_or_update_timetable_override(date: str = None, timetable_column_id: s
                     display_name2 = user2.full_name or f"{user2.first_name or ''} {user2.last_name or ''}".strip()
                     if display_name2:
                         teacher_names.append(display_name2)
-            except:
+            except Exception:
                 pass  # Skip if teacher not found
         
         return single_item_response({
@@ -352,7 +352,7 @@ def _sync_teacher_timetable_for_override(date: str, timetable_column_id: str, ta
             )
             if instances:
                 timetable_instance_id = instances[0].name
-        except:
+        except Exception:
             pass
             
         if not timetable_instance_id:

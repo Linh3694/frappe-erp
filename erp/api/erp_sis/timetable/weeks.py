@@ -101,27 +101,13 @@ def get_teacher_week():
                     for t in alt2:
                         resolved_teacher_ids.add(t.name)
         except Exception as resolve_error:
-            pass
+            frappe.logger().warning(f"⚠️ Failed to resolve teacher ID {teacher_id}: {str(resolve_error)}")
         # Fallback to original id if nothing resolved
         if not resolved_teacher_ids:
             resolved_teacher_ids.add(teacher_id)
         
-        # Query timetable rows
-        campus_id = get_current_campus_from_context()
-
-        # Test if campus_id field exists, if not, use empty filters
+        # ⚡ Removed redundant test query - campus_id filter is handled in Teacher Timetable query
         filters = {}
-        try:
-            test_rows = frappe.get_all(
-                "SIS Timetable Instance Row",
-                fields=["name"],
-                filters={"campus_id": campus_id} if campus_id else {},
-                limit=1
-            )
-            filters = {"campus_id": campus_id} if campus_id else {}
-        except Exception as filter_error:
-            pass
-            filters = {}  # Use no filters if campus_id doesn't exist
         
         # Add education_stage filter by getting valid timetable_column_ids
         if education_stage:
@@ -160,8 +146,6 @@ def get_teacher_week():
         # ✅ NEW APPROACH: Query from SIS Teacher Timetable materialized view instead of Instance Rows
         # This ensures we only return entries that have been properly created with teacher assignments
         
-        frappe.logger().info(f"🔍 TIMETABLE: Querying Teacher Timetable for teachers: {resolved_teacher_ids}")
-        
         # Build date filter for the week
         teacher_timetable_filters = {
             "date": ["between", [ws, week_end]] if week_end else [">=", ws]
@@ -171,47 +155,33 @@ def get_teacher_week():
         if "timetable_column_id" in filters:
             teacher_timetable_filters["timetable_column_id"] = filters["timetable_column_id"]
         
-        frappe.logger().info(f"🔍 TIMETABLE: Teacher Timetable filters: {teacher_timetable_filters}")
-        
         try:
-            # Query Teacher Timetable directly - this is the materialized view
-            rows = []
-            for teacher_id in resolved_teacher_ids:
-                teacher_filters = {**teacher_timetable_filters, "teacher_id": teacher_id}
-                teacher_rows = frappe.get_all(
-                    "SIS Teacher Timetable",
-                    fields=[
-                        "name",
-                        "teacher_id", 
-                        "class_id",
-                        "day_of_week",
-                        "timetable_column_id",
-                        "subject_id",
-                        "room_id",
-                        "date",
-                        "timetable_instance_id"
-                    ],
-                    filters=teacher_filters,
-                    order_by="date asc, day_of_week asc"
-                )
-                rows.extend(teacher_rows)
-                frappe.logger().info(f"  - Found {len(teacher_rows)} entries for teacher {teacher_id}")
+            # ⚡ OPTIMIZED: Query all teachers at once using IN clause instead of loop
+            teacher_timetable_filters["teacher_id"] = ["in", list(resolved_teacher_ids)]
             
-            frappe.logger().info(f"✅ TIMETABLE: Total {len(rows)} entries from Teacher Timetable")
+            rows = frappe.get_all(
+                "SIS Teacher Timetable",
+                fields=[
+                    "name",
+                    "teacher_id", 
+                    "class_id",
+                    "day_of_week",
+                    "timetable_column_id",
+                    "subject_id",
+                    "room_id",
+                    "date",
+                    "timetable_instance_id"
+                ],
+                filters=teacher_timetable_filters,
+                order_by="date asc, day_of_week asc"
+            )
             
             # Map to structure expected by downstream code
-            # Teacher Timetable already has teacher_id - mark for later use
             for row in rows:
-                row["parent"] = row.get("timetable_instance_id")  # For compatibility with instance lookup
-                # Keep teacher_id as-is, will be used in enrich section
+                row["parent"] = row.get("timetable_instance_id")
                 
         except Exception as query_error:
-            frappe.logger().error(f"❌ TIMETABLE: Query failed: {str(query_error)}")
             return error_response(f"Query failed: {str(query_error)}")
-
-        # Teacher Timetable already has class_id, no need to fetch from instance
-        # Just log for debugging
-        frappe.logger().info(f"📝 TIMETABLE: Rows already have class_id from Teacher Timetable")
         # Enrich subject_title and teacher_names
         try:
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
@@ -307,24 +277,44 @@ def get_teacher_week():
                 teacher_names_list = [teacher_user_map.get(tid) for tid in teacher_ids_for_row if tid in teacher_user_map]
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
 
-            # Enrich with room information for Teacher Timetable data
-            frappe.logger().info(f"🏫 ROOM ENRICH: Starting room enrichment for {len(rows)} rows")
-            for r in rows:
-                frappe.logger().info(f"🏫 ROOM ENRICH: Processing class={r.get('class_id')}, subject={r.get('subject_title')}")
-                try:
-                    from erp.api.erp_administrative.room import get_room_for_class_subject
-                    room_info = get_room_for_class_subject(r.get("class_id"), r.get("subject_title"))
-                    frappe.logger().info(f"🏫 ROOM INFO: class={r.get('class_id')}, subject={r.get('subject_title')} -> room={room_info.get('room_name')}, type={room_info.get('room_type')}")
-                    r["room_id"] = room_info.get("room_id")
-                    r["room_name"] = room_info.get("room_name")
-                    r["room_type"] = room_info.get("room_type")
-                    frappe.logger().info(f"🏫 ROOM ENRICH: Added room info to row: {r.get('room_name')}")
-                except Exception as room_error:
-                    frappe.logger().warning(f"Failed to get room for class {r.get('class_id')}, subject {r.get('subject_title')}: {str(room_error)}")
-                    import traceback
-                    frappe.logger().error(f"Room error traceback: {traceback.format_exc()}")
+            # ⚡ BULK: Enrich with room information (batch query instead of N+1)
+            try:
+                # Collect unique class_ids for bulk query
+                class_ids = list({r.get("class_id") for r in rows if r.get("class_id")})
+                room_map = {}  # {class_id: {room_id, room_name, room_type}}
+                
+                if class_ids:
+                    # Query all rooms for these classes at once
+                    class_rooms = frappe.db.sql("""
+                        SELECT c.name as class_id, r.name as room_id, r.room_name, r.room_type
+                        FROM `tabSIS Class` c
+                        LEFT JOIN `tabSIS Room` r ON c.default_room_id = r.name
+                        WHERE c.name IN %s
+                    """, (class_ids,), as_dict=True)
+                    
+                    for cr in class_rooms:
+                        room_map[cr.class_id] = {
+                            "room_id": cr.room_id,
+                            "room_name": cr.room_name or "Chưa có phòng",
+                            "room_type": cr.room_type
+                        }
+                
+                # Apply room info to rows
+                for r in rows:
+                    class_id = r.get("class_id")
+                    if class_id and class_id in room_map:
+                        r["room_id"] = room_map[class_id].get("room_id")
+                        r["room_name"] = room_map[class_id].get("room_name")
+                        r["room_type"] = room_map[class_id].get("room_type")
+                    else:
+                        r["room_id"] = None
+                        r["room_name"] = "Chưa có phòng"
+                        r["room_type"] = None
+            except Exception as room_error:
+                frappe.logger().warning(f"Failed to bulk load room info: {str(room_error)}")
+                for r in rows:
                     r["room_id"] = None
-                    r["room_name"] = "Lỗi tải phòng"
+                    r["room_name"] = "Chưa có phòng"
                     r["room_type"] = None
         except Exception as enrich_error:
             frappe.logger().error(f"Error in enrichment section: {str(enrich_error)}")
@@ -348,33 +338,10 @@ def get_teacher_week():
                 pass
 
         entries = _build_entries(rows, ws)
-        frappe.logger().info(f"📝 TIMETABLE: Built {len(entries)} entries from {len(rows)} rows")
-
-        # Debug: Check room info in final entries
-        if entries:
-            sample_entry = entries[0]
-            frappe.logger().info(f"🏫 FINAL ENTRIES: Sample entry has room info: room_name={sample_entry.get('room_name')}, room_type={sample_entry.get('room_type')}, room_id={sample_entry.get('room_id')}")
         
         # Apply timetable overrides for date-specific changes (PRIORITY 3)
         week_end = _add_days(ws, 6)
         entries_with_overrides = _apply_timetable_overrides(entries, "Teacher", resolved_teacher_ids, ws, week_end)
-        
-        frappe.logger().info(f"✅ TIMETABLE: Final response - {len(entries_with_overrides)} entries (after overrides)")
-        
-        # Detect duplicates by unique key
-        if len(entries_with_overrides) > 0:
-            unique_keys = set()
-            duplicates = []
-            for entry in entries_with_overrides:
-                key = f"{entry.get('date')}_{entry.get('timetable_column_id')}_{entry.get('class_id')}"
-                if key in unique_keys:
-                    duplicates.append(entry)
-                unique_keys.add(key)
-            
-            if duplicates:
-                frappe.logger().warning(f"⚠️ TIMETABLE: Found {len(duplicates)} duplicate entries!")
-                for dup in duplicates[:3]:  # Log first 3
-                    frappe.logger().warning(f"  - Duplicate: {dup.get('date')} / {dup.get('class_id')} / {dup.get('subject_title')}")
         
         # ⚡ CACHE: Store result in Redis (5 min = 300 sec)
         try:
@@ -646,41 +613,48 @@ def get_class_week():
                 teacher_names_list = [teacher_user_map.get(tid) for tid in teacher_ids_for_row if tid in teacher_user_map]
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
 
-            # Enrich with room information
-            for r in rows:
-                try:
-                    from erp.api.erp_administrative.room import get_room_for_class_subject
-                    room_info = get_room_for_class_subject(r.get("class_id"), r.get("subject_title"))
-                    r["room_id"] = room_info.get("room_id")
-                    r["room_name"] = room_info.get("room_name")
-                    r["room_type"] = room_info.get("room_type")
-                except Exception as room_error:
-                    frappe.logger().warning(f"Failed to get room for class {r.get('class_id')}, subject {r.get('subject_title')}: {str(room_error)}")
-                    import traceback
-                    frappe.logger().error(f"Room error traceback: {traceback.format_exc()}")
+            # ⚡ BULK: Enrich with room information (batch query instead of N+1)
+            try:
+                class_ids = list({r.get("class_id") for r in rows if r.get("class_id")})
+                room_map = {}
+                
+                if class_ids:
+                    class_rooms = frappe.db.sql("""
+                        SELECT c.name as class_id, r.name as room_id, r.room_name, r.room_type
+                        FROM `tabSIS Class` c
+                        LEFT JOIN `tabSIS Room` r ON c.default_room_id = r.name
+                        WHERE c.name IN %s
+                    """, (class_ids,), as_dict=True)
+                    
+                    for cr in class_rooms:
+                        room_map[cr.class_id] = {
+                            "room_id": cr.room_id,
+                            "room_name": cr.room_name or "Chưa có phòng",
+                            "room_type": cr.room_type
+                        }
+                
+                for r in rows:
+                    class_id = r.get("class_id")
+                    if class_id and class_id in room_map:
+                        r["room_id"] = room_map[class_id].get("room_id")
+                        r["room_name"] = room_map[class_id].get("room_name")
+                        r["room_type"] = room_map[class_id].get("room_type")
+                    else:
+                        r["room_id"] = None
+                        r["room_name"] = "Chưa có phòng"
+                        r["room_type"] = None
+            except Exception as room_error:
+                frappe.logger().warning(f"Failed to bulk load room info: {str(room_error)}")
+                for r in rows:
                     r["room_id"] = None
-                    r["room_name"] = "Lỗi tải phòng"
+                    r["room_name"] = "Chưa có phòng"
                     r["room_type"] = None
         except Exception as enrich_error:
             frappe.logger().error(f"Error in enrichment section: {str(enrich_error)}")
-            import traceback
-            frappe.logger().error(f"Enrichment error traceback: {traceback.format_exc()}")
-            # Still try to add room info even if other enrichment failed
-            try:
-                from erp.api.erp_administrative.room import get_room_for_class_subject
-                for r in rows:
-                    if not r.get("room_id"):
-                        try:
-                            room_info = get_room_for_class_subject(r.get("class_id"), r.get("subject_title"))
-                            r["room_id"] = room_info.get("room_id")
-                            r["room_name"] = room_info.get("room_name")
-                            r["room_type"] = room_info.get("room_type")
-                        except Exception:
-                            r["room_id"] = None
-                            r["room_name"] = "Chưa có phòng"
-                            r["room_type"] = None
-            except Exception:
-                pass
+            for r in rows:
+                r["room_id"] = None
+                r["room_name"] = "Chưa có phòng"
+                r["room_type"] = None
 
         entries = _build_entries(rows, ws)
         
