@@ -442,6 +442,15 @@ def assign():
         feedback.save()
         frappe.db.commit()
         
+        # Send push notification to assigned user
+        try:
+            if assigned_to:
+                from erp.api.notification.feedback import send_feedback_assigned_notification
+                send_feedback_assigned_notification(feedback, frappe.session.user)
+        except Exception as notify_error:
+            frappe.logger().error(f"Error sending assignment notification: {str(notify_error)}")
+            # Don't fail the request if notification fails
+        
         return success_response(
             data={"name": feedback.name},
             message="Phân công feedback thành công"

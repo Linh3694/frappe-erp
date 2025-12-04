@@ -254,6 +254,15 @@ def create():
 
         frappe.db.commit()
         
+        # Send push notification to mobile staff (for "Góp ý" type only)
+        try:
+            if feedback.feedback_type == "Góp ý":
+                from erp.api.notification.feedback import send_new_feedback_notification
+                send_new_feedback_notification(feedback)
+        except Exception as notify_error:
+            frappe.logger().error(f"Error sending feedback notification: {str(notify_error)}")
+            # Don't fail the request if notification fails
+        
         return success_response(
             data={"name": feedback.name},
             message="Tạo feedback thành công"
@@ -618,6 +627,14 @@ def add_reply():
         
         feedback.save()
         frappe.db.commit()
+        
+        # Send push notification to assigned staff (if any)
+        try:
+            from erp.api.notification.feedback import send_feedback_reply_notification
+            send_feedback_reply_notification(feedback, "Guardian")
+        except Exception as notify_error:
+            frappe.logger().error(f"Error sending reply notification: {str(notify_error)}")
+            # Don't fail the request if notification fails
         
         return success_response(
             data={"name": feedback.name},

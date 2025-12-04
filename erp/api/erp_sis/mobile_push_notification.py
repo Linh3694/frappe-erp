@@ -590,14 +590,26 @@ def send_mobile_notification(user_email, title, body, data=None):
         # Prepare Expo notification payload
         messages = []
         for token_doc in tokens:
-            # Determine channelId based on notification type
+            # Determine channelId and sound based on notification type
             notification_type = data.get("type") if data else None
+            action = data.get("action") if data else None
+            
             if notification_type == "attendance":
                 channel_id = "attendance"
+                sound_name = "default"
             elif notification_type == "ticket":
                 channel_id = "ticket"
+                # Use custom sound for new ticket notifications
+                if action in ["new_ticket_admin", "ticket_assigned"]:
+                    sound_name = "ticket_create.wav"  # Custom sound file
+                else:
+                    sound_name = "default"
+            elif notification_type == "feedback":
+                channel_id = "feedback"
+                sound_name = "ticket_create.wav"  # Same sound for new feedback
             else:
                 channel_id = "default"
+                sound_name = "default"
             
             message = {
                 "to": token_doc.device_token,
@@ -605,17 +617,21 @@ def send_mobile_notification(user_email, title, body, data=None):
                 "body": body,
                 "data": data or {},
                 "priority": "high",
-                "sound": "default",  # iOS default message sound (ting ting)
+                "sound": sound_name,
                 "channelId": channel_id
             }
 
             # Add platform-specific settings
             if token_doc.platform == "ios":
                 message["badge"] = 1
+                # iOS uses sound name without path for custom sounds bundled in app
+                if sound_name != "default":
+                    message["sound"] = sound_name
             elif token_doc.platform == "android":
                 message["android"] = {
                     "channelId": channel_id,
-                    "priority": "high"
+                    "priority": "high",
+                    "sound": sound_name if sound_name != "default" else None
                 }
 
             messages.append(message)
