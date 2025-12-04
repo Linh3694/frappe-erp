@@ -687,7 +687,7 @@ def _process_staff_attachments(feedback_name, reply_index=None):
                         "attached_to_doctype": "Feedback",
                         "attached_to_name": feedback_name,
                         "attached_to_field": "replies",
-                        "is_private": 1
+                        "is_private": 0  # Public file để mobile có thể hiển thị
                     })
                     file_doc.insert(ignore_permissions=True)
 

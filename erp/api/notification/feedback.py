@@ -231,18 +231,23 @@ def send_staff_reply_notification_to_guardian(feedback_doc, staff_name=None):
             frappe.logger().warning("📱 [Feedback Notification] No guardian found for feedback")
             return
         
-        # Get guardian info to find their email
+        # Get guardian info
         try:
             guardian = frappe.get_doc("CRM Guardian", feedback_doc.guardian)
-            guardian_email = guardian.email
             guardian_name = guardian.guardian_name
+            guardian_id = guardian.guardian_id
         except frappe.DoesNotExistError:
             frappe.logger().warning(f"📱 [Feedback Notification] Guardian {feedback_doc.guardian} not found")
             return
         
-        if not guardian_email:
-            frappe.logger().warning(f"📱 [Feedback Notification] Guardian {feedback_doc.guardian} has no email")
+        if not guardian_id:
+            frappe.logger().warning(f"📱 [Feedback Notification] Guardian {feedback_doc.guardian} has no guardian_id")
             return
+        
+        # Build guardian email for parent portal (format: guardian_id@parent.wellspring.edu.vn)
+        # This matches the email format used when guardian logs into Parent Portal
+        guardian_email = f"{guardian_id}@parent.wellspring.edu.vn"
+        frappe.logger().info(f"📱 [Feedback Notification] Sending to guardian email: {guardian_email}")
         
         # Prepare notification content
         title = "Phản hồi từ nhà trường"
