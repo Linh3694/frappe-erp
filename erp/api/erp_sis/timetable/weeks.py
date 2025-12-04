@@ -278,10 +278,29 @@ def get_teacher_week():
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
 
             # ⚡ BULK: Enrich with room information (batch query instead of N+1)
+            # ✅ FIX: Only apply class default room if row doesn't already have room_id
             try:
-                # Collect unique class_ids for bulk query
-                class_ids = list({r.get("class_id") for r in rows if r.get("class_id")})
-                room_map = {}  # {class_id: {room_id, room_name, room_type}}
+                # First, collect room_ids that rows already have (from Teacher Timetable)
+                existing_room_ids = list({r.get("room_id") for r in rows if r.get("room_id")})
+                
+                # Query room details for existing room_ids
+                room_details_map = {}  # {room_id: {room_name, room_type}}
+                if existing_room_ids:
+                    room_details = frappe.db.sql("""
+                        SELECT name, room_name, room_type
+                        FROM `tabSIS Room`
+                        WHERE name IN %s
+                    """, (existing_room_ids,), as_dict=True)
+                    
+                    for rd in room_details:
+                        room_details_map[rd.name] = {
+                            "room_name": rd.room_name,
+                            "room_type": rd.room_type
+                        }
+                
+                # Collect class_ids for rows that DON'T have room_id (need fallback)
+                class_ids = list({r.get("class_id") for r in rows if r.get("class_id") and not r.get("room_id")})
+                class_room_map = {}  # {class_id: {room_id, room_name, room_type}}
                 
                 if class_ids:
                     # Query all rooms for these classes at once
@@ -293,7 +312,7 @@ def get_teacher_week():
                     """, (class_ids,), as_dict=True)
                     
                     for cr in class_rooms:
-                        room_map[cr.class_id] = {
+                        class_room_map[cr.class_id] = {
                             "room_id": cr.room_id,
                             "room_name": cr.room_name or "Chưa có phòng",
                             "room_type": cr.room_type
@@ -301,21 +320,29 @@ def get_teacher_week():
                 
                 # Apply room info to rows
                 for r in rows:
-                    class_id = r.get("class_id")
-                    if class_id and class_id in room_map:
-                        r["room_id"] = room_map[class_id].get("room_id")
-                        r["room_name"] = room_map[class_id].get("room_name")
-                        r["room_type"] = room_map[class_id].get("room_type")
+                    if r.get("room_id"):
+                        # Row already has room_id (from Teacher Timetable) - just enrich with name/type
+                        room_info = room_details_map.get(r["room_id"], {})
+                        r["room_name"] = room_info.get("room_name") or "Chưa có phòng"
+                        r["room_type"] = room_info.get("room_type")
                     else:
-                        r["room_id"] = None
-                        r["room_name"] = "Chưa có phòng"
-                        r["room_type"] = None
+                        # No room_id - use class default room
+                        class_id = r.get("class_id")
+                        if class_id and class_id in class_room_map:
+                            r["room_id"] = class_room_map[class_id].get("room_id")
+                            r["room_name"] = class_room_map[class_id].get("room_name")
+                            r["room_type"] = class_room_map[class_id].get("room_type")
+                        else:
+                            r["room_id"] = None
+                            r["room_name"] = "Chưa có phòng"
+                            r["room_type"] = None
             except Exception as room_error:
                 frappe.logger().warning(f"Failed to bulk load room info: {str(room_error)}")
                 for r in rows:
-                    r["room_id"] = None
-                    r["room_name"] = "Chưa có phòng"
-                    r["room_type"] = None
+                    if not r.get("room_name"):
+                        r["room_name"] = "Chưa có phòng"
+                    if not r.get("room_type"):
+                        r["room_type"] = None
         except Exception as enrich_error:
             frappe.logger().error(f"Error in enrichment section: {str(enrich_error)}")
             import traceback
@@ -614,47 +641,76 @@ def get_class_week():
                 r["teacher_names"] = ", ".join([n for n in teacher_names_list if n])
 
             # ⚡ BULK: Enrich with room information (batch query instead of N+1)
+            # ✅ FIX: Only apply class default room if row doesn't already have room_id
             try:
-                class_ids = list({r.get("class_id") for r in rows if r.get("class_id")})
-                room_map = {}
+                # First, collect room_ids that rows already have (from Instance Rows)
+                existing_room_ids = list({r.get("room_id") for r in rows if r.get("room_id")})
                 
-                if class_ids:
+                # Query room details for existing room_ids
+                room_details_map = {}  # {room_id: {room_name, room_type}}
+                if existing_room_ids:
+                    room_details = frappe.db.sql("""
+                        SELECT name, room_name, room_type
+                        FROM `tabSIS Room`
+                        WHERE name IN %s
+                    """, (existing_room_ids,), as_dict=True)
+                    
+                    for rd in room_details:
+                        room_details_map[rd.name] = {
+                            "room_name": rd.room_name,
+                            "room_type": rd.room_type
+                        }
+                
+                # Collect class_ids for rows that DON'T have room_id (need fallback)
+                class_ids_for_fallback = list({r.get("class_id") for r in rows if r.get("class_id") and not r.get("room_id")})
+                class_room_map = {}
+                
+                if class_ids_for_fallback:
                     class_rooms = frappe.db.sql("""
                         SELECT c.name as class_id, r.name as room_id, r.room_name, r.room_type
                         FROM `tabSIS Class` c
                         LEFT JOIN `tabSIS Room` r ON c.default_room_id = r.name
                         WHERE c.name IN %s
-                    """, (class_ids,), as_dict=True)
+                    """, (class_ids_for_fallback,), as_dict=True)
                     
                     for cr in class_rooms:
-                        room_map[cr.class_id] = {
+                        class_room_map[cr.class_id] = {
                             "room_id": cr.room_id,
                             "room_name": cr.room_name or "Chưa có phòng",
                             "room_type": cr.room_type
                         }
                 
                 for r in rows:
-                    class_id = r.get("class_id")
-                    if class_id and class_id in room_map:
-                        r["room_id"] = room_map[class_id].get("room_id")
-                        r["room_name"] = room_map[class_id].get("room_name")
-                        r["room_type"] = room_map[class_id].get("room_type")
+                    if r.get("room_id"):
+                        # Row already has room_id - just enrich with name/type
+                        room_info = room_details_map.get(r["room_id"], {})
+                        r["room_name"] = room_info.get("room_name") or "Chưa có phòng"
+                        r["room_type"] = room_info.get("room_type")
                     else:
-                        r["room_id"] = None
-                        r["room_name"] = "Chưa có phòng"
-                        r["room_type"] = None
+                        # No room_id - use class default room
+                        row_class_id = r.get("class_id")
+                        if row_class_id and row_class_id in class_room_map:
+                            r["room_id"] = class_room_map[row_class_id].get("room_id")
+                            r["room_name"] = class_room_map[row_class_id].get("room_name")
+                            r["room_type"] = class_room_map[row_class_id].get("room_type")
+                        else:
+                            r["room_id"] = None
+                            r["room_name"] = "Chưa có phòng"
+                            r["room_type"] = None
             except Exception as room_error:
                 frappe.logger().warning(f"Failed to bulk load room info: {str(room_error)}")
                 for r in rows:
-                    r["room_id"] = None
-                    r["room_name"] = "Chưa có phòng"
-                    r["room_type"] = None
+                    if not r.get("room_name"):
+                        r["room_name"] = "Chưa có phòng"
+                    if not r.get("room_type"):
+                        r["room_type"] = None
         except Exception as enrich_error:
             frappe.logger().error(f"Error in enrichment section: {str(enrich_error)}")
             for r in rows:
-                r["room_id"] = None
-                r["room_name"] = "Chưa có phòng"
-                r["room_type"] = None
+                if not r.get("room_name"):
+                    r["room_name"] = "Chưa có phòng"
+                if not r.get("room_type"):
+                    r["room_type"] = None
 
         entries = _build_entries(rows, ws)
         
