@@ -97,9 +97,14 @@ def sync_for_rows(row_ids: List[str]):
 	teacher_count = sync_teacher_timetable_for_rows(rows)
 	frappe.logger().info(f"✅ Teacher Timetable: {teacher_count} entries synced")
 	
-	# Sync Student Timetable
-	student_count = sync_student_timetable_for_rows(rows)
-	frappe.logger().info(f"✅ Student Timetable: {student_count} entries synced")
+	# ⚡ DISABLED: Student Timetable sync removed (not used, wastes 50% performance)
+	# Student Timetable table không được dùng trong hệ thống:
+	# - Frontend không hiển thị
+	# - Backend APIs không query
+	# - Parent Portal query trực tiếp từ Timetable Pattern
+	# student_count = sync_student_timetable_for_rows(rows)
+	# frappe.logger().info(f"✅ Student Timetable: {student_count} entries synced")
+	student_count = 0
 	
 	# Commit
 	frappe.db.commit()
