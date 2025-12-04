@@ -881,22 +881,30 @@ class TimetableImportExecutor:
 			
 			frappe.logger().info(f"📊 Found {len(assignments)} assignments to sync")
 			
-			# Group assignments by (class_id, actual_subject_id) to get all teachers
-			from collections import defaultdict
-			assignments_by_key = defaultdict(list)
+			# ✅ FIX: Separate full_year and from_date assignments
+			# Must sync full_year FIRST (to populate pattern rows), then from_date (override rows)
+			full_year_assignments = [a for a in assignments if a.application_type == "full_year"]
+			from_date_assignments = [a for a in assignments if a.application_type != "full_year"]
 			
-			for assignment in assignments:
-				key = (assignment.class_id, assignment.actual_subject_id)
-				assignments_by_key[key].append(assignment)
+			frappe.logger().info(
+				f"📊 Assignments breakdown: {len(full_year_assignments)} full_year, "
+				f"{len(from_date_assignments)} from_date"
+			)
 			
-			# Sync each group
 			from erp.api.erp_sis.subject_assignment.timetable_sync_v2 import sync_assignment_to_timetable
+			from collections import defaultdict
 			
-			for (class_id, actual_subject_id), group_assignments in assignments_by_key.items():
+			# STEP 1: Sync full_year assignments (group by class+subject, sync first of each group)
+			# sync_full_year_assignment will gather ALL teachers for that class+subject
+			full_year_by_key = defaultdict(list)
+			for assignment in full_year_assignments:
+				key = (assignment.class_id, assignment.actual_subject_id)
+				full_year_by_key[key].append(assignment)
+			
+			for (class_id, actual_subject_id), group_assignments in full_year_by_key.items():
 				try:
-					# Only sync the first assignment - it will gather all teachers for this class+subject
+					# Sync first assignment - it gathers all teachers for this class+subject
 					first_assignment = group_assignments[0]
-					
 					result = sync_assignment_to_timetable(assignment_id=first_assignment.name)
 					
 					if result.get("success"):
@@ -904,11 +912,30 @@ class TimetableImportExecutor:
 					else:
 						total_errors += 1
 						frappe.logger().warning(
-							f"⚠️ Failed to sync assignment {first_assignment.name}: {result.get('message')}"
+							f"⚠️ Failed to sync full_year {first_assignment.name}: {result.get('message')}"
 						)
 				except Exception as sync_error:
 					total_errors += 1
-					frappe.logger().warning(f"⚠️ Error syncing assignment: {str(sync_error)}")
+					frappe.logger().warning(f"⚠️ Error syncing full_year: {str(sync_error)}")
+			
+			# STEP 2: Sync from_date assignments (each creates override rows for its date range)
+			# Each from_date assignment needs to be synced individually
+			for assignment in from_date_assignments:
+				try:
+					result = sync_assignment_to_timetable(assignment_id=assignment.name)
+					
+					if result.get("success"):
+						total_synced += result.get("rows_created", 0) + result.get("rows_updated", 0)
+					else:
+						# Don't count conflicts as errors - they're expected
+						if result.get("error_type") != "teacher_conflict":
+							total_errors += 1
+							frappe.logger().warning(
+								f"⚠️ Failed to sync from_date {assignment.name}: {result.get('message')}"
+							)
+				except Exception as sync_error:
+					total_errors += 1
+					frappe.logger().warning(f"⚠️ Error syncing from_date: {str(sync_error)}")
 			
 			self.logs.append(f"✅ Đã gán GV cho {total_synced} rows, {total_errors} lỗi")
 			frappe.logger().info(f"✅ Teacher assignment sync complete: {total_synced} rows, {total_errors} errors")
