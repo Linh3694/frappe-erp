@@ -568,16 +568,25 @@ def create_subject_assignment():
                         replace_teacher_map=replace_teacher_map
                     )
                     
-                    # Check for conflicts
-                    if not sync_result.get("success") and sync_result.get("error_type") == "teacher_conflict":
-                        # Conflict detected!
-                        conflicts = sync_result.get("conflicts", [])
-                        
-                        # Add assignment_id to each conflict for frontend tracking
-                        for conflict in conflicts:
-                            conflict["assignment_id"] = assignment_id
-                        
-                        all_conflicts.extend(conflicts)
+                    # Check for conflicts or other failures
+                    if not sync_result.get("success"):
+                        if sync_result.get("error_type") == "teacher_conflict":
+                            # Conflict detected!
+                            conflicts = sync_result.get("conflicts", [])
+                            
+                            # Add assignment_id to each conflict for frontend tracking
+                            for conflict in conflicts:
+                                conflict["assignment_id"] = assignment_id
+                            
+                            all_conflicts.extend(conflicts)
+                        else:
+                            # ⚡ FIX: Handle other sync failures (e.g., no pattern rows)
+                            # Don't silently ignore - log warning but allow assignment creation
+                            # This can happen if timetable hasn't been uploaded yet
+                            frappe.logger().warning(
+                                f"Timetable sync warning for {assignment_id}: {sync_result.get('message', 'Unknown error')}. "
+                                f"Debug: {sync_result.get('debug_info', [])}"
+                            )
                     else:
                         # Success - update counters
                         sync_summary["rows_updated"] += sync_result.get("rows_updated", 0)
@@ -1159,6 +1168,22 @@ def delete_subject_assignment(assignment_id=None):
                 tuple(instance_ids + subject_ids), as_dict=True)
                 
                 updated_count = 0
+                row_names = [row.name for row in rows_to_update]
+                
+                # ⚡ FIX: Delete teacher from child table (NEW logic)
+                # Previous code only cleared teacher_1_id, teacher_2_id (deprecated fields)
+                # Now we need to delete from child table 'tabSIS Timetable Instance Row Teacher'
+                if row_names:
+                    frappe.db.sql("""
+                        DELETE FROM `tabSIS Timetable Instance Row Teacher`
+                        WHERE parent IN ({})
+                          AND teacher_id = %s
+                    """.format(','.join(['%s'] * len(row_names))),
+                    tuple(row_names + [assignment_doc.teacher_id]))
+                    frappe.logger().info(f"🗑️ Deleted teacher {assignment_doc.teacher_id} from {len(row_names)} pattern rows (child table)")
+                    updated_count = len(row_names)
+                
+                # Also clear deprecated fields for backward compatibility
                 for row in rows_to_update:
                     if row.teacher_1_id == assignment_doc.teacher_id:
                         frappe.db.set_value(
@@ -1168,7 +1193,6 @@ def delete_subject_assignment(assignment_id=None):
                             None,
                             update_modified=False
                         )
-                        updated_count += 1
                     elif row.teacher_2_id == assignment_doc.teacher_id:
                         frappe.db.set_value(
                             "SIS Timetable Instance Row",
@@ -1177,7 +1201,6 @@ def delete_subject_assignment(assignment_id=None):
                             None,
                             update_modified=False
                         )
-                        updated_count += 1
                 
                 frappe.db.commit()
                 
