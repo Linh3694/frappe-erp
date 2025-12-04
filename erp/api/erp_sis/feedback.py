@@ -648,6 +648,55 @@ def update_priority():
         )
 
 
+def _process_staff_attachments(feedback_name, reply_index=None):
+    """Process file attachments from frappe.request.files for staff reply"""
+    attachment_urls = []
+
+    if not frappe.request.files:
+        return attachment_urls
+
+    for file_key, file_list in frappe.request.files.items(multi=True):
+        if not isinstance(file_list, list):
+            file_list = [file_list]
+            
+        for file_obj in file_list:
+            if file_obj and file_obj.filename:
+                try:
+                    file_content = file_obj.read()
+                    if not file_content:
+                        continue
+
+                    # Generate unique filename
+                    import uuid
+                    unique_id = str(uuid.uuid4())[:8]
+                    original_name = file_obj.filename
+                    name_parts = original_name.rsplit('.', 1)
+                    if len(name_parts) == 2:
+                        new_filename = f"{name_parts[0]}_{unique_id}.{name_parts[1]}"
+                    else:
+                        new_filename = f"{original_name}_{unique_id}"
+
+                    file_doc = frappe.get_doc({
+                        "doctype": "File",
+                        "file_name": new_filename,
+                        "content": file_content,
+                        "attached_to_doctype": "Feedback",
+                        "attached_to_name": feedback_name,
+                        "attached_to_field": "replies",
+                        "is_private": 1
+                    })
+                    file_doc.insert(ignore_permissions=True)
+
+                    file_url = file_doc.file_url
+                    if file_url:
+                        attachment_urls.append(file_url)
+
+                except Exception as e:
+                    frappe.logger().error(f"Error processing staff attachment {file_key}: {str(e)}")
+
+    return attachment_urls
+
+
 @frappe.whitelist(allow_guest=False)
 def add_reply():
     """Add reply to feedback (staff only)"""
@@ -668,12 +717,8 @@ def add_reply():
         # Get feedback
         feedback = frappe.get_doc("Feedback", feedback_name)
         
-        # Only reply to Góp ý type
-        if feedback.feedback_type != "Góp ý":
-            return error_response(
-                message="Chỉ có thể phản hồi feedback loại Góp ý",
-                code="REPLY_NOT_ALLOWED"
-            )
+        # Allow reply to both Góp ý and Đánh giá types
+        # Staff can respond to ratings (especially low ratings) to address concerns
         
         # If draft, check if there's existing draft from this user and update it
         if is_draft:
@@ -707,32 +752,48 @@ def add_reply():
                 message="Lưu tạm thành công"
             )
         
+        # Process file attachments if any
+        attachment_urls = _process_staff_attachments(feedback_name)
+        
+        # Build final content with attachments
+        final_content = content
+        if attachment_urls:
+            # Append attachment info to content as HTML
+            attachments_html = "\n\n---\n**File đính kèm:**\n"
+            for url in attachment_urls:
+                attachments_html += f'- <a href="{url}" target="_blank">{url.split("/")[-1]}</a>\n'
+            final_content += attachments_html
+        
         # For non-draft replies, check if there's a draft to convert
         if feedback.replies:
             for reply in feedback.replies:
                 if reply.is_internal and reply.reply_by == frappe.session.user:
                     # Convert draft to public reply
-                    reply.content = content
+                    reply.content = final_content
                     reply.is_internal = is_internal
                     reply.reply_date = now()
+                    if attachment_urls:
+                        reply.attachments = attachment_urls[0]  # Store first attachment in field
                     break
             else:
                 # No draft found, add new reply
                 feedback.append("replies", {
-                    "content": content,
+                    "content": final_content,
                     "reply_by": frappe.session.user,
                     "reply_by_type": "Staff",
                     "reply_date": now(),
-                    "is_internal": is_internal
+                    "is_internal": is_internal,
+                    "attachments": attachment_urls[0] if attachment_urls else None
                 })
         else:
             # No replies yet, add new one
             feedback.append("replies", {
-                "content": content,
+                "content": final_content,
                 "reply_by": frappe.session.user,
                 "reply_by_type": "Staff",
                 "reply_date": now(),
-                "is_internal": is_internal
+                "is_internal": is_internal,
+                "attachments": attachment_urls[0] if attachment_urls else None
             })
         
         # Update status only for non-draft replies
@@ -741,6 +802,17 @@ def add_reply():
         
         feedback.save()
         frappe.db.commit()
+        
+        # Send push notification to guardian (only for non-internal replies)
+        if not is_internal:
+            try:
+                from erp.api.notification.feedback import send_staff_reply_notification_to_guardian
+                # Get staff name for notification
+                staff_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
+                send_staff_reply_notification_to_guardian(feedback, staff_name)
+            except Exception as notify_error:
+                frappe.logger().error(f"Error sending guardian notification: {str(notify_error)}")
+                # Don't fail the request if notification fails
         
         return success_response(
             data={"name": feedback.name},

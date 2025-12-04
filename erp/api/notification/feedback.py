@@ -218,6 +218,79 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
         frappe.logger().error(f"❌ [Feedback Notification] Error sending reply notification: {str(e)}")
 
 
+def send_staff_reply_notification_to_guardian(feedback_doc, staff_name=None):
+    """
+    Send push notification to guardian when staff replies to feedback
+    
+    Args:
+        feedback_doc: The Feedback document
+        staff_name: Full name of staff who replied
+    """
+    try:
+        if not feedback_doc.guardian:
+            frappe.logger().warning("📱 [Feedback Notification] No guardian found for feedback")
+            return
+        
+        # Get guardian info to find their email
+        try:
+            guardian = frappe.get_doc("CRM Guardian", feedback_doc.guardian)
+            guardian_email = guardian.email
+            guardian_name = guardian.guardian_name
+        except frappe.DoesNotExistError:
+            frappe.logger().warning(f"📱 [Feedback Notification] Guardian {feedback_doc.guardian} not found")
+            return
+        
+        if not guardian_email:
+            frappe.logger().warning(f"📱 [Feedback Notification] Guardian {feedback_doc.guardian} has no email")
+            return
+        
+        # Prepare notification content
+        title = "Phản hồi từ nhà trường"
+        if feedback_doc.feedback_type == "Đánh giá":
+            body = f"Nhà trường đã phản hồi đánh giá của bạn. Nhấn để xem chi tiết."
+        else:
+            body = f"Góp ý '{feedback_doc.title or feedback_doc.name}' đã được phản hồi. Nhấn để xem chi tiết."
+        
+        if len(body) > 100:
+            body = body[:97] + "..."
+        
+        # Notification data for deep linking in parent portal
+        data = {
+            "type": "feedback_staff_reply",
+            "action": "staff_reply",
+            "feedbackId": feedback_doc.name,
+            "feedbackCode": feedback_doc.name,
+            "feedbackType": feedback_doc.feedback_type,
+            "title": feedback_doc.title or "",
+            "staffName": staff_name or "",
+            "url": f"/feedback/{feedback_doc.name}",
+            "timestamp": now_datetime().isoformat()
+        }
+        
+        # Send push notification via parent portal push notification system
+        from erp.api.parent_portal.push_notification import send_push_notification
+        
+        try:
+            result = send_push_notification(
+                user_email=guardian_email,
+                title=title,
+                body=body,
+                data=data,
+                tag=f"feedback-reply-{feedback_doc.name}"
+            )
+            
+            if result.get("success"):
+                frappe.logger().info(f"✅ [Feedback Notification] Staff reply notification sent to guardian {guardian_email}")
+            else:
+                frappe.logger().warning(f"⚠️ [Feedback Notification] Failed to send staff reply notification: {result.get('message')}")
+                
+        except Exception as e:
+            frappe.logger().error(f"❌ [Feedback Notification] Error sending staff reply notification: {str(e)}")
+    
+    except Exception as e:
+        frappe.logger().error(f"❌ [Feedback Notification] Error in send_staff_reply_notification_to_guardian: {str(e)}")
+
+
 def send_feedback_assigned_notification(feedback_doc, assigned_by=None):
     """
     Send notification when feedback is assigned to a user
