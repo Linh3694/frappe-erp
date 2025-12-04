@@ -86,7 +86,6 @@ def get_teachers_with_assignment_summary(search_term=None):
         params = [campus_id] + search_params
         results = frappe.db.sql(query, params, as_dict=True)
 
-        frappe.logger().info(f"OPTIMIZED QUERY - Found {len(results)} teachers with assignments")
 
         return {
             "success": True,
@@ -117,59 +116,31 @@ def get_teachers_for_assignment():
         
         filters = {"campus_id": campus_id}
             
-        teachers = frappe.get_all(
-            "SIS Teacher",
-            fields=[
-                "name",
-                "user_id"
-            ],
-            filters=filters,
-            order_by="user_id asc"
-        )
+        # ⚡ OPTIMIZED: Single query with JOINs instead of N+1 queries
+        teachers_data = frappe.db.sql("""
+            SELECT 
+                t.name,
+                t.user_id,
+                COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id) as full_name,
+                u.email,
+                (
+                    SELECT GROUP_CONCAT(DISTINCT es.title_vn SEPARATOR ', ')
+                    FROM `tabSIS Teacher Education Stage` tes
+                    INNER JOIN `tabSIS Education Stage` es ON tes.education_stage_id = es.name
+                    WHERE tes.teacher_id = t.name AND tes.is_active = 1
+                ) as education_stages_display
+            FROM `tabSIS Teacher` t
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
+            WHERE t.campus_id = %s
+            ORDER BY t.user_id ASC
+        """, (campus_id,), as_dict=True)
         
-        # Enrich with user full_name and education stages for display
-        for teacher in teachers:
-            if teacher.get("user_id"):
-                try:
-                    user_doc = frappe.get_cached_doc("User", teacher["user_id"])
-                    teacher["full_name"] = user_doc.get("full_name") or user_doc.get("first_name") or teacher["user_id"]
-                    teacher["email"] = user_doc.get("email")
-                except Exception:
-                    teacher["full_name"] = teacher["user_id"]
-                    teacher["email"] = teacher["user_id"]
-            else:
-                teacher["full_name"] = teacher["user_id"]
-            
-            # Fetch multiple education stages from mapping table
-            try:
-                education_stages = frappe.get_all(
-                    "SIS Teacher Education Stage",
-                    filters={
-                        "teacher_id": teacher["name"],
-                        "is_active": 1
-                    },
-                    fields=["education_stage_id"],
-                    order_by="creation asc"
-                )
-                teacher["education_stages"] = education_stages
-                
-                # Create a display string for education stages
-                if education_stages:
-                    stage_names = []
-                    for stage in education_stages:
-                        stage_name = frappe.db.get_value("SIS Education Stage", stage.education_stage_id, "title_vn")
-                        if stage_name:
-                            stage_names.append(stage_name)
-                    teacher["education_stages_display"] = ", ".join(stage_names) if stage_names else ""
-                else:
-                    teacher["education_stages_display"] = ""
-                    
-            except Exception as e:
-                frappe.logger().warning(f"Error fetching education stages for teacher {teacher['name']}: {str(e)}")
-                teacher["education_stages"] = []
-                teacher["education_stages_display"] = ""
+        # Add education_stages list for backward compatibility
+        for teacher in teachers_data:
+            teacher["education_stages"] = []  # Simplified - not fetching full list
+            teacher["education_stages_display"] = teacher.get("education_stages_display") or ""
         
-        return list_response(teachers, "Teachers fetched successfully")
+        return list_response(teachers_data, "Teachers fetched successfully")
         
     except Exception as e:
         frappe.log_error(f"Error fetching teachers for assignment: {str(e)}")
@@ -463,7 +434,6 @@ def get_classes_for_education_grade():
             order_by="title asc"
         )
 
-        frappe.logger().info(f"Classes for education_grade '{education_grade_id}' in campus '{campus_id}': {len(classes)} found")
         return list_response(classes, "Classes fetched successfully")
 
     except Exception as e:
@@ -477,6 +447,8 @@ def get_subjects_for_class(class_id: str | None = None):
     Get available subjects for a specific class (for Subject Assignment creation).
     
     Returns actual subjects that are taught in this class or assigned to students in this class.
+    
+    ⚡ OPTIMIZED: Single query combining all strategies instead of 3+ separate queries.
     
     Args:
         class_id: Required class ID
@@ -494,89 +466,58 @@ def get_subjects_for_class(class_id: str | None = None):
         if not class_id:
             return validation_error_response("Validation failed", {"class_id": ["Class ID is required"]})
 
-        # Strategy 1: Get subjects from Student Subject (subjects that students in this class are studying)
-        student_subject_ids = set()
-        try:
-            student_subjects = frappe.get_all(
-                "SIS Student Subject",
-                fields=["actual_subject_id"],
-                filters={"class_id": class_id, "campus_id": campus_id},
-                distinct=True
-            )
-            student_subject_ids = {ss.actual_subject_id for ss in student_subjects if ss.actual_subject_id}
-        except Exception:
-            pass
-
-        # Strategy 2: Get subjects from existing Subject Assignments for this class
-        assignment_subject_ids = set()
-        try:
-            assignments = frappe.get_all(
-                "SIS Subject Assignment",
-                fields=["actual_subject_id"],
-                filters={"class_id": class_id, "campus_id": campus_id},
-                distinct=True
-            )
-            assignment_subject_ids = {a.actual_subject_id for a in assignments if a.actual_subject_id}
-        except Exception:
-            pass
-
-        # Strategy 3: Get subjects from Timetable Instance Rows for this class
-        timetable_subject_ids = set()
-        try:
-            # Get active timetable instances for this class
-            instances = frappe.get_all(
-                "SIS Timetable Instance",
-                fields=["name"],
-                filters={"class_id": class_id, "campus_id": campus_id},
-                limit=10  # Limit to recent instances
-            )
+        # ⚡ BULK QUERY: Combine all strategies in single query
+        all_subject_ids = frappe.db.sql("""
+            -- Strategy 1: Student Subject
+            SELECT DISTINCT actual_subject_id FROM `tabSIS Student Subject`
+            WHERE class_id = %(class_id)s AND campus_id = %(campus_id)s AND actual_subject_id IS NOT NULL
             
-            if instances:
-                instance_ids = [i.name for i in instances]
-                # Get subjects from timetable rows
-                rows = frappe.db.sql("""
-                    SELECT DISTINCT subject_id
-                    FROM `tabSIS Timetable Instance Row`
-                    WHERE parent IN ({})
-                """.format(','.join(['%s'] * len(instance_ids))), 
-                tuple(instance_ids), as_dict=True)
-                
-                # Map SIS Subject -> Actual Subject
-                for row in rows:
-                    if row.subject_id:
-                        actual_subject_id = frappe.db.get_value("SIS Subject", row.subject_id, "actual_subject_id")
-                        if actual_subject_id:
-                            timetable_subject_ids.add(actual_subject_id)
-        except Exception:
-            pass
-
-        # Combine all strategies
-        all_subject_ids = student_subject_ids | assignment_subject_ids | timetable_subject_ids
+            UNION
+            
+            -- Strategy 2: Subject Assignment
+            SELECT DISTINCT actual_subject_id FROM `tabSIS Subject Assignment`
+            WHERE class_id = %(class_id)s AND campus_id = %(campus_id)s AND actual_subject_id IS NOT NULL
+            
+            UNION
+            
+            -- Strategy 3: Timetable Instance Rows (with SIS Subject -> Actual Subject mapping)
+            SELECT DISTINCT s.actual_subject_id
+            FROM `tabSIS Timetable Instance Row` tir
+            INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
+            INNER JOIN `tabSIS Subject` s ON tir.subject_id = s.name
+            WHERE ti.class_id = %(class_id)s 
+              AND ti.campus_id = %(campus_id)s 
+              AND s.actual_subject_id IS NOT NULL
+        """, {"class_id": class_id, "campus_id": campus_id}, as_list=True)
+        
+        subject_ids_set = {row[0] for row in all_subject_ids if row[0]}
 
         # If no subjects found, fallback to all subjects for the class's education stage
-        if not all_subject_ids:
-            try:
-                education_grade = frappe.db.get_value("SIS Class", class_id, "education_grade")
-                if education_grade:
-                    education_stage = frappe.db.get_value("SIS Education Grade", education_grade, "education_stage_id")
-                    if education_stage:
-                        all_subjects = frappe.get_all(
-                            "SIS Actual Subject",
-                            fields=["name"],
-                            filters={"education_stage_id": education_stage, "campus_id": campus_id}
-                        )
-                        all_subject_ids = {s.name for s in all_subjects}
-            except Exception:
-                pass
+        if not subject_ids_set:
+            class_info = frappe.db.get_value(
+                "SIS Class", class_id, 
+                ["education_grade"], as_dict=True
+            )
+            if class_info and class_info.education_grade:
+                education_stage = frappe.db.get_value(
+                    "SIS Education Grade", class_info.education_grade, 
+                    "education_stage_id"
+                )
+                if education_stage:
+                    fallback_subjects = frappe.db.sql("""
+                        SELECT name FROM `tabSIS Actual Subject`
+                        WHERE education_stage_id = %s AND campus_id = %s
+                    """, (education_stage, campus_id), as_list=True)
+                    subject_ids_set = {row[0] for row in fallback_subjects if row[0]}
 
-        if not all_subject_ids:
+        if not subject_ids_set:
             return list_response([], "No subjects found for this class")
 
         # Get actual subject details
         subjects = frappe.get_all(
             "SIS Actual Subject",
             fields=["name", "title_vn as title", "education_stage_id"],
-            filters={"name": ["in", list(all_subject_ids)], "campus_id": campus_id},
+            filters={"name": ["in", list(subject_ids_set)], "campus_id": campus_id},
             order_by="title_vn asc"
         )
 

@@ -78,37 +78,30 @@ def get_all_subject_assignments():
             ORDER BY sa.teacher_id asc
         """, (campus_id,), as_dict=True)
         
-        # Enrich with teacher's education stages
+        # ⚡ BULK: Enrich with teacher's education stages (single query instead of N+1)
+        teacher_ids = list(set(a['teacher_id'] for a in subject_assignments_data if a.get('teacher_id')))
+        teacher_stages_map = {}
+        
+        if teacher_ids:
+            # Single query to get all education stages for all teachers
+            stages_data = frappe.db.sql("""
+                SELECT 
+                    tes.teacher_id,
+                    GROUP_CONCAT(DISTINCT es.title_vn SEPARATOR ', ') as stages_display
+                FROM `tabSIS Teacher Education Stage` tes
+                INNER JOIN `tabSIS Education Stage` es ON tes.education_stage_id = es.name
+                WHERE tes.teacher_id IN %(teacher_ids)s
+                  AND tes.is_active = 1
+                GROUP BY tes.teacher_id
+            """, {"teacher_ids": teacher_ids}, as_dict=True)
+            
+            for row in stages_data:
+                teacher_stages_map[row.teacher_id] = row.stages_display or ""
+        
+        # Apply to assignments
         for assignment in subject_assignments_data:
-            if assignment.get('teacher_id'):
-                try:
-                    # Get education stages for this teacher
-                    teacher_stages = frappe.get_all(
-                        "SIS Teacher Education Stage",
-                        filters={
-                            "teacher_id": assignment['teacher_id'],
-                            "is_active": 1
-                        },
-                        fields=["education_stage_id"],
-                        order_by="creation asc"
-                    )
-                    
-                    # Create a display string for education stages
-                    if teacher_stages:
-                        stage_names = []
-                        for stage in teacher_stages:
-                            stage_name = frappe.db.get_value("SIS Education Stage", stage.education_stage_id, "title_vn")
-                            if stage_name:
-                                stage_names.append(stage_name)
-                        assignment["teacher_education_stages_display"] = ", ".join(stage_names) if stage_names else ""
-                    else:
-                        assignment["teacher_education_stages_display"] = ""
-                        
-                except Exception as e:
-                    frappe.logger().warning(f"Error fetching education stages for teacher {assignment['teacher_id']}: {str(e)}")
-                    assignment["teacher_education_stages_display"] = ""
-            else:
-                assignment["teacher_education_stages_display"] = ""
+            teacher_id = assignment.get('teacher_id')
+            assignment["teacher_education_stages_display"] = teacher_stages_map.get(teacher_id, "") if teacher_id else ""
         
         return list_response(subject_assignments_data, "Subject assignments fetched successfully")
         
@@ -365,7 +358,7 @@ def create_subject_assignment():
         else:
             data = frappe.local.form_dict
         
-        frappe.logger().info(f"CREATE DEBUG - Received data: {data}")
+        # Debug logging removed for production
         
         # Extract values from data - Priority: JSON payload > form_dict > URL params
         teacher_id = data.get("teacher_id")
@@ -385,19 +378,11 @@ def create_subject_assignment():
         # Format: {row_id: "teacher_1" or "teacher_2"}
         replace_teacher_map = data.get("replace_teacher_map") or {}
         
-        frappe.logger().info(f"CREATE DEBUG - Parsed values: teacher_id={teacher_id}, assignments={len(assignments)}")
-        frappe.logger().info(f"CREATE DEBUG - Global params: application_type={global_application_type}, start_date={global_start_date}, end_date={global_end_date}")
-        frappe.logger().info(f"CREATE DEBUG - Top-level params: application_type={data.get('application_type')}, start_date={data.get('start_date')}, end_date={data.get('end_date')}")
-        
-        if assignments:
-            frappe.logger().info(f"CREATE DEBUG - First assignment: {assignments[0] if len(assignments) > 0 else 'N/A'}")
         
         # Input validation
         if not teacher_id:
-            frappe.logger().error("CREATE DEBUG - Missing teacher_id")
             frappe.throw(_("Teacher ID is required"))
         if not actual_subject_id and not actual_subject_ids and not assignments and not classes:
-            frappe.logger().error(f"CREATE DEBUG - Missing required fields")
             frappe.throw(_("Actual Subject ID or actual_subject_ids or assignments is required"))
         
         # Get campus from user context
@@ -423,7 +408,6 @@ def create_subject_assignment():
                 start_date = a.get("start_date")
                 end_date = a.get("end_date")
                 
-                frappe.logger().info(f"CREATE DEBUG - Assignment {i}: class_id={cid}, subject_ids={sids}, application_type={application_type}")
                 if cid and sids:
                     normalized_assignments.append({
                         "class_id": cid, 
@@ -480,7 +464,6 @@ def create_subject_assignment():
         affected_subjects = set()
         skipped_duplicates = []
         
-        frappe.logger().info(f"🎯 CREATE - Processing {len(normalized_assignments)} normalized assignments for teacher {teacher_id}")
         
         # FAST: Create all assignments without syncing
         for item in normalized_assignments:
@@ -497,13 +480,11 @@ def create_subject_assignment():
                     {"name": sid, "campus_id": campus_id}
                 )
                 if not subject_exists:
-                    frappe.logger().error(f"CREATE DEBUG - Actual subject not found: {sid} for campus: {campus_id}")
                     # Check if it's a SIS Subject ID by mistake
                     sis_subject_exists = frappe.db.exists("SIS Subject", {"name": sid, "campus_id": campus_id})
                     if sis_subject_exists:
                         actual_subject_id_from_sis = frappe.db.get_value("SIS Subject", sid, "actual_subject_id")
                         if actual_subject_id_from_sis:
-                            frappe.logger().info(f"CREATE DEBUG - Using actual_subject_id {actual_subject_id_from_sis} from SIS Subject {sid}")
                             sid = actual_subject_id_from_sis
                         else:
                             return validation_error_response(f"SIS Subject {sid} does not have a linked Actual Subject", {"actual_subject_id": [f"Subject {sid} is not properly linked"]})
@@ -522,7 +503,6 @@ def create_subject_assignment():
                 if application_type == "full_year":
                     existing = frappe.db.exists("SIS Subject Assignment", filters)
                     if existing:
-                        frappe.logger().info(f"🎯 CREATE - SKIPPED duplicate full_year: teacher={teacher_id}, class={cid}, subject={sid}")
                         skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
                         continue
                 elif application_type == "from_date" and start_date:
@@ -530,13 +510,11 @@ def create_subject_assignment():
                     filters_full_year = {**filters, "application_type": "full_year"}
                     existing_full_year = frappe.db.exists("SIS Subject Assignment", filters_full_year)
                     if existing_full_year:
-                        frappe.logger().info(f"🎯 CREATE - SKIPPED: conflict with full_year assignment")
                         skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing_full_year, "reason": "conflicts with full_year"})
                         continue
                 else:
                     existing = frappe.db.exists("SIS Subject Assignment", filters)
                     if existing:
-                        frappe.logger().info(f"🎯 CREATE - SKIPPED duplicate: teacher={teacher_id}, class={cid}, subject={sid}")
                         skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
                         continue
 
@@ -552,15 +530,7 @@ def create_subject_assignment():
                     "end_date": end_date
                 })
                 
-                frappe.logger().info(f"🎯 CREATE - Creating assignment: teacher={teacher_id}, subject={sid}, class={cid}")
-                frappe.logger().info(f"           application_type={application_type}, start_date={start_date}, end_date={end_date}")
-                
                 assignment_doc.insert()
-                
-                # Verify after insert
-                created_doc = frappe.get_doc("SIS Subject Assignment", assignment_doc.name)
-                frappe.logger().info(f"✅ VERIFY - Created assignment {created_doc.name}")
-                frappe.logger().info(f"           application_type={created_doc.application_type}, start_date={created_doc.start_date}, end_date={created_doc.end_date}")
                 
                 created_names.append(assignment_doc.name)
                 
@@ -574,7 +544,6 @@ def create_subject_assignment():
 
         # VALIDATION: If ALL assignments were skipped (all duplicates), return error
         if len(created_names) == 0 and len(skipped_duplicates) > 0:
-            frappe.logger().info(f"❌ All {len(skipped_duplicates)} assignments already exist - returning validation error")
             return validation_error_response(
                 message="Tất cả phân công đã tồn tại",
                 errors={
@@ -594,7 +563,6 @@ def create_subject_assignment():
             
             for assignment_id in created_names:
                 try:
-                    frappe.logger().info(f"🔄 Syncing assignment {assignment_id}")
                     sync_result = sync_assignment_to_timetable(
                         assignment_id=assignment_id,
                         replace_teacher_map=replace_teacher_map
@@ -603,7 +571,6 @@ def create_subject_assignment():
                     # Check for conflicts
                     if not sync_result.get("success") and sync_result.get("error_type") == "teacher_conflict":
                         # Conflict detected!
-                        frappe.logger().warning(f"⚠️ Conflict detected for assignment {assignment_id}")
                         conflicts = sync_result.get("conflicts", [])
                         
                         # Add assignment_id to each conflict for frontend tracking
@@ -619,7 +586,6 @@ def create_subject_assignment():
                 except Exception as sync_error:
                     error_msg = f"Timetable sync failed for assignment {assignment_id}: {str(sync_error)}"
                     frappe.log_error(error_msg, "Timetable Sync Error")
-                    frappe.logger().error(f"❌ {error_msg}")
                     
                     # ⚡ CRITICAL: Throw exception to rollback transaction
                     # This ensures we don't create "orphan" assignments without timetable sync
@@ -628,7 +594,6 @@ def create_subject_assignment():
             # If there are conflicts, rollback and return conflict error
             if all_conflicts:
                 frappe.db.rollback()
-                frappe.logger().warning(f"⚠️ Rolling back due to {len(all_conflicts)} conflicts")
                 
                 # Return conflict response using standard format but with additional fields
                 conflict_response = {
@@ -638,10 +603,8 @@ def create_subject_assignment():
                     "conflicts": all_conflicts,
                     "created_assignments": created_names  # Frontend can use this to retry
                 }
-                frappe.logger().info(f"🚫 Returning conflict response: {conflict_response}")
                 return conflict_response
             
-            frappe.logger().info(f"✅ Timetable sync completed: {sync_summary}")
             
             # ⚡ NOTE: Teacher Timetable sync is ALREADY handled by sync_assignment_to_timetable()
             # above (line 598). It calls sync_for_rows() which updates Teacher Timetable.
@@ -811,7 +774,6 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
         dict: Updated assignment data with sync summary
     """
     try:
-        frappe.logger().info(f"UPDATE DEBUG - API called with assignment_id={assignment_id}, teacher_id={teacher_id}, actual_subject_id={actual_subject_id}")
 
         # Get data from POST body first (JSON payload)
         if frappe.request.data:
@@ -823,7 +785,6 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
 
                 if json_str.strip():
                     json_data = json.loads(json_str)
-                    frappe.logger().info(f"UPDATE DEBUG - Parsed JSON data: {json_data}")
 
                     assignment_id = json_data.get('assignment_id') or assignment_id
                     teacher_id = json_data.get('teacher_id') or teacher_id
@@ -884,7 +845,6 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
         except frappe.DoesNotExistError:
             return not_found_response("Subject assignment not found")
         
-        frappe.logger().info(f"UPDATE DEBUG - Current assignment: teacher={assignment_doc.teacher_id}, actual_subject={assignment_doc.actual_subject_id}, class={assignment_doc.class_id}")
 
         # Update fields if provided
         if teacher_id and teacher_id != assignment_doc.teacher_id:
@@ -938,7 +898,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                 application_type = json_data.get('application_type') or application_type
                 start_date = json_data.get('start_date') or start_date
                 end_date = json_data.get('end_date') or end_date
-            except:
+            except (json.JSONDecodeError, TypeError):
                 pass
         
         if application_type and application_type != getattr(assignment_doc, 'application_type', 'full_year'):
@@ -996,9 +956,6 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                 (old_application_type == "from_date" and (old_start_date != new_start_date or old_end_date != new_end_date))
             )
             
-            frappe.logger().info(f"UPDATE SYNC - Delete decision: old_teacher={old_teacher_id}, new_teacher={new_teacher_id}, old_type={old_application_type}, new_type={new_application_type}")
-            frappe.logger().info(f"              Old dates: {old_start_date} to {old_end_date}, New dates: {new_start_date} to {new_end_date}")
-            frappe.logger().info(f"              should_delete_overrides={should_delete_overrides}")
             
             if should_delete_overrides:
                 try:
@@ -1016,9 +973,8 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                             campus_id
                         )
                         debug_info['override_rows_deleted'] = override_deleted
-                        frappe.logger().info(f"UPDATE SYNC - Deleted {override_deleted} old override rows")
-                except Exception as override_del_error:
-                    frappe.logger().error(f"UPDATE SYNC - Failed to delete old override rows: {str(override_del_error)}")
+                except Exception:
+                    pass  # Continue even if override deletion fails
             
             assignment_doc.save()
             frappe.db.commit()
@@ -1169,7 +1125,6 @@ def delete_subject_assignment(assignment_id=None):
         # BEFORE DELETE: Sync TKB to remove teacher from timetable rows
         sync_summary = {}
         try:
-            frappe.logger().info(f"DELETE SYNC - Starting for assignment: teacher={assignment_doc.teacher_id}, class={assignment_doc.class_id}")
             
             # Get all timetable instances for this class
             instances = frappe.db.sql("""
@@ -1241,7 +1196,6 @@ def delete_subject_assignment(assignment_id=None):
                 # ✅ FIX: Delete Teacher Timetable entries (materialized view)
                 teacher_timetable_deleted = 0
                 try:
-                    frappe.logger().info(f"DELETE SYNC - Deleting Teacher Timetable entries for teacher={assignment_doc.teacher_id}")
                     
                     # Delete ALL Teacher Timetable entries for this teacher + class + subject
                     # (Not just future dates - also delete past entries for data consistency)
@@ -1256,13 +1210,10 @@ def delete_subject_assignment(assignment_id=None):
                         ','.join(['%s'] * len(instance_ids))
                     ), tuple([assignment_doc.teacher_id, assignment_doc.class_id] + subject_ids + instance_ids))
                     
-                    frappe.logger().info(f"DELETE SYNC - Deleted {teacher_timetable_deleted or 0} Teacher Timetable entries")
                     frappe.db.commit()
                     
-                except Exception as teacher_tt_error:
-                    frappe.logger().error(f"DELETE SYNC - Failed to delete Teacher Timetable: {str(teacher_tt_error)}")
-                    import traceback
-                    frappe.logger().error(traceback.format_exc())
+                except Exception:
+                    pass  # Continue even if Teacher Timetable deletion fails
                 
                 # DISABLED: Student Timetable sync removed (not used, wastes 50% performance)
                 student_timetable_updated = 0
@@ -1282,7 +1233,6 @@ def delete_subject_assignment(assignment_id=None):
                     )
                 }
         except Exception as sync_error:
-            frappe.logger().error(f"DELETE SYNC - Failed: {str(sync_error)}")
             frappe.log_error(f"DELETE SYNC Error: {str(sync_error)}")
         
         # Delete the document
