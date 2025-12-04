@@ -35,10 +35,12 @@ def sync_for_rows(row_ids: List[str]):
 	frappe.logger().info(f"🔄 Starting incremental sync for {len(row_ids)} rows")
 	
 	# Get row details với instance info
+	# ⚡ FIX: Also select teacher_1_id, teacher_2_id for backward compatibility
 	rows = frappe.db.sql("""
 		SELECT 
 			r.name, r.parent, r.date, r.day_of_week,
 			r.timetable_column_id, r.subject_id, r.room_id,
+			r.teacher_1_id, r.teacher_2_id,
 			i.class_id, i.start_date, i.end_date, i.campus_id
 		FROM `tabSIS Timetable Instance Row` r
 		INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
@@ -66,8 +68,24 @@ def sync_for_rows(row_ids: List[str]):
 			teacher_map[child.parent].append(child.teacher_id)
 	
 	# Attach teachers to rows
+	# ⚡ FIX: Fallback to teacher_1_id, teacher_2_id if child table is empty
 	for row in rows:
-		row['teachers'] = teacher_map.get(row.name, [])
+		teachers_from_child = teacher_map.get(row.name, [])
+		
+		if teachers_from_child:
+			# Use teachers from child table (new format)
+			row['teachers'] = teachers_from_child
+		else:
+			# Fallback: Use teacher_1_id, teacher_2_id (old format)
+			fallback_teachers = []
+			if row.get('teacher_1_id'):
+				fallback_teachers.append(row['teacher_1_id'])
+			if row.get('teacher_2_id'):
+				fallback_teachers.append(row['teacher_2_id'])
+			row['teachers'] = fallback_teachers
+			
+			if fallback_teachers:
+				frappe.logger().info(f"📋 Row {row.name}: Using fallback teachers {fallback_teachers}")
 	
 	if not rows:
 		frappe.logger().info("⚠️  No rows found to sync")

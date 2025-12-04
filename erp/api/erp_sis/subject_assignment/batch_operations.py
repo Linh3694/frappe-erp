@@ -952,3 +952,106 @@ def sync_teacher_timetable_bulk(teacher_id: str, assignment_ids: List[str]) -> D
 		"details": details
 	}
 
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def resync_all_teacher_timetables(campus_id: str = None, class_id: str = None):
+	"""
+	⚡ ADMIN UTILITY: Resync ALL Teacher Timetable entries from pattern rows.
+	
+	This is useful when:
+	- Data was lost or corrupted
+	- Need to refresh materialized view
+	
+	Args:
+		campus_id: Optional - filter by campus (default: user's campus)
+		class_id: Optional - filter by specific class
+	
+	Returns:
+		dict: Summary of sync operation
+	"""
+	try:
+		from erp.utils.campus_utils import get_current_campus_from_context
+		from erp.api.erp_sis.utils.materialized_view_optimizer import sync_for_rows
+		
+		# Get campus
+		if not campus_id:
+			campus_id = get_current_campus_from_context()
+		if not campus_id:
+			campus_id = "campus-1"
+		
+		# Build instance filters
+		instance_filters = {"campus_id": campus_id}
+		if class_id:
+			instance_filters["class_id"] = class_id
+		
+		# Get all active timetable instances
+		today = frappe.utils.getdate()
+		instances = frappe.db.sql("""
+			SELECT name, class_id, start_date, end_date
+			FROM `tabSIS Timetable Instance`
+			WHERE campus_id = %s
+			  AND end_date >= %s
+			  {}
+			ORDER BY class_id, start_date
+		""".format(
+			"AND class_id = %s" if class_id else ""
+		), (campus_id, today, class_id) if class_id else (campus_id, today), as_dict=True)
+		
+		if not instances:
+			return {
+				"success": True,
+				"message": "Không có timetable instance nào để sync",
+				"instances_processed": 0,
+				"rows_synced": 0
+			}
+		
+		instance_ids = [i.name for i in instances]
+		
+		# Get ALL pattern rows (date IS NULL) from these instances
+		pattern_rows = frappe.db.sql("""
+			SELECT name
+			FROM `tabSIS Timetable Instance Row`
+			WHERE parent IN ({})
+			  AND date IS NULL
+		""".format(','.join(['%s'] * len(instance_ids))),
+		tuple(instance_ids),
+		as_dict=True)
+		
+		if not pattern_rows:
+			return {
+				"success": True,
+				"message": "Không có pattern rows nào để sync",
+				"instances_processed": len(instances),
+				"rows_synced": 0
+			}
+		
+		row_ids = [r.name for r in pattern_rows]
+		
+		# Sync in batches to avoid timeout
+		batch_size = 100
+		total_synced = 0
+		
+		for i in range(0, len(row_ids), batch_size):
+			batch = row_ids[i:i + batch_size]
+			sync_for_rows(batch)
+			total_synced += len(batch)
+			frappe.logger().info(f"✅ Synced batch {i // batch_size + 1}: {len(batch)} rows")
+		
+		frappe.db.commit()
+		
+		return {
+			"success": True,
+			"message": f"Đã sync thành công {total_synced} pattern rows từ {len(instances)} timetable instances",
+			"instances_processed": len(instances),
+			"rows_synced": total_synced,
+			"campus_id": campus_id,
+			"class_id": class_id
+		}
+		
+	except Exception as e:
+		frappe.log_error(f"Error resyncing teacher timetables: {str(e)}")
+		return {
+			"success": False,
+			"message": f"Lỗi khi sync: {str(e)}"
+		}
+
