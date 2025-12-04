@@ -283,18 +283,18 @@ def get_teacher_week():
                 # First, collect room_ids that rows already have (from Teacher Timetable)
                 existing_room_ids = list({r.get("room_id") for r in rows if r.get("room_id")})
                 
-                # Query room details for existing room_ids
+                # Query room details for existing room_ids from ERP Administrative Room
                 room_details_map = {}  # {room_id: {room_name, room_type}}
                 if existing_room_ids:
                     room_details = frappe.db.sql("""
-                        SELECT name, room_name, room_type
-                        FROM `tabSIS Room`
+                        SELECT name, title_vn, short_title, room_type
+                        FROM `tabERP Administrative Room`
                         WHERE name IN %s
                     """, (existing_room_ids,), as_dict=True)
                     
                     for rd in room_details:
                         room_details_map[rd.name] = {
-                            "room_name": rd.room_name,
+                            "room_name": rd.short_title or rd.title_vn,
                             "room_type": rd.room_type
                         }
                 
@@ -303,18 +303,18 @@ def get_teacher_week():
                 class_room_map = {}  # {class_id: {room_id, room_name, room_type}}
                 
                 if class_ids:
-                    # Query all rooms for these classes at once
+                    # SIS Class has field 'room' linking to ERP Administrative Room
                     class_rooms = frappe.db.sql("""
-                        SELECT c.name as class_id, r.name as room_id, r.room_name, r.room_type
+                        SELECT c.name as class_id, r.name as room_id, r.title_vn, r.short_title, r.room_type
                         FROM `tabSIS Class` c
-                        LEFT JOIN `tabSIS Room` r ON c.default_room_id = r.name
+                        LEFT JOIN `tabERP Administrative Room` r ON c.room = r.name
                         WHERE c.name IN %s
                     """, (class_ids,), as_dict=True)
                     
                     for cr in class_rooms:
                         class_room_map[cr.class_id] = {
                             "room_id": cr.room_id,
-                            "room_name": cr.room_name or "Chưa có phòng",
+                            "room_name": cr.short_title or cr.title_vn or "Chưa có phòng",
                             "room_type": cr.room_type
                         }
                 
@@ -480,6 +480,7 @@ def get_class_week():
                     "date",
                     "timetable_column_id",
                     "subject_id",
+                    "room_id",
                 ],
                 filters=pattern_filters,
                 order_by="day_of_week asc",
@@ -495,6 +496,7 @@ def get_class_week():
                     "date",
                     "timetable_column_id",
                     "subject_id",
+                    "room_id",
                 ],
                 filters=override_filters,
                 order_by="date asc, day_of_week asc",
@@ -646,18 +648,18 @@ def get_class_week():
                 # First, collect room_ids that rows already have (from Instance Rows)
                 existing_room_ids = list({r.get("room_id") for r in rows if r.get("room_id")})
                 
-                # Query room details for existing room_ids
+                # Query room details for existing room_ids from ERP Administrative Room
                 room_details_map = {}  # {room_id: {room_name, room_type}}
                 if existing_room_ids:
                     room_details = frappe.db.sql("""
-                        SELECT name, room_name, room_type
-                        FROM `tabSIS Room`
+                        SELECT name, title_vn, short_title, room_type
+                        FROM `tabERP Administrative Room`
                         WHERE name IN %s
                     """, (existing_room_ids,), as_dict=True)
                     
                     for rd in room_details:
                         room_details_map[rd.name] = {
-                            "room_name": rd.room_name,
+                            "room_name": rd.short_title or rd.title_vn,
                             "room_type": rd.room_type
                         }
                 
@@ -666,17 +668,18 @@ def get_class_week():
                 class_room_map = {}
                 
                 if class_ids_for_fallback:
+                    # SIS Class has field 'room' linking to ERP Administrative Room
                     class_rooms = frappe.db.sql("""
-                        SELECT c.name as class_id, r.name as room_id, r.room_name, r.room_type
+                        SELECT c.name as class_id, r.name as room_id, r.title_vn, r.short_title, r.room_type
                         FROM `tabSIS Class` c
-                        LEFT JOIN `tabSIS Room` r ON c.default_room_id = r.name
+                        LEFT JOIN `tabERP Administrative Room` r ON c.room = r.name
                         WHERE c.name IN %s
                     """, (class_ids_for_fallback,), as_dict=True)
                     
                     for cr in class_rooms:
                         class_room_map[cr.class_id] = {
                             "room_id": cr.room_id,
-                            "room_name": cr.room_name or "Chưa có phòng",
+                            "room_name": cr.short_title or cr.title_vn or "Chưa có phòng",
                             "room_type": cr.room_type
                         }
                 
