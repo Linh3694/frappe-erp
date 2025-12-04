@@ -337,7 +337,8 @@ def batch_get_active_leaves():
                 start_date,
                 end_date,
                 total_days,
-                description
+                description,
+                submitted_at
             FROM `tabSIS Student Leave Request`
             WHERE student_id IN %(student_ids)s
                 AND start_date <= %(date)s

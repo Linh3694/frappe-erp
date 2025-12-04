@@ -149,24 +149,41 @@ def sync_event_to_class_attendance():
             return success_response({"synced_count": 0}, "No matching date found")
 
         # Lấy education_stage_id của lớp để filter timetable column chính xác
-        if class_id:
-            # Lấy education_grade từ class
-            class_info = frappe.get_all("SIS Class",
-                                      filters={"name": class_id},
-                                      fields=["education_grade"],
-                                      limit=1)
+        education_stage_id = None  # Initialize variable
+        
+        # Lấy class_id từ event students để xác định education_stage
+        event_students_for_class = frappe.get_all("SIS Event Student",
+                                                 filters={"event_id": event_id, "status": "approved"},
+                                                 fields=["class_student_id"],
+                                                 limit=1)
+        
+        if event_students_for_class:
+            class_student_id = event_students_for_class[0].get('class_student_id')
+            if class_student_id:
+                class_info_from_student = frappe.get_all("SIS Class Student",
+                                                       filters={"name": class_student_id},
+                                                       fields=["class_id"],
+                                                       limit=1)
+                if class_info_from_student:
+                    derived_class_id = class_info_from_student[0].get('class_id')
+                    if derived_class_id:
+                        # Lấy education_grade từ class
+                        class_info = frappe.get_all("SIS Class",
+                                                  filters={"name": derived_class_id},
+                                                  fields=["education_grade"],
+                                                  limit=1)
 
-            if class_info:
-                education_grade = class_info[0].get("education_grade")
-                if education_grade:
-                    # Lấy education_stage_id từ education_grade
-                    grade_info = frappe.get_all("SIS Education Grade",
-                                              filters={"name": education_grade},
-                                              fields=["education_stage_id"],
-                                              limit=1)
+                        if class_info:
+                            education_grade = class_info[0].get("education_grade")
+                            if education_grade:
+                                # Lấy education_stage_id từ education_grade
+                                grade_info = frappe.get_all("SIS Education Grade",
+                                                          filters={"name": education_grade},
+                                                          fields=["education_stage_id"],
+                                                          limit=1)
 
-                    if grade_info:
-                        education_stage_id = grade_info[0].get("education_stage_id")
+                                if grade_info:
+                                    education_stage_id = grade_info[0].get("education_stage_id")
 
         # Lấy tất cả schedules (tiết học) theo education_stage_id
         schedule_filters = {"period_type": "study"}
@@ -309,8 +326,9 @@ def get_events_by_class_period():
         class_id = frappe.request.args.get('class_id')
         date = frappe.request.args.get('date')
         period = frappe.request.args.get('period')
+        education_stage_id = frappe.request.args.get('education_stage_id')  # Added: education_stage filter
         
-        debug_logs.append(f"📝 [Backend] Parameters: class_id={class_id}, date={date}, period={period}")
+        debug_logs.append(f"📝 [Backend] Parameters: class_id={class_id}, date={date}, period={period}, education_stage_id={education_stage_id}")
 
         if not class_id or not date or not period:
             debug_logs.append("❌ [Backend] Missing required parameters")
@@ -333,22 +351,27 @@ def get_events_by_class_period():
             return error_response(f"Failed to get events: {str(events_error)}", code="GET_EVENTS_ERROR", debug_info={"logs": debug_logs})
 
         # Chỉ lấy study periods matching với period requested
+        # Filter theo education_stage_id nếu có để đảm bảo chỉ lấy schedules của đúng cấp học
         try:
-            debug_logs.append(f"🔍 [Backend] Querying schedules for period: {period}")
+            debug_logs.append(f"🔍 [Backend] Querying schedules for period: {period}, education_stage_id: {education_stage_id}")
+            
+            # Build base filters
+            base_filters_name = {"period_type": "study", "period_name": period}
+            base_filters_priority = {"period_type": "study", "period_priority": period}
+            
+            # Add education_stage_id filter if provided
+            if education_stage_id:
+                base_filters_name["education_stage_id"] = education_stage_id
+                base_filters_priority["education_stage_id"] = education_stage_id
+            
             # Query với 2 filters riêng rồi merge
             schedules_by_name = frappe.get_all("SIS Timetable Column", 
                                              fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
-                                             filters={
-                                                 "period_type": "study",
-                                                 "period_name": period
-                                             })
+                                             filters=base_filters_name)
             
             schedules_by_priority = frappe.get_all("SIS Timetable Column", 
                                                  fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
-                                                 filters={
-                                                     "period_type": "study",
-                                                     "period_priority": period
-                                                 })
+                                                 filters=base_filters_priority)
             
             # Merge và remove duplicates
             schedule_names = set()
@@ -446,24 +469,15 @@ def get_events_by_class_period():
                             # Try multiple filter approaches
                             event_students = []
                             
-                            # Try 1: event_id field
+                            # Get event students
                             try:
                                 event_students = frappe.get_all("SIS Event Student",
                                                                filters={"event_id": event['name']},
                                                                fields=["class_student_id", "status"])
-                                debug_logs.append(f"🔍 [Backend] Try 1 - event_id filter: {len(event_students)} students")
+                                debug_logs.append(f"🔍 [Backend] Found {len(event_students)} event students")
                             except Exception as e1:
-                                debug_logs.append(f"❌ [Backend] Try 1 failed: {str(e1)}")
-                            
-                            # Try 2: using event_id if first failed
-                            if not event_students:
-                                try:
-                                    event_students = frappe.get_all("SIS Event Student",
-                                                                   filters={"event_id": event['name']},
-                                                                   fields=["class_student_id", "status"])
-                                    debug_logs.append(f"🔍 [Backend] Try 2 - event_id filter: {len(event_students)} students")
-                                except Exception as e2:
-                                    debug_logs.append(f"❌ [Backend] Try 2 failed: {str(e2)}")
+                                debug_logs.append(f"❌ [Backend] Error getting event students: {str(e1)}")
+                                event_students = []
                             
                             # Try 3: No field filter, get all and debug
                             if not event_students:
@@ -721,7 +735,6 @@ def batch_get_event_attendance():
                                    filters={"status": "approved"})
         
         frappe.logger().info(f"📊 [Backend] Found {len(all_events)} approved events total")
-        frappe.logger().info(f"📊 [Backend] Events list: {[e['name'] + ' - ' + e['title'] for e in all_events]}")
         
         # Get timetable columns for these periods (once)
         schedule_filters = {"period_type": "study", "period_name": ["in", periods]}
@@ -734,14 +747,6 @@ def batch_get_event_attendance():
                                   fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
                                   filters=schedule_filters)
 
-        frappe.logger().info(f"📚 [Debug] Raw schedules found: {schedules}")
-
-        # Debug: Check all available schedules for this education stage
-        if education_stage_id:
-            all_schedules_for_stage = frappe.get_all("SIS Timetable Column",
-                                                   filters={"education_stage_id": education_stage_id},
-                                                   fields=["name", "period_name", "period_type", "period_priority"])
-            frappe.logger().info(f"📚 [Debug] All schedules for education_stage {education_stage_id}: {all_schedules_for_stage}")
 
         # Create period_name -> schedule mapping
         schedule_map = {}
@@ -751,8 +756,6 @@ def batch_get_event_attendance():
                 schedule_map[period_name] = s
 
         frappe.logger().info(f"📚 [Backend] Loaded {len(schedules)} schedules for {len(periods)} periods")
-        frappe.logger().info(f"📋 [Debug] Schedule map: {schedule_map}")
-        frappe.logger().info(f"📋 [Debug] Requested periods: {periods}")
         
         # Get class students (once)
         class_students = frappe.get_all("SIS Class Student",
@@ -764,7 +767,6 @@ def batch_get_event_attendance():
         
         # Result structure
         result = {}
-        overlap_debug = []  # Track overlap checking results
         for period in periods:
             result[period] = {"events": [], "statuses": {}}
         
@@ -776,27 +778,20 @@ def batch_get_event_attendance():
                                                  filters={"event_id": event['name']},
                                                  fields=["event_date", "start_time", "end_time"])
                 
-                frappe.logger().info(f"🔍 [Debug] Event {event['name']}: found {len(event_date_times)} date times")
-                
                 # Check if event affects our date
                 matching_dt = None
                 for dt in event_date_times:
-                    frappe.logger().info(f"🔍 [Debug] Checking date time: event_date={dt.get('event_date')} vs requested date={date}")
                     if str(dt.get('event_date')) == date:
                         matching_dt = dt
-                        frappe.logger().info(f"✅ [Debug] Found matching date time for event {event['name']}")
                         break
                 
                 if not matching_dt:
-                    frappe.logger().info(f"⚠️ [Debug] Event {event['name']} has no matching date time for {date}")
                     continue
                 
                 # Get event students (once per event)
                 event_students = frappe.get_all("SIS Event Student",
                                                filters={"event_id": event['name']},
                                                fields=["class_student_id", "status"])
-                
-                frappe.logger().info(f"👥 [Debug] Event {event['name']}: found {len(event_students)} event students")
                 
                 # Match with class students
                 matching_student_ids = []
@@ -806,10 +801,7 @@ def batch_get_event_attendance():
                         student_id = class_student_dict[class_student_id]
                         matching_student_ids.append(student_id)
                 
-                frappe.logger().info(f"👥 [Debug] Event {event['name']}: {len(matching_student_ids)} matching students from this class")
-                
                 if not matching_student_ids:
-                    frappe.logger().warning(f"⚠️ [Debug] Event {event['name']} has no students from class {class_id}, skipping overlap check")
                     continue
                 
                 # Check which periods this event overlaps with
@@ -822,41 +814,16 @@ def batch_get_event_attendance():
                     'endTime': str(end_time_raw) if end_time_raw else ''
                 }
 
-                frappe.logger().info(f"🎯 [Debug] Event {event['name']} ({event['title']}) time range: {event_time_range}")
-                frappe.logger().info(f"🎯 [Debug] Event time types: start_time type={type(start_time_raw)}, end_time type={type(end_time_raw)}")
-                frappe.logger().info(f"🎯 [Debug] Event time values: start={start_time_raw}, end={end_time_raw}")
-
                 # Track if this event overlaps with any period
                 event_has_overlap = False
 
                 for period_name in periods:
                     schedule = schedule_map.get(period_name)
                     if not schedule:
-                        frappe.logger().warning(f"⚠️ [Debug] No schedule found for period {period_name}")
                         continue
 
-                    # Use schedule directly for overlap check (contains start_time and end_time)
-                    # time_ranges_overlap expects: range2.get('start_time') and range2.get('end_time')
-                    schedule_start_raw = schedule.get('start_time')
-                    schedule_end_raw = schedule.get('end_time')
-                    
-                    frappe.logger().info(f"📅 [Debug] Checking period '{period_name}':")
-                    frappe.logger().info(f"📅 [Debug]   Event: {event_time_range}")
-                    frappe.logger().info(f"📅 [Debug]   Schedule: start={schedule_start_raw} (type={type(schedule_start_raw)}), end={schedule_end_raw} (type={type(schedule_end_raw)})")
-
                     overlap = time_ranges_overlap(event_time_range, schedule)
-                    overlap_debug.append({
-                        "event": event['name'],
-                        "period": period_name,
-                        "event_time": event_time_range,
-                        "schedule_start": str(schedule_start_raw) if schedule_start_raw else None,
-                        "schedule_end": str(schedule_end_raw) if schedule_end_raw else None,
-                        "overlap": overlap
-                    })
-                    frappe.logger().info(f"🧮 [Debug] Overlap result for {period_name}: {overlap}")
-
                     if overlap:
-                        frappe.logger().info(f"✅ [Debug] OVERLAP FOUND! Event {event['name']} overlaps with {period_name}")
                         event_has_overlap = True
                         # Event affects this period!
                         result[period_name]["events"].append({
@@ -864,13 +831,6 @@ def batch_get_event_attendance():
                             "eventTitle": event['title'],
                             "studentIds": matching_student_ids
                         })
-                    else:
-                        frappe.logger().info(f"❌ [Debug] NO OVERLAP: Event {event['name']} does not overlap with {period_name}")
-
-                # Debug: Log if event has no overlaps but has participants
-                if not event_has_overlap and matching_student_ids:
-                    frappe.logger().warning(f"⚠️ [Debug] Event {event['name']} has {len(matching_student_ids)} participants but no overlapping periods found!")
-                    frappe.logger().warning(f"⚠️ [Debug] Event time: {event_time_range}, Available periods: {list(schedule_map.keys())}")
                 
             except Exception as event_error:
                 frappe.logger().warning(f"⚠️ [Backend] Error processing event {event.get('name')}: {str(event_error)}")
@@ -918,25 +878,7 @@ def batch_get_event_attendance():
         
         frappe.logger().info(f"✅ [Backend] batch_get_event_attendance completed successfully")
 
-        # Include debug info in response
-        debug_info = {
-            "date_requested": date,
-            "class_id": class_id,
-            "events_found": len(all_events),
-            "events_list": [{"name": e["name"], "title": e["title"]} for e in all_events[:5]],  # First 5 events
-            "schedules_found": len(schedules),
-            "schedule_filters": schedule_filters,
-            "requested_periods": periods,
-            "education_stage_id": education_stage_id,
-            "class_students_count": len(class_students),
-            "schedule_map_keys": list(schedule_map.keys()) if schedule_map else [],
-            "schedule_samples": list(schedule_map.values())[:2] if schedule_map else [],  # Show first 2 schedules as sample
-            "overlap_check_results": overlap_debug,  # Show ALL overlap checks for debugging
-            "total_overlap_checks": len(overlap_debug),
-            "overlaps_found": len([d for d in overlap_debug if d.get('overlap')])
-        }
-
-        return success_response(result, debug_info=debug_info)
+        return success_response(result)
         
     except Exception as e:
         import traceback

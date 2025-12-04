@@ -52,36 +52,28 @@ def _get_student_parent_emails(student_id):
     """Get all parent emails for a student"""
     # Query relationships to find parents
     try:
-        print(f"🔍 [_get_student_parent_emails] Looking for relationships for student_id: {student_id}")
         relationships = frappe.get_all(
             "CRM Family Relationship",
             filters={"student": student_id},
             fields=["guardian"]
         )
-        print(f"🔍 [_get_student_parent_emails] Found {len(relationships)} relationships")
-    except Exception as e:
-        print(f"❌ [_get_student_parent_emails] Error querying relationships: {str(e)}")
+    except Exception:
         return []
     
     parent_emails = []
-    for idx, rel in enumerate(relationships):
-        print(f"🔍 [_get_student_parent_emails] Relationship {idx}: {rel}")
+    for rel in relationships:
         if rel.guardian:
             try:
                 # Get guardian document - use get_value instead of get_doc to avoid DocType not found exceptions
                 guardian_id = frappe.db.get_value("CRM Guardian", rel.guardian, "guardian_id")
-                print(f"🔍 [_get_student_parent_emails] Guardian {rel.guardian} -> guardian_id: {guardian_id}")
                 if guardian_id:
                     # Parent email format: guardian_id@parent.wellspring.edu.vn
                     email = f"{guardian_id}@parent.wellspring.edu.vn"
                     parent_emails.append(email)
-                    print(f"✅ [_get_student_parent_emails] Added email: {email}")
-            except Exception as e:
+            except Exception:
                 # Silently skip guardians that don't exist or have issues
-                print(f"⚠️ [_get_student_parent_emails] Error processing guardian {rel.guardian}: {str(e)}")
                 continue
     
-    print(f"✅ [_get_student_parent_emails] Final parent_emails: {parent_emails}")
     return parent_emails
 
 
