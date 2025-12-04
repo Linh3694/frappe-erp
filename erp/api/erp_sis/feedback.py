@@ -710,8 +710,15 @@ def add_reply():
         data = _get_request_data()
         feedback_name = data.get("name")
         content = data.get("content")
-        is_internal = data.get("is_internal", False)
-        is_draft = data.get("is_draft", False)
+        
+        # Parse boolean values properly (FormData sends strings "0"/"1")
+        is_internal_raw = data.get("is_internal", False)
+        is_internal = is_internal_raw in [True, 1, "1", "true", "True"]
+        
+        is_draft_raw = data.get("is_draft", False)
+        is_draft = is_draft_raw in [True, 1, "1", "true", "True"]
+        
+        frappe.logger().info(f"[add_reply] is_internal_raw={is_internal_raw}, is_internal={is_internal}")
 
         if not feedback_name:
             return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
@@ -808,15 +815,22 @@ def add_reply():
         frappe.db.commit()
         
         # Send push notification to guardian (only for non-internal replies)
+        frappe.logger().info(f"[add_reply] Checking notification: is_internal={is_internal}")
         if not is_internal:
             try:
+                frappe.logger().info(f"[add_reply] Sending notification to guardian for feedback {feedback.name}")
                 from erp.api.notification.feedback import send_staff_reply_notification_to_guardian
                 # Get staff name for notification
                 staff_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
                 send_staff_reply_notification_to_guardian(feedback, staff_name)
+                frappe.logger().info(f"[add_reply] Notification function called successfully")
             except Exception as notify_error:
                 frappe.logger().error(f"Error sending guardian notification: {str(notify_error)}")
+                import traceback
+                frappe.logger().error(f"Traceback: {traceback.format_exc()}")
                 # Don't fail the request if notification fails
+        else:
+            frappe.logger().info(f"[add_reply] Skipping notification because is_internal={is_internal}")
         
         return success_response(
             data={"name": feedback.name},
