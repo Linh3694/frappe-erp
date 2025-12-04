@@ -894,6 +894,44 @@ def close_feedback():
 
 
 @frappe.whitelist(allow_guest=False)
+def delete_feedback():
+    """Delete feedback permanently"""
+    try:
+        _check_staff_permission()
+        
+        data = _get_request_data()
+        request_args = frappe.request.args
+        
+        feedback_name = data.get("name") or request_args.get("name")
+        if not feedback_name:
+            return validation_error_response("name là bắt buộc", {"name": ["name là bắt buộc"]})
+        
+        # Get feedback to check if exists
+        feedback = frappe.get_doc("Feedback", feedback_name)
+        
+        # Delete the feedback
+        frappe.delete_doc("Feedback", feedback_name, force=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": feedback_name},
+            message="Xóa feedback thành công"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Feedback không tồn tại",
+            code="NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error deleting feedback: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi xóa feedback: {str(e)}",
+            code="DELETE_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
 def sla_report():
     """SLA performance report"""
     try:
