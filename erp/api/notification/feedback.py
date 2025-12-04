@@ -57,11 +57,6 @@ def send_new_feedback_notification(feedback_doc):
         feedback_doc: The newly created Feedback document
     """
     try:
-        # Only notify for "Góp ý" type (not "Đánh giá")
-        if feedback_doc.feedback_type != "Góp ý":
-            frappe.logger().info(f"📱 [Feedback Notification] Skipping notification for feedback type: {feedback_doc.feedback_type}")
-            return
-
         # Get guardian info
         guardian_name = "Phụ huynh"
         if feedback_doc.guardian:
@@ -71,11 +66,21 @@ def send_new_feedback_notification(feedback_doc):
             except:
                 pass
 
-        # Prepare notification content
-        title = f"Góp ý mới từ {guardian_name}"
-        body = feedback_doc.title or "Nhấn để xem chi tiết"
-        if len(body) > 100:
-            body = body[:97] + "..."
+        # Prepare notification content based on feedback type
+        if feedback_doc.feedback_type == "Đánh giá":
+            # Calculate actual rating (stored as 0-1, need to convert to 1-5)
+            actual_rating = round((feedback_doc.rating or 0) * 5)
+            stars = "⭐" * actual_rating
+            title = f"Đánh giá mới từ {guardian_name}"
+            body = f"{stars} - {feedback_doc.rating_comment or 'Nhấn để xem chi tiết'}"
+            if len(body) > 100:
+                body = body[:97] + "..."
+        else:
+            # Góp ý
+            title = f"Góp ý mới từ {guardian_name}"
+            body = feedback_doc.title or "Nhấn để xem chi tiết"
+            if len(body) > 100:
+                body = body[:97] + "..."
 
         # Notification data
         data = {
@@ -83,8 +88,10 @@ def send_new_feedback_notification(feedback_doc):
             "action": "new_feedback",
             "feedbackId": feedback_doc.name,
             "feedbackCode": feedback_doc.name,
+            "feedbackType": feedback_doc.feedback_type,
             "guardianName": guardian_name,
             "title": feedback_doc.title or "",
+            "rating": round((feedback_doc.rating or 0) * 5) if feedback_doc.feedback_type == "Đánh giá" else None,
             "priority": feedback_doc.priority or "Trung bình",
             "department": feedback_doc.department or "",
             "timestamp": now_datetime().isoformat()
@@ -148,9 +155,14 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
             except:
                 pass
 
-        # Prepare notification content
+        # Prepare notification content based on feedback type
         title = f"Phản hồi mới từ {guardian_name}"
-        body = f"Góp ý: {feedback_doc.title or feedback_doc.name}"
+        if feedback_doc.feedback_type == "Đánh giá":
+            actual_rating = round((feedback_doc.rating or 0) * 5)
+            stars = "⭐" * actual_rating
+            body = f"Đánh giá {stars}: {feedback_doc.name}"
+        else:
+            body = f"Góp ý: {feedback_doc.title or feedback_doc.name}"
         if len(body) > 100:
             body = body[:97] + "..."
 
@@ -160,6 +172,7 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
             "action": "guardian_reply",
             "feedbackId": feedback_doc.name,
             "feedbackCode": feedback_doc.name,
+            "feedbackType": feedback_doc.feedback_type,
             "guardianName": guardian_name,
             "timestamp": now_datetime().isoformat()
         }

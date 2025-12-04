@@ -220,7 +220,7 @@ def create():
             normalized_rating = rating_value / 5.0
             feedback.rating = normalized_rating  # Store normalized value (0-1)
             feedback.rating_comment = data.get("rating_comment", "") or ""
-            feedback.status = "Hoàn thành"  # Auto-complete for rating
+            feedback.status = "Mới"  # Không auto-complete, để staff có thể phản hồi nếu cần (đặc biệt với đánh giá thấp)
             # Explicitly clear "Góp ý" fields for "Đánh giá" type
             feedback.department = None
             feedback.title = None
@@ -254,11 +254,10 @@ def create():
 
         frappe.db.commit()
         
-        # Send push notification to mobile staff (for "Góp ý" type only)
+        # Send push notification to mobile staff (cho cả Góp ý và Đánh giá)
         try:
-            if feedback.feedback_type == "Góp ý":
-                from erp.api.notification.feedback import send_new_feedback_notification
-                send_new_feedback_notification(feedback)
+            from erp.api.notification.feedback import send_new_feedback_notification
+            send_new_feedback_notification(feedback)
         except Exception as notify_error:
             frappe.logger().error(f"Error sending feedback notification: {str(notify_error)}")
             # Don't fail the request if notification fails
@@ -597,12 +596,7 @@ def add_reply():
                 code="PERMISSION_DENIED"
             )
         
-        # Check if feedback type allows replies
-        if feedback.feedback_type == "Đánh giá":
-            return error_response(
-                message="Đánh giá không thể có phản hồi",
-                code="REPLY_NOT_ALLOWED"
-            )
+        # Cho phép phản hồi cho cả Góp ý và Đánh giá (đặc biệt đánh giá thấp cần làm rõ)
         
         # Add reply
         reply_content = content
@@ -696,12 +690,7 @@ def close_and_rate():
                 code="PERMISSION_DENIED"
             )
         
-        # Only allow closing "Góp ý" type
-        if feedback.feedback_type != "Góp ý":
-            return error_response(
-                message="Chỉ có thể đóng feedback loại Góp ý",
-                code="CLOSE_NOT_ALLOWED"
-            )
+        # Cho phép đóng cả "Góp ý" và "Đánh giá"
         
         # Check if feedback has staff replies
         if not feedback.replies:
