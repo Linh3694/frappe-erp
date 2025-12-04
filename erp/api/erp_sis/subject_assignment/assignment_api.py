@@ -556,6 +556,7 @@ def create_subject_assignment():
         sync_summary = {"rows_updated": 0, "rows_skipped": 0}
         teacher_timetable_sync_summary = {"created": 0, "updated": 0, "errors": 0}
         all_conflicts = []  # Collect conflicts from all assignments
+        sync_warnings = []  # Track assignments that couldn't sync (e.g., no timetable yet)
         
         if created_names and affected_classes:
             # ✅ V2: Use new sync logic that supports conflict detection
@@ -581,8 +582,11 @@ def create_subject_assignment():
                             all_conflicts.extend(conflicts)
                         else:
                             # ⚡ FIX: Handle other sync failures (e.g., no pattern rows)
-                            # Don't silently ignore - log warning but allow assignment creation
-                            # This can happen if timetable hasn't been uploaded yet
+                            # Track warning for user notification
+                            sync_warnings.append({
+                                "assignment_id": assignment_id,
+                                "message": sync_result.get("message", "Chưa có thời khóa biểu")
+                            })
                             frappe.logger().warning(
                                 f"Timetable sync warning for {assignment_id}: {sync_result.get('message', 'Unknown error')}. "
                                 f"Debug: {sync_result.get('debug_info', [])}"
@@ -666,6 +670,7 @@ def create_subject_assignment():
         # Build response message
         created_count = len(created_names)
         skipped_count = len(skipped_duplicates)
+        sync_warning_count = len(sync_warnings)
         
         response_message_parts = []
         if created_count > 0:
@@ -674,6 +679,9 @@ def create_subject_assignment():
             response_message_parts.append(f"{skipped_count} phân công đã tồn tại (bỏ qua)")
         if sync_summary.get('rows_updated', 0) > 0:
             response_message_parts.append(f"TKB: {sync_summary.get('rows_updated', 0)} ô cập nhật")
+        elif sync_warning_count > 0:
+            # ⚡ FIX: Notify user that sync = 0 because no timetable yet
+            response_message_parts.append(f"TKB: 0 ô cập nhật (chưa có thời khóa biểu, sẽ tự đồng bộ khi upload TKB)")
         if teacher_timetable_sync_summary.get('created', 0) > 0 or teacher_timetable_sync_summary.get('updated', 0) > 0:
             total_synced = teacher_timetable_sync_summary.get('created', 0) + teacher_timetable_sync_summary.get('updated', 0)
             response_message_parts.append(f"Teacher View: {total_synced} entries synced")
@@ -698,7 +706,9 @@ def create_subject_assignment():
                 "subject_title": result.subject_title,
                 "class_title": result.class_title,
                 "sync_summary": sync_summary,
-                "skipped_duplicates": skipped_duplicates
+                "skipped_duplicates": skipped_duplicates,
+                "sync_warnings": sync_warnings,  # ⚡ Include sync warnings for frontend
+                "sync_warning_count": sync_warning_count
             }, response_message)
         else:
             return list_response({
@@ -706,7 +716,9 @@ def create_subject_assignment():
                 "sync_summary": sync_summary,
                 "skipped_duplicates": skipped_duplicates,
                 "created_count": created_count,
-                "skipped_count": skipped_count
+                "skipped_count": skipped_count,
+                "sync_warnings": sync_warnings,  # ⚡ Include sync warnings for frontend
+                "sync_warning_count": sync_warning_count
             }, response_message)
         
     except Exception as e:
