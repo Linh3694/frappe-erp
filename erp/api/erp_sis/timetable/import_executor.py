@@ -135,6 +135,15 @@ class TimetableImportExecutor:
 			except Exception as e:
 				raise Exception(f"Failed to sync student subjects: {str(e)}")
 			
+			# Step 3.5: ⚡ CRITICAL: Sync teachers from Subject Assignment vào pattern rows
+			# Điều này phải làm TRƯỚC khi sync materialized views
+			# Nếu không, Teacher Timetable sẽ trống vì pattern rows không có teachers
+			try:
+				self._sync_teachers_from_assignments()
+			except Exception as e:
+				frappe.logger().warning(f"Failed to sync teachers from assignments: {str(e)}")
+				# Don't fail import - teachers can be synced later via resync API
+			
 			# Step 4: Sync Teacher Timetable và Student Timetable
 			# OPTIMIZATION: Skip sync during import, run as background job instead
 			# Teacher timetable will be synced by subject assignment or manual trigger
@@ -821,6 +830,93 @@ class TimetableImportExecutor:
 			created += 1
 		
 		return created
+	
+	def _sync_teachers_from_assignments(self):
+		"""
+		⚡ CRITICAL: Sync teachers từ Subject Assignment vào pattern rows.
+		
+		Điều này cần làm SAU KHI tạo pattern rows và TRƯỚC KHI sync materialized views.
+		Nếu không, Teacher Timetable sẽ trống vì pattern rows không có teachers.
+		
+		Logic:
+		1. Lấy tất cả Subject Assignments cho các classes đã import
+		2. Với mỗi assignment, tìm pattern rows tương ứng (class + subject)
+		3. Gán teachers vào pattern rows
+		"""
+		if not self.processed_instances:
+			return
+		
+		campus_id = self.metadata["campus_id"]
+		
+		# Get unique class IDs from processed instances
+		class_ids = list(set(
+			instance_data["class_id"] 
+			for instance_data in self.processed_instances.values()
+		))
+		
+		if not class_ids:
+			return
+		
+		frappe.logger().info(f"🔄 Syncing teachers from assignments for {len(class_ids)} classes")
+		self.logs.append(f"🔄 Đang gán giáo viên từ phân công vào TKB...")
+		
+		total_synced = 0
+		total_errors = 0
+		
+		# Get all assignments for these classes
+		try:
+			assignments = frappe.get_all(
+				"SIS Subject Assignment",
+				filters={
+					"class_id": ["in", class_ids],
+					"campus_id": campus_id
+				},
+				fields=["name", "teacher_id", "class_id", "actual_subject_id", "application_type"],
+				order_by="creation asc"
+			)
+			
+			if not assignments:
+				self.logs.append("ℹ️ Không có phân công giáo viên cho các lớp này")
+				return
+			
+			frappe.logger().info(f"📊 Found {len(assignments)} assignments to sync")
+			
+			# Group assignments by (class_id, actual_subject_id) to get all teachers
+			from collections import defaultdict
+			assignments_by_key = defaultdict(list)
+			
+			for assignment in assignments:
+				key = (assignment.class_id, assignment.actual_subject_id)
+				assignments_by_key[key].append(assignment)
+			
+			# Sync each group
+			from erp.api.erp_sis.subject_assignment.timetable_sync_v2 import sync_assignment_to_timetable
+			
+			for (class_id, actual_subject_id), group_assignments in assignments_by_key.items():
+				try:
+					# Only sync the first assignment - it will gather all teachers for this class+subject
+					first_assignment = group_assignments[0]
+					
+					result = sync_assignment_to_timetable(assignment_id=first_assignment.name)
+					
+					if result.get("success"):
+						total_synced += result.get("rows_updated", 0)
+					else:
+						total_errors += 1
+						frappe.logger().warning(
+							f"⚠️ Failed to sync assignment {first_assignment.name}: {result.get('message')}"
+						)
+				except Exception as sync_error:
+					total_errors += 1
+					frappe.logger().warning(f"⚠️ Error syncing assignment: {str(sync_error)}")
+			
+			self.logs.append(f"✅ Đã gán GV cho {total_synced} rows, {total_errors} lỗi")
+			frappe.logger().info(f"✅ Teacher assignment sync complete: {total_synced} rows, {total_errors} errors")
+			
+		except Exception as e:
+			error_msg = f"Error syncing teachers from assignments: {str(e)}"
+			frappe.logger().error(error_msg)
+			self.logs.append(f"⚠️ {error_msg}")
 	
 	def _queue_async_sync(self):
 		"""

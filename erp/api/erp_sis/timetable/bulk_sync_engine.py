@@ -194,7 +194,7 @@ class BulkSyncEngine:
 		frappe.logger().info(f"  ✓ Loaded {len(self.students_cache)} students")
 	
 	def _get_instance_rows(self) -> List[Dict]:
-		"""Get all rows for this instance."""
+		"""Get all rows for this instance with teachers from both old and new format."""
 		rows = frappe.db.sql("""
 			SELECT 
 				name, day_of_week, date, timetable_column_id,
@@ -202,6 +202,45 @@ class BulkSyncEngine:
 			FROM `tabSIS Timetable Instance Row`
 			WHERE parent = %s
 		""", (self.instance_id,), as_dict=True)
+		
+		if not rows:
+			return rows
+		
+		# ⚡ FIX: Also load teachers from child table (new format)
+		# This ensures we read teachers regardless of whether they're stored in
+		# old format (teacher_1_id, teacher_2_id) or new format (child table)
+		row_names = [r.name for r in rows]
+		teacher_children = frappe.db.sql("""
+			SELECT parent, teacher_id
+			FROM `tabSIS Timetable Instance Row Teacher`
+			WHERE parent IN ({})
+			ORDER BY parent ASC, sort_order ASC
+		""".format(','.join(['%s'] * len(row_names))),
+		tuple(row_names),
+		as_dict=True)
+		
+		# Build map: row_name -> list of teacher_ids
+		teacher_map = {}
+		for child in teacher_children:
+			if child.parent not in teacher_map:
+				teacher_map[child.parent] = []
+			teacher_map[child.parent].append(child.teacher_id)
+		
+		# Attach teachers to rows (merge with existing teacher_1_id, teacher_2_id)
+		for row in rows:
+			teachers_from_child = teacher_map.get(row.name, [])
+			
+			if teachers_from_child:
+				# Use teachers from child table (new format takes precedence)
+				row['teachers_list'] = teachers_from_child
+			else:
+				# Fallback: Use teacher_1_id, teacher_2_id (old format)
+				fallback_teachers = []
+				if row.get('teacher_1_id'):
+					fallback_teachers.append(row['teacher_1_id'])
+				if row.get('teacher_2_id'):
+					fallback_teachers.append(row['teacher_2_id'])
+				row['teachers_list'] = fallback_teachers
 		
 		return rows
 	
@@ -269,12 +308,17 @@ class BulkSyncEngine:
 			
 			day_num = self.day_to_num[normalized_day]
 			
-			# Get teachers
-			teachers = []
-			if row.teacher_1_id:
-				teachers.append(row.teacher_1_id)
-			if row.teacher_2_id:
-				teachers.append(row.teacher_2_id)
+			# ⚡ FIX: Get teachers from teachers_list (populated by _get_instance_rows)
+			# This includes teachers from both child table (new format) and 
+			# teacher_1_id/teacher_2_id (old format fallback)
+			teachers = row.get('teachers_list', [])
+			
+			# Fallback if teachers_list not populated
+			if not teachers:
+				if row.get('teacher_1_id'):
+					teachers.append(row['teacher_1_id'])
+				if row.get('teacher_2_id'):
+					teachers.append(row['teacher_2_id'])
 			
 			if not teachers:
 				continue
@@ -325,12 +369,15 @@ class BulkSyncEngine:
 			if specific_date < self.start_date or specific_date > self.end_date:
 				continue
 			
-			# Get teachers
-			teachers = []
-			if row.teacher_1_id:
-				teachers.append(row.teacher_1_id)
-			if row.teacher_2_id:
-				teachers.append(row.teacher_2_id)
+			# ⚡ FIX: Get teachers from teachers_list (same as pattern rows)
+			teachers = row.get('teachers_list', [])
+			
+			# Fallback if teachers_list not populated
+			if not teachers:
+				if row.get('teacher_1_id'):
+					teachers.append(row['teacher_1_id'])
+				if row.get('teacher_2_id'):
+					teachers.append(row['teacher_2_id'])
 			
 			# Create entries
 			for teacher_id in teachers:
