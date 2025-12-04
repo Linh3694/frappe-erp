@@ -166,11 +166,26 @@ def admin_list():
             )
             guardian_name_map = {g["name"]: g.get("guardian_name") for g in guardians}
         
-        # Calculate SLA status and add guardian_name for each feedback
+        # Get assigned user full names
+        assigned_users = set([f.get("assigned_to") for f in feedback_list if f.get("assigned_to")])
+        assigned_user_map = {}
+        if assigned_users:
+            users = frappe.get_all(
+                "User",
+                filters={"name": ["in", list(assigned_users)]},
+                fields=["name", "full_name"]
+            )
+            assigned_user_map = {u["name"]: u.get("full_name") for u in users}
+        
+        # Calculate SLA status and add guardian_name, assigned_to_full_name for each feedback
         for feedback in feedback_list:
             # Add guardian_name
             if feedback.get("guardian"):
                 feedback["guardian_name"] = guardian_name_map.get(feedback["guardian"], feedback["guardian"])
+            
+            # Add assigned_to_full_name
+            if feedback.get("assigned_to"):
+                feedback["assigned_to_full_name"] = assigned_user_map.get(feedback["assigned_to"], feedback["assigned_to"])
             
             # Calculate SLA status
             if feedback.get("deadline"):
