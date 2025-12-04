@@ -1171,6 +1171,32 @@ def get_events():
         # Debug logging can be enabled here if needed for troubleshooting
         # frappe.log_error(f"EventService get_events: filters={filters}, total_count={total_count}, events_returned={len(events)}, page={page}", "Events Debug")
 
+        # Populate teacher info for all events in a single batch query
+        teacher_ids = list(set([e.get("create_by") for e in events if e.get("create_by")]))
+        teacher_map = {}
+        if teacher_ids:
+            teachers = frappe.get_all(
+                "SIS Teacher",
+                filters={"name": ["in", teacher_ids]},
+                fields=["name", "full_name", "first_name", "last_name", "user_id", "email"]
+            )
+            for t in teachers:
+                # Format teacher name: prioritize full_name, fallback to email parsing
+                display_name = t.get("full_name") or ""
+                if not display_name and t.get("user_id"):
+                    # Extract name from email
+                    email_name = t.get("user_id", "").split("@")[0]
+                    display_name = " ".join(
+                        part.capitalize() for part in email_name.replace(".", " ").replace("_", " ").replace("-", " ").split()
+                    )
+                teacher_map[t.name] = display_name or t.get("user_id") or t.name
+        
+        # Add teacher_name to each event
+        for event in events:
+            create_by = event.get("create_by")
+            if create_by and create_by in teacher_map:
+                event["teacher_name"] = teacher_map[create_by]
+
         result = {
             "data": events,
             "pagination": {
