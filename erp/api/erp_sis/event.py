@@ -1175,21 +1175,39 @@ def get_events():
         teacher_ids = list(set([e.get("create_by") for e in events if e.get("create_by")]))
         teacher_map = {}
         if teacher_ids:
+            # Step 1: Get teacher records to get user_id
             teachers = frappe.get_all(
                 "SIS Teacher",
                 filters={"name": ["in", teacher_ids]},
-                fields=["name", "full_name", "first_name", "last_name", "user_id", "email"]
+                fields=["name", "user_id"]
             )
+            
+            # Step 2: Get user info from User table
+            user_ids = [t.get("user_id") for t in teachers if t.get("user_id")]
+            user_map = {}
+            if user_ids:
+                users = frappe.get_all(
+                    "User",
+                    filters={"name": ["in", user_ids]},
+                    fields=["name", "full_name", "first_name", "last_name", "email"]
+                )
+                for u in users:
+                    user_map[u.name] = u
+            
+            # Step 3: Build teacher_map with display names
             for t in teachers:
+                user_id = t.get("user_id")
+                user_info = user_map.get(user_id, {})
+                
                 # Format teacher name: prioritize full_name, fallback to email parsing
-                display_name = t.get("full_name") or ""
-                if not display_name and t.get("user_id"):
-                    # Extract name from email
-                    email_name = t.get("user_id", "").split("@")[0]
+                display_name = user_info.get("full_name") or ""
+                if not display_name and user_id:
+                    # Extract name from email (user_id is email)
+                    email_name = user_id.split("@")[0]
                     display_name = " ".join(
                         part.capitalize() for part in email_name.replace(".", " ").replace("_", " ").replace("-", " ").split()
                     )
-                teacher_map[t.name] = display_name or t.get("user_id") or t.name
+                teacher_map[t.name] = display_name or user_id or t.name
         
         # Add teacher_name to each event
         for event in events:
