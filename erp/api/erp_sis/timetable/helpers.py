@@ -161,11 +161,13 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
     1. Separate rows into date-specific overrides vs patterns
     2. Build entries from patterns for all days
     3. Override with date-specific rows where they exist
+    4. Add non-study periods from SIS Timetable Column
     
     This ensures:
     - Date-range assignments work correctly
     - Pattern rows remain as templates
     - No data duplication
+    - Non-study periods (breaks, lunch) are included
     """
     # Load timetable columns map for period info
     column_ids = list({r.get("timetable_column_id") for r in rows if r.get("timetable_column_id")})
@@ -177,6 +179,75 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
             filters={"name": ["in", column_ids]},
         ):
             columns_map[col.name] = col
+    
+    # Get education_stage_id and campus_id from class for non-study periods
+    education_stage_id = None
+    campus_id = None
+    class_ids = list({r.get("class_id") for r in rows if r.get("class_id")})
+    if class_ids:
+        try:
+            class_info = frappe.db.get_value(
+                "SIS Class", 
+                class_ids[0], 
+                ["education_grade", "campus_id"], 
+                as_dict=True
+            )
+            if class_info:
+                campus_id = class_info.get("campus_id")
+                # Get education_stage from grade
+                if class_info.get("education_grade"):
+                    grade_info = frappe.db.get_value(
+                        "SIS Education Grade",
+                        class_info["education_grade"],
+                        ["education_stage"],
+                        as_dict=True
+                    )
+                    if grade_info:
+                        education_stage_id = grade_info.get("education_stage")
+        except Exception as e:
+            frappe.logger().warning(f"Failed to get education_stage for non-study periods: {str(e)}")
+    
+    # Load non-study columns for this education stage
+    non_study_columns = []
+    if education_stage_id and campus_id:
+        try:
+            non_study_columns = frappe.get_all(
+                "SIS Timetable Column",
+                fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                filters={
+                    "education_stage_id": education_stage_id,
+                    "campus_id": campus_id,
+                    "period_type": "non-study"
+                },
+                order_by="period_priority asc, start_time asc"
+            )
+            # Add to columns_map
+            for col in non_study_columns:
+                columns_map[col.name] = col
+            frappe.logger().info(f"📊 Found {len(non_study_columns)} non-study columns for education_stage={education_stage_id}")
+        except Exception as e:
+            frappe.logger().warning(f"Failed to load non-study columns: {str(e)}")
+    
+    # Load teacher_ids for each row from child table
+    row_ids = [r.get("name") for r in rows if r.get("name")]
+    row_teachers_map = {}  # row_id -> list of teacher_ids
+    
+    if row_ids:
+        try:
+            teacher_children = frappe.get_all(
+                "SIS Timetable Instance Row Teacher",
+                fields=["parent", "teacher_id", "sort_order"],
+                filters={"parent": ["in", row_ids]},
+                order_by="parent asc, sort_order asc"
+            )
+            for child in teacher_children:
+                row_id = child.parent
+                if row_id not in row_teachers_map:
+                    row_teachers_map[row_id] = []
+                if child.teacher_id:
+                    row_teachers_map[row_id].append(child.teacher_id)
+        except Exception as e:
+            frappe.logger().warning(f"Failed to load teacher_ids: {str(e)}")
     
     # Separate pattern rows vs date-specific override rows
     pattern_rows = []
@@ -269,6 +340,9 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 else:
                     end_time = str(col['end_time'])[:5]
             
+            # Get teacher_ids for this row
+            row_teacher_ids = row_teachers_map.get(r.get("name"), [])
+            
             result.append({
                 "name": r.get("name"),
                 "date": date_str,
@@ -282,6 +356,7 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 "subject_id": r.get("subject_id") or "",  # ✅ Include subject_id for edit modal
                 "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
                 "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
+                "teacher_ids": row_teacher_ids,  # ✅ Include teacher_ids array
                 "class_id": r.get("class_id"),
                 "room_id": r.get("room_id"),
                 "room_name": r.get("room_name"),
@@ -329,6 +404,9 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 else:
                     end_time = str(col['end_time'])[:5]
             
+            # Get teacher_ids for this row
+            row_teacher_ids = row_teachers_map.get(r.get("name"), [])
+            
             result.append({
                 "name": r.get("name"),
                 "date": row_date.strftime("%Y-%m-%d"),
@@ -342,6 +420,7 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 "subject_id": r.get("subject_id") or "",  # ✅ Include subject_id for edit modal
                 "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
                 "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
+                "teacher_ids": row_teacher_ids,  # ✅ Include teacher_ids array
                 "class_id": r.get("class_id"),
                 "room_id": r.get("room_id"),
                 "room_name": r.get("room_name"),
@@ -349,7 +428,78 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 "is_override": True  # Mark as override for debugging
             })
     
-    frappe.logger().info(f"✅ _build_entries: Built {len(result)} entries ({len([e for e in result if e.get('is_pattern')])} from patterns, {len([e for e in result if e.get('is_override')])} overrides)")
+    # Add non-study periods for each day of the week
+    if non_study_columns:
+        # Get unique dates from result to know which days have entries
+        all_dates = set()
+        for entry in result:
+            if entry.get("date"):
+                all_dates.add(entry["date"])
+        
+        # If no dates from study periods, generate dates for the week
+        if not all_dates:
+            for i in range(7):
+                d = _add_days(week_start, i)
+                all_dates.add(d.strftime("%Y-%m-%d"))
+        
+        # Get class_id from first row
+        class_id = rows[0].get("class_id") if rows else None
+        
+        # Add non-study entries for each date
+        for date_str in all_dates:
+            # Parse date to get day of week
+            from datetime import datetime
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            day_index = date_obj.weekday()  # 0=Monday, 6=Sunday
+            day_names = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+            day_of_week = day_names[day_index]
+            
+            for col in non_study_columns:
+                # Convert timedelta to HH:MM format
+                start_time = None
+                if col.get('start_time'):
+                    if hasattr(col['start_time'], 'total_seconds'):
+                        total_seconds = int(col['start_time'].total_seconds())
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds % 3600) // 60
+                        start_time = f"{hours:02d}:{minutes:02d}"
+                    else:
+                        start_time = str(col['start_time'])[:5]
+                
+                end_time = None
+                if col.get('end_time'):
+                    if hasattr(col['end_time'], 'total_seconds'):
+                        total_seconds = int(col['end_time'].total_seconds())
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds % 3600) // 60
+                        end_time = f"{hours:02d}:{minutes:02d}"
+                    else:
+                        end_time = str(col['end_time'])[:5]
+                
+                result.append({
+                    "name": None,
+                    "date": date_str,
+                    "day_of_week": day_of_week,
+                    "timetable_column_id": col.get("name"),
+                    "period_priority": col.get("period_priority"),
+                    "period_name": col.get("period_name") or "",
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "period_type": "non-study",
+                    "subject_id": None,
+                    "subject_title": "",
+                    "teacher_names": "",
+                    "teacher_ids": [],
+                    "class_id": class_id,
+                    "room_id": None,
+                    "room_name": "",
+                    "room_type": None,
+                    "is_non_study": True
+                })
+        
+        frappe.logger().info(f"📊 Added {len(non_study_columns) * len(all_dates)} non-study entries")
+    
+    frappe.logger().info(f"✅ _build_entries: Built {len(result)} entries ({len([e for e in result if e.get('is_pattern')])} from patterns, {len([e for e in result if e.get('is_override')])} overrides, {len([e for e in result if e.get('is_non_study')])} non-study)")
     
     return result
 
