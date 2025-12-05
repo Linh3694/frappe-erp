@@ -368,11 +368,41 @@ def list_titles():
     )
 
 
+def _ensure_book_cover_folder():
+    """
+    Đảm bảo folder Library/BookCover tồn tại trong Frappe File system.
+    """
+    # Kiểm tra và tạo folder Library
+    library_folder = frappe.db.exists("File", {"is_folder": 1, "file_name": "Library", "folder": "Home"})
+    if not library_folder:
+        lib_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": "Library",
+            "is_folder": 1,
+            "folder": "Home",
+        })
+        lib_doc.insert(ignore_permissions=True)
+    
+    # Kiểm tra và tạo folder BookCover trong Library
+    cover_folder = frappe.db.exists("File", {"is_folder": 1, "file_name": "BookCover", "folder": "Home/Library"})
+    if not cover_folder:
+        cover_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": "BookCover",
+            "is_folder": 1,
+            "folder": "Home/Library",
+        })
+        cover_doc.insert(ignore_permissions=True)
+    
+    return "Home/Library/BookCover"
+
+
 @frappe.whitelist(allow_guest=False)
 def upload_title_cover():
     """
     Upload ảnh bìa cho đầu sách.
     Nhận file và title_id, upload lên Frappe File và cập nhật field cover_image.
+    Lưu vào folder: /files/Library/BookCover/
     """
     if (resp := _require_library_role()):
         return resp
@@ -397,10 +427,10 @@ def upload_title_cover():
         content = file.stream.read()
         filename = file.filename
         
-        # Upload file using Frappe's file handler
-        from frappe.handler import upload_file
+        # Đảm bảo folder tồn tại
+        folder_path = _ensure_book_cover_folder()
         
-        # Save file to Frappe
+        # Save file to Frappe với folder cụ thể
         file_doc = frappe.get_doc({
             "doctype": "File",
             "file_name": filename,
@@ -408,6 +438,7 @@ def upload_title_cover():
             "attached_to_doctype": TITLE_DTYPE,
             "attached_to_name": title_id,
             "is_private": 0,
+            "folder": folder_path,
         })
         file_doc.save(ignore_permissions=True)
         
@@ -429,12 +460,16 @@ def bulk_upload_covers():
     """
     Upload nhiều ảnh bìa cùng lúc.
     Tên file phải chứa library_code của đầu sách.
+    Lưu vào folder: /files/Library/BookCover/
     """
     if (resp := _require_library_role()):
         return resp
     
     if not frappe.request.files:
         return validation_error_response(message="Thiếu file ảnh", errors={"files": ["required"]})
+    
+    # Đảm bảo folder tồn tại
+    folder_path = _ensure_book_cover_folder()
     
     # Lấy tất cả titles để match
     titles = frappe.get_all(
@@ -474,7 +509,7 @@ def bulk_upload_covers():
         try:
             content = file.stream.read()
             
-            # Save file to Frappe
+            # Save file to Frappe với folder cụ thể
             file_doc = frappe.get_doc({
                 "doctype": "File",
                 "file_name": filename,
@@ -482,6 +517,7 @@ def bulk_upload_covers():
                 "attached_to_doctype": TITLE_DTYPE,
                 "attached_to_name": matched_title.name,
                 "is_private": 0,
+                "folder": folder_path,
             })
             file_doc.save(ignore_permissions=True)
             
