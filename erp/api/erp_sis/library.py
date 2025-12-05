@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 import frappe
 from frappe import _
 from frappe.utils import now, nowdate
-from frappe.utils.xlsxutils import read_xlsx_file_from_file_content
+from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -236,7 +236,7 @@ def delete_lookup():
 
 def _import_excel_to_rows(file_content: bytes) -> List[Dict[str, Any]]:
     rows = []
-    data = read_xlsx_file_from_file_content(file_content)
+    data = read_xlsx_file_from_attached_file(fcontent=file_content)
     # data is list of lists; first row is header
     if not data:
         return rows
