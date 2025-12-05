@@ -186,16 +186,18 @@ def get_teacher_week():
         try:
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
             subject_title_map = {}
+            subject_curriculum_map = {}  # subject_id -> curriculum_id
             timetable_subject_by_subject = {}
             timetable_subject_title_map = {}
             if subject_ids:
                 subj_rows = frappe.get_all(
                     "SIS Subject",
-                    fields=["name", "title", "timetable_subject_id"],
+                    fields=["name", "title", "timetable_subject_id", "curriculum_id"],
                     filters={"name": ["in", subject_ids]},
                 )
                 for s in subj_rows:
                     subject_title_map[s.name] = s.title
+                    subject_curriculum_map[s.name] = s.get("curriculum_id")
                     if s.get("timetable_subject_id"):
                         timetable_subject_by_subject[s.name] = s.get("timetable_subject_id")
                 # Load timetable subject titles for display preference
@@ -262,7 +264,7 @@ def get_teacher_week():
                 for t in teachers:
                     teacher_user_map[t.name] = user_display_map.get(t.get("user_id")) or t.get("user_id") or t.get("name")
 
-            # Enrich rows with subject titles and teacher names
+            # Enrich rows with subject titles, curriculum_id, and teacher names
             for r in rows:
                 # Prefer Timetable Subject title if linked via SIS Subject
                 subj_id = r.get("subject_id")
@@ -270,6 +272,9 @@ def get_teacher_week():
                 ts_title = timetable_subject_title_map.get(ts_id) if ts_id else None
                 default_title = subject_title_map.get(subj_id) or r.get("subject_title") or r.get("subject_name") or ""
                 r["subject_title"] = ts_title or default_title
+                
+                # Add curriculum_id from subject
+                r["curriculum_id"] = subject_curriculum_map.get(subj_id)
                 
                 # Build teacher_names from child table
                 row_id = r.get("name")
@@ -550,16 +555,18 @@ def get_class_week():
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
 
             subject_title_map = {}
+            subject_curriculum_map = {}  # subject_id -> curriculum_id
             timetable_subject_by_subject = {}
             timetable_subject_title_map = {}
             if subject_ids:
                 subj_rows = frappe.get_all(
                     "SIS Subject",
-                    fields=["name", "title", "timetable_subject_id"],
+                    fields=["name", "title", "timetable_subject_id", "curriculum_id"],
                     filters={"name": ["in", subject_ids]},
                 )
                 for s in subj_rows:
                     subject_title_map[s.name] = s.title
+                    subject_curriculum_map[s.name] = s.get("curriculum_id")
                     if s.get("timetable_subject_id"):
                         timetable_subject_by_subject[s.name] = s.get("timetable_subject_id")
                 ts_ids = list({ts for ts in timetable_subject_by_subject.values() if ts})
@@ -618,7 +625,7 @@ def get_class_week():
                 for t in teachers:
                     teacher_user_map[t.name] = user_display_map.get(t.get("user_id")) or t.get("user_id") or t.get("name")
 
-            # Enrich rows with subject titles and teacher names
+            # Enrich rows with subject titles, curriculum_id, and teacher names
             for r in rows:
                 subj_id = r.get("subject_id")
                 
@@ -630,6 +637,9 @@ def get_class_week():
                 ts_title = timetable_subject_title_map.get(ts_id) if ts_id else None
                 default_title = subject_title_map.get(subj_id) or r.get("subject_title") or r.get("subject_name") or ""
                 r["subject_title"] = ts_title or default_title
+                
+                # Add curriculum_id from subject
+                r["curriculum_id"] = subject_curriculum_map.get(subj_id)
                 
                 # If still no subject_title, mark it clearly for debugging
                 if not r["subject_title"]:

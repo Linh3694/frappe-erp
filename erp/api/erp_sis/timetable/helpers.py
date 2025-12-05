@@ -355,6 +355,7 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 "period_type": col.get("period_type") or "study",
                 "subject_id": r.get("subject_id") or "",  # ✅ Include subject_id for edit modal
                 "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
+                "curriculum_id": r.get("curriculum_id"),  # ✅ Include curriculum_id for border color
                 "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
                 "teacher_ids": row_teacher_ids,  # ✅ Include teacher_ids array
                 "class_id": r.get("class_id"),
@@ -419,6 +420,7 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 "period_type": col.get("period_type") or "study",
                 "subject_id": r.get("subject_id") or "",  # ✅ Include subject_id for edit modal
                 "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
+                "curriculum_id": r.get("curriculum_id"),  # ✅ Include curriculum_id for border color
                 "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
                 "teacher_ids": row_teacher_ids,  # ✅ Include teacher_ids array
                 "class_id": r.get("class_id"),
