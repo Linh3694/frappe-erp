@@ -91,6 +91,159 @@ def _check_overlapping_leave_requests(student_id, start_date, end_date):
 	}
 
 
+def _get_homeroom_teachers_for_student(student_id):
+	"""Get homeroom teacher user_id(s) for a student
+	
+	Args:
+		student_id: Student ID
+	
+	Returns:
+		List of dicts: [{"user_id": "teacher@email.com", "teacher_name": "...", "class_title": "..."}]
+	"""
+	try:
+		# Step 1: Get class(es) for this student from SIS Class Student
+		class_students = frappe.get_all(
+			"SIS Class Student",
+			filters={"student_id": student_id},
+			fields=["class_id"]
+		)
+		
+		if not class_students:
+			frappe.logger().info(f"📚 No class found for student {student_id}")
+			return []
+		
+		class_ids = [cs.class_id for cs in class_students]
+		
+		# Step 2: Get homeroom teachers from SIS Class
+		classes = frappe.get_all(
+			"SIS Class",
+			filters={"name": ["in", class_ids]},
+			fields=["name", "title", "homeroom_teacher", "vice_homeroom_teacher"]
+		)
+		
+		if not classes:
+			frappe.logger().info(f"📚 No SIS Class records found for class_ids {class_ids}")
+			return []
+		
+		# Step 3: Collect all homeroom teachers
+		teacher_ids = set()
+		class_info_map = {}
+		
+		for cls in classes:
+			if cls.homeroom_teacher:
+				teacher_ids.add(cls.homeroom_teacher)
+				class_info_map[cls.homeroom_teacher] = cls.title
+			if cls.vice_homeroom_teacher:
+				teacher_ids.add(cls.vice_homeroom_teacher)
+				if cls.vice_homeroom_teacher not in class_info_map:
+					class_info_map[cls.vice_homeroom_teacher] = cls.title
+		
+		if not teacher_ids:
+			frappe.logger().info(f"📚 No homeroom teachers found for classes {class_ids}")
+			return []
+		
+		# Step 4: Get user_id from SIS Teacher
+		teachers = frappe.get_all(
+			"SIS Teacher",
+			filters={"name": ["in", list(teacher_ids)]},
+			fields=["name", "user_id"]
+		)
+		
+		result = []
+		for teacher in teachers:
+			if teacher.user_id:
+				# Get teacher name from User
+				teacher_name = frappe.db.get_value("User", teacher.user_id, "full_name") or teacher.user_id
+				result.append({
+					"user_id": teacher.user_id,
+					"teacher_id": teacher.name,
+					"teacher_name": teacher_name,
+					"class_title": class_info_map.get(teacher.name, "")
+				})
+		
+		frappe.logger().info(f"✅ Found {len(result)} homeroom teachers for student {student_id}: {[t['user_id'] for t in result]}")
+		return result
+		
+	except Exception as e:
+		frappe.logger().error(f"❌ Error getting homeroom teachers for student {student_id}: {str(e)}")
+		return []
+
+
+def _send_leave_notification_to_teachers(student_id, student_name, parent_name, leave_request_id, reason, reason_display, start_date, end_date):
+	"""Send push notification to homeroom teachers when parent creates leave request
+	
+	Args:
+		student_id: Student ID
+		student_name: Student name for display
+		parent_name: Parent name who created the request
+		leave_request_id: Created leave request ID
+		reason: Leave reason code
+		reason_display: Localized reason text
+		start_date: Leave start date (YYYY-MM-DD)
+		end_date: Leave end date (YYYY-MM-DD)
+	"""
+	try:
+		from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+		
+		# Get homeroom teachers for this student
+		teachers = _get_homeroom_teachers_for_student(student_id)
+		
+		if not teachers:
+			frappe.logger().info(f"📱 No homeroom teachers to notify for student {student_id}")
+			return
+		
+		# Format dates for display
+		try:
+			start_date_display = datetime.strptime(str(start_date), '%Y-%m-%d').strftime('%d/%m/%Y')
+			end_date_display = datetime.strptime(str(end_date), '%Y-%m-%d').strftime('%d/%m/%Y')
+		except:
+			start_date_display = str(start_date)
+			end_date_display = str(end_date)
+		
+		# Prepare notification content
+		notification_title = "Đơn xin nghỉ phép mới"
+		notification_body = f"Phụ huynh gửi đơn nghỉ cho {student_name}. Lý do: {reason_display}. Ngày: {start_date_display} - {end_date_display}"
+		
+		notification_data = {
+			"type": "leave_request",
+			"action": "new_leave_from_parent",
+			"student_id": student_id,
+			"student_name": student_name,
+			"parent_name": parent_name,
+			"leave_request_id": leave_request_id,
+			"reason": reason,
+			"reason_display": reason_display,
+			"start_date": str(start_date),
+			"end_date": str(end_date)
+		}
+		
+		# Send notification to each teacher
+		success_count = 0
+		for teacher in teachers:
+			try:
+				result = send_mobile_notification(
+					user_email=teacher["user_id"],
+					title=notification_title,
+					body=notification_body,
+					data=notification_data
+				)
+				
+				if result.get("success"):
+					success_count += 1
+					frappe.logger().info(f"✅ Sent leave notification to teacher {teacher['user_id']}")
+				else:
+					frappe.logger().warning(f"⚠️ Failed to send notification to {teacher['user_id']}: {result.get('message')}")
+					
+			except Exception as teacher_error:
+				frappe.logger().error(f"❌ Error sending notification to {teacher['user_id']}: {str(teacher_error)}")
+		
+		frappe.logger().info(f"📱 Leave notification sent to {success_count}/{len(teachers)} teachers for student {student_id}")
+		
+	except Exception as e:
+		frappe.logger().error(f"❌ Error in _send_leave_notification_to_teachers: {str(e)}")
+		# Don't raise - notification failure shouldn't fail the leave request
+
+
 def _validate_parent_student_access(parent_id, student_ids):
 	"""Validate that parent has access to all students and is key person
 	
@@ -301,6 +454,39 @@ def submit_leave_request():
 				"student_id": student_id,
 				"student_name": leave_request.student_name
 			})
+
+		# Transform reason to Vietnamese for notification
+		reason_mapping = {
+			'sick_child': 'Con ốm',
+			'family_matters': 'Gia đình có việc bận',
+			'other': 'Lý do khác'
+		}
+		
+		# Get parent name for notification
+		parent_name = "Phụ huynh"
+		try:
+			guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
+			parent_name = guardian_doc.guardian_name or "Phụ huynh"
+		except:
+			pass
+
+		# Send push notifications to homeroom teachers for each student
+		for req in created_requests:
+			try:
+				reason_display = data.get('other_reason') if data['reason'] == 'other' else reason_mapping.get(data['reason'], data['reason'])
+				_send_leave_notification_to_teachers(
+					student_id=req["student_id"],
+					student_name=req["student_name"],
+					parent_name=parent_name,
+					leave_request_id=req["id"],
+					reason=data['reason'],
+					reason_display=reason_display,
+					start_date=data['start_date'],
+					end_date=data['end_date']
+				)
+			except Exception as noti_error:
+				# Don't fail the request if notification fails
+				frappe.logger().error(f"❌ Error sending notification for leave request {req['id']}: {str(noti_error)}")
 
 		return success_response({
 			"message": f"Đã gửi đơn xin nghỉ phép cho {len(created_requests)} học sinh",

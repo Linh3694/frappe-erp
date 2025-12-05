@@ -155,14 +155,28 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
             except:
                 pass
 
+        # Get latest reply content for notification body
+        latest_reply_content = ""
+        if feedback_doc.replies and len(feedback_doc.replies) > 0:
+            # Get the last reply (most recent)
+            latest_reply = feedback_doc.replies[-1]
+            if latest_reply.reply_by_type == "Guardian":
+                latest_reply_content = latest_reply.content or ""
+                # Clean up content - remove attachment HTML if present
+                if "---\n**File đính kèm:**" in latest_reply_content:
+                    latest_reply_content = latest_reply_content.split("---\n**File đính kèm:**")[0].strip()
+
         # Prepare notification content based on feedback type
         title = f"Phản hồi mới từ {guardian_name}"
-        if feedback_doc.feedback_type == "Đánh giá":
+        if latest_reply_content:
+            body = latest_reply_content
+        elif feedback_doc.feedback_type == "Đánh giá":
             actual_rating = round((feedback_doc.rating or 0) * 5)
             stars = "⭐" * actual_rating
             body = f"Đánh giá {stars}: {feedback_doc.name}"
         else:
             body = f"Góp ý: {feedback_doc.title or feedback_doc.name}"
+        
         if len(body) > 100:
             body = body[:97] + "..."
 
@@ -174,13 +188,18 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
             "feedbackCode": feedback_doc.name,
             "feedbackType": feedback_doc.feedback_type,
             "guardianName": guardian_name,
+            "title": feedback_doc.title or "",
             "timestamp": now_datetime().isoformat()
         }
 
-        # If assigned, only notify assigned user
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+        
+        success_count = 0
+        total_count = 0
+
+        # If assigned, notify assigned user first
         if feedback_doc.assigned_to:
-            from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
-            
+            total_count += 1
             try:
                 result = send_mobile_notification(
                     user_email=feedback_doc.assigned_to,
@@ -190,29 +209,37 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
                 )
                 
                 if result.get("success"):
-                    frappe.logger().info(f"✅ [Feedback Notification] Reply notification sent to {feedback_doc.assigned_to}")
+                    success_count += 1
+                    frappe.logger().info(f"✅ [Feedback Reply] Sent to assigned user: {feedback_doc.assigned_to}")
                 else:
-                    frappe.logger().warning(f"⚠️ [Feedback Notification] Failed to send reply notification: {result.get('message')}")
+                    frappe.logger().warning(f"⚠️ [Feedback Reply] Failed to send to {feedback_doc.assigned_to}: {result.get('message')}")
                     
             except Exception as e:
-                frappe.logger().error(f"❌ [Feedback Notification] Error sending reply notification: {str(e)}")
-        else:
-            # Not assigned yet, notify all mobile staff
-            staff_users = get_mobile_staff_users()
-            
-            if staff_users:
-                from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
-                
-                for user in staff_users:
-                    try:
-                        send_mobile_notification(
-                            user_email=user.get("email"),
-                            title=title,
-                            body=body,
-                            data=data
-                        )
-                    except:
-                        pass
+                frappe.logger().error(f"❌ [Feedback Reply] Error sending to {feedback_doc.assigned_to}: {str(e)}")
+        
+        # Also notify all mobile staff (to keep everyone informed)
+        staff_users = get_mobile_staff_users()
+        
+        if staff_users:
+            for user in staff_users:
+                # Skip if already notified (assigned user)
+                if feedback_doc.assigned_to and user.get("email") == feedback_doc.assigned_to:
+                    continue
+                    
+                total_count += 1
+                try:
+                    result = send_mobile_notification(
+                        user_email=user.get("email"),
+                        title=title,
+                        body=body,
+                        data=data
+                    )
+                    if result.get("success"):
+                        success_count += 1
+                except Exception as user_error:
+                    frappe.logger().error(f"❌ [Feedback Reply] Error sending to {user.get('email')}: {str(user_error)}")
+
+        frappe.logger().info(f"📱 [Feedback Reply] Guardian reply notification sent to {success_count}/{total_count} users for feedback {feedback_doc.name}")
 
     except Exception as e:
         frappe.logger().error(f"❌ [Feedback Notification] Error sending reply notification: {str(e)}")

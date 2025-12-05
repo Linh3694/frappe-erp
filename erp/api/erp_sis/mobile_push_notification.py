@@ -599,14 +599,17 @@ def send_mobile_notification(user_email, title, body, data=None):
                 sound_name = "default"
             elif notification_type == "ticket":
                 channel_id = "ticket"
-                # Use custom sound for new ticket notifications
+                # Use custom sound ONLY for new ticket notifications from IT
                 if action in ["new_ticket_admin", "ticket_assigned"]:
                     sound_name = "ticket_create.wav"  # Custom sound file
                 else:
                     sound_name = "default"
             elif notification_type == "feedback":
                 channel_id = "feedback"
-                sound_name = "ticket_create.wav"  # Same sound for new feedback
+                sound_name = "default"
+            elif notification_type == "leave_request" or notification_type == "leave":
+                channel_id = "leave_request"
+                sound_name = "default"
             else:
                 channel_id = "default"
                 sound_name = "default"
