@@ -358,12 +358,161 @@ def list_titles():
             "is_new_book",
             "is_featured_book",
             "is_audio_book",
+            "cover_image",
         ],
         order_by="modified desc",
     )
     return list_response(
         data={"items": data, "total": len(data)},
         message="Fetched titles",
+    )
+
+
+@frappe.whitelist(allow_guest=False)
+def upload_title_cover():
+    """
+    Upload ảnh bìa cho đầu sách.
+    Nhận file và title_id, upload lên Frappe File và cập nhật field cover_image.
+    """
+    if (resp := _require_library_role()):
+        return resp
+    
+    title_id = (
+        frappe.request.form.get("title_id") 
+        or frappe.form_dict.get("title_id")
+    )
+    
+    if not title_id:
+        return validation_error_response(message="Thiếu title_id", errors={"title_id": ["required"]})
+    
+    if "file" not in frappe.request.files:
+        return validation_error_response(message="Thiếu file ảnh", errors={"file": ["required"]})
+    
+    try:
+        # Kiểm tra title tồn tại
+        if not frappe.db.exists(TITLE_DTYPE, title_id):
+            return not_found_response(message="Không tìm thấy đầu sách")
+        
+        file = frappe.request.files["file"]
+        content = file.stream.read()
+        filename = file.filename
+        
+        # Upload file using Frappe's file handler
+        from frappe.handler import upload_file
+        
+        # Save file to Frappe
+        file_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": filename,
+            "content": content,
+            "attached_to_doctype": TITLE_DTYPE,
+            "attached_to_name": title_id,
+            "is_private": 0,
+        })
+        file_doc.save(ignore_permissions=True)
+        
+        # Update title with cover_image URL
+        frappe.db.set_value(TITLE_DTYPE, title_id, "cover_image", file_doc.file_url)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"file_url": file_doc.file_url, "title_id": title_id},
+            message="Upload ảnh bìa thành công",
+        )
+    except Exception as ex:
+        frappe.log_error(f"upload_title_cover failed: {ex}")
+        return error_response(message=f"Lỗi upload ảnh: {str(ex)}", code="UPLOAD_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def bulk_upload_covers():
+    """
+    Upload nhiều ảnh bìa cùng lúc.
+    Tên file phải chứa library_code của đầu sách.
+    """
+    if (resp := _require_library_role()):
+        return resp
+    
+    if not frappe.request.files:
+        return validation_error_response(message="Thiếu file ảnh", errors={"files": ["required"]})
+    
+    # Lấy tất cả titles để match
+    titles = frappe.get_all(
+        TITLE_DTYPE,
+        fields=["name", "library_code", "title"],
+    )
+    titles_by_code = {t.library_code.lower(): t for t in titles if t.library_code}
+    
+    results = []
+    success_count = 0
+    
+    files = frappe.request.files.getlist("files")
+    if not files:
+        # Thử lấy single file
+        files = [frappe.request.files.get("file")] if frappe.request.files.get("file") else []
+    
+    for file in files:
+        filename = file.filename
+        # Tách tên file để lấy library_code
+        name_without_ext = filename.rsplit(".", 1)[0] if "." in filename else filename
+        
+        # Tìm title phù hợp
+        matched_title = None
+        for code, title_doc in titles_by_code.items():
+            if code in name_without_ext.lower() or name_without_ext.lower() in code:
+                matched_title = title_doc
+                break
+        
+        if not matched_title:
+            results.append({
+                "filename": filename,
+                "status": "not_found",
+                "message": f"Không tìm thấy đầu sách với mã: {name_without_ext}"
+            })
+            continue
+        
+        try:
+            content = file.stream.read()
+            
+            # Save file to Frappe
+            file_doc = frappe.get_doc({
+                "doctype": "File",
+                "file_name": filename,
+                "content": content,
+                "attached_to_doctype": TITLE_DTYPE,
+                "attached_to_name": matched_title.name,
+                "is_private": 0,
+            })
+            file_doc.save(ignore_permissions=True)
+            
+            # Update title with cover_image URL
+            frappe.db.set_value(TITLE_DTYPE, matched_title.name, "cover_image", file_doc.file_url)
+            
+            results.append({
+                "filename": filename,
+                "status": "success",
+                "title_id": matched_title.name,
+                "library_code": matched_title.library_code,
+                "title": matched_title.title,
+                "file_url": file_doc.file_url,
+            })
+            success_count += 1
+        except Exception as ex:
+            results.append({
+                "filename": filename,
+                "status": "error",
+                "message": str(ex)
+            })
+    
+    frappe.db.commit()
+    
+    return success_response(
+        data={
+            "results": results,
+            "success_count": success_count,
+            "total_count": len(files),
+        },
+        message=f"Upload {success_count}/{len(files)} ảnh thành công",
     )
 
 
@@ -401,8 +550,30 @@ def create_title():
         return error_response(message="Không tạo được đầu sách", code="TITLE_CREATE_ERROR")
 
 
+def _parse_bool_value(value) -> bool:
+    """Parse boolean từ Excel - hỗ trợ 'Có', 'Không', 'Yes', 'No', 'X', '1', 'True'"""
+    if value is None:
+        return False
+    val = str(value).strip().lower()
+    return val in {"có", "co", "true", "1", "yes", "x", "✓", "✔"}
+
+
 @frappe.whitelist(allow_guest=False)
 def import_titles_excel():
+    """
+    Import đầu sách từ Excel.
+    Các cột hỗ trợ (tiếng Việt hoặc tiếng Anh):
+    - Mã định danh / library_code
+    - Tên sách / title (bắt buộc)
+    - Tác giả / authors
+    - Thể loại / category
+    - Ngôn ngữ / language
+    - Phân loại tài liệu / document_type
+    - Tùng thư / series_name
+    - Sách mới / is_new_book (Có/Không)
+    - Nổi bật / is_featured_book (Có/Không)
+    - Sách nói / is_audio_book (Có/Không)
+    """
     if (resp := _require_library_role()):
         return resp
     if "file" not in frappe.request.files:
@@ -410,30 +581,49 @@ def import_titles_excel():
     rows = _import_excel_to_rows(frappe.request.files["file"].stream.read())
     created = 0
     errors: List[str] = []
+    
     for idx, row in enumerate(rows, start=2):
-        title = str(row.get("title") or row.get("Tên đầu sách") or "").strip()
+        # Đọc các trường với nhiều tên có thể
+        title = str(row.get("title") or row.get("Tên sách") or row.get("Tên đầu sách") or "").strip()
         if not title:
-            errors.append(f"Dòng {idx}: thiếu tên đầu sách")
+            errors.append(f"Dòng {idx}: thiếu tên sách")
             continue
+        
+        library_code = str(row.get("library_code") or row.get("Mã định danh") or row.get("Mã đầu sách") or "").strip()
+        
+        # Tác giả - hỗ trợ nhiều tác giả phân cách bằng dấu phẩy
+        authors_raw = str(row.get("authors") or row.get("Tác giả") or "").strip()
+        authors = [a.strip() for a in authors_raw.split(",") if a.strip()] if authors_raw else []
+        
+        category = str(row.get("category") or row.get("Thể loại") or row.get("Chủ đề") or "").strip()
+        language = str(row.get("language") or row.get("Ngôn ngữ") or "").strip()
+        document_type = str(row.get("document_type") or row.get("Phân loại tài liệu") or "").strip()
+        series_name = str(row.get("series_name") or row.get("Tùng thư") or "").strip()
+        
+        is_new_book = _parse_bool_value(row.get("is_new_book") or row.get("Sách mới"))
+        is_featured_book = _parse_bool_value(row.get("is_featured_book") or row.get("Nổi bật"))
+        is_audio_book = _parse_bool_value(row.get("is_audio_book") or row.get("Sách nói"))
+        
         try:
-          doc = frappe.get_doc(
-              {
-                  "doctype": TITLE_DTYPE,
-                  "title": title,
-                  "authors": json.dumps((row.get("authors") or "").split(",") if row.get("authors") else []),
-                  "category": row.get("category"),
-                  "document_type": row.get("document_type"),
-                  "series_name": row.get("series_name"),
-                  "language": row.get("language"),
-                  "is_new_book": str(row.get("is_new_book") or "").lower() in {"true", "1", "yes", "x"},
-                  "is_featured_book": str(row.get("is_featured_book") or "").lower() in {"true", "1", "yes", "x"},
-                  "is_audio_book": str(row.get("is_audio_book") or "").lower() in {"true", "1", "yes", "x"},
-              }
-          )
-          doc.insert(ignore_permissions=True)
-          created += 1
+            doc = frappe.get_doc(
+                {
+                    "doctype": TITLE_DTYPE,
+                    "title": title,
+                    "library_code": library_code or None,
+                    "authors": json.dumps(authors),
+                    "category": category or None,
+                    "document_type": document_type or None,
+                    "series_name": series_name or None,
+                    "language": language or None,
+                    "is_new_book": is_new_book,
+                    "is_featured_book": is_featured_book,
+                    "is_audio_book": is_audio_book,
+                }
+            )
+            doc.insert(ignore_permissions=True)
+            created += 1
         except Exception as ex:
-          errors.append(f"Dòng {idx}: {ex}")
+            errors.append(f"Dòng {idx}: {ex}")
 
     return success_response(
         data={"success_count": created, "total_count": len(rows), "errors": errors},

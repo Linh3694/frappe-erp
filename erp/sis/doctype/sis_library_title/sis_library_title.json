@@ -15,6 +15,7 @@
   "document_type",
   "series_name",
   "language",
+  "cover_image",
   "is_new_book",
   "is_featured_book",
   "is_audio_book",
@@ -60,6 +61,11 @@
    "fieldname": "language",
    "fieldtype": "Data",
    "label": "Ngôn ngữ"
+  },
+  {
+   "fieldname": "cover_image",
+   "fieldtype": "Attach Image",
+   "label": "Ảnh bìa"
   },
   {
    "fieldname": "is_new_book",
