@@ -1289,3 +1289,80 @@ def get_teacher_class_assignments(user_id: str = None):
             code="TEACHER_ASSIGN_FETCH_ERROR",
             debug_info={"error": str(e)}
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_teacher_info_batch():
+    """Get teacher info for multiple teacher IDs - used by mobile timetable"""
+    try:
+        # Get teacher_ids from request - support both GET params and POST body
+        teacher_ids = frappe.local.form_dict.get("teacher_ids")
+        
+        if not teacher_ids:
+            return success_response(data={}, message="No teacher IDs provided")
+        
+        # Parse if JSON string
+        if isinstance(teacher_ids, str):
+            try:
+                teacher_ids = json.loads(teacher_ids)
+            except:
+                teacher_ids = [teacher_ids]
+        
+        if not teacher_ids or len(teacher_ids) == 0:
+            return success_response(data={}, message="No teacher IDs provided")
+        
+        frappe.logger().info(f"👨‍🏫 get_teacher_info_batch called with {len(teacher_ids)} teacher IDs")
+        
+        # Query teachers
+        teachers = frappe.get_all(
+            "SIS Teacher",
+            fields=["name", "user_id", "gender"],
+            filters={"name": ["in", teacher_ids]}
+        )
+        
+        if not teachers:
+            return success_response(data={}, message="No teachers found")
+        
+        # Get user info for display names
+        user_ids = [t.user_id for t in teachers if t.get("user_id")]
+        user_map = {}
+        
+        if user_ids:
+            users = frappe.get_all(
+                "User",
+                fields=["name", "full_name", "first_name", "middle_name", "last_name", "user_image"],
+                filters={"name": ["in", user_ids]}
+            )
+            for u in users:
+                display_name = u.get("full_name")
+                if not display_name:
+                    parts = [u.get("first_name"), u.get("middle_name"), u.get("last_name")]
+                    display_name = " ".join([p for p in parts if p]) or u.get("name")
+                user_map[u.name] = {
+                    "full_name": display_name,
+                    "avatar_url": u.get("user_image")
+                }
+        
+        # Build result dict: teacher_id -> info
+        result = {}
+        for t in teachers:
+            user_info = user_map.get(t.user_id, {})
+            result[t.name] = {
+                "name": t.name,
+                "teacher_name": t.name,
+                "full_name": user_info.get("full_name") or t.user_id or t.name,
+                "gender": t.gender,
+                "avatar_url": user_info.get("avatar_url"),
+                "user_id": t.user_id
+            }
+        
+        frappe.logger().info(f"👨‍🏫 Returning info for {len(result)} teachers")
+        return success_response(data=result, message="Teacher info fetched successfully")
+    
+    except Exception as e:
+        frappe.log_error(f"get_teacher_info_batch error: {str(e)}")
+        return error_response(
+            message="Error fetching teacher info",
+            code="TEACHER_INFO_BATCH_ERROR",
+            debug_info={"error": str(e)}
+        )
