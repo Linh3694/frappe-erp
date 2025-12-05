@@ -261,7 +261,12 @@ def import_lookups_excel():
     if (resp := _require_library_role()):
         return resp
     
-    lookup_type = frappe.form_dict.get("type") or (_get_json_payload().get("type"))
+    # Với multipart/form-data, dùng request.form thay vì form_dict
+    lookup_type = (
+        frappe.request.form.get("type") 
+        or frappe.form_dict.get("type") 
+        or _get_json_payload().get("type")
+    )
     if lookup_type not in VALID_LOOKUP_TYPES:
         return validation_error_response(message="Loại danh mục không hợp lệ", errors={"type": ["invalid"]})
 
