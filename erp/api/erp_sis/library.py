@@ -92,8 +92,17 @@ def list_lookups(type: str | None = None):
     if (resp := _require_library_role()):
         return resp
     try:
-        # Lấy type từ nhiều nguồn để đảm bảo nhận được
-        lookup_type = type or frappe.form_dict.get("type") or _get_json_payload().get("type")
+        # Lấy type từ nhiều nguồn - ưu tiên theo thứ tự
+        # 1. Function parameter (từ frappe.call)
+        # 2. Query string params (request.args)
+        # 3. form_dict (frappe internal)
+        # 4. JSON payload
+        lookup_type = (
+            type 
+            or (frappe.request.args.get("type") if frappe.request else None)
+            or frappe.form_dict.get("type") 
+            or _get_json_payload().get("type")
+        )
         
         filters = {}
         if lookup_type:
@@ -264,9 +273,10 @@ def import_lookups_excel():
     if (resp := _require_library_role()):
         return resp
     
-    # Với multipart/form-data, dùng request.form thay vì form_dict
+    # Với multipart/form-data, lấy type từ nhiều nguồn
     lookup_type = (
         frappe.request.form.get("type") 
+        or (frappe.request.args.get("type") if frappe.request else None)
         or frappe.form_dict.get("type") 
         or _get_json_payload().get("type")
     )
