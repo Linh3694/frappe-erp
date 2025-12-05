@@ -153,25 +153,12 @@ def login(email=None, username=None, password=None, provider="local"):
         except Exception:
             manual_roles = []
 
-        # Build user data from User core fields + custom fields
-        user_data = {
-            "email": user_doc.email,
-            "full_name": user_doc.full_name,
-            "first_name": user_doc.first_name,
-            "last_name": user_doc.last_name,
-            "enabled": user_doc.enabled,
-            "roles": frappe_roles,
-            "user_roles": manual_roles,
-            "provider": getattr(user_doc, "provider", "local"),
-            "active": user_doc.enabled,  # Map enabled to active for backward compatibility
-            "user_image": user_doc.user_image or "",
-            "avatar_url": user_doc.user_image or "",
-        }
+        # Build user data using the same function as get_current_user()
+        # This ensures consistency between login response and subsequent API calls
+        user_data = build_user_data_response(user_doc)
         
-        # Add custom fields if they exist
-        for field in ["username", "employee_code", "job_title", "department", "designation", "microsoft_id", "apple_id"]:
-            if hasattr(user_doc, field):
-                user_data[field] = getattr(user_doc, field)
+        # Override provider to be explicit about login method
+        user_data["provider"] = provider
 
         return {
             "status": "success",

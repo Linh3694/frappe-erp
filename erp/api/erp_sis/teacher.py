@@ -1291,12 +1291,37 @@ def get_teacher_class_assignments(user_id: str = None):
         )
 
 
-@frappe.whitelist(allow_guest=False)
-def get_teacher_info_batch():
-    """Get teacher info for multiple teacher IDs - used by mobile timetable"""
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
+def get_teacher_info_batch(teacher_ids=None):
+    """Get teacher info for multiple teacher IDs - used by mobile timetable
+    
+    Supports both:
+    - GET with ?teacher_ids=["id1","id2"] (JSON-encoded string)
+    - POST with JSON body {"teacher_ids": ["id1", "id2"]}
+    """
     try:
-        # Get teacher_ids from request - support both GET params and POST body
-        teacher_ids = frappe.local.form_dict.get("teacher_ids")
+        # Method 1: Parameter directly passed
+        if not teacher_ids:
+            # Method 2: Try frappe.local.form_dict (for GET params and form data)
+            teacher_ids = frappe.local.form_dict.get("teacher_ids")
+        
+        # Method 3: Try to parse JSON body for POST requests
+        if not teacher_ids and frappe.request.data:
+            try:
+                raw_data = frappe.request.data
+                if isinstance(raw_data, bytes):
+                    raw_data = raw_data.decode('utf-8')
+                if raw_data.strip():
+                    json_data = json.loads(raw_data)
+                    if isinstance(json_data, dict):
+                        teacher_ids = json_data.get("teacher_ids")
+                    elif isinstance(json_data, list):
+                        # If JSON is directly an array
+                        teacher_ids = json_data
+            except Exception as e:
+                frappe.logger().warning(f"👨‍🏫 Could not parse JSON body: {e}")
+        
+        frappe.logger().info(f"👨‍🏫 get_teacher_info_batch received teacher_ids type: {type(teacher_ids)}, value: {teacher_ids}")
         
         if not teacher_ids:
             return success_response(data={}, message="No teacher IDs provided")
@@ -1308,8 +1333,15 @@ def get_teacher_info_batch():
             except:
                 teacher_ids = [teacher_ids]
         
+        # Ensure it's a list
+        if not isinstance(teacher_ids, list):
+            teacher_ids = [teacher_ids]
+        
+        # Filter out empty/null values
+        teacher_ids = [tid for tid in teacher_ids if tid and str(tid).strip()]
+        
         if not teacher_ids or len(teacher_ids) == 0:
-            return success_response(data={}, message="No teacher IDs provided")
+            return success_response(data={}, message="No valid teacher IDs provided")
         
         frappe.logger().info(f"👨‍🏫 get_teacher_info_batch called with {len(teacher_ids)} teacher IDs")
         

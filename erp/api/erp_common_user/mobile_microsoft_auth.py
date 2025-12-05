@@ -242,30 +242,24 @@ def mobile_microsoft_callback(code=None, state=None):
                 "details": str(e)
             }
         
-        # Get user roles
-        frappe_roles = []
-        try:
-            frappe_roles = frappe.get_roles(frappe_user.email) or ["Guest"]
-        except Exception:
-            frappe_roles = ["Guest"]
+        # Build user data using the same function as get_current_user() and login()
+        # This ensures consistency across all authentication methods
+        from erp.api.erp_common_user.auth import build_user_data_response
+        user_data = build_user_data_response(frappe_user)
         
-        # Create user data for mobile app using Microsoft Graph info
-        user_data = {
-            "email": user_email,
-            "full_name": frappe_user.full_name,
-            "first_name": frappe_user.first_name or "",
-            "last_name": frappe_user.last_name or "",
-            "provider": "microsoft",
-            "job_title": user_info.get("jobTitle", ""),
-            "department": user_info.get("department", ""),
-            "employee_code": user_info.get("employeeId", ""),
-            "user_role": "user",  # Default role
-            "roles": frappe_roles,
-            "active": frappe_user.enabled,
-            "username": user_email,
-            "user_image": frappe_user.user_image or "",
-            "account_enabled": user_info.get("accountEnabled", True)
-        }
+        # Override/add Microsoft-specific fields
+        user_data["provider"] = "microsoft"
+        user_data["account_enabled"] = user_info.get("accountEnabled", True)
+        
+        # Use Microsoft Graph info for job_title/department if available and not in Frappe user
+        if not user_data.get("job_title") and user_info.get("jobTitle"):
+            user_data["job_title"] = user_info.get("jobTitle", "")
+        if not user_data.get("department") and user_info.get("department"):
+            user_data["department"] = user_info.get("department", "")
+        if not user_data.get("employee_code") and user_info.get("employeeId"):
+            user_data["employee_code"] = user_info.get("employeeId", "")
+        
+        frappe.logger().info(f"Microsoft login user_data: email={user_data.get('email')}, teacher_info={user_data.get('teacher_info')}")
         
         # Return success response
         result = success_response(
@@ -373,25 +367,23 @@ def mobile_direct_token_auth(microsoft_token):
         frappe_user = handle_microsoft_user_login(ms_user)
         
         # Generate JWT token
-        from erp.api.erp_common_user.auth import generate_jwt_token
+        from erp.api.erp_common_user.auth import generate_jwt_token, build_user_data_response
         jwt_token = generate_jwt_token(frappe_user.email)
         
-        # Get user roles
-        frappe_roles = frappe.get_roles(frappe_user.email) or ["Guest"]
+        # Build user data using the same function as get_current_user() and login()
+        # This ensures consistency across all authentication methods
+        user_data = build_user_data_response(frappe_user)
         
-        # Create user data using Microsoft Graph info
-        user_data = {
-            "email": user_email,
-            "full_name": frappe_user.full_name,
-            "provider": "microsoft",
-            "job_title": user_info.get("jobTitle", ""),
-            "department": user_info.get("department", ""),
-            "employee_code": user_info.get("employeeId", ""),
-            "user_role": "user",  # Default role
-            "roles": frappe_roles,
-            "active": frappe_user.enabled,
-            "username": user_email
-        }
+        # Override/add Microsoft-specific fields
+        user_data["provider"] = "microsoft"
+        
+        # Use Microsoft Graph info for job_title/department if available
+        if not user_data.get("job_title") and user_info.get("jobTitle"):
+            user_data["job_title"] = user_info.get("jobTitle", "")
+        if not user_data.get("department") and user_info.get("department"):
+            user_data["department"] = user_info.get("department", "")
+        if not user_data.get("employee_code") and user_info.get("employeeId"):
+            user_data["employee_code"] = user_info.get("employeeId", "")
         
         return success_response(
             data={
