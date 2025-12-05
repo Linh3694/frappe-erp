@@ -1056,6 +1056,16 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
             limit=1
         )
         
+        # Debug info
+        debug_info = {
+            "searched_user_id": teacher_user_id,
+            "found_teacher_record": len(teacher_records) > 0,
+            "teacher_name": teacher_records[0].name if teacher_records else None,
+            "campus_id": campus_id,
+            "school_year_id": school_year_id
+        }
+        frappe.logger().info(f"🔍 Debug: {debug_info}")
+        
         homeroom_classes = []
         teaching_class_ids = set()
         
@@ -1083,6 +1093,10 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
                 ],
                 order_by="title asc"
             )
+            
+            frappe.logger().info(f"🏫 Found {len(homeroom_classes)} homeroom classes for teacher {teacher_name}")
+        else:
+            frappe.logger().warning(f"⚠️ No SIS Teacher record found with user_id={teacher_user_id}. Please link this user to a SIS Teacher record.")
 
         # 2. Get teaching classes using optimized multi-source approach
         # (week_start already calculated above for cache key)

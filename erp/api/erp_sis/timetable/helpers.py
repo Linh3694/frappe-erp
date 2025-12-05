@@ -173,7 +173,7 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
     if column_ids:
         for col in frappe.get_all(
             "SIS Timetable Column",
-            fields=["name", "period_priority", "period_name", "start_time", "end_time"],
+            fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
             filters={"name": ["in", column_ids]},
         ):
             columns_map[col.name] = col
@@ -248,12 +248,37 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
         # Only use pattern if no override exists for this date/period/day
         if key not in override_map:
             col = columns_map.get(r.get("timetable_column_id")) or {}
+            # Convert timedelta to HH:MM format for start_time and end_time
+            start_time = None
+            if col.get('start_time'):
+                if hasattr(col['start_time'], 'total_seconds'):
+                    total_seconds = int(col['start_time'].total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    start_time = f"{hours:02d}:{minutes:02d}"
+                else:
+                    start_time = str(col['start_time'])[:5]  # "HH:MM:SS" -> "HH:MM"
+            
+            end_time = None
+            if col.get('end_time'):
+                if hasattr(col['end_time'], 'total_seconds'):
+                    total_seconds = int(col['end_time'].total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    end_time = f"{hours:02d}:{minutes:02d}"
+                else:
+                    end_time = str(col['end_time'])[:5]
+            
             result.append({
                 "name": r.get("name"),
                 "date": date_str,
                 "day_of_week": r.get("day_of_week"),
                 "timetable_column_id": r.get("timetable_column_id"),
                 "period_priority": col.get("period_priority"),
+                "period_name": col.get("period_name") or "",
+                "start_time": start_time,
+                "end_time": end_time,
+                "period_type": col.get("period_type") or "study",
                 "subject_id": r.get("subject_id") or "",  # ✅ Include subject_id for edit modal
                 "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
                 "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
@@ -283,12 +308,37 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
         # Only include overrides within this week
         if week_start_date <= row_date <= week_end_date:
             col = columns_map.get(r.get("timetable_column_id")) or {}
+            # Convert timedelta to HH:MM format for start_time and end_time
+            start_time = None
+            if col.get('start_time'):
+                if hasattr(col['start_time'], 'total_seconds'):
+                    total_seconds = int(col['start_time'].total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    start_time = f"{hours:02d}:{minutes:02d}"
+                else:
+                    start_time = str(col['start_time'])[:5]
+            
+            end_time = None
+            if col.get('end_time'):
+                if hasattr(col['end_time'], 'total_seconds'):
+                    total_seconds = int(col['end_time'].total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    end_time = f"{hours:02d}:{minutes:02d}"
+                else:
+                    end_time = str(col['end_time'])[:5]
+            
             result.append({
                 "name": r.get("name"),
                 "date": row_date.strftime("%Y-%m-%d"),
                 "day_of_week": r.get("day_of_week"),
                 "timetable_column_id": r.get("timetable_column_id"),
                 "period_priority": col.get("period_priority"),
+                "period_name": col.get("period_name") or "",
+                "start_time": start_time,
+                "end_time": end_time,
+                "period_type": col.get("period_type") or "study",
                 "subject_id": r.get("subject_id") or "",  # ✅ Include subject_id for edit modal
                 "subject_title": r.get("subject_title") or r.get("subject_name") or r.get("subject") or "",
                 "teacher_names": r.get("teacher_names") or r.get("teacher_display") or "",
