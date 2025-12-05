@@ -21,12 +21,10 @@ COPY_DTYPE = "SIS Library Book Copy"
 ACTIVITY_DTYPE = "SIS Library Activity"
 
 VALID_LOOKUP_TYPES = {
-    "convention",
-    "document_type",
-    "series",
-    "topic",
-    "language",
-    "warehouse",
+    "convention",      # Mã quy ước: code (mã đặc biệt), storage (nơi lưu trữ), language (ngôn ngữ)
+    "document_type",   # Phân loại tài liệu: name_vi (tên đầu mục), code (mã)
+    "series",          # Tùng thư: name_vi (tên tùng thư)
+    "author",          # Tác giả: name_vi (tên tác giả)
 }
 
 STATUS_MAP = {"available", "borrowed", "reserved", "overdue"}
@@ -117,6 +115,14 @@ def list_lookups(type: str | None = None):
 
 @frappe.whitelist(allow_guest=False)
 def create_lookup():
+    """
+    Tạo danh mục thư viện.
+    Schema theo từng loại:
+    - document_type: name (Tên đầu mục) + code (Mã) - cả 2 bắt buộc
+    - series: name (Tên tùng thư) - chỉ name
+    - author: name (Tên tác giả) - chỉ name  
+    - convention: code (Mã đặc biệt) + storage (Nơi lưu trữ) + language (Ngôn ngữ)
+    """
     if (resp := _require_library_role()):
         return resp
     data = _get_json_payload()
@@ -126,23 +132,54 @@ def create_lookup():
 
     code = (data.get("code") or "").strip()
     name = (data.get("name") or "").strip()
-    if not code or not name:
-        return validation_error_response(message="Thiếu mã hoặc tên", errors={"code": ["required"], "name": ["required"]})
+    language = (data.get("language") or "").strip()
+    storage = (data.get("storage") or "").strip()
+
+    # Validate theo từng loại
+    if lookup_type == "document_type":
+        # Phân loại tài liệu: cần name (Tên đầu mục) + code (Mã)
+        if not name:
+            return validation_error_response(message="Thiếu tên đầu mục", errors={"name": ["required"]})
+        if not code:
+            return validation_error_response(message="Thiếu mã", errors={"code": ["required"]})
+    elif lookup_type == "series":
+        # Tùng thư: chỉ cần name (Tên tùng thư)
+        if not name:
+            return validation_error_response(message="Thiếu tên tùng thư", errors={"name": ["required"]})
+    elif lookup_type == "author":
+        # Tác giả: chỉ cần name (Tên tác giả)
+        if not name:
+            return validation_error_response(message="Thiếu tên tác giả", errors={"name": ["required"]})
+    elif lookup_type == "convention":
+        # Mã quy ước: code (Mã đặc biệt) + storage (Nơi lưu trữ) + language (Ngôn ngữ)
+        if not code:
+            return validation_error_response(message="Thiếu mã đặc biệt", errors={"code": ["required"]})
+        if not storage:
+            return validation_error_response(message="Thiếu nơi lưu trữ", errors={"storage": ["required"]})
+        if not language:
+            return validation_error_response(message="Thiếu ngôn ngữ", errors={"language": ["required"]})
 
     try:
         doc = frappe.get_doc(
             {
                 "doctype": LOOKUP_DTYPE,
                 "lookup_type": lookup_type,
-                "code": code,
-                "name_vi": name,
-                "language": data.get("language"),
-                "storage": data.get("storage"),
+                "code": code or None,
+                "name_vi": name or None,
+                "language": language or None,
+                "storage": storage or None,
             }
         )
         doc.insert(ignore_permissions=True)
         return success_response(
-            data={"id": doc.name, "code": doc.code, "name": doc.name_vi, "type": doc.lookup_type, "language": doc.language, "storage": doc.storage},
+            data={
+                "id": doc.name, 
+                "code": doc.code, 
+                "name": doc.name_vi, 
+                "type": doc.lookup_type, 
+                "language": doc.language, 
+                "storage": doc.storage
+            },
             message="Tạo danh mục thành công",
         )
     except Exception as ex:
@@ -213,9 +250,17 @@ def _import_excel_to_rows(file_content: bytes) -> List[Dict[str, Any]]:
 
 @frappe.whitelist(allow_guest=False)
 def import_lookups_excel():
+    """
+    Upload Excel for lookups.
+    Expected columns theo từng loại:
+    - document_type: name/tên (Tên đầu mục), code/mã (Mã)
+    - series: name/tên (Tên tùng thư)
+    - author: name/tên (Tên tác giả)
+    - convention: code/mã (Mã đặc biệt), storage/nơi lưu trữ, language/ngôn ngữ
+    """
     if (resp := _require_library_role()):
         return resp
-    """Upload Excel for lookups. Expected columns: code, name, language, storage"""
+    
     lookup_type = frappe.form_dict.get("type") or (_get_json_payload().get("type"))
     if lookup_type not in VALID_LOOKUP_TYPES:
         return validation_error_response(message="Loại danh mục không hợp lệ", errors={"type": ["invalid"]})
@@ -229,23 +274,41 @@ def import_lookups_excel():
     errors: List[str] = []
 
     for idx, row in enumerate(rows, start=2):
-        code = str(row.get("code") or row.get("mã") or row.get("Mã") or "").strip()
-        name = str(row.get("name") or row.get("tên") or row.get("Tên") or "").strip()
-        language = row.get("language") or row.get("ngôn ngữ") or row.get("Ngôn ngữ")
-        storage = row.get("storage") or row.get("kho") or row.get("Kho")
+        # Đọc các cột với nhiều tên có thể
+        code = str(row.get("code") or row.get("mã") or row.get("Mã") or row.get("Mã đặc biệt") or "").strip()
+        name = str(row.get("name") or row.get("tên") or row.get("Tên") or row.get("Tên đầu mục") or row.get("Tên tùng thư") or row.get("Tên tác giả") or "").strip()
+        language = str(row.get("language") or row.get("ngôn ngữ") or row.get("Ngôn ngữ") or "").strip()
+        storage = str(row.get("storage") or row.get("nơi lưu trữ") or row.get("Nơi lưu trữ") or row.get("kho") or row.get("Kho") or "").strip()
 
-        if not code or not name:
-            errors.append(f"Dòng {idx}: thiếu mã hoặc tên")
-            continue
+        # Validate theo từng loại
+        if lookup_type == "document_type":
+            if not name or not code:
+                errors.append(f"Dòng {idx}: thiếu tên đầu mục hoặc mã")
+                continue
+        elif lookup_type in {"series", "author"}:
+            if not name:
+                errors.append(f"Dòng {idx}: thiếu tên")
+                continue
+        elif lookup_type == "convention":
+            if not code:
+                errors.append(f"Dòng {idx}: thiếu mã đặc biệt")
+                continue
+            if not storage:
+                errors.append(f"Dòng {idx}: thiếu nơi lưu trữ")
+                continue
+            if not language:
+                errors.append(f"Dòng {idx}: thiếu ngôn ngữ")
+                continue
+
         try:
             doc = frappe.get_doc(
                 {
                     "doctype": LOOKUP_DTYPE,
                     "lookup_type": lookup_type,
-                    "code": code,
-                    "name_vi": name,
-                    "language": language,
-                    "storage": storage,
+                    "code": code or None,
+                    "name_vi": name or None,
+                    "language": language or None,
+                    "storage": storage or None,
                 }
             )
             doc.insert(ignore_permissions=True)
