@@ -184,6 +184,8 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
     education_stage_id = None
     campus_id = None
     class_ids = list({r.get("class_id") for r in rows if r.get("class_id")})
+    frappe.logger().info(f"📊 _build_entries: class_ids from rows = {class_ids}")
+    
     if class_ids:
         try:
             class_info = frappe.db.get_value(
@@ -192,6 +194,8 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 ["education_grade", "campus_id"], 
                 as_dict=True
             )
+            frappe.logger().info(f"📊 _build_entries: class_info = {class_info}")
+            
             if class_info:
                 campus_id = class_info.get("campus_id")
                 # Get education_stage from grade
@@ -202,13 +206,18 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                         ["education_stage"],
                         as_dict=True
                     )
+                    frappe.logger().info(f"📊 _build_entries: grade_info = {grade_info}")
                     if grade_info:
                         education_stage_id = grade_info.get("education_stage")
+                        
+            frappe.logger().info(f"📊 _build_entries: education_stage_id={education_stage_id}, campus_id={campus_id}")
         except Exception as e:
             frappe.logger().warning(f"Failed to get education_stage for non-study periods: {str(e)}")
     
     # Load non-study columns for this education stage
     non_study_columns = []
+    
+    # First try: Use education_stage_id and campus_id from class
     if education_stage_id and campus_id:
         try:
             non_study_columns = frappe.get_all(
@@ -224,9 +233,41 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
             # Add to columns_map
             for col in non_study_columns:
                 columns_map[col.name] = col
-            frappe.logger().info(f"📊 Found {len(non_study_columns)} non-study columns for education_stage={education_stage_id}")
+            frappe.logger().info(f"📊 Found {len(non_study_columns)} non-study columns for education_stage={education_stage_id}, campus={campus_id}")
         except Exception as e:
             frappe.logger().warning(f"Failed to load non-study columns: {str(e)}")
+    
+    # Fallback: Get non-study columns from same education_stage/campus as existing study columns
+    if not non_study_columns and column_ids:
+        try:
+            # Get education_stage_id and campus_id from the first study column
+            first_col = frappe.db.get_value(
+                "SIS Timetable Column",
+                column_ids[0],
+                ["education_stage_id", "campus_id"],
+                as_dict=True
+            )
+            if first_col:
+                fallback_education_stage = first_col.get("education_stage_id")
+                fallback_campus = first_col.get("campus_id")
+                frappe.logger().info(f"📊 Fallback: Using education_stage={fallback_education_stage}, campus={fallback_campus} from study columns")
+                
+                if fallback_education_stage and fallback_campus:
+                    non_study_columns = frappe.get_all(
+                        "SIS Timetable Column",
+                        fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                        filters={
+                            "education_stage_id": fallback_education_stage,
+                            "campus_id": fallback_campus,
+                            "period_type": "non-study"
+                        },
+                        order_by="period_priority asc, start_time asc"
+                    )
+                    for col in non_study_columns:
+                        columns_map[col.name] = col
+                    frappe.logger().info(f"📊 Fallback found {len(non_study_columns)} non-study columns")
+        except Exception as e:
+            frappe.logger().warning(f"Fallback non-study columns lookup failed: {str(e)}")
     
     # Load teacher_ids for each row from child table
     row_ids = [r.get("name") for r in rows if r.get("name")]
