@@ -1,0 +1,134 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "autoname": "format:LIB-{#####}",
+ "creation": "2025-01-01 00:00:00.000000",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "library_code",
+  "authors",
+  "category",
+  "document_type",
+  "series_name",
+  "language",
+  "is_new_book",
+  "is_featured_book",
+  "is_audio_book",
+  "description",
+  "introduction",
+  "audio_book"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tên đầu sách",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "library_code",
+   "fieldtype": "Data",
+   "label": "Mã đầu sách",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "authors",
+   "fieldtype": "Small Text",
+   "label": "Tác giả (JSON array)"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Data",
+   "label": "Chủ đề/Thể loại"
+  },
+  {
+   "fieldname": "document_type",
+   "fieldtype": "Data",
+   "label": "Phân loại tài liệu"
+  },
+  {
+   "fieldname": "series_name",
+   "fieldtype": "Data",
+   "label": "Tùng thư"
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Ngôn ngữ"
+  },
+  {
+   "fieldname": "is_new_book",
+   "fieldtype": "Check",
+   "label": "Sách mới"
+  },
+  {
+   "fieldname": "is_featured_book",
+   "fieldtype": "Check",
+   "label": "Nổi bật"
+  },
+  {
+   "fieldname": "is_audio_book",
+   "fieldtype": "Check",
+   "label": "Sách nói"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Mô tả (JSON)"
+  },
+  {
+   "fieldname": "introduction",
+   "fieldtype": "Small Text",
+   "label": "Giới thiệu (JSON)"
+  },
+  {
+   "fieldname": "audio_book",
+   "fieldtype": "Small Text",
+   "label": "Sách nói (JSON)"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Library Title",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Library",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

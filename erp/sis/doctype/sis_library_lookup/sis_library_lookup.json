@@ -1,0 +1,93 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "autoname": "field:code",
+ "creation": "2025-01-01 00:00:00.000000",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "lookup_type",
+  "code",
+  "name_vi",
+  "language",
+  "storage"
+ ],
+ "fields": [
+  {
+   "fieldname": "lookup_type",
+   "fieldtype": "Select",
+   "label": "Loại danh mục",
+   "options": "convention\ndocument_type\nseries\ntopic\nlanguage\nwarehouse",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "code",
+   "fieldtype": "Data",
+   "label": "Mã",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "name_vi",
+   "fieldtype": "Data",
+   "label": "Tên",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Ngôn ngữ",
+   "in_list_view": 0
+  },
+  {
+   "fieldname": "storage",
+   "fieldtype": "Data",
+   "label": "Kho/Nơi lưu trữ",
+   "in_list_view": 0
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Library Lookup",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Library",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "name_vi",
+ "track_changes": 1
+}

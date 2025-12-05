@@ -1,0 +1,129 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "autoname": "field:generated_code",
+ "creation": "2025-01-01 00:00:00.000000",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title_id",
+  "generated_code",
+  "special_code",
+  "status",
+  "warehouse",
+  "language",
+  "borrower_name",
+  "borrower_id",
+  "borrowed_date",
+  "return_date",
+  "overdue_days"
+ ],
+ "fields": [
+  {
+   "fieldname": "title_id",
+   "fieldtype": "Link",
+   "label": "Đầu sách",
+   "options": "SIS Library Title",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "generated_code",
+   "fieldtype": "Data",
+   "label": "Mã bản sao",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "special_code",
+   "fieldtype": "Data",
+   "label": "Mã quy ước"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "available\nborrowed\nreserved\noverdue",
+   "default": "available",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Data",
+   "label": "Kho/Nơi lưu trữ",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Ngôn ngữ"
+  },
+  {
+   "fieldname": "borrower_name",
+   "fieldtype": "Data",
+   "label": "Người mượn"
+  },
+  {
+   "fieldname": "borrower_id",
+   "fieldtype": "Data",
+   "label": "ID người mượn"
+  },
+  {
+   "fieldname": "borrowed_date",
+   "fieldtype": "Date",
+   "label": "Ngày mượn"
+  },
+  {
+   "fieldname": "return_date",
+   "fieldtype": "Date",
+   "label": "Ngày trả"
+  },
+  {
+   "fieldname": "overdue_days",
+   "fieldtype": "Int",
+   "label": "Số ngày quá hạn",
+   "default": "0"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Library Book Copy",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Library",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "generated_code",
+ "track_changes": 1
+}
