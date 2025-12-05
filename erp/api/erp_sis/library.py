@@ -586,6 +586,57 @@ def create_title():
         return error_response(message="Không tạo được đầu sách", code="TITLE_CREATE_ERROR")
 
 
+@frappe.whitelist(allow_guest=False)
+def update_title():
+    """Cập nhật đầu sách"""
+    if (resp := _require_library_role()):
+        return resp
+    data = _get_json_payload()
+    title_id = data.get("id")
+    if not title_id:
+        return validation_error_response(message="Thiếu id đầu sách", errors={"id": ["required"]})
+    
+    if not frappe.db.exists(TITLE_DTYPE, title_id):
+        return not_found_response(message="Không tìm thấy đầu sách")
+    
+    try:
+        doc = frappe.get_doc(TITLE_DTYPE, title_id)
+        
+        # Update fields nếu có trong payload
+        if "title" in data:
+            doc.title = data["title"]
+        if "library_code" in data:
+            doc.library_code = data["library_code"]
+        if "authors" in data:
+            doc.authors = json.dumps(data["authors"]) if isinstance(data["authors"], list) else data["authors"]
+        if "category" in data:
+            doc.category = data["category"]
+        if "document_type" in data:
+            doc.document_type = data["document_type"]
+        if "series_name" in data:
+            doc.series_name = data["series_name"]
+        if "language" in data:
+            doc.language = data["language"]
+        if "is_new_book" in data:
+            doc.is_new_book = bool(data["is_new_book"])
+        if "is_featured_book" in data:
+            doc.is_featured_book = bool(data["is_featured_book"])
+        if "is_audio_book" in data:
+            doc.is_audio_book = bool(data["is_audio_book"])
+        if "cover_image" in data:
+            doc.cover_image = data["cover_image"]
+        if "description" in data:
+            doc.description = json.dumps(data["description"]) if isinstance(data["description"], dict) else data["description"]
+        if "introduction" in data:
+            doc.introduction = json.dumps(data["introduction"]) if isinstance(data["introduction"], dict) else data["introduction"]
+        
+        doc.save(ignore_permissions=True)
+        return success_response(data={"id": doc.name}, message="Cập nhật đầu sách thành công")
+    except Exception as ex:
+        frappe.log_error(f"update_title failed: {ex}")
+        return error_response(message="Không cập nhật được đầu sách", code="TITLE_UPDATE_ERROR")
+
+
 def _parse_bool_value(value) -> bool:
     """Parse boolean từ Excel - hỗ trợ 'Có', 'Không', 'Yes', 'No', 'X', '1', 'True'"""
     if value is None:
