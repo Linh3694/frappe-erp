@@ -424,16 +424,26 @@ def import_titles_excel():
 
 
 @frappe.whitelist(allow_guest=False)
-def list_book_copies(search: str | None = None, status: str | None = None, page: int = 1, page_size: int = 20):
+def list_book_copies(search: str | None = None, status: str | None = None, title_id: str | None = None, page: int = 1, page_size: int = 20):
+    """
+    List book copies with optional filters.
+    - search: search by generated_code
+    - status: filter by status (available, borrowed, reserved, overdue)
+    - title_id: filter by title (đầu sách)
+    """
     if (resp := _require_library_role()):
         return resp
     try:
         filters: Dict[str, Any] = {}
         if status and status in STATUS_MAP:
             filters["status"] = status
+        if title_id:
+            filters["title_id"] = title_id
         if search:
-            # crude search on code
+            # Search by generated_code, isbn, or book_title
             filters["generated_code"] = ["like", f"%{search}%"]
+            # For OR search, we use frappe.get_all with or_filters later
+            # For now, simple search on generated_code only
 
         copies = frappe.get_all(
             COPY_DTYPE,
@@ -451,11 +461,35 @@ def list_book_copies(search: str | None = None, status: str | None = None, page:
                 "borrowed_date",
                 "return_date",
                 "overdue_days",
+                # Book info fields
+                "isbn",
+                "document_identifier",
+                "book_title",
+                "classification_sign",
+                "series_name",
+                # Publishing fields
+                "publisher_name",
+                "publisher_place_name",
+                "publish_year",
+                # Description fields
+                "pages",
+                "cover_price",
+                "cataloging_agency",
+                "storage_location",
             ],
             limit_start=(page - 1) * page_size,
             limit=page_size,
             order_by="modified desc",
         )
+        # Enrich with title info
+        for copy in copies:
+            if copy.get("title_id"):
+                try:
+                    title_doc = frappe.get_cached_doc(TITLE_DTYPE, copy["title_id"])
+                    copy["title_name"] = title_doc.title
+                    copy["title_library_code"] = title_doc.library_code
+                except Exception:
+                    pass
         total = frappe.db.count(COPY_DTYPE, filters=filters)
         return list_response(data={"items": copies, "total": total}, message="Fetched copies")
     except Exception as ex:
@@ -514,6 +548,21 @@ def create_book_copy():
                 "status": status,
                 "warehouse": warehouse,
                 "language": language,
+                # Book info fields
+                "isbn": data.get("isbn"),
+                "document_identifier": data.get("document_identifier"),
+                "book_title": data.get("book_title"),
+                "classification_sign": data.get("classification_sign"),
+                "series_name": data.get("series_name"),
+                # Publishing fields
+                "publisher_name": data.get("publisher_name"),
+                "publisher_place_name": data.get("publisher_place_name"),
+                "publish_year": data.get("publish_year"),
+                # Description fields
+                "pages": data.get("pages"),
+                "cover_price": data.get("cover_price"),
+                "cataloging_agency": data.get("cataloging_agency") or "WIS",
+                "storage_location": data.get("storage_location"),
             }
         )
         doc.insert(ignore_permissions=True)
@@ -562,6 +611,39 @@ def import_copies_excel():
         language = row.get("language") or row.get("Ngôn ngữ")
         status = (row.get("status") or "available").lower()
 
+        # Book info fields
+        isbn = row.get("isbn") or row.get("ISBN")
+        document_identifier = row.get("document_identifier") or row.get("Định danh tài liệu")
+        book_title = row.get("book_title") or row.get("Tên sách")
+        classification_sign = row.get("classification_sign") or row.get("Ký hiệu phân loại")
+        series_name = row.get("series_name") or row.get("Tùng thư")
+
+        # Publishing fields
+        publisher_name = row.get("publisher_name") or row.get("Nhà Xuất Bản") or row.get("NXB")
+        publisher_place_name = row.get("publisher_place_name") or row.get("Nơi Xuất Bản")
+        publish_year = row.get("publish_year") or row.get("Năm XB") or row.get("Năm Xuất Bản")
+        if publish_year:
+            try:
+                publish_year = int(publish_year)
+            except (ValueError, TypeError):
+                publish_year = None
+
+        # Description fields
+        pages = row.get("pages") or row.get("Số trang")
+        if pages:
+            try:
+                pages = int(pages)
+            except (ValueError, TypeError):
+                pages = None
+        cover_price = row.get("cover_price") or row.get("Giá bìa")
+        if cover_price:
+            try:
+                cover_price = float(cover_price)
+            except (ValueError, TypeError):
+                cover_price = None
+        cataloging_agency = row.get("cataloging_agency") or row.get("Cơ quan biên mục") or "WIS"
+        storage_location = row.get("storage_location") or row.get("Vị trí lưu trữ")
+
         if status not in STATUS_MAP:
             status = "available"
         if not title_id:
@@ -578,6 +660,21 @@ def import_copies_excel():
                     "status": status,
                     "warehouse": warehouse,
                     "language": language,
+                    # Book info
+                    "isbn": isbn,
+                    "document_identifier": document_identifier,
+                    "book_title": book_title,
+                    "classification_sign": classification_sign,
+                    "series_name": series_name,
+                    # Publishing
+                    "publisher_name": publisher_name,
+                    "publisher_place_name": publisher_place_name,
+                    "publish_year": publish_year,
+                    # Description
+                    "pages": pages,
+                    "cover_price": cover_price,
+                    "cataloging_agency": cataloging_agency,
+                    "storage_location": storage_location,
                 }
             )
             doc.insert(ignore_permissions=True)
@@ -741,6 +838,33 @@ def update_book_copy():
             doc.overdue_days = data.get("overdue_days") or 0
         if "special_code" in data:
             doc.special_code = data.get("special_code")
+        # Book info fields
+        if "isbn" in data:
+            doc.isbn = data.get("isbn")
+        if "document_identifier" in data:
+            doc.document_identifier = data.get("document_identifier")
+        if "book_title" in data:
+            doc.book_title = data.get("book_title")
+        if "classification_sign" in data:
+            doc.classification_sign = data.get("classification_sign")
+        if "series_name" in data:
+            doc.series_name = data.get("series_name")
+        # Publishing fields
+        if "publisher_name" in data:
+            doc.publisher_name = data.get("publisher_name")
+        if "publisher_place_name" in data:
+            doc.publisher_place_name = data.get("publisher_place_name")
+        if "publish_year" in data:
+            doc.publish_year = data.get("publish_year")
+        # Description fields
+        if "pages" in data:
+            doc.pages = data.get("pages")
+        if "cover_price" in data:
+            doc.cover_price = data.get("cover_price")
+        if "cataloging_agency" in data:
+            doc.cataloging_agency = data.get("cataloging_agency")
+        if "storage_location" in data:
+            doc.storage_location = data.get("storage_location")
 
         doc.save(ignore_permissions=True)
 

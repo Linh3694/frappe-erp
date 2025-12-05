@@ -12,10 +12,31 @@
   "generated_code",
   "special_code",
   "status",
+  "section_book_info",
+  "isbn",
+  "document_identifier",
+  "book_title",
+  "column_break_1",
+  "classification_sign",
+  "series_name",
+  "section_publishing",
+  "publisher_name",
+  "publisher_place_name",
+  "column_break_2",
+  "publish_year",
+  "section_description",
+  "pages",
+  "cover_price",
+  "column_break_3",
+  "cataloging_agency",
+  "storage_location",
+  "section_storage",
   "warehouse",
   "language",
+  "section_borrow",
   "borrower_name",
   "borrower_id",
+  "column_break_4",
   "borrowed_date",
   "return_date",
   "overdue_days"
@@ -50,15 +71,114 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "section_book_info",
+   "fieldtype": "Section Break",
+   "label": "Thông tin sách"
+  },
+  {
+   "fieldname": "isbn",
+   "fieldtype": "Data",
+   "label": "ISBN"
+  },
+  {
+   "fieldname": "document_identifier",
+   "fieldtype": "Data",
+   "label": "Định danh tài liệu"
+  },
+  {
+   "fieldname": "book_title",
+   "fieldtype": "Data",
+   "label": "Tên sách",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "classification_sign",
+   "fieldtype": "Data",
+   "label": "Ký hiệu phân loại"
+  },
+  {
+   "fieldname": "series_name",
+   "fieldtype": "Data",
+   "label": "Tùng thư"
+  },
+  {
+   "fieldname": "section_publishing",
+   "fieldtype": "Section Break",
+   "label": "Thông tin xuất bản"
+  },
+  {
+   "fieldname": "publisher_name",
+   "fieldtype": "Data",
+   "label": "Nhà Xuất Bản"
+  },
+  {
+   "fieldname": "publisher_place_name",
+   "fieldtype": "Data",
+   "label": "Nơi Xuất Bản"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "publish_year",
+   "fieldtype": "Int",
+   "label": "Năm Xuất Bản",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_description",
+   "fieldtype": "Section Break",
+   "label": "Mô tả"
+  },
+  {
+   "fieldname": "pages",
+   "fieldtype": "Int",
+   "label": "Số trang"
+  },
+  {
+   "fieldname": "cover_price",
+   "fieldtype": "Currency",
+   "label": "Giá bìa"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cataloging_agency",
+   "fieldtype": "Data",
+   "label": "Cơ quan biên mục",
+   "default": "WIS"
+  },
+  {
+   "fieldname": "storage_location",
+   "fieldtype": "Data",
+   "label": "Vị trí lưu trữ"
+  },
+  {
+   "fieldname": "section_storage",
+   "fieldtype": "Section Break",
+   "label": "Kho/Ngôn ngữ"
+  },
+  {
    "fieldname": "warehouse",
    "fieldtype": "Data",
-   "label": "Kho/Nơi lưu trữ",
-   "in_list_view": 1
+   "label": "Kho/Nơi lưu trữ"
   },
   {
    "fieldname": "language",
    "fieldtype": "Data",
    "label": "Ngôn ngữ"
+  },
+  {
+   "fieldname": "section_borrow",
+   "fieldtype": "Section Break",
+   "label": "Thông tin mượn"
   },
   {
    "fieldname": "borrower_name",
@@ -69,6 +189,10 @@
    "fieldname": "borrower_id",
    "fieldtype": "Data",
    "label": "ID người mượn"
+  },
+  {
+   "fieldname": "column_break_4",
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "borrowed_date",
