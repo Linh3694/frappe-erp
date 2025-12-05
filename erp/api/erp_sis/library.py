@@ -92,14 +92,17 @@ def list_lookups(type: str | None = None):
     if (resp := _require_library_role()):
         return resp
     try:
+        # Lấy type từ nhiều nguồn để đảm bảo nhận được
+        lookup_type = type or frappe.form_dict.get("type") or _get_json_payload().get("type")
+        
         filters = {}
-        if type:
-            if type not in VALID_LOOKUP_TYPES:
+        if lookup_type:
+            if lookup_type not in VALID_LOOKUP_TYPES:
                 return validation_error_response(
                     message="Loại danh mục không hợp lệ",
                     errors={"type": ["invalid"]},
                 )
-            filters["lookup_type"] = type
+            filters["lookup_type"] = lookup_type
 
         items = frappe.get_all(
             LOOKUP_DTYPE,
