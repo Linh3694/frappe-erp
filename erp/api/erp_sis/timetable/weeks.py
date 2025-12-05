@@ -186,30 +186,34 @@ def get_teacher_week():
         try:
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
             subject_title_map = {}
-            subject_curriculum_map = {}  # subject_id -> curriculum_id
+            subject_curriculum_map = {}  # subject_id -> curriculum_id (from Timetable Subject)
             timetable_subject_by_subject = {}
             timetable_subject_title_map = {}
             if subject_ids:
                 subj_rows = frappe.get_all(
                     "SIS Subject",
-                    fields=["name", "title", "timetable_subject_id", "curriculum_id"],
+                    fields=["name", "title", "timetable_subject_id"],
                     filters={"name": ["in", subject_ids]},
                 )
                 for s in subj_rows:
                     subject_title_map[s.name] = s.title
-                    subject_curriculum_map[s.name] = s.get("curriculum_id")
                     if s.get("timetable_subject_id"):
                         timetable_subject_by_subject[s.name] = s.get("timetable_subject_id")
-                # Load timetable subject titles for display preference
+                # Load timetable subject titles and curriculum_id for display preference
                 ts_ids = list({ts for ts in timetable_subject_by_subject.values() if ts})
                 if ts_ids:
                     ts_rows = frappe.get_all(
                         "SIS Timetable Subject",
-                        fields=["name", "title_vn", "title_en"],
+                        fields=["name", "title_vn", "title_en", "curriculum_id"],
                         filters={"name": ["in", ts_ids]},
                     )
                     for ts in ts_rows:
                         timetable_subject_title_map[ts.name] = ts.title_vn or ts.title_en or ""
+                # Build subject_curriculum_map from timetable subjects
+                for subj_id, ts_id in timetable_subject_by_subject.items():
+                    ts_row = next((ts for ts in ts_rows if ts.name == ts_id), None)
+                    if ts_row:
+                        subject_curriculum_map[subj_id] = ts_row.get("curriculum_id")
 
             # Get row IDs to query teachers from child table (for Instance Rows)
             # Also collect teacher_id from rows that come from Teacher Timetable view
@@ -555,29 +559,34 @@ def get_class_week():
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
 
             subject_title_map = {}
-            subject_curriculum_map = {}  # subject_id -> curriculum_id
+            subject_curriculum_map = {}  # subject_id -> curriculum_id (from Timetable Subject)
             timetable_subject_by_subject = {}
             timetable_subject_title_map = {}
             if subject_ids:
                 subj_rows = frappe.get_all(
                     "SIS Subject",
-                    fields=["name", "title", "timetable_subject_id", "curriculum_id"],
+                    fields=["name", "title", "timetable_subject_id"],
                     filters={"name": ["in", subject_ids]},
                 )
                 for s in subj_rows:
                     subject_title_map[s.name] = s.title
-                    subject_curriculum_map[s.name] = s.get("curriculum_id")
                     if s.get("timetable_subject_id"):
                         timetable_subject_by_subject[s.name] = s.get("timetable_subject_id")
                 ts_ids = list({ts for ts in timetable_subject_by_subject.values() if ts})
+                ts_rows = []
                 if ts_ids:
                     ts_rows = frappe.get_all(
                         "SIS Timetable Subject",
-                        fields=["name", "title_vn", "title_en"],
+                        fields=["name", "title_vn", "title_en", "curriculum_id"],
                         filters={"name": ["in", ts_ids]},
                     )
                     for ts in ts_rows:
                         timetable_subject_title_map[ts.name] = ts.title_vn or ts.title_en or ""
+                # Build subject_curriculum_map from timetable subjects
+                for subj_id, ts_id in timetable_subject_by_subject.items():
+                    ts_row = next((ts for ts in ts_rows if ts.name == ts_id), None)
+                    if ts_row:
+                        subject_curriculum_map[subj_id] = ts_row.get("curriculum_id")
 
             # Get row IDs to query teachers from child table
             row_ids = [r.get("name") for r in rows if r.get("name")]
