@@ -5,7 +5,32 @@ Logs all API calls with response times and status codes
 
 import frappe
 import time
+import re
 from erp.utils.centralized_logger import log_api_call
+
+# Module patterns - ONLY modules matching Parent Portal folder pages
+# Excluded: Profile, Landing, Documentation, Notifications, Login
+PARENT_PORTAL_MODULES = {
+    'Announcement': r'/api/method/erp\.api\.parent_portal\.announcements',
+    'Attendance': r'/api/method/erp\.api\.parent_portal\.attendance',
+    'Bus': r'/api/method/erp\.api\.parent_portal\.bus',
+    'Calendar': r'/api/method/erp\.api\.parent_portal\.calendar',
+    'Communication': r'/api/method/erp\.api\.parent_portal\.contact_log',
+    'Feedback': r'/api/method/erp\.api\.parent_portal\.feedback',
+    'Leave': r'/api/method/erp\.api\.parent_portal\.leave',
+    'Menu': r'/api/method/erp\.api\.parent_portal\.daily_menu',
+    'News': r'/api/method/erp\.api\.parent_portal\.news',
+    'Report Card': r'/api/method/erp\.api\.parent_portal\.report_card',
+    'Timetable': r'/api/method/erp\.api\.parent_portal\.timetable',
+}
+
+
+def detect_module(endpoint: str) -> str:
+    """Detect which Parent Portal module an endpoint belongs to"""
+    for module_name, pattern in PARENT_PORTAL_MODULES.items():
+        if re.search(pattern, endpoint):
+            return module_name
+    return None
 
 
 def log_api_request_start(**kwargs):
@@ -22,10 +47,7 @@ def log_api_request_start(**kwargs):
 def log_api_request_end(**kwargs):
     """Hook called after API request execution"""
     try:
-        frappe.errprint(f"🔵 [api_logger] after_request hook triggered")
-        
         if not hasattr(frappe.local, 'request_start_time'):
-            frappe.errprint(f"🔵 [api_logger] No request_start_time found, skipping")
             return
         
         # Calculate response time
@@ -45,13 +67,21 @@ def log_api_request_end(**kwargs):
         # Get endpoint
         endpoint = getattr(frappe.local, 'request_path', '')
         
-        # DEDUPLICATION: Skip if same user + endpoint was logged within last 3 seconds
-        # This prevents counting multiple reloads/rapid requests as separate API calls
-        # Only apply dedup for parent_portal APIs to avoid blocking analytics
+        # Detect Parent Portal module
+        module_name = detect_module(endpoint)
+        
+        # Only log Parent Portal APIs with detailed module info
         if 'parent_portal' in endpoint.lower():
+            if module_name:
+                frappe.errprint(f"🔵 [api_logger] Module: {module_name} | Endpoint: {endpoint}")
+            else:
+                # API is parent_portal but not in tracked modules (e.g., interface, otp_auth, notification_center)
+                frappe.errprint(f"🔵 [api_logger] Untracked parent_portal API: {endpoint}")
+            
+            # DEDUPLICATION: Skip if same user + endpoint was logged within last 3 seconds
             dedup_key = f"api_log_dedup:{user}:{endpoint}"
             if frappe.cache().get_value(dedup_key):
-                frappe.errprint(f"🔵 [api_logger] Skipping duplicate API call: {user} -> {endpoint}")
+                frappe.errprint(f"🔵 [api_logger] Skipping duplicate: {module_name or 'untracked'} | {endpoint}")
                 return
             
             # Set dedup cache for 3 seconds
@@ -95,7 +125,7 @@ def log_api_request_end(**kwargs):
         if user_agent != 'unknown' and len(user_agent) > 100:
             user_agent = user_agent[:100]
         
-        # Log the API call
+        # Log the API call with module info
         log_api_call(
             user=user,
             method=method,
@@ -106,7 +136,8 @@ def log_api_request_end(**kwargs):
                 'ip': ip,
                 'user_agent': user_agent,
                 'status_code': status_code,
-                'timestamp': frappe.utils.now()
+                'timestamp': frappe.utils.now(),
+                'module': module_name  # Track which module this API belongs to
             }
         )
     except Exception as e:

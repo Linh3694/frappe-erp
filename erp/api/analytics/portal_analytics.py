@@ -215,6 +215,12 @@ def aggregate_module_usage_from_logs():
 	"""
 	Aggregate API calls by module from logging.log
 	Returns dict with module names and call counts
+	
+	Only tracks MAIN modules matching Parent Portal folder pages:
+	- Announcement, Attendance, Bus, Calendar, Communication, Dashboard,
+	- Feedback, Leave, Menu, News, ReportCard, Students, Timetable
+	
+	Excluded: Profile, Landing, Documentation, Notifications, Login
 	"""
 	try:
 		# Get site path
@@ -228,18 +234,20 @@ def aggregate_module_usage_from_logs():
 		today_date = datetime.now().date()
 		date_30d_ago = today_date - timedelta(days=30)
 		
-		# Module patterns
+		# Module patterns - ONLY modules matching Parent Portal folder pages
+		# Excluded: Profile, Landing, Documentation, Notifications, Login
 		module_patterns = {
-			'Timetable': r'/api/method/erp\.api\.parent_portal\.timetable',
+			'Announcement': r'/api/method/erp\.api\.parent_portal\.announcements',
+			'Attendance': r'/api/method/erp\.api\.parent_portal\.attendance',
+			'Bus': r'/api/method/erp\.api\.parent_portal\.bus',
+			'Calendar': r'/api/method/erp\.api\.parent_portal\.calendar',
+			'Communication': r'/api/method/erp\.api\.parent_portal\.contact_log',
+			'Feedback': r'/api/method/erp\.api\.parent_portal\.feedback',
+			'Leave': r'/api/method/erp\.api\.parent_portal\.leave',
 			'Menu': r'/api/method/erp\.api\.parent_portal\.daily_menu',
 			'News': r'/api/method/erp\.api\.parent_portal\.news',
-			'Calendar': r'/api/method/erp\.api\.parent_portal\.calendar',
-			'Feedback': r'/api/method/erp\.api\.parent_portal\.feedback',
-			'Bus': r'/api/method/erp\.api\.parent_portal\.bus',
-			'Attendance': r'/api/method/erp\.api\.parent_portal\.attendance',
-			'Announcements': r'/api/method/erp\.api\.parent_portal\.announcements',
 			'Report Card': r'/api/method/erp\.api\.parent_portal\.report_card',
-			'Subjects': r'/api/method/erp\.api\.parent_portal\.subject',
+			'Timetable': r'/api/method/erp\.api\.parent_portal\.timetable',
 		}
 		
 		# Initialize counters
