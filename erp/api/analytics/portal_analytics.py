@@ -237,7 +237,7 @@ def aggregate_module_usage_from_logs():
 		# Module patterns - ONLY modules matching Parent Portal folder pages
 		# Excluded: Profile, Landing, Documentation, Notifications, Login
 		module_patterns = {
-			'Announcement': r'/api/method/erp\.api\.parent_portal\.announcements',
+			'Announcements': r'/api/method/erp\.api\.parent_portal\.announcements',
 			'Attendance': r'/api/method/erp\.api\.parent_portal\.attendance',
 			'Bus': r'/api/method/erp\.api\.parent_portal\.bus',
 			'Calendar': r'/api/method/erp\.api\.parent_portal\.calendar',
@@ -287,3 +287,123 @@ def aggregate_module_usage_from_logs():
 	except Exception as e:
 		frappe.errprint(f"❌ [Analytics] Error aggregating module usage: {str(e)}")
 		return {}
+
+
+@frappe.whitelist()
+def get_guardian_login_history(days=30, limit=100):
+	"""
+	Get list of guardian OTP login history from logs
+	
+	Args:
+		days: Number of days to look back (default 30)
+		limit: Maximum number of records to return (default 100)
+		
+	Returns:
+		dict: List of login records with guardian info and timestamps
+	"""
+	try:
+		# Get site path
+		site_path = frappe.get_site_path()
+		log_file = os.path.join(site_path, 'logs', 'logging.log')
+		
+		if not os.path.exists(log_file):
+			return {
+				"success": False,
+				"message": "Log file not found",
+				"data": []
+			}
+		
+		# Date range
+		today_date = datetime.now().date()
+		date_cutoff = today_date - timedelta(days=int(days))
+		
+		# Collect login records
+		login_records = []
+		
+		# Parse log file
+		with open(log_file, 'r', encoding='utf-8') as f:
+			for line in f:
+				try:
+					log_entry = json.loads(line.strip())
+					
+					# Only process OTP logins
+					if log_entry.get('action') != 'otp_login':
+						continue
+					
+					user = log_entry.get('user', '')
+					timestamp_str = log_entry.get('timestamp', '')
+					details = log_entry.get('details', {})
+					
+					# Only count Parent Portal users
+					if '@parent.wellspring.edu.vn' not in user:
+						continue
+					
+					# Parse timestamp
+					try:
+						log_datetime = datetime.strptime(timestamp_str, "%d/%m/%Y %H:%M:%S")
+						log_date = log_datetime.date()
+						
+						# Skip if older than cutoff
+						if log_date < date_cutoff:
+							continue
+					except ValueError:
+						continue
+					
+					# Extract guardian info from details or parse from user email
+					guardian_id = user.split('@')[0] if '@' in user else user
+					
+					login_records.append({
+						"user": user,
+						"guardian_id": guardian_id,
+						"guardian_name": details.get('fullname', guardian_id),
+						"phone_number": details.get('phone_number', ''),
+						"ip": log_entry.get('ip', 'unknown'),
+						"login_time": timestamp_str,
+						"login_datetime": log_datetime.isoformat(),
+						"date": log_date.strftime("%Y-%m-%d")
+					})
+					
+				except json.JSONDecodeError:
+					continue
+				except Exception:
+					continue
+		
+		# Sort by login time (most recent first)
+		login_records.sort(key=lambda x: x['login_datetime'], reverse=True)
+		
+		# Limit results
+		login_records = login_records[:int(limit)]
+		
+		# Group by date for summary
+		logins_by_date = {}
+		for record in login_records:
+			date = record['date']
+			if date not in logins_by_date:
+				logins_by_date[date] = 0
+			logins_by_date[date] += 1
+		
+		# Count unique guardians
+		unique_guardians = set(r['guardian_id'] for r in login_records)
+		
+		return {
+			"success": True,
+			"data": {
+				"logins": login_records,
+				"summary": {
+					"total_logins": len(login_records),
+					"unique_guardians": len(unique_guardians),
+					"days_queried": int(days),
+					"logins_by_date": logins_by_date
+				}
+			}
+		}
+		
+	except Exception as e:
+		frappe.errprint(f"❌ [Analytics] Error getting login history: {str(e)}")
+		import traceback
+		frappe.errprint(traceback.format_exc())
+		return {
+			"success": False,
+			"message": str(e),
+			"data": []
+		}

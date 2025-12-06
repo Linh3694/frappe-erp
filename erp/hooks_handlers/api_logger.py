@@ -11,7 +11,7 @@ from erp.utils.centralized_logger import log_api_call
 # Module patterns - ONLY modules matching Parent Portal folder pages
 # Excluded: Profile, Landing, Documentation, Notifications, Login
 PARENT_PORTAL_MODULES = {
-    'Announcement': r'/api/method/erp\.api\.parent_portal\.announcements',
+    'Announcements': r'/api/method/erp\.api\.parent_portal\.announcements',
     'Attendance': r'/api/method/erp\.api\.parent_portal\.attendance',
     'Bus': r'/api/method/erp\.api\.parent_portal\.bus',
     'Calendar': r'/api/method/erp\.api\.parent_portal\.calendar',
