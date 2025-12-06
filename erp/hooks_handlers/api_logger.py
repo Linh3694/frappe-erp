@@ -62,17 +62,22 @@ def log_api_request_end(**kwargs):
         try:
             # First try: frappe.response dict
             if hasattr(frappe, 'response') and isinstance(frappe.response, dict):
-                status_code = frappe.response.get('_status_code', 200)
+                code = frappe.response.get('_status_code', 200)
+                if code is not None:
+                    status_code = code
             # Second try: from flask response
             if hasattr(frappe.local, 'response') and hasattr(frappe.local.response, 'status_code'):
-                status_code = frappe.local.response.status_code
-            # Third try: from request context
-            if hasattr(frappe, 'request') and hasattr(frappe.request, 'environ'):
-                status = frappe.request.environ.get('wsgi.error', None)
+                code = frappe.local.response.status_code
+                if code is not None:
+                    status_code = code
             
             # Clean up string status codes
             if isinstance(status_code, str):
                 status_code = int(status_code.split()[0]) if ' ' in status_code else 200
+            
+            # Ensure it's an int
+            if not isinstance(status_code, int) or status_code is None:
+                status_code = 200
         except:
             status_code = 200
         

@@ -166,6 +166,10 @@ def log_api_call(user: str, method: str, endpoint: str, response_time_ms: float,
         level = logging.INFO
     
     # Override level if error status code
+    # Ensure status_code is int
+    if not isinstance(status_code, int):
+        status_code = 200
+    
     if status_code >= 400:
         level = logging.WARNING
         if status_code >= 500:
