@@ -691,7 +691,7 @@ before_request = [
 	"erp.hooks_handlers.api_logger.log_api_request_start"
 ]
 
-teardown_request = [
+after_request = [
 	"erp.hooks_handlers.api_logger.log_api_request_end"
 ]
 
