@@ -227,7 +227,7 @@ def get_feedback_ratings(page=1, page_size=20):
 				f.submitted_at,
 				g.guardian_name as guardian_name
 			FROM `tabFeedback` f
-			LEFT JOIN `tabGuardian` g ON f.guardian = g.name
+			LEFT JOIN `tabCRM Guardian` g ON f.guardian = g.name
 			WHERE f.feedback_type = 'Đánh giá'
 			ORDER BY f.submitted_at DESC
 			LIMIT %s OFFSET %s
