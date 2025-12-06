@@ -45,6 +45,16 @@ def log_api_request_end(**kwargs):
         # Get endpoint
         endpoint = getattr(frappe.local, 'request_path', '')
         
+        # DEDUPLICATION: Skip if same user + endpoint was logged within last 3 seconds
+        # This prevents counting multiple reloads/rapid requests as separate API calls
+        dedup_key = f"api_log_dedup:{user}:{endpoint}"
+        if frappe.cache().get_value(dedup_key):
+            frappe.errprint(f"🔵 [api_logger] Skipping duplicate API call: {user} -> {endpoint}")
+            return
+        
+        # Set dedup cache for 3 seconds
+        frappe.cache().set_value(dedup_key, True, expires_in_sec=3)
+        
         # Try to get status code from multiple sources
         status_code = 200
         try:

@@ -1,0 +1,134 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "field:date",
+ "beta": 0,
+ "creation": "2025-12-06 10:00:00.000000",
+ "custom": 0,
+ "description": "Parent Portal Analytics Data - Daily aggregated statistics",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "date",
+  "guardians_section",
+  "total_guardians",
+  "active_guardians_today",
+  "active_guardians_7d",
+  "active_guardians_30d",
+  "new_guardians",
+  "module_usage_section",
+  "api_calls_by_module"
+ ],
+ "fields": [
+  {
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Ngày",
+   "unique": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "guardians_section",
+   "fieldtype": "Section Break",
+   "label": "Thống kê Phụ huynh"
+  },
+  {
+   "fieldname": "total_guardians",
+   "fieldtype": "Int",
+   "label": "Tổng số Phụ huynh",
+   "default": 0
+  },
+  {
+   "fieldname": "active_guardians_today",
+   "fieldtype": "Int",
+   "label": "Phụ huynh hoạt động hôm nay",
+   "default": 0
+  },
+  {
+   "fieldname": "active_guardians_7d",
+   "fieldtype": "Int",
+   "label": "Phụ huynh hoạt động 7 ngày",
+   "default": 0
+  },
+  {
+   "fieldname": "active_guardians_30d",
+   "fieldtype": "Int",
+   "label": "Phụ huynh hoạt động 30 ngày",
+   "default": 0
+  },
+  {
+   "fieldname": "new_guardians",
+   "fieldtype": "Int",
+   "label": "Phụ huynh mới",
+   "default": 0
+  },
+  {
+   "fieldname": "module_usage_section",
+   "fieldtype": "Section Break",
+   "label": "Sử dụng Module"
+  },
+  {
+   "fieldname": "api_calls_by_module",
+   "fieldtype": "Long Text",
+   "label": "API Calls theo Module (JSON)",
+   "description": "JSON data lưu số lượng API calls theo từng module"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-12-06 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Portal Analytics",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

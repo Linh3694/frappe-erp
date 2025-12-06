@@ -355,6 +355,34 @@ def verify_otp_and_login(phone_number, otp):
         # Clear OTP from cache
         frappe.cache().delete_value(cache_key)
         logs.append("Cleared OTP from cache")
+        
+        # Log successful OTP authentication
+        try:
+            from erp.utils.centralized_logger import log_authentication
+            
+            # Get IP address
+            try:
+                ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
+                if ip and ',' in ip:
+                    ip = ip.split(',')[0].strip()
+            except Exception:
+                ip = 'unknown'
+            
+            log_authentication(
+                user=user_email,
+                action='otp_login',
+                ip=ip,
+                status='success',
+                details={
+                    'fullname': guardian['guardian_name'],
+                    'guardian_id': guardian['guardian_id'],
+                    'phone_number': normalized_phone,
+                    'timestamp': frappe.utils.now()
+                }
+            )
+            logs.append(f"✅ Logged OTP authentication for {user_email}")
+        except Exception as e:
+            logs.append(f"⚠️ Failed to log authentication: {str(e)}")
 
         # Get comprehensive guardian data
         comprehensive_data = get_guardian_comprehensive_data(guardian["name"])

@@ -648,7 +648,13 @@ whitelisted_methods = [
 	"erp.api.erp_sis.curriculum_evaluation_criteria.delete_curriculum_evaluation_criteria",
 	# File download endpoints
 	"erp.api.parent_portal.file_download.download_leave_attachment",
-	"erp.api.erp_sis.file_download.download_leave_attachment"
+	"erp.api.erp_sis.file_download.download_leave_attachment",
+	# Analytics dashboard endpoints
+	"erp.api.analytics.dashboard_api.get_dashboard_summary",
+	"erp.api.analytics.dashboard_api.get_user_trends",
+	"erp.api.analytics.dashboard_api.get_module_usage",
+	"erp.api.analytics.dashboard_api.get_feedback_ratings",
+	"erp.api.analytics.dashboard_api.trigger_analytics_aggregation"
 ]
 
 # Allow guest access for testing
@@ -780,6 +786,10 @@ scheduler_events = {
         "0 8 * * *": [
             "erp.api.erp_sis.attendance.remind_homeroom_attendance",
             "erp.api.erp_sis.attendance.daily_homeroom_attendance_report"
+        ],
+        # Aggregate Parent Portal Analytics lúc 23:00 hàng ngày
+        "0 23 * * *": [
+            "erp.api.analytics.portal_analytics.aggregate_portal_analytics"
         ]
     }
 }
