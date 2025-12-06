@@ -47,13 +47,15 @@ def log_api_request_end(**kwargs):
         
         # DEDUPLICATION: Skip if same user + endpoint was logged within last 3 seconds
         # This prevents counting multiple reloads/rapid requests as separate API calls
-        dedup_key = f"api_log_dedup:{user}:{endpoint}"
-        if frappe.cache().get_value(dedup_key):
-            frappe.errprint(f"🔵 [api_logger] Skipping duplicate API call: {user} -> {endpoint}")
-            return
-        
-        # Set dedup cache for 3 seconds
-        frappe.cache().set_value(dedup_key, True, expires_in_sec=3)
+        # Only apply dedup for parent_portal APIs to avoid blocking analytics
+        if 'parent_portal' in endpoint.lower():
+            dedup_key = f"api_log_dedup:{user}:{endpoint}"
+            if frappe.cache().get_value(dedup_key):
+                frappe.errprint(f"🔵 [api_logger] Skipping duplicate API call: {user} -> {endpoint}")
+                return
+            
+            # Set dedup cache for 3 seconds
+            frappe.cache().set_value(dedup_key, True, expires_in_sec=3)
         
         # Try to get status code from multiple sources
         status_code = 200
@@ -83,6 +85,11 @@ def log_api_request_end(**kwargs):
         if method == 'OPTIONS':
             return
         
+        # Get User-Agent safely
+        user_agent = frappe.get_request_header('User-Agent') or 'unknown'
+        if user_agent != 'unknown' and len(user_agent) > 100:
+            user_agent = user_agent[:100]
+        
         # Log the API call
         log_api_call(
             user=user,
@@ -92,7 +99,7 @@ def log_api_request_end(**kwargs):
             status_code=status_code,
             details={
                 'ip': ip,
-                'user_agent': frappe.get_request_header('User-Agent')[:100] or 'unknown',
+                'user_agent': user_agent,
                 'status_code': status_code,
                 'timestamp': frappe.utils.now()
             }
