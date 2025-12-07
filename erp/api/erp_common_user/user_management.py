@@ -509,6 +509,23 @@ def assign_user_roles(user_email=None, roles=None):
         if isinstance(roles, str):
             roles = json.loads(roles)
         
+        # Filter out system roles that are automatically added by Frappe
+        # These roles are not stored in Has Role table but returned by frappe.get_roles()
+        system_roles = ["All", "Guest"]
+        roles = [r for r in roles if r not in system_roles]
+        
+        # Validate that roles list is not empty (should have at least some roles)
+        if not roles:
+            frappe.throw(_("At least one role is required"))
+        
+        # Validate all roles exist before making changes
+        valid_roles = frappe.get_all("Role", filters={"disabled": 0}, pluck="name")
+        invalid_roles = [r for r in roles if r not in valid_roles]
+        if invalid_roles:
+            # Log warning but continue with valid roles
+            frappe.log_error(f"Invalid roles ignored: {invalid_roles}", "User Management")
+            roles = [r for r in roles if r in valid_roles]
+        
         user_doc = frappe.get_doc("User", user_email)
         
         # Remove existing roles first
@@ -521,11 +538,14 @@ def assign_user_roles(user_email=None, roles=None):
         user_doc.flags.ignore_permissions = True
         user_doc.save()
         
+        # Return the actual roles after save
+        final_roles = frappe.get_roles(user_email)
+        
         return {
             "status": "success",
             "message": _("Roles assigned successfully"),
             "user_email": user_email,
-            "roles": roles
+            "roles": final_roles
         }
         
     except Exception as e:
