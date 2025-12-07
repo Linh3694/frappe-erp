@@ -229,14 +229,18 @@ def create_user(user_data):
 def update_user(user_data=None):
     """Update existing user"""
     try:
-        # Read from request args or form_dict if not provided
+        # Read from multiple sources: function arg, form_dict, or request.json
         if not user_data:
-            all_params = {}
-            if hasattr(frappe.request, 'args') and frappe.request.args:
-                all_params.update(frappe.request.args.to_dict())
-            if frappe.form_dict:
-                all_params.update(frappe.form_dict)
-            user_data = all_params.get('user_data')
+            # Try form_dict first
+            user_data = frappe.form_dict.get('user_data')
+            
+            # Try request.json if still not found
+            if not user_data and hasattr(frappe.request, 'json') and frappe.request.json:
+                user_data = frappe.request.json.get('user_data')
+        
+        # Validate user_data exists
+        if not user_data:
+            frappe.throw(_("User data is required"))
         
         if isinstance(user_data, str):
             user_data = json.loads(user_data)
@@ -482,9 +486,23 @@ def get_user_roles(user_email=None):
 
 
 @frappe.whitelist()
-def assign_user_roles(user_email, roles):
+def assign_user_roles(user_email=None, roles=None):
     """Assign roles to user"""
     try:
+        # Read from form_dict or request.json if not provided
+        if not user_email:
+            user_email = frappe.form_dict.get('user_email')
+            if not user_email and hasattr(frappe.request, 'json') and frappe.request.json:
+                user_email = frappe.request.json.get('user_email')
+        
+        if not roles:
+            roles = frappe.form_dict.get('roles')
+            if not roles and hasattr(frappe.request, 'json') and frappe.request.json:
+                roles = frappe.request.json.get('roles')
+        
+        if not user_email:
+            frappe.throw(_("User email is required"))
+        
         if not frappe.db.exists("User", user_email):
             frappe.throw(_("User not found"))
         
