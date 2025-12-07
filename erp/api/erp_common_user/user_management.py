@@ -226,9 +226,18 @@ def create_user(user_data):
 
 
 @frappe.whitelist()
-def update_user(user_data):
+def update_user(user_data=None):
     """Update existing user"""
     try:
+        # Read from request args or form_dict if not provided
+        if not user_data:
+            all_params = {}
+            if hasattr(frappe.request, 'args') and frappe.request.args:
+                all_params.update(frappe.request.args.to_dict())
+            if frappe.form_dict:
+                all_params.update(frappe.form_dict)
+            user_data = all_params.get('user_data')
+        
         if isinstance(user_data, str):
             user_data = json.loads(user_data)
         
