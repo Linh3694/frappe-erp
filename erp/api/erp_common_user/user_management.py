@@ -518,22 +518,18 @@ def assign_user_roles(user_email=None, roles=None):
         if not roles:
             frappe.throw(_("At least one role is required"))
         
-        # Validate all roles exist before making changes
-        valid_roles = frappe.get_all("Role", filters={"disabled": 0}, pluck="name")
-        invalid_roles = [r for r in roles if r not in valid_roles]
-        if invalid_roles:
-            # Log warning but continue with valid roles
-            frappe.log_error(f"Invalid roles ignored: {invalid_roles}", "User Management")
-            roles = [r for r in roles if r in valid_roles]
-        
         user_doc = frappe.get_doc("User", user_email)
         
         # Remove existing roles first
         user_doc.set("roles", [])
         
-        # Add new roles
+        # Add new roles - use append directly to avoid any filtering by add_roles
         for role in roles:
-            user_doc.add_roles(role)
+            # Check if role exists before adding
+            if frappe.db.exists("Role", role):
+                user_doc.append("roles", {"role": role})
+            else:
+                frappe.log_error(f"Role '{role}' does not exist, skipping", "User Management")
         
         user_doc.flags.ignore_permissions = True
         user_doc.save()
