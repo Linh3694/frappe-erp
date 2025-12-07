@@ -441,9 +441,21 @@ def get_user_stats():
 
 
 @frappe.whitelist()
-def get_user_roles(user_email):
+def get_user_roles(user_email=None):
     """Get roles for a specific user"""
     try:
+        # Read from request args or form_dict (for GET and POST requests)
+        if not user_email:
+            all_params = {}
+            if hasattr(frappe.request, 'args') and frappe.request.args:
+                all_params.update(frappe.request.args.to_dict())
+            if frappe.form_dict:
+                all_params.update(frappe.form_dict)
+            user_email = all_params.get('user_email')
+        
+        if not user_email:
+            frappe.throw(_("User email is required"))
+        
         if not frappe.db.exists("User", user_email):
             frappe.throw(_("User not found"))
         
