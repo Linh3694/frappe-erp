@@ -11,3 +11,5 @@ class SISPortalAnalytics(Document):
 	Document for storing daily Parent Portal analytics data
 	"""
 	pass
+
+

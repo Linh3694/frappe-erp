@@ -33,3 +33,5 @@ def test_guest_api():
 		"message": "Guest API works",
 		"note": "This should be logged in logging.log"
 	}
+
+
