@@ -292,7 +292,11 @@ def aggregate_module_usage_from_logs():
 @frappe.whitelist()
 def get_guardian_login_history(days=30, limit=100):
 	"""
-	Get list of guardian OTP login history from logs
+	Get list of guardian login and app activity history from logs
+	
+	Tracks:
+	- OTP logins (when guardian logs in with OTP)
+	- App sessions (when guardian opens/resumes the app)
 	
 	Args:
 		days: Number of days to look back (default 30)
@@ -326,8 +330,10 @@ def get_guardian_login_history(days=30, limit=100):
 				try:
 					log_entry = json.loads(line.strip())
 					
-					# Only process OTP logins
-					if log_entry.get('action') != 'otp_login':
+					action = log_entry.get('action', '')
+					
+					# Process both OTP logins and app sessions
+					if action not in ['otp_login', 'app_session']:
 						continue
 					
 					user = log_entry.get('user', '')
@@ -352,6 +358,9 @@ def get_guardian_login_history(days=30, limit=100):
 					# Extract guardian info from details or parse from user email
 					guardian_id = user.split('@')[0] if '@' in user else user
 					
+					# Determine activity type for display
+					activity_type = "OTP Login" if action == 'otp_login' else "Mở App"
+					
 					login_records.append({
 						"user": user,
 						"guardian_id": guardian_id,
@@ -360,7 +369,9 @@ def get_guardian_login_history(days=30, limit=100):
 						"ip": log_entry.get('ip', 'unknown'),
 						"login_time": timestamp_str,
 						"login_datetime": log_datetime.isoformat(),
-						"date": log_date.strftime("%Y-%m-%d")
+						"date": log_date.strftime("%Y-%m-%d"),
+						"activity_type": activity_type,  # NEW: Show what type of activity
+						"action": action  # Raw action for filtering if needed
 					})
 					
 				except json.JSONDecodeError:
