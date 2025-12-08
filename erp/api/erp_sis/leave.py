@@ -355,7 +355,42 @@ def batch_get_active_leaves():
             "date": date
         }, as_dict=True)
         
+        # Get leave request IDs to fetch attachments
+        leave_ids = [leave.name for leave in leaves] if leaves else []
+        
         frappe.logger().info(f"📝 [Backend] Found {len(leaves)} active leaves")
+        
+        # Get attachments for all leave requests in one query for efficiency
+        attachments_map = {}
+        if leave_ids:
+            attachments = frappe.get_all("File",
+                filters={
+                    "attached_to_doctype": "SIS Student Leave Request",
+                    "attached_to_name": ["in", leave_ids],
+                    "is_private": 1
+                },
+                fields=["attached_to_name", "name", "file_name", "file_url", "file_size", "creation"],
+                order_by="creation desc"
+            )
+            
+            # Build map: leave_id -> list of attachments
+            for attachment in attachments:
+                leave_id = attachment.attached_to_name
+                if leave_id not in attachments_map:
+                    attachments_map[leave_id] = []
+                
+                # Add full URL for file
+                file_url = attachment.file_url
+                if file_url and not file_url.startswith('http'):
+                    file_url = frappe.utils.get_url(file_url)
+                
+                attachments_map[leave_id].append({
+                    "name": attachment.name,
+                    "file_name": attachment.file_name,
+                    "file_url": file_url,
+                    "file_size": attachment.file_size,
+                    "creation": str(attachment.creation)
+                })
         
         # Transform reason to Vietnamese
         reason_mapping = {
@@ -381,7 +416,8 @@ def batch_get_active_leaves():
                 "end_date": str(leave.end_date),
                 "total_days": leave.total_days,
                 "description": leave.description,
-                "submitted_at": str(leave.submitted_at) if leave.submitted_at else None
+                "submitted_at": str(leave.submitted_at) if leave.submitted_at else None,
+                "attachments": attachments_map.get(leave.name, [])
             })
 
         # Sort leaves by submission time (newest first) for each student
