@@ -516,11 +516,12 @@ def update_leave_request():
     }
     """
     try:
-        # Check if files exist
-        has_files = frappe.request.files and len(frappe.request.files) > 0
+        # Check if request is multipart/form-data (FormData from frontend)
+        content_type = frappe.request.headers.get('Content-Type', '')
+        is_form_data = 'multipart/form-data' in content_type
         
-        if has_files:
-            # FormData with files - use request.form
+        if is_form_data:
+            # FormData request - use request.form
             data = frappe.request.form
         elif frappe.request.is_json:
             # JSON request - use request.json
@@ -528,6 +529,9 @@ def update_leave_request():
         else:
             # Fallback to form_dict
             data = frappe.form_dict
+
+        frappe.logger().info(f"🔍 [Backend] update_leave_request - content_type: {content_type}, is_form_data: {is_form_data}")
+        frappe.logger().info(f"🔍 [Backend] update_leave_request - data keys: {list(data.keys())}")
 
         # Required field
         if 'id' not in data:
@@ -864,3 +868,74 @@ def create_leave_request():
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "ERP SIS Create Leave Request Error")
         return error_response(f"Lỗi khi tạo đơn nghỉ phép: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def delete_leave_request():
+    """
+    Delete leave request (admin/teacher view)
+    Only deletable within 24 hours of creation (for teacher-created requests)
+    
+    POST body:
+    {
+        "id": "SIS-LEAVE-00001"
+    }
+    """
+    try:
+        # Parse request body
+        data = json.loads(frappe.request.data.decode('utf-8'))
+        leave_request_id = data.get('id')
+        
+        if not leave_request_id:
+            return validation_error_response("Thiếu ID đơn xin nghỉ phép", {
+                "id": ["ID đơn xin nghỉ phép là bắt buộc"]
+            })
+        
+        # Get leave request
+        leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
+        
+        # Check campus permissions
+        campus_id = get_current_campus_from_context()
+        if leave_request.campus_id != campus_id:
+            return forbidden_response("Bạn không có quyền xóa đơn này")
+        
+        # Check if within 24 hours (only for teacher-created requests)
+        owner_email = leave_request.owner or ''
+        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email)
+        
+        if not is_created_by_parent:
+            # Teacher/Admin created - check 24h rule
+            if leave_request.submitted_at:
+                submitted_time = datetime.strptime(str(leave_request.submitted_at), '%Y-%m-%d %H:%M:%S.%f')
+                time_diff = datetime.now() - submitted_time
+                if time_diff.total_seconds() > (24 * 60 * 60):
+                    return error_response("Đã quá thời hạn xóa (24 giờ)")
+        
+        # Store student name for response
+        student_name = leave_request.student_name
+        
+        # Delete all attachments first
+        attachments = frappe.get_all("File",
+            filters={
+                "attached_to_doctype": "SIS Student Leave Request",
+                "attached_to_name": leave_request_id
+            },
+            fields=["name"]
+        )
+        
+        for attachment in attachments:
+            frappe.delete_doc("File", attachment.name, ignore_permissions=True)
+        
+        # Delete leave request
+        frappe.delete_doc("SIS Student Leave Request", leave_request_id, ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response({
+            "message": f"Đã xóa đơn nghỉ phép của {student_name} thành công"
+        })
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Không tìm thấy đơn xin nghỉ phép")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "ERP SIS Delete Leave Request Error")
+        return error_response(f"Lỗi khi xóa đơn nghỉ phép: {str(e)}")
