@@ -568,16 +568,16 @@ def delete_assignment(assignment: Dict) -> Dict:
 	override_rows_deleted = 0
 	if subject_ids and instances:
 		try:
-			# A. Update ALL rows (not just weekly_pattern, but also rows without parentfield)
-			# ⚡ FIX: Remove parentfield filter to catch ALL rows
+			# A. Update pattern rows (weekly recurring)
 			pattern_rows = frappe.db.sql("""
-				SELECT name, teacher_1_id, teacher_2_id, parentfield
+				SELECT name, teacher_1_id, teacher_2_id
 				FROM `tabSIS Timetable Instance Row`
-				WHERE (parent IN ({0}) OR parent_timetable_instance IN ({0}))
-				  AND subject_id IN ({1})
+				WHERE parent IN ({})
+				  AND subject_id IN ({})
 				  AND (teacher_1_id = %s OR teacher_2_id = %s)
+				  AND parentfield = 'weekly_pattern'
 			""".format(','.join(['%s'] * len(instances)), ','.join(['%s'] * len(subject_ids))),
-			tuple(instances + instances + subject_ids + [teacher_id, teacher_id]), as_dict=True)
+			tuple(instances + subject_ids + [teacher_id, teacher_id]), as_dict=True)
 			
 			# Remove teacher from each pattern row
 			for row in pattern_rows:
@@ -601,20 +601,20 @@ def delete_assignment(assignment: Dict) -> Dict:
 					rows_updated += 1
 			
 			frappe.logger().info(
-				f"DELETE in batch: Removed teacher from {rows_updated} rows (all parentfield types)"
+				f"DELETE in batch: Removed teacher from {rows_updated} pattern rows"
 			)
 			
-			# B. Delete override rows ONLY IF they have parentfield = 'date_overrides'
-			# These are date-specific rows that should be completely removed
+			# B. Delete override rows (date-specific rows for this teacher)
+			# Override rows are created for from_date assignments
 			override_rows = frappe.db.sql("""
 				SELECT name
 				FROM `tabSIS Timetable Instance Row`
-				WHERE (parent IN ({0}) OR parent_timetable_instance IN ({0}))
-				  AND subject_id IN ({1})
+				WHERE parent IN ({})
+				  AND subject_id IN ({})
 				  AND (teacher_1_id = %s OR teacher_2_id = %s)
 				  AND parentfield = 'date_overrides'
 			""".format(','.join(['%s'] * len(instances)), ','.join(['%s'] * len(subject_ids))),
-			tuple(instances + instances + subject_ids + [teacher_id, teacher_id]), as_dict=True)
+			tuple(instances + subject_ids + [teacher_id, teacher_id]), as_dict=True)
 			
 			for override_row in override_rows:
 				frappe.delete_doc(
