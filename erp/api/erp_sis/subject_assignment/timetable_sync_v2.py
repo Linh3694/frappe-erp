@@ -147,33 +147,27 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	
 	try:
 		for row in pattern_rows:
-			# Get full document to update child table
-			row_doc = frappe.get_doc("SIS Timetable Instance Row", row.name)
+			row_name = row.name
 			
-			# ⚡ FIX: Set parent_timetable_instance to avoid validation error
-			# "Giá trị mất tích: Parent Timetable Instance"
-			if not row_doc.parent_timetable_instance:
-				row_doc.parent_timetable_instance = row_doc.parent
+			# ⚡ FIX: Use direct SQL to ensure child table is updated correctly
+			# Step 3a: Delete ALL existing teachers from child table for this row
+			frappe.db.sql("""
+				DELETE FROM `tabSIS Timetable Instance Row Teacher`
+				WHERE parent = %s
+			""", (row_name,))
 			
-			# Clear existing teachers child table
-			row_doc.teachers = []
-			
-			# ✅ Save first to ensure parent reference exists
-			row_doc.save(ignore_permissions=True)
-			
-			# Add ALL teachers from assignments
+			# Step 3b: Insert ALL teachers into child table
 			for idx, tid in enumerate(teacher_ids, start=1):
-				row_doc.append("teachers", {
-					"teacher_id": tid,
-					"sort_order": idx
-				})
+				# Generate a unique name for the child row
+				child_name = frappe.generate_hash(length=10)
+				frappe.db.sql("""
+					INSERT INTO `tabSIS Timetable Instance Row Teacher`
+					(name, parent, parenttype, parentfield, teacher_id, sort_order, idx)
+					VALUES (%s, %s, 'SIS Timetable Instance Row', 'teachers', %s, %s, %s)
+				""", (child_name, row_name, tid, idx, idx))
 			
-			# Save the document with new child table entries
-			if teacher_ids:
-				row_doc.save(ignore_permissions=True)
 			updated_count += 1
-			
-			debug_info.append(f"  ✓ Updated row {row.name}: {len(teacher_ids)} teachers")
+			debug_info.append(f"  ✓ Updated row {row_name}: {len(teacher_ids)} teachers")
 		
 		# ⚡ CRITICAL: Sync materialized view INSIDE try block
 		if updated_count > 0:
@@ -751,18 +745,23 @@ def find_pattern_rows(class_id: str, actual_subject_id: str, campus_id: str) -> 
 		f"find_pattern_rows: Found {len(subject_ids)} SIS Subjects for actual_subject={actual_subject_id}: {subject_ids}"
 	)
 	
-	# Get instances for this class
+	# ⚡ FIX: Get instances for this class WITHOUT campus_id filter
+	# (consistent with get_class_week() which also doesn't filter by campus_id)
 	instances = frappe.get_all(
 		"SIS Timetable Instance",
-		filters={"class_id": class_id, "campus_id": campus_id},
+		filters={"class_id": class_id},
 		pluck="name"
 	)
 	
 	if not instances:
 		frappe.logger().warning(
-			f"find_pattern_rows: No timetable instances for class={class_id}, campus={campus_id}"
+			f"find_pattern_rows: No timetable instances for class={class_id}"
 		)
 		return []
+	
+	frappe.logger().info(
+		f"find_pattern_rows: Found {len(instances)} timetable instances for class={class_id}"
+	)
 	
 	# ⚡ FIX: Get pattern rows for ANY of the subject_ids (date IS NULL)
 	rows = frappe.db.sql("""

@@ -229,6 +229,10 @@ def _batch_update_assignments_internal(teacher_id: str, assignments: List[Dict],
 		f"Success: {sync_result['synced']}/{len(apply_result['assignment_ids'])}"
 	)
 	
+	# ⚡ CRITICAL: Commit Phase 3 changes (child table updates via SQL)
+	frappe.db.commit()
+	frappe.logger().info("✅ Phase 3: Committed timetable sync changes")
+	
 	# PHASE 4: SYNC TEACHER TIMETABLE (Materialized View)
 	# ⚡ NOTE: Teacher Timetable sync is ALREADY handled in Phase 3 (sync_all_assignments)
 	# which calls sync_assignment_to_timetable() → sync_for_rows() → updates Teacher Timetable
@@ -566,21 +570,22 @@ def delete_assignment(assignment: Dict) -> Dict:
 	# ✅ Step 1: Remove teacher from Timetable Instance Rows (Pattern Rows)
 	rows_updated = 0
 	override_rows_deleted = 0
+	child_table_deleted = 0
 	if subject_ids and instances:
 		try:
-			# A. Update pattern rows (weekly recurring)
+			# A. Get all pattern rows for this class + subject
 			pattern_rows = frappe.db.sql("""
 				SELECT name, teacher_1_id, teacher_2_id
 				FROM `tabSIS Timetable Instance Row`
 				WHERE parent IN ({})
 				  AND subject_id IN ({})
-				  AND (teacher_1_id = %s OR teacher_2_id = %s)
 				  AND parentfield = 'weekly_pattern'
 			""".format(','.join(['%s'] * len(instances)), ','.join(['%s'] * len(subject_ids))),
-			tuple(instances + subject_ids + [teacher_id, teacher_id]), as_dict=True)
+			tuple(instances + subject_ids), as_dict=True)
 			
-			# Remove teacher from each pattern row
+			# Remove teacher from each pattern row (both legacy fields AND child table)
 			for row in pattern_rows:
+				# A1. Update legacy fields (for backward compatibility)
 				if row.teacher_1_id == teacher_id:
 					frappe.db.set_value(
 						"SIS Timetable Instance Row", 
@@ -599,31 +604,56 @@ def delete_assignment(assignment: Dict) -> Dict:
 						update_modified=False
 					)
 					rows_updated += 1
+				
+				# A2. ⚡ FIX: Delete from child table `teachers` (critical for get_class_week)
+				deleted_count = frappe.db.sql("""
+					DELETE FROM `tabSIS Timetable Instance Row Teacher`
+					WHERE parent = %s AND teacher_id = %s
+				""", (row.name, teacher_id))
+				if deleted_count:
+					child_table_deleted += 1
 			
 			frappe.logger().info(
-				f"DELETE in batch: Removed teacher from {rows_updated} pattern rows"
+				f"DELETE in batch: Removed teacher from {rows_updated} pattern rows (legacy), "
+				f"{child_table_deleted} child table entries"
 			)
 			
 			# B. Delete override rows (date-specific rows for this teacher)
 			# Override rows are created for from_date assignments
+			# Query by checking child table instead of legacy fields
 			override_rows = frappe.db.sql("""
-				SELECT name
-				FROM `tabSIS Timetable Instance Row`
-				WHERE parent IN ({})
-				  AND subject_id IN ({})
-				  AND (teacher_1_id = %s OR teacher_2_id = %s)
-				  AND parentfield = 'date_overrides'
+				SELECT DISTINCT r.name
+				FROM `tabSIS Timetable Instance Row` r
+				LEFT JOIN `tabSIS Timetable Instance Row Teacher` t ON t.parent = r.name
+				WHERE r.parent IN ({})
+				  AND r.subject_id IN ({})
+				  AND r.parentfield = 'date_overrides'
+				  AND (r.teacher_1_id = %s OR r.teacher_2_id = %s OR t.teacher_id = %s)
 			""".format(','.join(['%s'] * len(instances)), ','.join(['%s'] * len(subject_ids))),
-			tuple(instances + subject_ids + [teacher_id, teacher_id]), as_dict=True)
+			tuple(instances + subject_ids + [teacher_id, teacher_id, teacher_id]), as_dict=True)
 			
 			for override_row in override_rows:
-				frappe.delete_doc(
-					"SIS Timetable Instance Row",
-					override_row.name,
-					ignore_permissions=True,
-					force=True
+				# First delete child table entries for this teacher
+				frappe.db.sql("""
+					DELETE FROM `tabSIS Timetable Instance Row Teacher`
+					WHERE parent = %s AND teacher_id = %s
+				""", (override_row.name, teacher_id))
+				
+				# Check if any teachers remain for this override row
+				remaining_teachers = frappe.db.count(
+					"SIS Timetable Instance Row Teacher",
+					{"parent": override_row.name}
 				)
-				override_rows_deleted += 1
+				
+				# If no teachers remain, delete the entire override row
+				if remaining_teachers == 0:
+					frappe.delete_doc(
+						"SIS Timetable Instance Row",
+						override_row.name,
+						ignore_permissions=True,
+						force=True
+					)
+					override_rows_deleted += 1
 			
 			frappe.logger().info(
 				f"DELETE in batch: Deleted {override_rows_deleted} override rows"
