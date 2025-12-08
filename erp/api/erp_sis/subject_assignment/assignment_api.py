@@ -1190,18 +1190,38 @@ def delete_subject_assignment(assignment_id=None):
                     instance_ids = [i.name for i in instances]
                     
                     # Get rows with this subject
+                    # ⚡ FIX: Query using BOTH `parent` and `parent_timetable_instance` fields
+                    # because some rows may use one or the other depending on how they were created
                     rows_to_update = frappe.db.sql("""
                         SELECT name, teacher_1_id, teacher_2_id
                         FROM `tabSIS Timetable Instance Row`
-                        WHERE parent IN ({})
-                          AND subject_id IN ({})
-                    """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))), 
-                    tuple(instance_ids + subject_ids), as_dict=True)
+                        WHERE (parent IN ({instance_placeholders}) OR parent_timetable_instance IN ({instance_placeholders}))
+                          AND subject_id IN ({subject_placeholders})
+                    """.format(
+                        instance_placeholders=','.join(['%s'] * len(instance_ids)),
+                        subject_placeholders=','.join(['%s'] * len(subject_ids))
+                    ), 
+                    tuple(instance_ids + instance_ids + subject_ids), as_dict=True)
                     
                     frappe.logger().info(
                         f"🔍 Found {len(rows_to_update)} timetable instance rows to update. "
                         f"Instance IDs: {instance_ids}, Subject IDs: {subject_ids}"
                     )
+                    
+                    # ⚡ DEBUG: If no rows found, check what's in the table
+                    if not rows_to_update:
+                        # Try to see what rows exist for this instance
+                        all_rows_for_instance = frappe.db.sql("""
+                            SELECT name, subject_id, parent, parent_timetable_instance
+                            FROM `tabSIS Timetable Instance Row`
+                            WHERE parent IN ({instance_placeholders}) OR parent_timetable_instance IN ({instance_placeholders})
+                            LIMIT 5
+                        """.format(instance_placeholders=','.join(['%s'] * len(instance_ids))),
+                        tuple(instance_ids + instance_ids), as_dict=True)
+                        
+                        frappe.logger().warning(
+                            f"⚠️ No rows found! Sample rows for instance: {all_rows_for_instance}"
+                        )
                     
                     updated_count = 0
                     row_names = [row.name for row in rows_to_update]
