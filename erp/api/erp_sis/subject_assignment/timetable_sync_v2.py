@@ -149,22 +149,8 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 		for row in pattern_rows:
 			row_name = row.name
 			
-			# ⚡ FIX: Use direct SQL to ensure child table is updated correctly
-			# Step 3a: Delete ALL existing teachers from child table for this row
-			frappe.db.sql("""
-				DELETE FROM `tabSIS Timetable Instance Row Teacher`
-				WHERE parent = %s
-			""", (row_name,))
-			
-			# Step 3b: Insert ALL teachers into child table
-			for idx, tid in enumerate(teacher_ids, start=1):
-				# Generate a unique name for the child row
-				child_name = frappe.generate_hash(length=10)
-				frappe.db.sql("""
-					INSERT INTO `tabSIS Timetable Instance Row Teacher`
-					(name, parent, parenttype, parentfield, teacher_id, sort_order, idx)
-					VALUES (%s, %s, 'SIS Timetable Instance Row', 'teachers', %s, %s, %s)
-				""", (child_name, row_name, tid, idx, idx))
+			# ⚡ FIX: Use helper function to update child table via direct SQL
+			update_row_teachers_sql(row_name, teacher_ids)
 			
 			updated_count += 1
 			debug_info.append(f"  ✓ Updated row {row_name}: {len(teacher_ids)} teachers")
@@ -397,25 +383,17 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 							frappe.logger().error(f"Invalid replace_slot: {replace_slot} for row {existing.name}")
 							continue
 						
-						# Update child table instead of old fields
-						existing_doc = frappe.get_doc("SIS Timetable Instance Row", existing.name)
-						# Clear existing teachers child table
-						existing_doc.teachers = []
-						# Add teachers based on resolution
+						# ⚡ FIX: Use direct SQL to update child table
+						# Build teacher list based on resolution
 						if replace_slot == "teacher_1":
 							# Replace teacher_1 with new teacher, keep teacher_2
-							if teacher_id:
-								existing_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 0})
-							if existing.teacher_2_id:
-								existing_doc.append("teachers", {"teacher_id": existing.teacher_2_id, "sort_order": 1})
+							new_teachers = [tid for tid in [teacher_id, existing.teacher_2_id] if tid]
 						else:  # replace_slot == "teacher_2"
 							# Keep teacher_1, replace teacher_2 with new teacher
-							if existing.teacher_1_id:
-								existing_doc.append("teachers", {"teacher_id": existing.teacher_1_id, "sort_order": 0})
-							if teacher_id:
-								existing_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 1})
-						existing_doc.save(ignore_permissions=True)
-						affected_row_ids.append(existing_doc.name)  # ⚡ FIX: Track for sync
+							new_teachers = [tid for tid in [existing.teacher_1_id, teacher_id] if tid]
+						
+						update_row_teachers_sql(existing.name, new_teachers)
+						affected_row_ids.append(existing.name)
 						updated_count += 1
 						debug_info.append(
 							f"✅ Replaced {replace_slot} on {date} - {pattern_row.timetable_column_id} (subject: {pattern_row.subject_id})"
@@ -441,25 +419,25 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						)
 				elif not existing.teacher_2_id:
 					# teacher_2 is empty → Add as co-teacher
-					# Update child table instead of old fields
-					existing_doc = frappe.get_doc("SIS Timetable Instance Row", existing.name)
-					existing_doc.append("teachers", {
-						"teacher_id": teacher_id,
-						"sort_order": len(existing_doc.teachers)
-					})
-					existing_doc.save(ignore_permissions=True)
-					affected_row_ids.append(existing_doc.name)  # ⚡ FIX: Track for sync
+					# ⚡ FIX: Use direct SQL - get existing teachers and add new one
+					existing_teachers = frappe.db.sql("""
+						SELECT teacher_id FROM `tabSIS Timetable Instance Row Teacher`
+						WHERE parent = %s ORDER BY sort_order
+					""", (existing.name,), as_dict=True)
+					new_teachers = [t.teacher_id for t in existing_teachers] + [teacher_id]
+					update_row_teachers_sql(existing.name, new_teachers)
+					affected_row_ids.append(existing.name)
 					updated_count += 1
 				elif not existing.teacher_1_id:
 					# teacher_1 is empty (edge case) → Add to teacher_1
-					# Update child table instead of old fields
-					existing_doc = frappe.get_doc("SIS Timetable Instance Row", existing.name)
-					existing_doc.append("teachers", {
-						"teacher_id": teacher_id,
-						"sort_order": len(existing_doc.teachers)
-					})
-					existing_doc.save(ignore_permissions=True)
-					affected_row_ids.append(existing_doc.name)  # ⚡ FIX: Track for sync
+					# ⚡ FIX: Use direct SQL - get existing teachers and add new one
+					existing_teachers = frappe.db.sql("""
+						SELECT teacher_id FROM `tabSIS Timetable Instance Row Teacher`
+						WHERE parent = %s ORDER BY sort_order
+					""", (existing.name,), as_dict=True)
+					new_teachers = [teacher_id] + [t.teacher_id for t in existing_teachers]
+					update_row_teachers_sql(existing.name, new_teachers)
+					affected_row_ids.append(existing.name)
 					updated_count += 1
 			else:
 				# No existing override row - need to create one
@@ -503,7 +481,7 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 					override_doc = frappe.get_doc({
 						"doctype": "SIS Timetable Instance Row",
 						"parent": pattern_row.parent,
-						"parent_timetable_instance": pattern_row.parent,  # ✅ FIX: Set Link field to avoid validation error
+						"parent_timetable_instance": pattern_row.parent,
 						"parenttype": "SIS Timetable Instance",
 						"parentfield": "date_overrides",
 						"date": date,
@@ -515,19 +493,23 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 						"room_id": pattern_row.room_id
 					})
 					
-					# ✅ FIX: Insert first to get name
+					# Insert first to get name
 					override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 					
-					# Populate teachers child table
-					if teacher_1:
-						override_doc.append("teachers", {"teacher_id": teacher_1, "sort_order": 0})
-					if teacher_2 and teacher_2 != teacher_1:
-						override_doc.append("teachers", {"teacher_id": teacher_2, "sort_order": 1})
+					# ⚡ FIX: Use direct SQL to populate teachers child table
+					new_teachers = [tid for tid in [teacher_1, teacher_2] if tid and tid != teacher_1 or tid == teacher_1]
+					# Dedupe while preserving order
+					seen = set()
+					unique_teachers = []
+					for tid in [teacher_1, teacher_2]:
+						if tid and tid not in seen:
+							seen.add(tid)
+							unique_teachers.append(tid)
 					
-					# Save to persist child table
-					if teacher_1 or teacher_2:
-						override_doc.save(ignore_permissions=True)
-					affected_row_ids.append(override_doc.name)  # ⚡ FIX: Track for sync
+					if unique_teachers:
+						update_row_teachers_sql(override_doc.name, unique_teachers)
+					
+					affected_row_ids.append(override_doc.name)
 					created_count += 1
 					debug_info.append(
 						f"✅ Created override with {replace_slot} replaced on {date} (subject: {pattern_row.subject_id})"
@@ -557,9 +539,9 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 				override_doc = frappe.get_doc({
 					"doctype": "SIS Timetable Instance Row",
 					"parent": pattern_row.parent,
-					"parent_timetable_instance": pattern_row.parent,  # ✅ FIX: Set Link field to avoid validation error
+					"parent_timetable_instance": pattern_row.parent,
 					"parenttype": "SIS Timetable Instance",
-					"parentfield": "date_overrides",  # ✅ Must be date_overrides, not weekly_pattern!
+					"parentfield": "date_overrides",
 					"date": date,
 					"day_of_week": pattern_row.day_of_week,
 					"timetable_column_id": pattern_row.timetable_column_id,
@@ -569,17 +551,16 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 					"room_id": pattern_row.room_id
 				})
 				
-				# ✅ FIX: Insert first to get name
+				# Insert first to get name
 				override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
 				
-				# Populate teachers child table (keep original + add new)
-				if pattern_row.teacher_1_id:
-					override_doc.append("teachers", {"teacher_id": pattern_row.teacher_1_id, "sort_order": 0})
-				override_doc.append("teachers", {"teacher_id": teacher_id, "sort_order": 1})
+				# ⚡ FIX: Use direct SQL to populate teachers child table
+				# Keep original teacher + add new teacher
+				new_teachers = [tid for tid in [pattern_row.teacher_1_id, teacher_id] if tid]
+				if new_teachers:
+					update_row_teachers_sql(override_doc.name, new_teachers)
 				
-				# Save to persist child table
-				override_doc.save(ignore_permissions=True)
-				affected_row_ids.append(override_doc.name)  # ⚡ FIX: Track for sync
+				affected_row_ids.append(override_doc.name)
 				created_count += 1
 		
 		# Check if there are unresolved conflicts
@@ -683,6 +664,41 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 
 # ============= HELPER FUNCTIONS =============
 
+def update_row_teachers_sql(row_name: str, teacher_ids: List[str]) -> int:
+	"""
+	⚡ FIX: Update teachers child table using direct SQL.
+	
+	This ensures data is properly persisted to database, unlike Frappe ORM
+	which may have issues with child table updates.
+	
+	Args:
+		row_name: SIS Timetable Instance Row name
+		teacher_ids: List of teacher IDs to set
+		
+	Returns:
+		Number of teachers inserted
+	"""
+	# Step 1: Delete ALL existing teachers from child table
+	frappe.db.sql("""
+		DELETE FROM `tabSIS Timetable Instance Row Teacher`
+		WHERE parent = %s
+	""", (row_name,))
+	
+	# Step 2: Insert new teachers
+	inserted = 0
+	for idx, tid in enumerate(teacher_ids, start=1):
+		if tid:
+			child_name = frappe.generate_hash(length=10)
+			frappe.db.sql("""
+				INSERT INTO `tabSIS Timetable Instance Row Teacher`
+				(name, parent, parenttype, parentfield, teacher_id, sort_order, idx)
+				VALUES (%s, %s, 'SIS Timetable Instance Row', 'teachers', %s, %s, %s)
+			""", (child_name, row_name, tid, idx, idx))
+			inserted += 1
+	
+	return inserted
+
+
 def validate_assignment_for_sync(assignment) -> Dict:
 	"""Validate assignment trước khi sync"""
 	
@@ -703,12 +719,10 @@ def validate_assignment_for_sync(assignment) -> Dict:
 		}
 	
 	# Check timetable instances exist
+	# ⚡ FIX: Don't filter by campus_id (consistent with find_pattern_rows)
 	instances = frappe.get_all(
 		"SIS Timetable Instance",
-		filters={
-			"class_id": assignment.class_id,
-			"campus_id": assignment.campus_id
-		},
+		filters={"class_id": assignment.class_id},
 		limit=1
 	)
 	

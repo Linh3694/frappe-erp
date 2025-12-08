@@ -222,6 +222,10 @@ def get_leave_request_details(leave_request_id=None):
             'other': 'Lý do khác'
         }
 
+        # Check if created by parent
+        owner_email = leave_request.owner or ''
+        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email)
+
         result = {
             "id": leave_request.name,
             "student_id": leave_request.student_id,
@@ -238,7 +242,9 @@ def get_leave_request_details(leave_request_id=None):
             "submitted_at": leave_request.submitted_at,
             "campus_id": leave_request.campus_id,
             "creation": leave_request.creation,
-            "modified": leave_request.modified
+            "modified": leave_request.modified,
+            "owner": leave_request.owner,
+            "is_created_by_parent": is_created_by_parent
         }
 
         return single_item_response(result)
@@ -454,6 +460,212 @@ def get_leave_request_attachments():
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "ERP SIS Get Leave Request Attachments Error")
         return error_response(f"Lỗi khi lấy file đính kèm: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def update_leave_request():
+    """
+    Update leave request for a student (admin/teacher view)
+    Only editable within 24 hours of creation
+    
+    POST body (multipart/form-data or JSON):
+    {
+        "id": "SIS-LEAVE-00001",
+        "reason": "sick_child",
+        "other_reason": "",
+        "start_date": "2025-11-06",
+        "end_date": "2025-11-07",
+        "description": "Optional description",
+        "documents[]": <file> (optional, multiple files allowed)
+    }
+    """
+    try:
+        # Check if files exist
+        has_files = frappe.request.files and len(frappe.request.files) > 0
+        
+        if has_files:
+            # FormData with files - use request.form
+            data = frappe.request.form
+        elif frappe.request.is_json:
+            # JSON request - use request.json
+            data = frappe.request.json or {}
+        else:
+            # Fallback to form_dict
+            data = frappe.form_dict
+
+        # Required field
+        if 'id' not in data:
+            return validation_error_response("Thiếu ID đơn xin nghỉ phép", {"id": ["ID đơn xin nghỉ phép là bắt buộc"]})
+
+        leave_request_id = data['id']
+
+        # Get leave request
+        leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
+
+        # Check campus permissions
+        campus_id = get_current_campus_from_context()
+        if leave_request.campus_id != campus_id:
+            return forbidden_response("Bạn không có quyền chỉnh sửa đơn này")
+
+        # Check if within 24 hours (only for teacher-created requests)
+        owner_email = leave_request.owner or ''
+        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email)
+        
+        if not is_created_by_parent:
+            # Teacher/Admin created - check 24h rule
+            if leave_request.submitted_at:
+                submitted_time = datetime.strptime(str(leave_request.submitted_at), '%Y-%m-%d %H:%M:%S.%f')
+                time_diff = datetime.now() - submitted_time
+                if time_diff.total_seconds() > (24 * 60 * 60):
+                    return error_response("Đã quá thời hạn chỉnh sửa (24 giờ)")
+
+        # Update fields
+        updatable_fields = ['reason', 'other_reason', 'start_date', 'end_date', 'description']
+
+        for field in updatable_fields:
+            if field in data:
+                leave_request.set(field, data[field])
+
+        # Handle file attachments if any
+        if frappe.request.files:
+            for file_key, file_obj in frappe.request.files.items():
+                if file_key.startswith('documents'):
+                    file_doc = frappe.get_doc({
+                        "doctype": "File",
+                        "file_name": file_obj.filename,
+                        "attached_to_doctype": "SIS Student Leave Request",
+                        "attached_to_name": leave_request.name,
+                        "content": file_obj.stream.read(),
+                        "is_private": 1
+                    })
+                    file_doc.insert(ignore_permissions=True)
+
+        # Save
+        leave_request.flags.ignore_permissions = True
+        leave_request.save()
+        
+        frappe.db.commit()
+
+        return success_response({
+            "message": "Đã cập nhật đơn xin nghỉ phép thành công",
+            "request": {
+                "id": leave_request.name,
+                "student_name": leave_request.student_name
+            }
+        })
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Không tìm thấy đơn xin nghỉ phép")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "ERP SIS Update Leave Request Error")
+        return error_response(f"Lỗi khi cập nhật đơn xin nghỉ phép: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def upload_leave_attachment():
+    """
+    Upload attachment for a leave request (admin/teacher view)
+    
+    POST body (multipart/form-data):
+    {
+        "leave_request_id": "SIS-LEAVE-00001",
+        "documents[]": <file> (multiple files allowed)
+    }
+    """
+    try:
+        data = frappe.request.form
+        leave_request_id = data.get('leave_request_id')
+        
+        if not leave_request_id:
+            return validation_error_response("Thiếu leave_request_id", {"leave_request_id": ["Leave request ID là bắt buộc"]})
+
+        # Get leave request
+        leave_request = frappe.get_doc("SIS Student Leave Request", leave_request_id)
+
+        # Check campus permissions
+        campus_id = get_current_campus_from_context()
+        if leave_request.campus_id != campus_id:
+            return forbidden_response("Bạn không có quyền thêm file cho đơn này")
+
+        uploaded_files = []
+        
+        # Handle file attachments
+        if frappe.request.files:
+            for file_key, file_obj in frappe.request.files.items():
+                if file_key.startswith('documents'):
+                    file_doc = frappe.get_doc({
+                        "doctype": "File",
+                        "file_name": file_obj.filename,
+                        "attached_to_doctype": "SIS Student Leave Request",
+                        "attached_to_name": leave_request.name,
+                        "content": file_obj.stream.read(),
+                        "is_private": 1
+                    })
+                    file_doc.insert(ignore_permissions=True)
+                    uploaded_files.append({
+                        "name": file_doc.name,
+                        "file_name": file_doc.file_name,
+                        "file_url": file_doc.file_url,
+                        "file_size": file_doc.file_size
+                    })
+
+        frappe.db.commit()
+
+        return success_response({
+            "message": f"Đã tải lên {len(uploaded_files)} file thành công",
+            "files": uploaded_files
+        })
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Không tìm thấy đơn xin nghỉ phép")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "ERP SIS Upload Leave Attachment Error")
+        return error_response(f"Lỗi khi tải file: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def delete_leave_attachment():
+    """
+    Delete attachment from a leave request (admin/teacher view)
+    
+    POST body:
+    {
+        "file_name": "xxx" (File doc name)
+    }
+    """
+    try:
+        data = json.loads(frappe.request.data.decode('utf-8'))
+        file_name = data.get('file_name')
+        
+        if not file_name:
+            return validation_error_response("Thiếu file_name", {"file_name": ["File name là bắt buộc"]})
+
+        # Get file doc
+        file_doc = frappe.get_doc("File", file_name)
+        
+        # Verify it's attached to a leave request
+        if file_doc.attached_to_doctype != "SIS Student Leave Request":
+            return forbidden_response("File này không thuộc đơn nghỉ phép")
+
+        # Get leave request and check permissions
+        leave_request = frappe.get_doc("SIS Student Leave Request", file_doc.attached_to_name)
+        campus_id = get_current_campus_from_context()
+        if leave_request.campus_id != campus_id:
+            return forbidden_response("Bạn không có quyền xóa file này")
+
+        # Delete file
+        frappe.delete_doc("File", file_name, ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response({
+            "message": "Đã xóa file thành công"
+        })
+
+    except frappe.DoesNotExistError:
+        return not_found_response("Không tìm thấy file")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "ERP SIS Delete Leave Attachment Error")
+        return error_response(f"Lỗi khi xóa file: {str(e)}")
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
