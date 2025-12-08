@@ -1146,6 +1146,14 @@ def delete_subject_assignment(assignment_id=None):
         # BEFORE DELETE: Sync TKB to remove teacher from timetable rows
         sync_summary = {}
         try:
+            teacher_id_to_delete = assignment_doc.teacher_id
+            class_id_to_delete = assignment_doc.class_id
+            actual_subject_id_to_delete = assignment_doc.actual_subject_id
+            
+            frappe.logger().info(
+                f"🗑️ DELETE SYNC START: teacher={teacher_id_to_delete}, "
+                f"class={class_id_to_delete}, actual_subject={actual_subject_id_to_delete}"
+            )
             
             # Get all timetable instances for this class
             instances = frappe.db.sql("""
@@ -1154,121 +1162,190 @@ def delete_subject_assignment(assignment_id=None):
                 WHERE campus_id = %s
                   AND class_id = %s
                   AND end_date >= %s
-            """, (campus_id, assignment_doc.class_id, frappe.utils.getdate()), as_dict=True)
+            """, (campus_id, class_id_to_delete, frappe.utils.getdate()), as_dict=True)
+            
+            frappe.logger().info(f"🔍 Found {len(instances)} timetable instances for class {class_id_to_delete}")
             
             if instances:
                 # Find the SIS Subject that corresponds to this actual_subject_id
                 subject_mapping = frappe.db.sql("""
                     SELECT name FROM `tabSIS Subject`
                     WHERE actual_subject_id = %s AND campus_id = %s
-                """, (assignment_doc.actual_subject_id, campus_id), as_dict=True)
+                """, (actual_subject_id_to_delete, campus_id), as_dict=True)
+                
+                frappe.logger().info(
+                    f"🔍 Subject mapping: actual_subject={actual_subject_id_to_delete} -> "
+                    f"SIS Subjects: {[s.name for s in subject_mapping] if subject_mapping else 'NONE'}"
+                )
                 
                 if not subject_mapping:
-                    return success_response({"sync_summary": {"rows_updated": 0, "message": "No matching SIS Subject found"}}, 
-                                          message="Subject assignment deleted successfully")
-                
-                subject_ids = [s.name for s in subject_mapping]
-                instance_ids = [i.name for i in instances]
-                
-                # Get rows with this subject
-                rows_to_update = frappe.db.sql("""
-                    SELECT name, teacher_1_id, teacher_2_id
-                    FROM `tabSIS Timetable Instance Row`
-                    WHERE parent IN ({})
-                      AND subject_id IN ({})
-                """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))), 
-                tuple(instance_ids + subject_ids), as_dict=True)
-                
-                updated_count = 0
-                row_names = [row.name for row in rows_to_update]
-                
-                # ⚡ FIX: Delete teacher from child table (NEW logic)
-                # Previous code only cleared teacher_1_id, teacher_2_id (deprecated fields)
-                # Now we need to delete from child table 'tabSIS Timetable Instance Row Teacher'
-                if row_names:
-                    frappe.db.sql("""
-                        DELETE FROM `tabSIS Timetable Instance Row Teacher`
-                        WHERE parent IN ({})
-                          AND teacher_id = %s
-                    """.format(','.join(['%s'] * len(row_names))),
-                    tuple(row_names + [assignment_doc.teacher_id]))
-                    frappe.logger().info(f"🗑️ Deleted teacher {assignment_doc.teacher_id} from {len(row_names)} pattern rows (child table)")
-                    updated_count = len(row_names)
-                
-                # Also clear deprecated fields for backward compatibility
-                for row in rows_to_update:
-                    if row.teacher_1_id == assignment_doc.teacher_id:
-                        frappe.db.set_value(
-                            "SIS Timetable Instance Row",
-                            row.name,
-                            "teacher_1_id",
-                            None,
-                            update_modified=False
-                        )
-                    elif row.teacher_2_id == assignment_doc.teacher_id:
-                        frappe.db.set_value(
-                            "SIS Timetable Instance Row",
-                            row.name,
-                            "teacher_2_id",
-                            None,
-                            update_modified=False
-                        )
-                
-                frappe.db.commit()
-                
-                # Delete override rows for this assignment
-                override_deleted = 0
-                try:
-                    override_deleted = delete_teacher_override_rows(
-                        assignment_doc.teacher_id,
-                        subject_ids,
-                        [assignment_doc.class_id],
-                        campus_id
+                    # ⚡ FIX: Don't return early - still delete the assignment
+                    frappe.logger().warning(
+                        f"⚠️ No SIS Subject found for actual_subject={actual_subject_id_to_delete}. "
+                        f"Will still delete assignment but skip timetable sync."
                     )
-                except Exception as override_error:
-                    frappe.logger().error(f"DELETE SYNC - Failed to delete override rows: {str(override_error)}")
-                
-                # ✅ FIX: Delete Teacher Timetable entries (materialized view)
-                teacher_timetable_deleted = 0
-                try:
+                    sync_summary = {"rows_updated": 0, "message": "No matching SIS Subject found - skipped timetable sync"}
+                else:
+                    subject_ids = [s.name for s in subject_mapping]
+                    instance_ids = [i.name for i in instances]
                     
-                    # Delete ALL Teacher Timetable entries for this teacher + class + subject
-                    # (Not just future dates - also delete past entries for data consistency)
-                    teacher_timetable_deleted = frappe.db.sql("""
-                        DELETE FROM `tabSIS Teacher Timetable`
-                        WHERE teacher_id = %s
-                          AND class_id = %s
+                    # Get rows with this subject
+                    rows_to_update = frappe.db.sql("""
+                        SELECT name, teacher_1_id, teacher_2_id
+                        FROM `tabSIS Timetable Instance Row`
+                        WHERE parent IN ({})
                           AND subject_id IN ({})
-                          AND timetable_instance_id IN ({})
-                    """.format(
-                        ','.join(['%s'] * len(subject_ids)),
-                        ','.join(['%s'] * len(instance_ids))
-                    ), tuple([assignment_doc.teacher_id, assignment_doc.class_id] + subject_ids + instance_ids))
+                    """.format(','.join(['%s'] * len(instance_ids)), ','.join(['%s'] * len(subject_ids))), 
+                    tuple(instance_ids + subject_ids), as_dict=True)
+                    
+                    frappe.logger().info(
+                        f"🔍 Found {len(rows_to_update)} timetable instance rows to update. "
+                        f"Instance IDs: {instance_ids}, Subject IDs: {subject_ids}"
+                    )
+                    
+                    updated_count = 0
+                    row_names = [row.name for row in rows_to_update]
+                    
+                    # ⚡ FIX: Delete teacher from child table using Frappe ORM for proper cache invalidation
+                    if row_names:
+                        # Step 1: Count before delete for verification
+                        count_before = frappe.db.sql("""
+                            SELECT COUNT(*) as cnt FROM `tabSIS Timetable Instance Row Teacher`
+                            WHERE parent IN ({}) AND teacher_id = %s
+                        """.format(','.join(['%s'] * len(row_names))),
+                        tuple(row_names + [teacher_id_to_delete]), as_dict=True)
+                        
+                        count_before_val = count_before[0].cnt if count_before else 0
+                        frappe.logger().info(f"🔍 Before DELETE: Found {count_before_val} child rows to delete")
+                        
+                        # Step 2: Direct SQL delete from child table
+                        delete_result = frappe.db.sql("""
+                            DELETE FROM `tabSIS Timetable Instance Row Teacher`
+                            WHERE parent IN ({})
+                              AND teacher_id = %s
+                        """.format(','.join(['%s'] * len(row_names))),
+                        tuple(row_names + [teacher_id_to_delete]))
+                        
+                        # Step 3: Verify delete
+                        count_after = frappe.db.sql("""
+                            SELECT COUNT(*) as cnt FROM `tabSIS Timetable Instance Row Teacher`
+                            WHERE parent IN ({}) AND teacher_id = %s
+                        """.format(','.join(['%s'] * len(row_names))),
+                        tuple(row_names + [teacher_id_to_delete]), as_dict=True)
+                        
+                        count_after_val = count_after[0].cnt if count_after else 0
+                        
+                        frappe.logger().info(
+                            f"🗑️ SQL DELETE from child table: teacher={teacher_id_to_delete}, "
+                            f"before={count_before_val}, after={count_after_val}, deleted={count_before_val - count_after_val}"
+                        )
+                        
+                        # Step 4: Clear document cache for each row
+                        for row_name in row_names:
+                            try:
+                                frappe.clear_document_cache("SIS Timetable Instance Row", row_name)
+                            except Exception as cache_err:
+                                frappe.logger().warning(f"Failed to clear cache for row {row_name}: {cache_err}")
+                        
+                        # Step 5: Clear Redis cache for class_week (important!)
+                        try:
+                            from erp.api.erp_sis.utils.cache_utils import clear_class_cache
+                            clear_class_cache(class_id_to_delete)
+                            frappe.logger().info(f"✅ Cleared class_week cache for class {class_id_to_delete}")
+                        except Exception as class_cache_err:
+                            frappe.logger().warning(f"Failed to clear class cache: {class_cache_err}")
+                        
+                        updated_count = count_before_val - count_after_val
+                    
+                    # Also clear deprecated fields for backward compatibility
+                    for row in rows_to_update:
+                        if row.teacher_1_id == teacher_id_to_delete:
+                            frappe.db.set_value(
+                                "SIS Timetable Instance Row",
+                                row.name,
+                                "teacher_1_id",
+                                None,
+                                update_modified=False
+                            )
+                            frappe.logger().info(f"✅ Cleared teacher_1_id for row {row.name}")
+                        elif row.teacher_2_id == teacher_id_to_delete:
+                            frappe.db.set_value(
+                                "SIS Timetable Instance Row",
+                                row.name,
+                                "teacher_2_id",
+                                None,
+                                update_modified=False
+                            )
+                            frappe.logger().info(f"✅ Cleared teacher_2_id for row {row.name}")
                     
                     frappe.db.commit()
                     
-                except Exception:
-                    pass  # Continue even if Teacher Timetable deletion fails
+                    # Delete override rows for this assignment
+                    override_deleted = 0
+                    try:
+                        override_deleted = delete_teacher_override_rows(
+                            teacher_id_to_delete,
+                            subject_ids,
+                            [class_id_to_delete],
+                            campus_id
+                        )
+                        frappe.logger().info(f"🗑️ Deleted {override_deleted} override rows")
+                    except Exception as override_error:
+                        frappe.logger().error(f"DELETE SYNC - Failed to delete override rows: {str(override_error)}")
+                    
+                    # ✅ FIX: Delete Teacher Timetable entries (materialized view)
+                    teacher_timetable_deleted = 0
+                    try:
+                        # Delete ALL Teacher Timetable entries for this teacher + class + subject
+                        # (Not just future dates - also delete past entries for data consistency)
+                        teacher_timetable_deleted = frappe.db.sql("""
+                            DELETE FROM `tabSIS Teacher Timetable`
+                            WHERE teacher_id = %s
+                              AND class_id = %s
+                              AND subject_id IN ({})
+                              AND timetable_instance_id IN ({})
+                        """.format(
+                            ','.join(['%s'] * len(subject_ids)),
+                            ','.join(['%s'] * len(instance_ids))
+                        ), tuple([teacher_id_to_delete, class_id_to_delete] + subject_ids + instance_ids))
+                        
+                        frappe.logger().info(
+                            f"🗑️ Deleted Teacher Timetable entries: teacher={teacher_id_to_delete}, "
+                            f"result={teacher_timetable_deleted}"
+                        )
+                        
+                        frappe.db.commit()
+                        
+                    except Exception as tt_error:
+                        frappe.logger().error(f"Failed to delete Teacher Timetable: {str(tt_error)}")
+                    
+                    # DISABLED: Student Timetable sync removed (not used, wastes 50% performance)
+                    student_timetable_updated = 0
+                    
+                    sync_summary = {
+                        "rows_updated": updated_count,
+                        "override_rows_deleted": override_deleted,
+                        "teacher_timetable_deleted": teacher_timetable_deleted or 0,
+                        "student_timetable_updated": student_timetable_updated,
+                        "instances_checked": len(instances),
+                        "subject_ids": subject_ids,
+                        "row_names": row_names[:10],  # First 10 for debugging
+                        "message": (
+                            f"Removed teacher from {updated_count} timetable rows" + 
+                            (f", deleted {override_deleted} override rows" if override_deleted > 0 else "") +
+                            (f", deleted {teacher_timetable_deleted or 0} teacher timetable entries" if teacher_timetable_deleted else "") +
+                            (f", updated {student_timetable_updated} student timetable entries" if student_timetable_updated else "")
+                        )
+                    }
+                    
+                    frappe.logger().info(f"✅ DELETE SYNC COMPLETE: {sync_summary}")
+            else:
+                frappe.logger().info(f"ℹ️ No active timetable instances found for class {class_id_to_delete}")
+                sync_summary = {"rows_updated": 0, "message": "No active timetable instances"}
                 
-                # DISABLED: Student Timetable sync removed (not used, wastes 50% performance)
-                student_timetable_updated = 0
-                # Student Timetable không được dùng trong hệ thống, bỏ qua việc update
-                
-                sync_summary = {
-                    "rows_updated": updated_count,
-                    "override_rows_deleted": override_deleted,
-                    "teacher_timetable_deleted": teacher_timetable_deleted or 0,
-                    "student_timetable_updated": student_timetable_updated,
-                    "instances_checked": len(instances),
-                    "message": (
-                        f"Removed teacher from {updated_count} timetable rows" + 
-                        (f", deleted {override_deleted} override rows" if override_deleted > 0 else "") +
-                        (f", deleted {teacher_timetable_deleted or 0} teacher timetable entries" if teacher_timetable_deleted else "") +
-                        (f", updated {student_timetable_updated} student timetable entries" if student_timetable_updated else "")
-                    )
-                }
         except Exception as sync_error:
             frappe.log_error(f"DELETE SYNC Error: {str(sync_error)}")
+            frappe.logger().error(f"❌ DELETE SYNC Error: {str(sync_error)}")
         
         # Delete the document
         frappe.delete_doc("SIS Subject Assignment", assignment_id)

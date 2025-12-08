@@ -130,22 +130,42 @@ def clear_class_cache(class_id):
 	
 	Args:
 		class_id: SIS Class ID
+		
+	Returns:
+		int: Number of keys deleted
 	"""
 	try:
 		cache = frappe.cache()
 		redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
 		
-		# Clear class-specific cache
-		pattern = f"class_week:{class_id}:*"
+		# ⚠️ IMPORTANT: Frappe adds site hash prefix to cache keys
+		# Real key format: _2e0c5564d1360251|class_week:xxx
+		# So we need to use *class_week:class_id:* pattern (with wildcard prefix)
+		patterns = [
+			f"*class_week:{class_id}:*",
+			f"*class_week_v2:{class_id}:*"
+		]
 		
-		if hasattr(redis_conn, 'scan_iter'):
-			keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
-			if keys_to_delete:
-				redis_conn.delete(*keys_to_delete)
-				frappe.logger().info(f"✅ Cleared cache for class {class_id}: {len(keys_to_delete)} keys")
+		total_deleted = 0
+		
+		for pattern in patterns:
+			if hasattr(redis_conn, 'scan_iter'):
+				keys_to_delete = list(redis_conn.scan_iter(match=pattern, count=100))
+				if keys_to_delete:
+					deleted = redis_conn.delete(*keys_to_delete)
+					total_deleted += deleted
+					frappe.logger().info(f"✅ Cleared {deleted} keys matching pattern '{pattern}'")
+		
+		if total_deleted > 0:
+			frappe.logger().info(f"✅ Total cleared cache for class {class_id}: {total_deleted} keys")
+		else:
+			frappe.logger().info(f"ℹ️ No cache keys found for class {class_id}")
+		
+		return total_deleted
 		
 	except Exception as e:
 		frappe.logger().warning(f"Failed to clear cache for class {class_id}: {str(e)}")
+		return 0
 
 
 def clear_teacher_cache(teacher_user_id):
