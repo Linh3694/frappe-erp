@@ -899,17 +899,20 @@ def delete_leave_request():
         if leave_request.campus_id != campus_id:
             return forbidden_response("Bạn không có quyền xóa đơn này")
         
-        # Check if within 24 hours (only for teacher-created requests)
+        # Check if created by parent - cannot delete parent-created requests
         owner_email = leave_request.owner or ''
         is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email)
         
-        if not is_created_by_parent:
-            # Teacher/Admin created - check 24h rule
-            if leave_request.submitted_at:
-                submitted_time = datetime.strptime(str(leave_request.submitted_at), '%Y-%m-%d %H:%M:%S.%f')
-                time_diff = datetime.now() - submitted_time
-                if time_diff.total_seconds() > (24 * 60 * 60):
-                    return error_response("Đã quá thời hạn xóa (24 giờ)")
+        if is_created_by_parent:
+            # Parent created - teachers/admins cannot delete
+            return forbidden_response("Không thể xóa đơn nghỉ phép do phụ huynh tạo")
+        
+        # Teacher/Admin created - check 24h rule
+        if leave_request.submitted_at:
+            submitted_time = datetime.strptime(str(leave_request.submitted_at), '%Y-%m-%d %H:%M:%S.%f')
+            time_diff = datetime.now() - submitted_time
+            if time_diff.total_seconds() > (24 * 60 * 60):
+                return error_response("Đã quá thời hạn xóa (24 giờ)")
         
         # Store student name for response
         student_name = leave_request.student_name
