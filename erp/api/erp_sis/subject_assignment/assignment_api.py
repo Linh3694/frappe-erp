@@ -980,10 +980,11 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
             
             if should_delete_overrides:
                 try:
+                    # Use assignment_doc.campus_id for accurate campus matching
                     subject_mapping = frappe.db.sql("""
                         SELECT name FROM `tabSIS Subject`
                         WHERE actual_subject_id = %s AND campus_id = %s
-                    """, (assignment_doc.actual_subject_id, campus_id), as_dict=True)
+                    """, (assignment_doc.actual_subject_id, assignment_doc.campus_id), as_dict=True)
                     
                     if subject_mapping:
                         subject_ids = [s.name for s in subject_mapping]
@@ -991,7 +992,7 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
                             old_teacher_id,
                             subject_ids,
                             [assignment_doc.class_id],
-                            campus_id
+                            assignment_doc.campus_id
                         )
                         debug_info['override_rows_deleted'] = override_deleted
                 except Exception:
@@ -1149,10 +1150,14 @@ def delete_subject_assignment(assignment_id=None):
             teacher_id_to_delete = assignment_doc.teacher_id
             class_id_to_delete = assignment_doc.class_id
             actual_subject_id_to_delete = assignment_doc.actual_subject_id
+            # ⚡ FIX: Use campus_id from assignment_doc, NOT from context
+            # Context may return wrong value (e.g., "campus-1" instead of "CAMPUS-00001")
+            doc_campus_id = assignment_doc.campus_id
             
             frappe.logger().info(
                 f"🗑️ DELETE SYNC START: teacher={teacher_id_to_delete}, "
-                f"class={class_id_to_delete}, actual_subject={actual_subject_id_to_delete}"
+                f"class={class_id_to_delete}, actual_subject={actual_subject_id_to_delete}, "
+                f"campus={doc_campus_id}"
             )
             
             # Get all timetable instances for this class (include past ones for thorough cleanup)
@@ -1161,7 +1166,7 @@ def delete_subject_assignment(assignment_id=None):
                 FROM `tabSIS Timetable Instance`
                 WHERE campus_id = %s
                   AND class_id = %s
-            """, (campus_id, class_id_to_delete), as_dict=True)
+            """, (doc_campus_id, class_id_to_delete), as_dict=True)
             
             frappe.logger().info(f"🔍 Found {len(instances)} timetable instances for class {class_id_to_delete}")
             
@@ -1204,7 +1209,7 @@ def delete_subject_assignment(assignment_id=None):
                             subject_mapping = frappe.db.sql("""
                                 SELECT name FROM `tabSIS Subject`
                                 WHERE actual_subject_id = %s AND campus_id = %s
-                            """, (actual_subject_id_to_delete, campus_id), as_dict=True)
+                            """, (actual_subject_id_to_delete, doc_campus_id), as_dict=True)
                             
                             if subject_mapping:
                                 subject_ids = [s.name for s in subject_mapping]
@@ -1268,11 +1273,11 @@ def delete_subject_assignment(assignment_id=None):
                 if instances:
                     instance_ids = [i.name for i in instances]
                     
-                    # Get subject mapping for specific delete
+                    # Get subject mapping for specific delete (use doc_campus_id)
                     subject_mapping = frappe.db.sql("""
                         SELECT name FROM `tabSIS Subject`
                         WHERE actual_subject_id = %s AND campus_id = %s
-                    """, (actual_subject_id_to_delete, campus_id), as_dict=True)
+                    """, (actual_subject_id_to_delete, doc_campus_id), as_dict=True)
                     
                     if subject_mapping:
                         subject_ids = [s.name for s in subject_mapping]
@@ -1311,7 +1316,7 @@ def delete_subject_assignment(assignment_id=None):
                 subject_mapping = frappe.db.sql("""
                     SELECT name FROM `tabSIS Subject`
                     WHERE actual_subject_id = %s AND campus_id = %s
-                """, (actual_subject_id_to_delete, campus_id), as_dict=True)
+                """, (actual_subject_id_to_delete, doc_campus_id), as_dict=True)
                 
                 if subject_mapping:
                     subject_ids = [s.name for s in subject_mapping]
