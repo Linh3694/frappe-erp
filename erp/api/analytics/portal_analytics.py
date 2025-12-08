@@ -97,10 +97,12 @@ def count_active_guardians_from_logs():
 	Count guardian activity metrics from logging.log
 	Returns comprehensive analytics:
 	- activated_users: Total users who ever logged in (OTP)
-	- dau: Daily Active Users (API calls today, excluding OTP)
+	- dau: Daily Active Users (OTP login OR app session OR API calls today)
 	- new_users_today: First-time logins today
-	- wau: Weekly Active Users
-	- mau: Monthly Active Users
+	- wau: Weekly Active Users (any activity in 7 days)
+	- mau: Monthly Active Users (any activity in 30 days)
+	
+	Activity includes: OTP login, app session, or any Parent Portal API call
 	"""
 	try:
 		# Get site path
@@ -125,9 +127,9 @@ def count_active_guardians_from_logs():
 		# Sets to track different metrics
 		all_logged_in_users = set()  # Ever logged in (OTP)
 		users_with_first_login_today = set()  # First login today
-		dau_users = set()  # API calls today (not OTP login)
-		wau_users = set()  # API calls in 7d
-		mau_users = set()  # API calls in 30d
+		dau_users = set()  # Active today (OTP login OR app session OR API calls)
+		wau_users = set()  # Active in 7d
+		mau_users = set()  # Active in 30d
 		
 		# Track first login date per user
 		user_first_login = {}  # {user: earliest_login_date}
@@ -167,10 +169,15 @@ def count_active_guardians_from_logs():
 						else:
 							user_first_login[user] = min(user_first_login[user], log_date)
 					
-					# Track API calls (for DAU/WAU/MAU - excluding OTP login)
-					is_api_call = 'parent_portal' in resource.lower() and action != 'otp_login'
+					# Track active users (OTP login OR app session OR Parent Portal API calls)
+					# This gives us true DAU/WAU/MAU - anyone who interacted with the app
+					is_active_user = (
+						action == 'otp_login' or  # Logged in via OTP
+						action == 'app_session' or  # Opened/resumed app
+						('parent_portal' in resource.lower() and action not in ['otp_login', 'app_session'])  # Made API call
+					)
 					
-					if is_api_call:
+					if is_active_user:
 						if log_date == today_date:
 							dau_users.add(user)
 						if log_date >= date_7d_ago:
