@@ -163,13 +163,20 @@ def handle_new_ticket_created(event_data):
 		action = notification.get('action', 'new_ticket_admin')
 
 		frappe.logger().info(f"🆕 [New Ticket] Processing {ticket_code} for {len(recipients)} recipients")
+		frappe.logger().info(f"🆕 [New Ticket] Category: {category}, Priority: {priority}")
+		frappe.logger().info(f"🆕 [New Ticket] Recipients list: {recipients}")
 
 		# Recipients are already email addresses from ticket-service
 		recipient_emails = recipients
 
 		if not recipient_emails:
-			frappe.logger().warning(f"⚠️ [New Ticket] No recipients provided")
+			frappe.logger().warning(f"⚠️ [New Ticket] No recipients provided - check getSupportTeamRecipients in ticket-service")
 			return
+		
+		# Check if recipients have device tokens
+		for email in recipient_emails:
+			token_count = frappe.db.count("Mobile Device Token", {"user": email, "is_active": 1})
+			frappe.logger().info(f"🆕 [New Ticket] User {email} has {token_count} active device token(s)")
 
 		# Create notification data
 		ticket_notification_data = {

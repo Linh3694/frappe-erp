@@ -81,6 +81,12 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         
         where_clause = " AND ".join(where_conditions)
         
+        # Debug logging
+        frappe.logger().info(f"=== GET USERS DEBUG ===")
+        frappe.logger().info(f"Active parameter: {active}")
+        frappe.logger().info(f"WHERE clause: {where_clause}")
+        frappe.logger().info(f"Limit: {limit}, Offset: {offset}")
+        
         # Get users with role information
         users = frappe.db.sql(f"""
             SELECT 
@@ -110,6 +116,8 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
                 u.modified DESC
             LIMIT {limit} OFFSET {offset}
         """, as_dict=True)
+        
+        frappe.logger().info(f"Query returned {len(users)} users")
         
         # Add custom fields if they exist
         for user in users:
