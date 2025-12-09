@@ -1,0 +1,174 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 1,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-AWARD-CAT-{#####}",
+ "beta": 0,
+ "creation": "2025-01-09 09:00:00.000000",
+ "custom": 0,
+ "description": "SIS Award Category Management",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "campus_id",
+  "title_vn",
+  "title_en",
+  "recipient_type",
+  "column_break_1",
+  "is_active",
+  "description_section",
+  "description_vn",
+  "description_en",
+  "cover_section",
+  "cover_image",
+  "sub_categories_section",
+  "sub_categories"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1
+  },
+  {
+   "fieldname": "title_vn",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title (Vietnamese)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title (English)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "recipient_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Recipient Type",
+   "options": "student\nclass",
+   "default": "student",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active",
+   "default": "1"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": "Description"
+  },
+  {
+   "fieldname": "description_vn",
+   "fieldtype": "Text Editor",
+   "label": "Description (Vietnamese)"
+  },
+  {
+   "fieldname": "description_en",
+   "fieldtype": "Text Editor",
+   "label": "Description (English)"
+  },
+  {
+   "fieldname": "cover_section",
+   "fieldtype": "Section Break",
+   "label": "Cover Image"
+  },
+  {
+   "fieldname": "cover_image",
+   "fieldtype": "Attach Image",
+   "label": "Cover Image"
+  },
+  {
+   "fieldname": "sub_categories_section",
+   "fieldtype": "Section Break",
+   "label": "Sub Categories"
+  },
+  {
+   "fieldname": "sub_categories",
+   "fieldtype": "Table",
+   "label": "Sub Categories",
+   "options": "SIS Award Sub Category"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-01-09 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Award Category",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Guest"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title_vn",
+ "track_changes": 1
+}

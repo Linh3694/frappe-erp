@@ -1,0 +1,60 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "beta": 0,
+ "creation": "2025-01-09 09:00:00.000000",
+ "custom": 0,
+ "description": "Child table for Award Class Entries",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "class_id",
+  "column_break_1",
+  "note_vn",
+  "note_en"
+ ],
+ "fields": [
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Class",
+   "options": "SIS Class",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "note_vn",
+   "fieldtype": "Small Text",
+   "label": "Note (Vietnamese)"
+  },
+  {
+   "fieldname": "note_en",
+   "fieldtype": "Small Text",
+   "label": "Note (English)"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-01-09 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Award Class Entry",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
