@@ -438,25 +438,7 @@ def create_award_record(data: dict):
         if errors:
             return validation_error_response(errors=errors)
         
-        # Check for duplicate records
-        existing = frappe.get_all(
-            'SIS Award Record',
-            filters={
-                'award_category': data['award_category'],
-                'school_year_id': data['school_year_id'],
-                'sub_category_type': data['sub_category_type'],
-                'sub_category_label': data['sub_category_label'],
-                'semester': data.get('semester'),
-                'month': data.get('month')
-            },
-            limit=1
-        )
-        
-        if existing:
-            return error_response(
-                message="Bản ghi vinh danh này đã tồn tại",
-                code="DUPLICATE_RECORD"
-            )
+        # NOTE: Removed duplicate check - allow multiple records
         
         # Create record
         doc = frappe.get_doc({
@@ -605,35 +587,7 @@ def bulk_import_students(award_category: str, sub_category_data: dict, students_
                     results['summary']['failed'] += 1
                     continue
                 
-                # Check for duplicate
-                existing = frappe.get_all(
-                    'SIS Award Record',
-                    filters={
-                        'award_category': award_category,
-                        'school_year_id': sub_category_data['school_year_id'],
-                        'sub_category_type': sub_category_data['type'],
-                        'sub_category_label': sub_category_data['label']
-                    }
-                )
-                
-                # Check if student already exists in any of these records
-                duplicate_found = False
-                for rec in existing:
-                    rec_doc = frappe.get_doc('SIS Award Record', rec['name'])
-                    for entry in rec_doc.student_entries:
-                        if entry.student_id == student_data.get('student_id'):
-                            duplicate_found = True
-                            break
-                    if duplicate_found:
-                        break
-                
-                if duplicate_found:
-                    results['errors'].append({
-                        'student': student_data,
-                        'error': 'Học sinh đã có trong danh sách vinh danh này'
-                    })
-                    results['summary']['failed'] += 1
-                    continue
+                # NOTE: Removed duplicate check - allow multiple awards for same student
                 
                 # Create new record for this student
                 doc = frappe.get_doc({
@@ -720,35 +674,7 @@ def bulk_import_classes(award_category: str, sub_category_data: dict, classes_da
                     results['summary']['failed'] += 1
                     continue
                 
-                # Check for duplicate
-                existing = frappe.get_all(
-                    'SIS Award Record',
-                    filters={
-                        'award_category': award_category,
-                        'school_year_id': sub_category_data['school_year_id'],
-                        'sub_category_type': sub_category_data['type'],
-                        'sub_category_label': sub_category_data['label']
-                    }
-                )
-                
-                # Check if class already exists
-                duplicate_found = False
-                for rec in existing:
-                    rec_doc = frappe.get_doc('SIS Award Record', rec['name'])
-                    for entry in rec_doc.class_entries:
-                        if entry.class_id == class_data.get('class_id'):
-                            duplicate_found = True
-                            break
-                    if duplicate_found:
-                        break
-                
-                if duplicate_found:
-                    results['errors'].append({
-                        'class': class_data,
-                        'error': 'Lớp đã có trong danh sách vinh danh này'
-                    })
-                    results['summary']['failed'] += 1
-                    continue
+                # NOTE: Removed duplicate check - allow multiple awards for same class
                 
                 # Create new record for this class
                 doc = frappe.get_doc({
