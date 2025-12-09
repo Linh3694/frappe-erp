@@ -620,22 +620,37 @@ def send_mobile_notification(user_email, title, body, data=None):
                 "body": body,
                 "data": data or {},
                 "priority": "high",
-                "sound": sound_name,
                 "channelId": channel_id
             }
 
             # Add platform-specific settings
             if token_doc.platform == "ios":
                 message["badge"] = 1
-                # iOS uses sound name without path for custom sounds bundled in app
-                if sound_name != "default":
-                    message["sound"] = sound_name
+                # iOS uses sound name for custom sounds bundled in app
+                message["sound"] = sound_name
             elif token_doc.platform == "android":
+                # Android: sound phải ở top-level, không phải trong android object
+                # Custom sound file phải có trong res/raw folder của app
+                # Format: sound name without extension for custom, hoặc "default"
+                if sound_name != "default":
+                    # Custom sound: ticket_create.wav -> ticket_create
+                    android_sound_name = sound_name.replace(".wav", "").replace(".mp3", "")
+                    message["sound"] = android_sound_name
+                else:
+                    message["sound"] = "default"
+                
+                # Android notification channel configuration
                 message["android"] = {
                     "channelId": channel_id,
                     "priority": "high",
-                    "sound": sound_name if sound_name != "default" else None
+                    "notification": {
+                        "channelId": channel_id,
+                        "sound": sound_name.replace(".wav", "").replace(".mp3", "") if sound_name != "default" else "default"
+                    }
                 }
+            else:
+                # Expo/other platforms - use sound at top level
+                message["sound"] = sound_name
 
             messages.append(message)
 

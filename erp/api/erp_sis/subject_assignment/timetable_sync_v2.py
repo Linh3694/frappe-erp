@@ -342,18 +342,22 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 
 		for date, pattern_row in override_specs:
 			# Check if override already exists
-			existing = frappe.db.get_value(
-				"SIS Timetable Instance Row",
-				{
-					"parent": pattern_row.parent,
-					"date": date,
-					"day_of_week": pattern_row.day_of_week,
-					"timetable_column_id": pattern_row.timetable_column_id,
-					"subject_id": pattern_row.subject_id
-				},
-				["name", "teacher_1_id", "teacher_2_id"],
-				as_dict=True
-			)
+			# ⚡ FIX: Search by parent_timetable_instance OR parent (handle both cases)
+			# Also search ANY override row with same date + slot, not just from current pattern
+			existing = frappe.db.sql("""
+				SELECT name, teacher_1_id, teacher_2_id
+				FROM `tabSIS Timetable Instance Row`
+				WHERE date = %s
+				  AND day_of_week = %s
+				  AND timetable_column_id = %s
+				  AND subject_id = %s
+				  AND (parent = %s OR parent_timetable_instance = %s)
+				ORDER BY creation DESC
+				LIMIT 1
+			""", (date, pattern_row.day_of_week, pattern_row.timetable_column_id,
+				  pattern_row.subject_id, pattern_row.parent, pattern_row.parent),
+			as_dict=True)
+			existing = existing[0] if existing else None
 			
 			if existing:
 				# Check if teacher is already assigned to this row
@@ -601,23 +605,30 @@ def update_row_teachers_sql(row_name: str, teacher_ids: List[str]) -> int:
 	Returns:
 		Number of teachers inserted
 	"""
+	# ⚡ FIX: Dedupe teacher_ids - preserve order, remove duplicates and None
+	seen = set()
+	unique_teacher_ids = []
+	for tid in teacher_ids:
+		if tid and tid not in seen:
+			seen.add(tid)
+			unique_teacher_ids.append(tid)
+	
 	# Step 1: Delete ALL existing teachers from child table
 	frappe.db.sql("""
 		DELETE FROM `tabSIS Timetable Instance Row Teacher`
 		WHERE parent = %s
 	""", (row_name,))
 	
-	# Step 2: Insert new teachers
+	# Step 2: Insert new teachers (deduplicated)
 	inserted = 0
-	for idx, tid in enumerate(teacher_ids, start=1):
-		if tid:
-			child_name = frappe.generate_hash(length=10)
-			frappe.db.sql("""
-				INSERT INTO `tabSIS Timetable Instance Row Teacher`
-				(name, parent, parenttype, parentfield, teacher_id, sort_order, idx)
-				VALUES (%s, %s, 'SIS Timetable Instance Row', 'teachers', %s, %s, %s)
-			""", (child_name, row_name, tid, idx, idx))
-			inserted += 1
+	for idx, tid in enumerate(unique_teacher_ids, start=1):
+		child_name = frappe.generate_hash(length=10)
+		frappe.db.sql("""
+			INSERT INTO `tabSIS Timetable Instance Row Teacher`
+			(name, parent, parenttype, parentfield, teacher_id, sort_order, idx)
+			VALUES (%s, %s, 'SIS Timetable Instance Row', 'teachers', %s, %s, %s)
+		""", (child_name, row_name, tid, idx, idx))
+		inserted += 1
 	
 	return inserted
 
