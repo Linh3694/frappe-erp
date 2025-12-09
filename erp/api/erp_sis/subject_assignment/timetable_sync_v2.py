@@ -445,47 +445,46 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 			else:
 				# No existing override row - need to create one
 				
-				# ⚡ FIX: Check if teacher is already in pattern row using child table
+				# ⚡ FIX: Get teachers from pattern row's child table
 				pattern_teachers = frappe.db.sql("""
 					SELECT teacher_id FROM `tabSIS Timetable Instance Row Teacher`
-					WHERE parent = %s
+					WHERE parent = %s ORDER BY sort_order
 				""", (pattern_row.name,), as_dict=True)
 				pattern_teacher_ids = [t.teacher_id for t in pattern_teachers]
 				
 				if teacher_id in pattern_teacher_ids:
 					# Teacher already assigned in pattern, skip
 					continue
-			
-			# ⚡ SIMPLIFIED: With unlimited teachers, no conflict detection needed
-			# Always create override with ALL existing teachers + new teacher
-			override_doc = frappe.get_doc({
-				"doctype": "SIS Timetable Instance Row",
-				"parent": pattern_row.parent,
-				"parent_timetable_instance": pattern_row.parent,
-				"parenttype": "SIS Timetable Instance",
-				"parentfield": "date_overrides",
-				"date": date,
-				"day_of_week": pattern_row.day_of_week,
-				"timetable_column_id": pattern_row.timetable_column_id,
-				"period_priority": pattern_row.period_priority,
-				"period_name": pattern_row.period_name,
-				"subject_id": pattern_row.subject_id,
-				"room_id": pattern_row.room_id
-			})
-			
-			# Insert first to get name
-			override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
-			
-			# ⚡ FIX: Copy ALL teachers from pattern row + add new teacher
-			new_teachers = pattern_teacher_ids.copy()
-			if teacher_id and teacher_id not in new_teachers:
-				new_teachers.append(teacher_id)
-			
-			if new_teachers:
-				update_row_teachers_sql(override_doc.name, new_teachers)
-			
-			affected_row_ids.append(override_doc.name)
-			created_count += 1
+				
+				# ⚡ SIMPLIFIED: Create override with ALL existing teachers + new teacher
+				override_doc = frappe.get_doc({
+					"doctype": "SIS Timetable Instance Row",
+					"parent": pattern_row.parent,
+					"parent_timetable_instance": pattern_row.parent,
+					"parenttype": "SIS Timetable Instance",
+					"parentfield": "date_overrides",
+					"date": date,
+					"day_of_week": pattern_row.day_of_week,
+					"timetable_column_id": pattern_row.timetable_column_id,
+					"period_priority": pattern_row.period_priority,
+					"period_name": pattern_row.period_name,
+					"subject_id": pattern_row.subject_id,
+					"room_id": pattern_row.room_id
+				})
+				
+				# Insert first to get name
+				override_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+				
+				# ⚡ FIX: Copy ALL teachers from pattern row + add new teacher
+				new_teachers = pattern_teacher_ids.copy()
+				if teacher_id and teacher_id not in new_teachers:
+					new_teachers.append(teacher_id)
+				
+				if new_teachers:
+					update_row_teachers_sql(override_doc.name, new_teachers)
+				
+				affected_row_ids.append(override_doc.name)
+				created_count += 1
 		
 		# Check if there are unresolved conflicts
 		if conflicts:
