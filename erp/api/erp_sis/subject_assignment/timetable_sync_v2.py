@@ -70,13 +70,16 @@ def sync_assignment_to_timetable(assignment_id: str, replace_teacher_map: dict =
 
 def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> Dict:
 	"""
-	Sync full_year assignment: Update pattern rows with ALL teachers for this class+subject.
+	Sync full_year assignment: Update ALL rows (pattern + override) with ALL teachers.
 	
 	NEW LOGIC (Unlimited Teachers):
-	1. Find pattern rows cho class + subject
+	1. Find ALL rows (pattern + override) cho class + subject
 	2. Find ALL assignments for this class + subject (not just current one)
 	3. Clear existing teachers child table
 	4. Insert ALL teachers from ALL assignments into child table
+	
+	⚡ FIX: Now syncs BOTH pattern rows AND override rows!
+	Override rows were previously skipped, causing teachers to be missing.
 	
 	NO MORE CONFLICTS: Since we support unlimited teachers, no conflict detection needed.
 	
@@ -84,7 +87,7 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 		assignment: SIS Subject Assignment doc
 		replace_teacher_map: DEPRECATED - no longer used (kept for backward compatibility)
 	
-	Performance: ~100ms cho 10 pattern rows
+	Performance: ~100ms cho 10 pattern rows, ~500ms cho 50 rows (pattern + override)
 	"""
 	debug_info = []
 	teacher_id = assignment.teacher_id
@@ -94,21 +97,24 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	
 	debug_info.append(f"🔄 Syncing full_year assignment: class={class_id}, subject={actual_subject_id}")
 	
-	# STEP 1: Find pattern rows
-	pattern_rows = find_pattern_rows(
+	# STEP 1: Find ALL rows (pattern + override)
+	# ⚡ FIX: Use find_all_rows instead of find_pattern_rows
+	all_rows = find_all_rows(
 		class_id=class_id,
 		actual_subject_id=actual_subject_id,
 		campus_id=campus_id
 	)
 	
-	if not pattern_rows:
+	if not all_rows:
 		return {
 			"success": False,
-			"message": "No pattern rows found for this class/subject",
-			"debug_info": debug_info + ["❌ No pattern rows found"]
+			"message": "No timetable rows found for this class/subject",
+			"debug_info": debug_info + ["❌ No timetable rows found"]
 		}
 	
-	debug_info.append(f"📋 Found {len(pattern_rows)} pattern rows to sync")
+	pattern_count = len([r for r in all_rows if r.date is None])
+	override_count = len([r for r in all_rows if r.date is not None])
+	debug_info.append(f"📋 Found {len(all_rows)} rows ({pattern_count} pattern, {override_count} override)")
 	
 	# STEP 2: Get ALL assignments for this class + subject
 	all_assignments = frappe.get_all(
@@ -142,22 +148,19 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			"debug_info": debug_info
 		}
 	
-	# STEP 3: Update each pattern row with ALL teachers
+	# STEP 3: Update ALL rows (pattern + override) with ALL teachers
 	updated_count = 0
 	
 	try:
-		for row in pattern_rows:
-			row_name = row.name
-			
-			# ⚡ FIX: Use helper function to update child table via direct SQL
-			update_row_teachers_sql(row_name, teacher_ids)
-			
+		for row in all_rows:
+			# ⚡ FIX: Use direct SQL to update teachers (more reliable than ORM)
+			update_row_teachers_sql(row.name, teacher_ids)
 			updated_count += 1
-			debug_info.append(f"  ✓ Updated row {row_name}: {len(teacher_ids)} teachers")
+			debug_info.append(f"  ✓ Updated row {row.name}: {len(teacher_ids)} teachers")
 		
 		# ⚡ CRITICAL: Sync materialized view INSIDE try block
 		if updated_count > 0:
-			row_ids = [r.name for r in pattern_rows]
+			row_ids = [r.name for r in all_rows]
 			if len(row_ids) <= 50:
 				# ⚡ CRITICAL: Sync immediately for small updates
 				# If sync fails, we MUST throw exception to trigger rollback
@@ -797,6 +800,65 @@ def find_pattern_rows(class_id: str, actual_subject_id: str, campus_id: str) -> 
 	
 	frappe.logger().info(
 		f"find_pattern_rows: Found {len(rows)} pattern rows for class={class_id}, subjects={subject_ids}"
+	)
+	
+	return rows
+
+
+def find_all_rows(class_id: str, actual_subject_id: str, campus_id: str) -> List[Dict]:
+	"""
+	Find ALL rows (both pattern AND override) cho class + subject.
+	
+	⚡ NEW: This function finds ALL timetable rows, not just pattern rows.
+	Used by sync_full_year_assignment to ensure override rows also get teachers.
+	
+	Returns list of dicts with fields: name, parent, subject_id, day_of_week,
+	timetable_column_id, period_priority, period_name, teacher_1_id, teacher_2_id, room_id, date
+	"""
+	subject_ids = get_all_subject_ids_from_actual(actual_subject_id, campus_id)
+	
+	if not subject_ids:
+		frappe.logger().warning(
+			f"find_all_rows: No SIS Subjects found for actual_subject={actual_subject_id}, campus={campus_id}"
+		)
+		return []
+	
+	# Get instances for this class
+	instances = frappe.get_all(
+		"SIS Timetable Instance",
+		filters={"class_id": class_id, "campus_id": campus_id},
+		pluck="name"
+	)
+	
+	if not instances:
+		frappe.logger().warning(
+			f"find_all_rows: No timetable instances for class={class_id}, campus={campus_id}"
+		)
+		return []
+	
+	# ⚡ Get ALL rows (pattern + override) for ANY of the subject_ids
+	rows = frappe.db.sql("""
+		SELECT 
+			name, parent, subject_id, day_of_week,
+			timetable_column_id, period_priority, period_name,
+			teacher_1_id, teacher_2_id, room_id, date
+		FROM `tabSIS Timetable Instance Row`
+		WHERE (parent IN ({instances}) OR parent_timetable_instance IN ({instances}))
+		  AND subject_id IN ({subjects})
+		ORDER BY date, day_of_week, period_priority
+	""".format(
+		instances=','.join(['%s'] * len(instances)),
+		subjects=','.join(['%s'] * len(subject_ids))
+	),
+	tuple(instances + instances + subject_ids),
+	as_dict=True)
+	
+	pattern_count = len([r for r in rows if r.date is None])
+	override_count = len([r for r in rows if r.date is not None])
+	
+	frappe.logger().info(
+		f"find_all_rows: Found {len(rows)} rows ({pattern_count} pattern, {override_count} override) "
+		f"for class={class_id}, subjects={subject_ids}"
 	)
 	
 	return rows
