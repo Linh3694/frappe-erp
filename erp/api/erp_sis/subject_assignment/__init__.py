@@ -130,6 +130,7 @@ def batch_update_teacher_assignments():
             application_type = item.get('application_type', 'full_year')
             start_date = item.get('start_date')
             end_date = item.get('end_date')
+            weekdays = item.get('weekdays')  # ⚡ NEW: Support weekdays
             
             if not class_id or not subject_ids:
                 continue
@@ -150,6 +151,10 @@ def batch_update_teacher_assignments():
                     "start_date": start_date,
                     "end_date": end_date
                 }
+                
+                # ⚡ NEW: Add weekdays if provided
+                if weekdays is not None:
+                    assignment_data["weekdays"] = weekdays
                 
                 if existing:
                     assignment_data["assignment_id"] = existing
