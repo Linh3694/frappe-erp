@@ -627,7 +627,11 @@ def batch_get_homeroom_class_logs():
         
         frappe.logger().info(f"❌ Cache MISS - fetching from DB for {homeroom_class_id}, date={date}, {len(periods)} periods")
         
+        # ⏱️ PROFILING: Track time for each step
+        step_times = {}
+        
         # Step 1: Get all students in the homeroom class (single query)
+        step_start = time.time()
         homeroom_students = frappe.get_all(
             "SIS Class Student",
             filters={
@@ -649,8 +653,9 @@ def batch_get_homeroom_class_logs():
         
         # ⚡ OPTIMIZATION: Build student_id -> class_student_id lookup dict (O(1) instead of O(n))
         student_to_class_student = {s['student_id']: s['class_student_id'] for s in homeroom_students if s.get('student_id')}
+        step_times['1_homeroom_students'] = (time.time() - step_start) * 1000
         
-        frappe.logger().info(f"👨‍🎓 [Backend] Found {len(student_ids)} students in homeroom class")
+        frappe.logger().info(f"👨‍🎓 [Backend] Found {len(student_ids)} students in homeroom class ({step_times['1_homeroom_students']:.0f}ms)")
         
         if not student_ids:
             # No students, return empty structure
@@ -659,6 +664,7 @@ def batch_get_homeroom_class_logs():
         
         # Step 2: Query SIS Student Timetable to find which class each student attends for each period
         # This tells us if a student is in a mixed class for a specific period
+        step_start = time.time()
         student_timetable_entries = frappe.db.sql("""
             SELECT 
                 st.student_id,
@@ -674,8 +680,9 @@ def batch_get_homeroom_class_logs():
             "date": date,
             "periods": periods
         }, as_dict=True)
+        step_times['2_student_timetable'] = (time.time() - step_start) * 1000
         
-        frappe.logger().info(f"📋 [Backend] Found {len(student_timetable_entries)} student timetable entries")
+        frappe.logger().info(f"📋 [Backend] Found {len(student_timetable_entries)} student timetable entries ({step_times['2_student_timetable']:.0f}ms)")
         
         # Build mapping: (student_id, period) -> class_id
         student_period_class = {}
@@ -701,6 +708,7 @@ def batch_get_homeroom_class_logs():
         frappe.logger().info(f"🏫 [Backend] Will query {len(all_classes_to_query)} classes: {list(all_classes_to_query)}")
         
         # ⚡ Step 4: BATCH query timetable instances (single query instead of N queries)
+        step_start = time.time()
         class_instances = {}
         if all_classes_to_query:
             instance_rows = frappe.db.sql("""
@@ -716,10 +724,12 @@ def batch_get_homeroom_class_logs():
             
             for row in instance_rows:
                 class_instances[row['class_id']] = row['name']
+        step_times['4_timetable_instances'] = (time.time() - step_start) * 1000
         
-        frappe.logger().info(f"📚 [Backend] Found {len(class_instances)} timetable instances")
+        frappe.logger().info(f"📚 [Backend] Found {len(class_instances)} timetable instances ({step_times['4_timetable_instances']:.0f}ms)")
         
         # Step 5: Batch query all class log subjects for all classes and periods
+        step_start = time.time()
         all_subject_logs = []
         instance_ids = list(class_instances.values())
         
@@ -741,10 +751,12 @@ def batch_get_homeroom_class_logs():
         for log in all_subject_logs:
             key = (log['class_id'], log['period'])
             subject_by_class_period[key] = log
+        step_times['5_class_log_subjects'] = (time.time() - step_start) * 1000
         
-        frappe.logger().info(f"📝 [Backend] Found {len(all_subject_logs)} class log subjects")
+        frappe.logger().info(f"📝 [Backend] Found {len(all_subject_logs)} class log subjects ({step_times['5_class_log_subjects']:.0f}ms)")
         
         # Step 6: Batch query all student logs
+        step_start = time.time()
         subject_ids = [log['name'] for log in all_subject_logs]
         all_student_logs = []
         
@@ -771,11 +783,12 @@ def batch_get_homeroom_class_logs():
             if subject_id not in students_by_subject:
                 students_by_subject[subject_id] = {}
             students_by_subject[subject_id][student_log['student_id']] = student_log
+        step_times['6_student_logs'] = (time.time() - step_start) * 1000
         
-        frappe.logger().info(f"👥 [Backend] Found {len(all_student_logs)} student logs")
+        frappe.logger().info(f"👥 [Backend] Found {len(all_student_logs)} student logs ({step_times['6_student_logs']:.0f}ms)")
         
         # Step 7: Batch query attendance data (both class and event attendance)
-        perf_start = time.time()
+        step_start = time.time()
         
         # ⚡ Query all class attendance in single query
         class_attendance_records = frappe.db.sql("""
@@ -800,9 +813,11 @@ def batch_get_homeroom_class_logs():
             if record['class_id'] == expected_class:
                 class_attendance_map[key] = record['status']
         
-        frappe.logger().info(f"📊 [Backend] Loaded {len(class_attendance_map)} class attendance records in {(time.time() - perf_start)*1000:.0f}ms")
+        step_times['7a_class_attendance'] = (time.time() - step_start) * 1000
+        frappe.logger().info(f"📊 [Backend] Loaded {len(class_attendance_map)} class attendance records ({step_times['7a_class_attendance']:.0f}ms)")
         
         # ⚡ Query event attendance with optimized single query
+        step_start = time.time()
         event_attendance_map = {}
         try:
             # Get education_stage_id using SQL (faster than get_doc)
@@ -838,7 +853,10 @@ def batch_get_homeroom_class_logs():
         except Exception as e:
             frappe.logger().warning(f"⚠️ [Backend] Could not load event attendance: {str(e)}")
         
+        step_times['7b_event_attendance'] = (time.time() - step_start) * 1000
+        
         # Step 8: Build result for each period
+        step_start = time.time()
         result = {}
         
         for period in periods:
@@ -910,15 +928,19 @@ def batch_get_homeroom_class_logs():
                 "is_homeroom_class": primary_class == homeroom_class_id
             }
         
+        step_times['8_build_result'] = (time.time() - step_start) * 1000
+        
         total_time = (time.time() - total_start) * 1000
         frappe.logger().info(f"✅ [Backend] Returning aggregated logs for {len(result)} periods")
         frappe.logger().info(f"⚡ [Backend] TOTAL API TIME: {total_time:.0f}ms")
+        frappe.logger().info(f"⏱️ [Backend] Step times: {step_times}")
         
         meta = {
             "homeroom_class_id": homeroom_class_id,
             "student_count": len(student_ids),
             "classes_queried": list(all_classes_to_query),
-            "performance_ms": int(total_time)
+            "performance_ms": int(total_time),
+            "step_times_ms": step_times  # ⏱️ Detailed profiling for debugging
         }
         
         # ⚡ CACHE: Store result in Redis (2 min = 120 sec)
