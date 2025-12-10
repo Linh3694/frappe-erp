@@ -1450,3 +1450,238 @@ def test_mobile_attendance_notification():
 	except Exception as e:
 		frappe.log_error(f"Error testing mobile notification: {str(e)}")
 		return error_response(f"Test failed: {str(e)}", code="TEST_ERROR")
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def batch_get_homeroom_class_attendance():
+	"""
+	Get aggregated class attendance for homeroom class view.
+	
+	This endpoint handles the case where students may study in different classes 
+	(regular vs mixed) for different periods. It aggregates attendance from all 
+	relevant classes for students belonging to the homeroom class.
+	
+	⚡ Performance: Optimized with batch queries, Redis caching (2 min TTL).
+	
+	POST body:
+	{
+		"homeroom_class_id": "CLASS-001",
+		"date": "2025-10-10",
+		"periods": ["Tiết 1", "Tiết 2", "Tiết 3", ...]
+	}
+	
+	Returns:
+	{
+		"success": true,
+		"data": {
+			"Tiết 1": [
+				{"student_id": "...", "status": "present", "source_class_id": "CLASS-001"},
+				...
+			],
+			"Tiết 2": [...],
+			...
+		},
+		"meta": {
+			"homeroom_class_id": "CLASS-001",
+			"student_count": 30,
+			"classes_queried": ["CLASS-001", "MIXED-001", ...]
+		}
+	}
+	"""
+	try:
+		import time
+		import hashlib
+		total_start = time.time()
+		frappe.logger().info("🏠 [Backend] batch_get_homeroom_class_attendance called")
+		
+		body = _get_json_body() or {}
+		homeroom_class_id = body.get('homeroom_class_id')
+		date = body.get('date')
+		periods = body.get('periods') or []
+		
+		if not homeroom_class_id or not date or not periods:
+			return error_response(
+				message="Missing required parameters: homeroom_class_id, date, periods",
+				code="MISSING_PARAMS"
+			)
+		
+		# ⚡ CACHE: Check Redis cache first (2 min TTL - short due to multi-source)
+		periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
+		cache_key = f"homeroom_attendance:{homeroom_class_id}:{date}:periods_{periods_hash}"
+		
+		try:
+			cached_data = frappe.cache().get_value(cache_key)
+			if cached_data:
+				frappe.logger().info(f"✅ Cache HIT for homeroom_attendance {homeroom_class_id}/{date}")
+				return success_response(
+					data=cached_data['data'],
+					message=f"Fetched homeroom attendance for {len(periods)} periods (cached)",
+					meta=cached_data.get('meta', {})
+				)
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache read failed: {cache_error}")
+		
+		frappe.logger().info(f"❌ Cache MISS - fetching from DB for {homeroom_class_id}, date={date}, {len(periods)} periods")
+		
+		# ⏱️ PROFILING
+		step_times = {}
+		
+		# Step 1: Get all students in the homeroom class
+		step_start = time.time()
+		homeroom_students = frappe.get_all(
+			"SIS Class Student",
+			filters={
+				"class_id": homeroom_class_id,
+				"class_type": "regular"
+			},
+			fields=["name as class_student_id", "student_id"]
+		)
+		
+		if not homeroom_students:
+			homeroom_students = frappe.get_all(
+				"SIS Class Student",
+				filters={"class_id": homeroom_class_id},
+				fields=["name as class_student_id", "student_id"]
+			)
+		
+		student_ids = [s['student_id'] for s in homeroom_students if s.get('student_id')]
+		step_times['1_homeroom_students'] = (time.time() - step_start) * 1000
+		
+		frappe.logger().info(f"👨‍🎓 [Backend] Found {len(student_ids)} students ({step_times['1_homeroom_students']:.0f}ms)")
+		
+		if not student_ids:
+			result = {period: [] for period in periods}
+			return success_response(data=result, message="No students found in homeroom class")
+		
+		# Step 2: Query SIS Student Timetable to find which class each student attends
+		step_start = time.time()
+		student_timetable_entries = frappe.db.sql("""
+			SELECT 
+				st.student_id,
+				st.class_id,
+				tc.period_name
+			FROM `tabSIS Student Timetable` st
+			INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+			WHERE st.student_id IN %(student_ids)s
+				AND st.date = %(date)s
+				AND tc.period_name IN %(periods)s
+		""", {
+			"student_ids": student_ids,
+			"date": date,
+			"periods": periods
+		}, as_dict=True)
+		step_times['2_student_timetable'] = (time.time() - step_start) * 1000
+		
+		frappe.logger().info(f"📋 [Backend] Found {len(student_timetable_entries)} timetable entries ({step_times['2_student_timetable']:.0f}ms)")
+		
+		# Build mapping: (student_id, period) -> class_id
+		student_period_class = {}
+		for entry in student_timetable_entries:
+			key = (entry['student_id'], entry['period_name'])
+			student_period_class[key] = entry['class_id']
+		
+		# Step 3: Determine which classes to query
+		all_classes_to_query = set([homeroom_class_id])
+		for entry in student_timetable_entries:
+			all_classes_to_query.add(entry['class_id'])
+		
+		frappe.logger().info(f"🏫 [Backend] Will query {len(all_classes_to_query)} classes")
+		
+		# Step 4: Batch query all attendance records
+		step_start = time.time()
+		all_attendance_records = frappe.db.sql("""
+			SELECT student_id, period, status, class_id, remarks, student_code, student_name
+			FROM `tabSIS Class Attendance`
+			WHERE date = %(date)s
+				AND student_id IN %(student_ids)s
+				AND period IN %(periods)s
+				AND class_id IN %(class_ids)s
+		""", {
+			"date": date,
+			"student_ids": student_ids,
+			"periods": periods,
+			"class_ids": list(all_classes_to_query)
+		}, as_dict=True)
+		step_times['4_attendance_query'] = (time.time() - step_start) * 1000
+		
+		frappe.logger().info(f"📊 [Backend] Found {len(all_attendance_records)} attendance records ({step_times['4_attendance_query']:.0f}ms)")
+		
+		# Build map: (student_id, period, class_id) -> attendance record
+		attendance_map = {}
+		for record in all_attendance_records:
+			key = (record['student_id'], record['period'], record['class_id'])
+			attendance_map[key] = record
+		
+		# Step 5: Build result - for each period, get attendance from correct class
+		step_start = time.time()
+		result = {}
+		
+		for period in periods:
+			period_attendance = []
+			
+			for student_id in student_ids:
+				# Determine which class the student attended for this period
+				timetable_key = (student_id, period)
+				actual_class = student_period_class.get(timetable_key, homeroom_class_id)
+				
+				# Get attendance from the actual class
+				attendance_key = (student_id, period, actual_class)
+				attendance_record = attendance_map.get(attendance_key)
+				
+				if attendance_record:
+					period_attendance.append({
+						"student_id": student_id,
+						"status": attendance_record['status'],
+						"remarks": attendance_record.get('remarks'),
+						"student_code": attendance_record.get('student_code'),
+						"student_name": attendance_record.get('student_name'),
+						"source_class_id": actual_class,
+						"is_homeroom_class": actual_class == homeroom_class_id
+					})
+				else:
+					# No attendance record - student not marked
+					period_attendance.append({
+						"student_id": student_id,
+						"status": None,
+						"source_class_id": actual_class,
+						"is_homeroom_class": actual_class == homeroom_class_id
+					})
+			
+			result[period] = period_attendance
+		
+		step_times['5_build_result'] = (time.time() - step_start) * 1000
+		
+		total_time = (time.time() - total_start) * 1000
+		frappe.logger().info(f"✅ [Backend] Total time: {total_time:.0f}ms")
+		frappe.logger().info(f"⏱️ [Backend] Step times: {step_times}")
+		
+		meta = {
+			"homeroom_class_id": homeroom_class_id,
+			"student_count": len(student_ids),
+			"classes_queried": list(all_classes_to_query),
+			"performance_ms": int(total_time),
+			"step_times_ms": step_times
+		}
+		
+		# ⚡ CACHE: Store result in Redis (2 min = 120 sec)
+		try:
+			frappe.cache().set_value(cache_key, {"data": result, "meta": meta}, expires_in_sec=120)
+			frappe.logger().info(f"✅ Cached homeroom_attendance for {homeroom_class_id}/{date}")
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache write failed: {cache_error}")
+		
+		return success_response(
+			data=result,
+			message=f"Fetched homeroom attendance for {len(periods)} periods",
+			meta=meta
+		)
+		
+	except Exception as e:
+		frappe.logger().error(f"❌ [Backend] batch_get_homeroom_class_attendance error: {str(e)}")
+		import traceback
+		frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+		frappe.log_error(f"batch_get_homeroom_class_attendance error: {str(e)}")
+		return error_response(
+			message=f"Failed to fetch homeroom attendance: {str(e)}",
+			code="BATCH_GET_HOMEROOM_ATTENDANCE_ERROR"
+		)
