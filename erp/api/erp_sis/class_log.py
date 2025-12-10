@@ -543,7 +543,8 @@ def batch_get_homeroom_class_logs():
     relevant classes for students belonging to the homeroom class.
     
     ⚡ Performance: Optimized with batch queries using WHERE IN clause,
-    Redis caching (10 min TTL), and dict lookups instead of loops.
+    Redis caching (2 min TTL - short due to multi-source aggregation),
+    and dict lookups instead of loops.
     
     POST body:
     {
@@ -606,7 +607,9 @@ def batch_get_homeroom_class_logs():
                 code="MISSING_PARAMS"
             )
         
-        # ⚡ CACHE: Check Redis cache first (10 min TTL)
+        # ⚡ CACHE: Check Redis cache first (2 min TTL - short because multi-source aggregation)
+        # This endpoint aggregates: class logs + class attendance + event attendance
+        # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
         cache_key = f"homeroom_class_logs:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
@@ -918,10 +921,16 @@ def batch_get_homeroom_class_logs():
             "performance_ms": int(total_time)
         }
         
-        # ⚡ CACHE: Store result in Redis (10 min = 600 sec)
+        # ⚡ CACHE: Store result in Redis (2 min = 120 sec)
+        # Short TTL because this endpoint aggregates data from multiple sources:
+        # - Class logs (invalidated on save_class_log)
+        # - Class attendance (changes frequently)
+        # - Event attendance (changes frequently)
+        # - Student timetable (rarely changes but not tracked)
+        # Short TTL ensures data freshness without complex invalidation logic
         try:
-            frappe.cache().set_value(cache_key, {"data": result, "meta": meta}, expires_in_sec=600)
-            frappe.logger().info(f"✅ Cached homeroom_class_logs for {homeroom_class_id}/{date}")
+            frappe.cache().set_value(cache_key, {"data": result, "meta": meta}, expires_in_sec=120)
+            frappe.logger().info(f"✅ Cached homeroom_class_logs for {homeroom_class_id}/{date} (TTL=2min)")
         except Exception as cache_error:
             frappe.logger().warning(f"Cache write failed: {cache_error}")
         
