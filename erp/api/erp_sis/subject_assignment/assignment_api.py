@@ -153,13 +153,13 @@ def get_teacher_assignment_details(teacher_id=None):
                 GROUP_CONCAT(DISTINCT sa.actual_subject_id ORDER BY s.title_vn SEPARATOR '||') as subject_ids,
                 GROUP_CONCAT(DISTINCT s.title_vn ORDER BY s.title_vn SEPARATOR '||') as subject_titles,
                 
-                -- Date fields aggregated
-                GROUP_CONCAT(DISTINCT IFNULL(sa.application_type, 'full_year') ORDER BY s.title_vn SEPARATOR '||') as application_types,
-                GROUP_CONCAT(DISTINCT sa.start_date ORDER BY s.title_vn SEPARATOR '||') as start_dates,
-                GROUP_CONCAT(DISTINCT sa.end_date ORDER BY s.title_vn SEPARATOR '||') as end_dates,
+                -- Date fields aggregated (NO DISTINCT to keep 1-1 mapping with subject_ids)
+                GROUP_CONCAT(IFNULL(sa.application_type, 'full_year') ORDER BY s.title_vn SEPARATOR '||') as application_types,
+                GROUP_CONCAT(IFNULL(sa.start_date, '') ORDER BY s.title_vn SEPARATOR '||') as start_dates,
+                GROUP_CONCAT(IFNULL(sa.end_date, '') ORDER BY s.title_vn SEPARATOR '||') as end_dates,
                 
-                -- Weekdays field aggregated (JSON stored as text)
-                GROUP_CONCAT(DISTINCT IFNULL(sa.weekdays, '') ORDER BY s.title_vn SEPARATOR '||') as weekdays_list,
+                -- Weekdays field aggregated (NO DISTINCT to keep 1-1 mapping)
+                GROUP_CONCAT(IFNULL(sa.weekdays, '') ORDER BY s.title_vn SEPARATOR '||') as weekdays_list,
                 
                 COUNT(DISTINCT sa.actual_subject_id) as subject_count
                 
@@ -180,10 +180,10 @@ def get_teacher_assignment_details(teacher_id=None):
             row['assignment_ids'] = row['assignment_ids'].split('||') if row['assignment_ids'] else []
             row['subject_ids'] = row['subject_ids'].split('||') if row['subject_ids'] else []
             row['subject_titles'] = row['subject_titles'].split('||') if row['subject_titles'] else []
-            # Parse date fields
+            # Parse date fields (handle empty string as None)
             row['application_types'] = row['application_types'].split('||') if row['application_types'] else []
-            row['start_dates'] = [d if d != 'None' else None for d in (row['start_dates'].split('||') if row['start_dates'] else [])]
-            row['end_dates'] = [d if d != 'None' else None for d in (row['end_dates'].split('||') if row['end_dates'] else [])]
+            row['start_dates'] = [d if d and d != 'None' and d.strip() else None for d in (row['start_dates'].split('||') if row['start_dates'] else [])]
+            row['end_dates'] = [d if d and d != 'None' and d.strip() else None for d in (row['end_dates'].split('||') if row['end_dates'] else [])]
             # Parse weekdays (JSON strings)
             weekdays_raw = row.get('weekdays_list', '').split('||') if row.get('weekdays_list') else []
             row['weekdays_list'] = []
