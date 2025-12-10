@@ -583,6 +583,8 @@ def batch_get_homeroom_class_logs():
     - Returns null if no attendance record found
     """
     try:
+        import time
+        total_start = time.time()
         frappe.logger().info("🏠 [Backend] batch_get_homeroom_class_logs called")
         
         body = _get_body() or {}
@@ -746,40 +748,49 @@ def batch_get_homeroom_class_logs():
             students_by_subject[subject_id][student_log['student_id']] = student_log
         
         # Step 7.5: Batch query attendance data (both class and event attendance)
+        import time
+        perf_start = time.time()
         frappe.logger().info(f"🎯 [Backend] Loading attendance data for {len(student_ids)} students, {len(periods)} periods")
         
-        # Query class attendance - need to query from the correct class for each (student, period) combination
-        # Build list of (student_id, period, class_id) tuples to query
-        attendance_queries = []
-        for period in periods:
-            for student_id in student_ids:
-                # Find which class this student attends for this period
-                key = (student_id, period)
-                actual_class = student_period_class.get(key, homeroom_class_id)
-                attendance_queries.append((student_id, period, actual_class))
-        
-        # Batch query all attendance records
+        # ⚡ OPTIMIZED: Query all attendance for these students/periods/classes, then filter in Python
+        # This is MUCH faster than using tuple IN clause
         class_attendance_records = frappe.db.sql("""
             SELECT student_id, period, status, class_id
             FROM `tabSIS Class Attendance`
             WHERE date = %(date)s
-                AND (student_id, period, class_id) IN %(queries)s
+                AND student_id IN %(student_ids)s
+                AND period IN %(periods)s
+                AND class_id IN %(class_ids)s
         """, {
             "date": date,
-            "queries": attendance_queries
+            "student_ids": student_ids,
+            "periods": periods,
+            "class_ids": list(all_classes_to_query)
         }, as_dict=True)
         
+        frappe.logger().info(f"📊 [Backend] Queried {len(class_attendance_records)} attendance records in {(time.time() - perf_start)*1000:.0f}ms")
+        
         # Build map: (student_id, period) -> attendance status
+        # Filter to only include records where student attended the correct class for that period
         class_attendance_map = {}
         for record in class_attendance_records:
-            key = (record['student_id'], record['period'])
-            class_attendance_map[key] = record['status']
+            student_id = record['student_id']
+            period = record['period']
+            class_id = record['class_id']
+            
+            # Check if this student was supposed to be in this class for this period
+            key = (student_id, period)
+            expected_class = student_period_class.get(key, homeroom_class_id)
+            
+            if class_id == expected_class:
+                class_attendance_map[key] = record['status']
         
-        frappe.logger().info(f"📊 [Backend] Found {len(class_attendance_records)} class attendance records")
+        frappe.logger().info(f"📊 [Backend] Filtered to {len(class_attendance_map)} relevant attendance records")
         
         # Query event attendance (if education_stage_id is available)
         event_attendance_map = {}
         try:
+            event_start = time.time()
             # Get education_stage_id from homeroom class
             homeroom_class = frappe.get_doc("SIS Class", homeroom_class_id)
             education_stage_id = None
@@ -788,22 +799,26 @@ def batch_get_homeroom_class_logs():
                 education_stage_id = grade_doc.education_stage_id if hasattr(grade_doc, 'education_stage_id') else None
             
             if education_stage_id:
-                event_attendance_records = frappe.get_all(
-                    "SIS Event Attendance",
-                    filters={
-                        "date": date,
-                        "period": ["in", periods],
-                        "student_id": ["in", student_ids],
-                        "education_stage_id": education_stage_id
-                    },
-                    fields=["student_id", "period", "status"]
-                )
+                # ⚡ Use SQL for better performance
+                event_attendance_records = frappe.db.sql("""
+                    SELECT student_id, period, status
+                    FROM `tabSIS Event Attendance`
+                    WHERE date = %(date)s
+                        AND student_id IN %(student_ids)s
+                        AND period IN %(periods)s
+                        AND education_stage_id = %(education_stage_id)s
+                """, {
+                    "date": date,
+                    "student_ids": student_ids,
+                    "periods": periods,
+                    "education_stage_id": education_stage_id
+                }, as_dict=True)
                 
                 for record in event_attendance_records:
                     key = (record['student_id'], record['period'])
                     event_attendance_map[key] = record['status']
                 
-                frappe.logger().info(f"🎪 [Backend] Found {len(event_attendance_records)} event attendance records")
+                frappe.logger().info(f"🎪 [Backend] Found {len(event_attendance_records)} event attendance records in {(time.time() - event_start)*1000:.0f}ms")
         except Exception as e:
             frappe.logger().warning(f"⚠️ [Backend] Could not load event attendance: {str(e)}")
         
@@ -896,7 +911,9 @@ def batch_get_homeroom_class_logs():
                 "is_homeroom_class": primary_class == homeroom_class_id
             }
         
+        total_time = (time.time() - total_start) * 1000
         frappe.logger().info(f"✅ [Backend] Returning aggregated logs for {len(result)} periods")
+        frappe.logger().info(f"⚡ [Backend] TOTAL API TIME: {total_time:.0f}ms")
         
         return success_response(
             data=result,
@@ -904,7 +921,8 @@ def batch_get_homeroom_class_logs():
             meta={
                 "homeroom_class_id": homeroom_class_id,
                 "student_count": len(student_ids),
-                "classes_queried": list(all_classes_to_query)
+                "classes_queried": list(all_classes_to_query),
+                "performance_ms": int(total_time)
             }
         )
         
