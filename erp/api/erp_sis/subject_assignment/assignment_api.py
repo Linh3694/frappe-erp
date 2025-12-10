@@ -158,6 +158,9 @@ def get_teacher_assignment_details(teacher_id=None):
                 GROUP_CONCAT(DISTINCT sa.start_date ORDER BY s.title_vn SEPARATOR '||') as start_dates,
                 GROUP_CONCAT(DISTINCT sa.end_date ORDER BY s.title_vn SEPARATOR '||') as end_dates,
                 
+                -- Weekdays field aggregated (JSON stored as text)
+                GROUP_CONCAT(DISTINCT IFNULL(sa.weekdays, '') ORDER BY s.title_vn SEPARATOR '||') as weekdays_list,
+                
                 COUNT(DISTINCT sa.actual_subject_id) as subject_count
                 
             FROM `tabSIS Subject Assignment` sa
@@ -181,6 +184,18 @@ def get_teacher_assignment_details(teacher_id=None):
             row['application_types'] = row['application_types'].split('||') if row['application_types'] else []
             row['start_dates'] = [d if d != 'None' else None for d in (row['start_dates'].split('||') if row['start_dates'] else [])]
             row['end_dates'] = [d if d != 'None' else None for d in (row['end_dates'].split('||') if row['end_dates'] else [])]
+            # Parse weekdays (JSON strings)
+            weekdays_raw = row.get('weekdays_list', '').split('||') if row.get('weekdays_list') else []
+            row['weekdays_list'] = []
+            for wd_str in weekdays_raw:
+                if wd_str and wd_str != 'None' and wd_str.strip():
+                    try:
+                        wd_parsed = json.loads(wd_str) if wd_str.startswith('[') else []
+                        row['weekdays_list'].append(wd_parsed)
+                    except (json.JSONDecodeError, TypeError):
+                        row['weekdays_list'].append([])
+                else:
+                    row['weekdays_list'].append([])  # Empty = all days
         
         # Get teacher info
         teacher_info_result = frappe.db.sql("""
@@ -368,11 +383,12 @@ def create_subject_assignment():
         assignments = data.get("assignments") or []
         classes = data.get("classes") or []
         
-        # IMPORTANT: Extract application_type, start_date, end_date from JSON FIRST
+        # IMPORTANT: Extract application_type, start_date, end_date, weekdays from JSON FIRST
         # These are top-level parameters that apply to all assignments if not specified per-assignment
         global_application_type = data.get("application_type", "full_year")
         global_start_date = data.get("start_date")
         global_end_date = data.get("end_date")
+        global_weekdays = data.get("weekdays")  # JSON array like ["mon", "wed", "fri"]
         
         # Extract replace_teacher_map for conflict resolution
         # Format: {row_id: "teacher_1" or "teacher_2"}
@@ -407,6 +423,7 @@ def create_subject_assignment():
                 application_type = a.get("application_type", "full_year")
                 start_date = a.get("start_date")
                 end_date = a.get("end_date")
+                weekdays = a.get("weekdays")  # Per-assignment weekdays
                 
                 if cid and sids:
                     normalized_assignments.append({
@@ -414,7 +431,8 @@ def create_subject_assignment():
                         "actual_subject_ids": sids,
                         "application_type": application_type,
                         "start_date": start_date,
-                        "end_date": end_date
+                        "end_date": end_date,
+                        "weekdays": weekdays
                     })
 
         # Case 2: top-level classes + actual_subject_ids
@@ -425,7 +443,8 @@ def create_subject_assignment():
                     "actual_subject_ids": actual_subject_ids,
                     "application_type": global_application_type,
                     "start_date": global_start_date,
-                    "end_date": global_end_date
+                    "end_date": global_end_date,
+                    "weekdays": global_weekdays
                 })
 
         # Case 3: legacy single/bulk for one class
@@ -436,7 +455,8 @@ def create_subject_assignment():
                 "actual_subject_ids": effective_actual_subject_ids,
                 "application_type": global_application_type,
                 "start_date": global_start_date,
-                "end_date": global_end_date
+                "end_date": global_end_date,
+                "weekdays": global_weekdays
             })
 
         # Validate classes belong to campus
@@ -472,6 +492,7 @@ def create_subject_assignment():
             application_type = item.get("application_type", "full_year")
             start_date = item.get("start_date")
             end_date = item.get("end_date")
+            weekdays = item.get("weekdays")  # JSON array like ["mon", "wed", "fri"]
             
             # Validate and create for each actual subject
             for sid in sids:
@@ -518,8 +539,8 @@ def create_subject_assignment():
                         skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
                         continue
 
-                # Create assignment with date fields
-                assignment_doc = frappe.get_doc({
+                # Create assignment with date fields and weekdays
+                assignment_data = {
                     "doctype": "SIS Subject Assignment",
                     "teacher_id": teacher_id,
                     "actual_subject_id": sid,
@@ -528,7 +549,16 @@ def create_subject_assignment():
                     "application_type": application_type,
                     "start_date": start_date,
                     "end_date": end_date
-                })
+                }
+                # Add weekdays if provided (JSON format)
+                if weekdays:
+                    # Ensure it's a valid JSON string
+                    if isinstance(weekdays, list):
+                        assignment_data["weekdays"] = json.dumps(weekdays)
+                    elif isinstance(weekdays, str):
+                        assignment_data["weekdays"] = weekdays
+                
+                assignment_doc = frappe.get_doc(assignment_data)
                 
                 assignment_doc.insert()
                 

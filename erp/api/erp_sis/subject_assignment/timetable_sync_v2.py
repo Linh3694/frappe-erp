@@ -116,10 +116,10 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	override_count = len([r for r in all_rows if r.date is not None])
 	debug_info.append(f"📋 Found {len(all_rows)} rows ({pattern_count} pattern, {override_count} override)")
 	
-	# STEP 2: Get ALL assignments for this class + subject
+	# STEP 2: Get ALL assignments for this class + subject (including weekdays)
 	all_assignments = frappe.get_all(
 		"SIS Subject Assignment",
-		fields=["name", "teacher_id"],
+		fields=["name", "teacher_id", "weekdays"],
 		filters={
 			"class_id": class_id,
 			"actual_subject_id": actual_subject_id,
@@ -137,6 +137,20 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			"debug_info": debug_info
 		}
 	
+	# Parse weekdays for each assignment
+	import json as json_module
+	for a in all_assignments:
+		if a.weekdays:
+			try:
+				if isinstance(a.weekdays, str):
+					a.weekdays = json_module.loads(a.weekdays)
+				elif not isinstance(a.weekdays, list):
+					a.weekdays = []
+			except (json_module.JSONDecodeError, TypeError):
+				a.weekdays = []
+		else:
+			a.weekdays = []  # Empty = all days
+	
 	teacher_ids = [a.teacher_id for a in all_assignments if a.teacher_id]
 	debug_info.append(f"👥 Found {len(teacher_ids)} teachers from {len(all_assignments)} assignments")
 	
@@ -148,15 +162,27 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 			"debug_info": debug_info
 		}
 	
-	# STEP 3: Update ALL rows (pattern + override) with ALL teachers
+	# STEP 3: Update ALL rows (pattern + override) with teachers filtered by weekdays
 	updated_count = 0
 	
 	try:
 		for row in all_rows:
-			# ⚡ FIX: Use direct SQL to update teachers (more reliable than ORM)
-			update_row_teachers_sql(row.name, teacher_ids)
+			# ⚡ WEEKDAYS FILTER: Only include teachers whose weekdays match row's day_of_week
+			row_day = row.day_of_week  # e.g., "mon", "tue", etc.
+			
+			teachers_for_this_row = []
+			for a in all_assignments:
+				# If weekdays is empty = teach all days (backward compatible)
+				if not a.weekdays or row_day in a.weekdays:
+					teachers_for_this_row.append(a.teacher_id)
+			
+			# Remove duplicates while preserving order
+			teachers_for_this_row = list(dict.fromkeys(teachers_for_this_row))
+			
+			# Update row with filtered teachers
+			update_row_teachers_sql(row.name, teachers_for_this_row)
 			updated_count += 1
-			debug_info.append(f"  ✓ Updated row {row.name}: {len(teacher_ids)} teachers")
+			debug_info.append(f"  ✓ Updated row {row.name} ({row_day}): {len(teachers_for_this_row)} teachers")
 		
 		# ⚡ CRITICAL: Sync materialized view INSIDE try block
 		if updated_count > 0:

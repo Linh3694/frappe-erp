@@ -283,8 +283,11 @@ class TimetableImportExecutor:
 		Cache teacher assignments for each (class, subject) pair.
 		
 		Get teachers from Subject Assignment ONLY (no auto-fallback).
+		Includes weekdays for day-specific filtering.
 		"""
-		# Get all assignments for this campus
+		import json as json_module
+		
+		# Get all assignments for this campus (including weekdays)
 		assignments = frappe.db.sql("""
 			SELECT 
 				class_id,
@@ -292,7 +295,8 @@ class TimetableImportExecutor:
 				teacher_id,
 				application_type,
 				start_date,
-				end_date
+				end_date,
+				weekdays
 			FROM `tabSIS Subject Assignment`
 			WHERE campus_id = %s
 			ORDER BY class_id, actual_subject_id, application_type
@@ -304,11 +308,23 @@ class TimetableImportExecutor:
 			if key not in self.cache["assignments"]:
 				self.cache["assignments"][key] = []
 			
+			# Parse weekdays JSON
+			weekdays = []
+			if assignment.weekdays:
+				try:
+					if isinstance(assignment.weekdays, str):
+						weekdays = json_module.loads(assignment.weekdays)
+					elif isinstance(assignment.weekdays, list):
+						weekdays = assignment.weekdays
+				except (json_module.JSONDecodeError, TypeError):
+					weekdays = []
+			
 			self.cache["assignments"][key].append({
 				"teacher_id": assignment.teacher_id,
 				"application_type": assignment.application_type,
 				"start_date": assignment.start_date,
-				"end_date": assignment.end_date
+				"end_date": assignment.end_date,
+				"weekdays": weekdays  # Empty list = all days
 			})
 		
 		self.logs.append(f"👨‍🏫 Cached {len(assignments)} teacher assignments")
@@ -679,9 +695,9 @@ class TimetableImportExecutor:
 				)
 				continue
 			
-			# Get teacher from Subject Assignment
+			# Get teacher from Subject Assignment (filtered by day_of_week)
 			actual_subject_id = frappe.db.get_value("SIS Subject", subject_id, "actual_subject_id")
-			teachers = self._get_teachers_for_class_subject(class_id, actual_subject_id)
+			teachers = self._get_teachers_for_class_subject(class_id, actual_subject_id, day_of_week)
 			
 			# Get period details
 			period_info = frappe.db.get_value(
@@ -1194,32 +1210,40 @@ class TimetableImportExecutor:
 	def _get_teachers_for_class_subject(
 		self,
 		class_id: str,
-		actual_subject_id: str
+		actual_subject_id: str,
+		day_of_week: str = None
 	) -> List[str]:
 		"""
-		Get teachers from Subject Assignment.
+		Get teachers from Subject Assignment, filtered by day_of_week if provided.
+		
+		Args:
+			class_id: Class ID
+			actual_subject_id: Actual Subject ID
+			day_of_week: Optional day of week filter (e.g., "mon", "tue")
+			             If None, returns all teachers (backward compatible)
 		
 		Returns:
-			List of teacher IDs (max 2)
+			List of teacher IDs
 		"""
 		key = (class_id, actual_subject_id)
 		assignments = self.cache["assignments"].get(key, [])
 		
-		# Collect all teachers (prioritize full_year)
+		# Collect teachers filtered by weekdays
 		teachers = []
 		for assignment in assignments:
-			if assignment["application_type"] == "full_year":
-				teachers.insert(0, assignment["teacher_id"])  # Full year first
-			else:
-				teachers.append(assignment["teacher_id"])
+			# Check weekdays filter
+			weekdays = assignment.get("weekdays", [])
+			
+			# If weekdays is empty = teach all days (backward compatible)
+			# If day_of_week is None = no filter, include all
+			if day_of_week is None or not weekdays or day_of_week in weekdays:
+				if assignment["application_type"] == "full_year":
+					teachers.insert(0, assignment["teacher_id"])  # Full year first
+				else:
+					teachers.append(assignment["teacher_id"])
 		
-		# Return unique, max 2
-		unique_teachers = []
-		for t in teachers:
-			if t not in unique_teachers:
-				unique_teachers.append(t)
-			if len(unique_teachers) >= 2:
-				break
+		# Return unique teachers (no limit to support multiple teachers)
+		unique_teachers = list(dict.fromkeys(teachers))
 		
 		return unique_teachers
 	

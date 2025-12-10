@@ -486,8 +486,10 @@ def apply_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 
 
 def create_assignment(teacher_id: str, assignment: Dict) -> Dict:
-	"""Create single assignment"""
-	doc = frappe.get_doc({
+	"""Create single assignment with weekdays support"""
+	import json as json_module
+	
+	doc_data = {
 		"doctype": "SIS Subject Assignment",
 		"teacher_id": teacher_id,
 		"class_id": assignment["class_id"],
@@ -496,15 +498,26 @@ def create_assignment(teacher_id: str, assignment: Dict) -> Dict:
 		"application_type": assignment.get("application_type", "full_year"),
 		"start_date": assignment.get("start_date"),
 		"end_date": assignment.get("end_date")
-	})
+	}
 	
+	# Add weekdays if provided
+	weekdays = assignment.get("weekdays")
+	if weekdays:
+		if isinstance(weekdays, list):
+			doc_data["weekdays"] = json_module.dumps(weekdays)
+		elif isinstance(weekdays, str):
+			doc_data["weekdays"] = weekdays
+	
+	doc = frappe.get_doc(doc_data)
 	doc.insert(ignore_permissions=True)
 	
 	return {"assignment_id": doc.name}
 
 
 def update_assignment(assignment: Dict) -> Dict:
-	"""Update single assignment"""
+	"""Update single assignment with weekdays support"""
+	import json as json_module
+	
 	assignment_id = assignment["assignment_id"]
 	
 	doc = frappe.get_doc("SIS Subject Assignment", assignment_id)
@@ -520,6 +533,15 @@ def update_assignment(assignment: Dict) -> Dict:
 		doc.start_date = assignment["start_date"]
 	if "end_date" in assignment:
 		doc.end_date = assignment["end_date"]
+	# Update weekdays
+	if "weekdays" in assignment:
+		weekdays = assignment["weekdays"]
+		if isinstance(weekdays, list):
+			doc.weekdays = json_module.dumps(weekdays)
+		elif isinstance(weekdays, str):
+			doc.weekdays = weekdays
+		else:
+			doc.weekdays = None
 	
 	doc.save(ignore_permissions=True)
 	
