@@ -535,7 +535,8 @@ def batch_get_homeroom_class_logs():
     relevant classes for students belonging to the homeroom class.
     
     ⚡ Performance: Uses SIS Student Timetable to determine which class each student 
-    attends for each period, then fetches class logs from the appropriate classes.
+    attends for each period, then fetches class logs AND attendance data from the 
+    appropriate classes.
     
     POST body:
     {
@@ -550,7 +551,14 @@ def batch_get_homeroom_class_logs():
         "data": {
             "Tiết 1": { 
                 "subject": {...}, 
-                "students": [...],
+                "students": [
+                    {
+                        "student_id": "...",
+                        "homework": "...",
+                        "behavior": "...",
+                        "attendance": "present"  // ✨ NEW: attendance status
+                    }
+                ],
                 "source_class_id": "CLASS-001",  // Which class this log came from
                 "is_homeroom_class": true
             },
@@ -568,6 +576,11 @@ def batch_get_homeroom_class_logs():
             "classes_queried": ["CLASS-001", "MIXED-MATH-001", ...]
         }
     }
+    
+    ✨ Attendance Logic:
+    - Queries attendance from the ACTUAL class each student attends for each period
+    - Priority: Event Attendance > Class Attendance
+    - Returns null if no attendance record found
     """
     try:
         frappe.logger().info("🏠 [Backend] batch_get_homeroom_class_logs called")
@@ -732,6 +745,68 @@ def batch_get_homeroom_class_logs():
             # Use student_id as key for easy lookup
             students_by_subject[subject_id][student_log['student_id']] = student_log
         
+        # Step 7.5: Batch query attendance data (both class and event attendance)
+        frappe.logger().info(f"🎯 [Backend] Loading attendance data for {len(student_ids)} students, {len(periods)} periods")
+        
+        # Query class attendance - need to query from the correct class for each (student, period) combination
+        # Build list of (student_id, period, class_id) tuples to query
+        attendance_queries = []
+        for period in periods:
+            for student_id in student_ids:
+                # Find which class this student attends for this period
+                key = (student_id, period)
+                actual_class = student_period_class.get(key, homeroom_class_id)
+                attendance_queries.append((student_id, period, actual_class))
+        
+        # Batch query all attendance records
+        class_attendance_records = frappe.db.sql("""
+            SELECT student_id, period, status, class_id
+            FROM `tabSIS Class Attendance`
+            WHERE date = %(date)s
+                AND (student_id, period, class_id) IN %(queries)s
+        """, {
+            "date": date,
+            "queries": attendance_queries
+        }, as_dict=True)
+        
+        # Build map: (student_id, period) -> attendance status
+        class_attendance_map = {}
+        for record in class_attendance_records:
+            key = (record['student_id'], record['period'])
+            class_attendance_map[key] = record['status']
+        
+        frappe.logger().info(f"📊 [Backend] Found {len(class_attendance_records)} class attendance records")
+        
+        # Query event attendance (if education_stage_id is available)
+        event_attendance_map = {}
+        try:
+            # Get education_stage_id from homeroom class
+            homeroom_class = frappe.get_doc("SIS Class", homeroom_class_id)
+            education_stage_id = None
+            if homeroom_class.education_grade:
+                grade_doc = frappe.get_doc("SIS Education Grade", homeroom_class.education_grade)
+                education_stage_id = grade_doc.education_stage_id if hasattr(grade_doc, 'education_stage_id') else None
+            
+            if education_stage_id:
+                event_attendance_records = frappe.get_all(
+                    "SIS Event Attendance",
+                    filters={
+                        "date": date,
+                        "period": ["in", periods],
+                        "student_id": ["in", student_ids],
+                        "education_stage_id": education_stage_id
+                    },
+                    fields=["student_id", "period", "status"]
+                )
+                
+                for record in event_attendance_records:
+                    key = (record['student_id'], record['period'])
+                    event_attendance_map[key] = record['status']
+                
+                frappe.logger().info(f"🎪 [Backend] Found {len(event_attendance_records)} event attendance records")
+        except Exception as e:
+            frappe.logger().warning(f"⚠️ [Backend] Could not load event attendance: {str(e)}")
+        
         # Step 8: Build result for each period
         # For each period, aggregate logs from all relevant classes for homeroom students
         result = {}
@@ -759,26 +834,44 @@ def batch_get_homeroom_class_logs():
                     
                     # Only include logs for students that belong to homeroom and attend this class for this period
                     for student_id in class_student_ids:
+                        # Get attendance status for this student and period
+                        attendance_key = (student_id, period)
+                        class_attendance_status = class_attendance_map.get(attendance_key)
+                        event_attendance_status = event_attendance_map.get(attendance_key)
+                        # Priority: event attendance > class attendance
+                        final_attendance = event_attendance_status or class_attendance_status
+                        
                         if student_id in subject_student_logs:
-                            period_student_logs.append(subject_student_logs[student_id])
+                            student_log = subject_student_logs[student_id].copy()
+                            student_log['attendance'] = final_attendance
+                            period_student_logs.append(student_log)
                         else:
-                            # Student exists but no log entry yet - add placeholder
+                            # Student exists but no log entry yet - add placeholder with attendance
                             period_student_logs.append({
                                 "student_id": student_id,
                                 "class_student_id": next(
                                     (s['class_student_id'] for s in homeroom_students if s['student_id'] == student_id),
                                     None
-                                )
+                                ),
+                                "attendance": final_attendance
                             })
                 else:
-                    # No subject log for this class/period - add placeholders for students
+                    # No subject log for this class/period - add placeholders for students with attendance
                     for student_id in class_student_ids:
+                        # Get attendance status for this student and period
+                        attendance_key = (student_id, period)
+                        class_attendance_status = class_attendance_map.get(attendance_key)
+                        event_attendance_status = event_attendance_map.get(attendance_key)
+                        # Priority: event attendance > class attendance
+                        final_attendance = event_attendance_status or class_attendance_status
+                        
                         period_student_logs.append({
                             "student_id": student_id,
                             "class_student_id": next(
                                 (s['class_student_id'] for s in homeroom_students if s['student_id'] == student_id),
                                 None
-                            )
+                            ),
+                            "attendance": final_attendance
                         })
             
             # Determine primary source class (prefer the one with most students, or homeroom)
