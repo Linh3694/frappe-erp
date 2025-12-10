@@ -524,3 +524,304 @@ def batch_get_class_logs():
             code="BATCH_GET_CLASS_LOGS_ERROR"
         )
 
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def batch_get_homeroom_class_logs():
+    """
+    Get aggregated class logs for homeroom class view.
+    
+    This endpoint handles the case where students may study in different classes 
+    (regular vs mixed) for different periods. It aggregates class logs from all 
+    relevant classes for students belonging to the homeroom class.
+    
+    ⚡ Performance: Uses SIS Student Timetable to determine which class each student 
+    attends for each period, then fetches class logs from the appropriate classes.
+    
+    POST body:
+    {
+        "homeroom_class_id": "CLASS-001",  // The homeroom/regular class ID
+        "date": "2025-10-10",
+        "periods": ["Tiết 1", "Tiết 2", "Tiết 3", ...]
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "data": {
+            "Tiết 1": { 
+                "subject": {...}, 
+                "students": [...],
+                "source_class_id": "CLASS-001",  // Which class this log came from
+                "is_homeroom_class": true
+            },
+            "Tiết 2": { 
+                "subject": {...}, 
+                "students": [...],
+                "source_class_id": "MIXED-MATH-001",  // From mixed class
+                "is_homeroom_class": false
+            },
+            ...
+        },
+        "meta": {
+            "homeroom_class_id": "CLASS-001",
+            "student_count": 30,
+            "classes_queried": ["CLASS-001", "MIXED-MATH-001", ...]
+        }
+    }
+    """
+    try:
+        frappe.logger().info("🏠 [Backend] batch_get_homeroom_class_logs called")
+        
+        body = _get_body() or {}
+        homeroom_class_id = body.get('homeroom_class_id')
+        date = body.get('date')
+        periods = body.get('periods') or []
+        
+        if not homeroom_class_id or not date or not periods:
+            return error_response(
+                message="Missing required parameters: homeroom_class_id, date, periods",
+                code="MISSING_PARAMS"
+            )
+        
+        frappe.logger().info(f"📅 [Backend] Getting homeroom class logs for {homeroom_class_id}, date={date}, {len(periods)} periods")
+        
+        # Step 1: Get all students in the homeroom class
+        homeroom_students = frappe.get_all(
+            "SIS Class Student",
+            filters={
+                "class_id": homeroom_class_id,
+                "class_type": "regular"
+            },
+            fields=["name as class_student_id", "student_id"]
+        )
+        
+        if not homeroom_students:
+            # Fallback: try without class_type filter (older data may not have this)
+            homeroom_students = frappe.get_all(
+                "SIS Class Student",
+                filters={"class_id": homeroom_class_id},
+                fields=["name as class_student_id", "student_id"]
+            )
+        
+        student_ids = [s['student_id'] for s in homeroom_students if s.get('student_id')]
+        frappe.logger().info(f"👨‍🎓 [Backend] Found {len(student_ids)} students in homeroom class")
+        
+        if not student_ids:
+            # No students, return empty structure
+            result = {period: {"subject": None, "students": [], "source_class_id": homeroom_class_id, "is_homeroom_class": True} for period in periods}
+            return success_response(data=result, message="No students found in homeroom class")
+        
+        # Step 2: Get day_of_week from date
+        from datetime import datetime
+        date_obj = datetime.strptime(date, "%Y-%m-%d")
+        day_mapping = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
+        day_of_week = day_mapping[date_obj.weekday()]
+        
+        # Step 3: Query SIS Student Timetable to find which class each student attends for each period
+        # This tells us if a student is in a mixed class for a specific period
+        student_timetable_entries = frappe.db.sql("""
+            SELECT 
+                st.student_id,
+                st.class_id,
+                st.timetable_column_id,
+                tc.period_name
+            FROM `tabSIS Student Timetable` st
+            INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+            WHERE st.student_id IN %(student_ids)s
+                AND st.date = %(date)s
+                AND tc.period_name IN %(periods)s
+        """, {
+            "student_ids": student_ids,
+            "date": date,
+            "periods": periods
+        }, as_dict=True)
+        
+        frappe.logger().info(f"📋 [Backend] Found {len(student_timetable_entries)} student timetable entries")
+        
+        # Build mapping: (student_id, period) -> class_id
+        # If no entry found, student stays in homeroom class
+        student_period_class = {}
+        for entry in student_timetable_entries:
+            key = (entry['student_id'], entry['period_name'])
+            student_period_class[key] = entry['class_id']
+        
+        # Step 4: Determine which classes we need to query for each period
+        # and which students are in each class for each period
+        period_class_students = {}  # period -> {class_id -> [student_ids]}
+        all_classes_to_query = set()
+        
+        for period in periods:
+            period_class_students[period] = {}
+            for student_id in student_ids:
+                key = (student_id, period)
+                # If student has entry in SIS Student Timetable, use that class
+                # Otherwise, default to homeroom class
+                actual_class = student_period_class.get(key, homeroom_class_id)
+                all_classes_to_query.add(actual_class)
+                
+                if actual_class not in period_class_students[period]:
+                    period_class_students[period][actual_class] = []
+                period_class_students[period][actual_class].append(student_id)
+        
+        frappe.logger().info(f"🏫 [Backend] Will query {len(all_classes_to_query)} classes: {list(all_classes_to_query)}")
+        
+        # Step 5: Get timetable instances for all relevant classes
+        class_instances = {}
+        for class_id in all_classes_to_query:
+            inst_row = frappe.get_all(
+                "SIS Timetable Instance",
+                filters={
+                    "class_id": class_id,
+                    "start_date": ["<=", date],
+                    "end_date": [">=", date],
+                },
+                fields=["name"],
+                limit=1
+            )
+            if inst_row:
+                class_instances[class_id] = inst_row[0]['name']
+        
+        # Step 6: Batch query all class log subjects for all classes and periods
+        all_subject_logs = []
+        instance_ids = list(class_instances.values())
+        
+        if instance_ids:
+            all_subject_logs = frappe.get_all(
+                "SIS Class Log Subject",
+                filters={
+                    "timetable_instance_id": ["in", instance_ids],
+                    "log_date": date,
+                    "period": ["in", periods]
+                },
+                fields=["name", "period", "class_id", "general_comment", "timetable_instance_id"]
+            )
+        
+        # Build map: (class_id, period) -> subject_log
+        subject_by_class_period = {}
+        for log in all_subject_logs:
+            key = (log['class_id'], log['period'])
+            subject_by_class_period[key] = log
+        
+        # Step 7: Batch query all student logs
+        subject_ids = [log['name'] for log in all_subject_logs]
+        all_student_logs = []
+        
+        if subject_ids:
+            all_student_logs = frappe.get_all(
+                "SIS Class Log Student",
+                filters={"subject_id": ["in", subject_ids]},
+                fields=[
+                    "subject_id",
+                    "student_id",
+                    "class_student_id",
+                    "homework",
+                    "behavior",
+                    "participation",
+                    "issues",
+                    "is_top_performance",
+                    "specific_comment"
+                ]
+            )
+        
+        # Build map: subject_id -> list of student logs
+        students_by_subject = {}
+        for student_log in all_student_logs:
+            subject_id = student_log['subject_id']
+            if subject_id not in students_by_subject:
+                students_by_subject[subject_id] = {}
+            # Use student_id as key for easy lookup
+            students_by_subject[subject_id][student_log['student_id']] = student_log
+        
+        # Step 8: Build result for each period
+        # For each period, aggregate logs from all relevant classes for homeroom students
+        result = {}
+        
+        for period in periods:
+            classes_for_period = period_class_students.get(period, {})
+            
+            # Collect all student logs for this period from their respective classes
+            period_student_logs = []
+            source_classes = set()
+            primary_subject = None
+            
+            for class_id, class_student_ids in classes_for_period.items():
+                source_classes.add(class_id)
+                subject_key = (class_id, period)
+                subject_log = subject_by_class_period.get(subject_key)
+                
+                if subject_log:
+                    # Use first found subject as primary (prefer homeroom class)
+                    if primary_subject is None or class_id == homeroom_class_id:
+                        primary_subject = subject_log
+                    
+                    # Get student logs for this class
+                    subject_student_logs = students_by_subject.get(subject_log['name'], {})
+                    
+                    # Only include logs for students that belong to homeroom and attend this class for this period
+                    for student_id in class_student_ids:
+                        if student_id in subject_student_logs:
+                            period_student_logs.append(subject_student_logs[student_id])
+                        else:
+                            # Student exists but no log entry yet - add placeholder
+                            period_student_logs.append({
+                                "student_id": student_id,
+                                "class_student_id": next(
+                                    (s['class_student_id'] for s in homeroom_students if s['student_id'] == student_id),
+                                    None
+                                )
+                            })
+                else:
+                    # No subject log for this class/period - add placeholders for students
+                    for student_id in class_student_ids:
+                        period_student_logs.append({
+                            "student_id": student_id,
+                            "class_student_id": next(
+                                (s['class_student_id'] for s in homeroom_students if s['student_id'] == student_id),
+                                None
+                            )
+                        })
+            
+            # Determine primary source class (prefer the one with most students, or homeroom)
+            primary_class = homeroom_class_id
+            if classes_for_period:
+                # If homeroom class is one of them, use it; otherwise use the first one
+                if homeroom_class_id in classes_for_period:
+                    primary_class = homeroom_class_id
+                else:
+                    primary_class = list(classes_for_period.keys())[0]
+            
+            result[period] = {
+                "subject": {
+                    "name": primary_subject['name'] if primary_subject else None,
+                    "timetable_instance_id": primary_subject['timetable_instance_id'] if primary_subject else class_instances.get(homeroom_class_id),
+                    "class_id": primary_class,
+                    "general_comment": primary_subject.get('general_comment') if primary_subject else None
+                } if primary_subject else None,
+                "students": period_student_logs,
+                "source_class_id": primary_class,
+                "source_classes": list(source_classes),
+                "is_homeroom_class": primary_class == homeroom_class_id
+            }
+        
+        frappe.logger().info(f"✅ [Backend] Returning aggregated logs for {len(result)} periods")
+        
+        return success_response(
+            data=result,
+            message=f"Fetched homeroom class logs for {len(periods)} periods",
+            meta={
+                "homeroom_class_id": homeroom_class_id,
+                "student_count": len(student_ids),
+                "classes_queried": list(all_classes_to_query)
+            }
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Backend] batch_get_homeroom_class_logs error: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+        frappe.log_error(f"batch_get_homeroom_class_logs error: {str(e)}", "Batch Get Homeroom Class Logs Error")
+        return error_response(
+            message=f"Failed to fetch homeroom class logs: {str(e)}",
+            code="BATCH_GET_HOMEROOM_CLASS_LOGS_ERROR"
+        )
+
