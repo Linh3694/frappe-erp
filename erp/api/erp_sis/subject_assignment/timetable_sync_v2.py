@@ -320,10 +320,27 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 	
 	debug_info.append(f"📋 Found {len(pattern_rows)} pattern rows")
 	
+	# ⚡ NEW: Parse weekdays from assignment
+	import json as json_module
+	assignment_weekdays = []
+	if assignment.weekdays:
+		try:
+			if isinstance(assignment.weekdays, str):
+				assignment_weekdays = json_module.loads(assignment.weekdays)
+			elif isinstance(assignment.weekdays, list):
+				assignment_weekdays = assignment.weekdays
+		except (json_module.JSONDecodeError, TypeError):
+			assignment_weekdays = []
+	
+	debug_info.append(f"📅 Weekdays filter: {assignment_weekdays if assignment_weekdays else 'ALL DAYS'}")
+	
 	# Group by day_of_week for efficiency
 	rows_by_day = {}
 	for row in pattern_rows:
 		day = row.day_of_week
+		# ⚡ NEW: Skip days not in weekdays (if weekdays specified)
+		if assignment_weekdays and day not in assignment_weekdays:
+			continue
 		if day not in rows_by_day:
 			rows_by_day[day] = []
 		rows_by_day[day].append(row)
