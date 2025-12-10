@@ -43,13 +43,13 @@
    "fieldname": "exam",
    "fieldtype": "Data",
    "label": "Exam Name",
-   "description": "For custom_with_description type"
+   "description": "For custom type awards"
   },
   {
    "fieldname": "score",
    "fieldtype": "Data",
    "label": "Score",
-   "description": "For custom_with_description type"
+   "description": "For custom type awards"
   },
   {
    "fieldname": "notes_section",
@@ -75,13 +75,13 @@
    "fieldname": "activities_vn",
    "fieldtype": "Small Text",
    "label": "Activities (Vietnamese)",
-   "description": "JSON array of activities"
+   "description": "JSON array of activities - For custom type awards"
   },
   {
    "fieldname": "activities_en",
    "fieldtype": "Small Text",
    "label": "Activities (English)",
-   "description": "JSON array of activities"
+   "description": "JSON array of activities - For custom type awards"
   }
  ],
  "index_web_pages_for_search": 1,
