@@ -40,6 +40,13 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None, stu
     logs = []
 
     try:
+        # Get parameters from request (fallback to function args)
+        student_id = _get_request_arg("student_id", student_id)
+        school_year_id = _get_request_arg("school_year_id", school_year_id)
+        start_date = _get_request_arg("start_date", start_date)
+        end_date = _get_request_arg("end_date", end_date)
+        
+        logs.append(f"Received parameters - student_id: {student_id}, school_year_id: {school_year_id}, start_date: {start_date}, end_date: {end_date}")
         # Get current user's guardian and students to determine school year
         user_email = frappe.session.user
         if "@parent.wellspring.edu.vn" not in user_email:
