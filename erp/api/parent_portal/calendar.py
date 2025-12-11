@@ -89,39 +89,51 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None, stu
 
         # Get student's current class, school year, and education stage
         education_stage_id = None
-        if not school_year_id:
-            class_students = frappe.get_all(
-                "SIS Class Student",
-                filters={"student_id": student_id},
-                fields=["class_id", "school_year_id"],
-                ignore_permissions=True,
-                order_by="creation desc",  # Get the most recent one
-                limit=1
-            )
+        
+        # Always get student's class info to determine education_stage
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            filters={"student_id": student_id},
+            fields=["class_id", "school_year_id"],
+            ignore_permissions=True,
+            order_by="creation desc",  # Get the most recent one
+            limit=1
+        )
 
-            if class_students:
+        if class_students:
+            # Set school_year_id if not provided
+            if not school_year_id:
                 school_year_id = class_students[0].school_year_id
-                class_id = class_students[0].class_id
-                
-                # Get class education_grade to determine education_stage
-                class_info = frappe.get_value(
-                    "SIS Class",
-                    class_id,
-                    ["education_grade"],
+            
+            class_id = class_students[0].class_id
+            logs.append(f"Student class_id: {class_id}")
+            
+            # Get class education_grade to determine education_stage
+            class_info = frappe.get_value(
+                "SIS Class",
+                class_id,
+                ["education_grade"],
+                as_dict=True
+            )
+            
+            if class_info and class_info.education_grade:
+                logs.append(f"Education grade: {class_info.education_grade}")
+                # Get education_stage from education_grade
+                grade_info = frappe.get_value(
+                    "SIS Education Grade",
+                    class_info.education_grade,
+                    ["education_stage_id"],
                     as_dict=True
                 )
-                
-                if class_info and class_info.education_grade:
-                    # Get education_stage from education_grade
-                    grade_info = frappe.get_value(
-                        "SIS Education Grade",
-                        class_info.education_grade,
-                        ["education_stage_id"],
-                        as_dict=True
-                    )
-                    if grade_info:
-                        education_stage_id = grade_info.education_stage_id
-                        logs.append(f"Student education stage: {education_stage_id}")
+                if grade_info:
+                    education_stage_id = grade_info.education_stage_id
+                    logs.append(f"Student education stage: {education_stage_id}")
+                else:
+                    logs.append(f"No grade_info found for education_grade: {class_info.education_grade}")
+            else:
+                logs.append(f"No class_info or education_grade found for class_id: {class_id}")
+        else:
+            logs.append(f"No class_students found for student_id: {student_id}")
 
         # Build filters
         filters = {}
