@@ -1094,11 +1094,32 @@ def bulk_import_guardians():
         total_rows = len(df)
         is_success = success_count > 0
         
+        # Prepare errors_preview for frontend display
+        errors_preview = []
+        for idx, error_msg in enumerate(errors[:20]):  # Limit to first 20 errors
+            # Extract row number from error message (format: "Row X: ...")
+            import re
+            match = re.match(r'Row (\d+): (.+)', error_msg)
+            if match:
+                row_num = int(match.group(1))
+                error_text = match.group(2)
+                errors_preview.append({
+                    "row": row_num,
+                    "error": error_text,
+                    "data": {}
+                })
+            else:
+                errors_preview.append({
+                    "row": idx + 2,
+                    "error": error_msg,
+                    "data": {}
+                })
+        
         response_data = {
             "total_rows": total_rows,
             "success_count": success_count,
             "error_count": error_count,
-            "errors": errors[:10],  # Limit errors in response
+            "errors_preview": errors_preview,
             "logs": logs[-20:],  # Last 20 logs
         }
         
@@ -1108,11 +1129,14 @@ def bulk_import_guardians():
                 message=f"Bulk import completed. {success_count} guardians created, {error_count} errors."
             )
         else:
-            return error_response(
-                data=response_data,
-                message=f"Bulk import failed. {error_count} errors occurred.",
-                code="BULK_IMPORT_FAILED"
-            )
+            # ❌ KHÔNG ĐƯỢC truyền parameter 'data' vào error_response
+            # ✅ Thay vào đó dùng debug_info để truyền data
+            return {
+                "success": False,
+                "message": f"Bulk import failed. {error_count} errors occurred.",
+                "code": "BULK_IMPORT_FAILED",
+                "data": response_data  # Truyền data trực tiếp trong response dict
+            }
             
     except Exception as e:
         frappe.log_error(f"Error in bulk import guardians: {str(e)}", "Guardian Bulk Import Error")
