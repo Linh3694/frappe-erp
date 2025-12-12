@@ -414,11 +414,18 @@ def get_award_record_detail(name: str):
 # ============================================
 
 @frappe.whitelist(allow_guest=False)
-def create_award_record(data: dict):
+def create_award_record():
     """Create a new award record"""
     try:
+        # Lấy data từ form_dict
+        data = frappe.form_dict.get('data')
         if isinstance(data, str):
             data = json.loads(data)
+        
+        if not data:
+            return validation_error_response(
+                errors={'data': ['Data is required']}
+            )
         
         # Get current campus
         campus_id = data.get('campus_id') or get_current_campus_from_context()
@@ -472,11 +479,25 @@ def create_award_record(data: dict):
 
 
 @frappe.whitelist(allow_guest=False)
-def update_award_record(name: str, data: dict):
+def update_award_record():
     """Update an existing award record"""
     try:
+        # Lấy data từ form_dict
+        name = frappe.form_dict.get('name')
+        data = frappe.form_dict.get('data')
+        
         if isinstance(data, str):
             data = json.loads(data)
+        
+        if not name:
+            return validation_error_response(
+                errors={'name': ['Record name is required']}
+            )
+        
+        if not data:
+            return validation_error_response(
+                errors={'data': ['Data is required']}
+            )
         
         if not frappe.db.exists('SIS Award Record', name):
             return not_found_response(message="Không tìm thấy bản ghi vinh danh")
@@ -525,9 +546,17 @@ def update_award_record(name: str, data: dict):
 
 
 @frappe.whitelist(allow_guest=False)
-def delete_award_record(name: str):
+def delete_award_record():
     """Delete an award record"""
     try:
+        # Lấy name từ form_dict
+        name = frappe.form_dict.get('name')
+        
+        if not name:
+            return validation_error_response(
+                errors={'name': ['Record name is required']}
+            )
+        
         if not frappe.db.exists('SIS Award Record', name):
             return not_found_response(message="Không tìm thấy bản ghi vinh danh")
         
@@ -547,12 +576,17 @@ def delete_award_record(name: str):
 
 
 @frappe.whitelist(allow_guest=False)
-def bulk_import_students(award_category: str, sub_category_data: dict, students_data: list):
+def bulk_import_students():
     """
     Bulk import students for an award
     Creates individual records for each student to avoid duplicate issues
     """
     try:
+        # Lấy data từ form_dict
+        award_category = frappe.form_dict.get('award_category')
+        sub_category_data = frappe.form_dict.get('sub_category_data')
+        students_data = frappe.form_dict.get('students_data')
+        
         if isinstance(sub_category_data, str):
             sub_category_data = json.loads(sub_category_data)
         
@@ -647,12 +681,17 @@ def bulk_import_students(award_category: str, sub_category_data: dict, students_
 
 
 @frappe.whitelist(allow_guest=False)
-def bulk_import_classes(award_category: str, sub_category_data: dict, classes_data: list):
+def bulk_import_classes():
     """
     Bulk import classes for an award
     Creates individual records for each class
     """
     try:
+        # Lấy data từ form_dict
+        award_category = frappe.form_dict.get('award_category')
+        sub_category_data = frappe.form_dict.get('sub_category_data')
+        classes_data = frappe.form_dict.get('classes_data')
+        
         if isinstance(sub_category_data, str):
             sub_category_data = json.loads(sub_category_data)
         
