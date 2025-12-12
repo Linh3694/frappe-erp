@@ -1077,6 +1077,98 @@ def search_students(search_term=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
+def search_students_by_school_year(search_term=None, school_year_id=None):
+    """
+    Search students by school year - returns students enrolled in the specified school year
+    Gets data from SIS Class Student to include current class information
+    """
+    try:
+        # Normalize parameters
+        form = frappe.local.form_dict or {}
+        if 'search_term' in form and (search_term is None or str(search_term).strip() == ''):
+            search_term = form.get('search_term')
+        if 'school_year_id' in form and not school_year_id:
+            school_year_id = form.get('school_year_id')
+        
+        frappe.logger().info(f"search_students_by_school_year called with school_year_id: '{school_year_id}', search_term: '{search_term}'")
+        
+        if not school_year_id:
+            return error_response(
+                message="Thiếu tham số năm học (school_year_id)",
+                code="MISSING_SCHOOL_YEAR"
+            )
+        
+        # Get current user's campus
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = "campus-1"
+        
+        # Query to get students enrolled in the school year with their class info
+        # JOIN with SIS Class Student to get only students in this school year
+        # and include their class information
+        sql_query = """
+            SELECT DISTINCT
+                s.name,
+                s.student_name,
+                s.student_code,
+                s.dob,
+                s.gender,
+                s.campus_id,
+                s.creation,
+                s.modified,
+                c.title as current_class_title,
+                c.name as current_class_id
+            FROM `tabCRM Student` s
+            INNER JOIN `tabSIS Class Student` cs ON cs.student_id = s.name
+            INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+            WHERE s.campus_id = %s
+              AND cs.school_year_id = %s
+              AND c.school_year_id = %s
+        """
+        
+        params = [campus_id, school_year_id, school_year_id]
+        
+        # Add search term filter if provided
+        if search_term and str(search_term).strip():
+            search_clean = str(search_term).strip()
+            like_prefix = f"{search_clean}%"
+            like_contains = f"%{search_clean}%"
+            sql_query += " AND (LOWER(s.student_name) LIKE LOWER(%s) OR LOWER(s.student_code) LIKE LOWER(%s))"
+            params.extend([like_contains, like_prefix])
+        
+        sql_query += " ORDER BY s.student_name ASC"
+        
+        frappe.logger().info(f"EXECUTING SQL: {sql_query} | params={params}")
+        
+        students = frappe.db.sql(sql_query, params, as_dict=True)
+        
+        # Format data to include current_class object
+        for student in students:
+            if student.get('current_class_title'):
+                student['current_class'] = {
+                    'name': student.get('current_class_id'),
+                    'title': student.get('current_class_title')
+                }
+            # Remove redundant fields
+            student.pop('current_class_title', None)
+            student.pop('current_class_id', None)
+        
+        frappe.logger().info(f"Found {len(students)} students in school year '{school_year_id}'")
+        
+        return success_response(
+            data=students,
+            message=f"Found {len(students)} students in school year"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error searching students by school year: {str(e)}")
+        return error_response(
+            message="Error searching students by school year",
+            code="SEARCH_STUDENTS_BY_YEAR_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def get_student_profile():
     """
     Get comprehensive student profile information including:
