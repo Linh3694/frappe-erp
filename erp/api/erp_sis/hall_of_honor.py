@@ -215,7 +215,7 @@ def get_award_records(
                     class_doc = frappe.get_doc('SIS Class', class_enrollment[0]['class_id'])
                     entry['current_class'] = {
                         'name': class_doc.name,
-                        'title': class_doc.title
+                        'title': class_doc.short_title  # Sử dụng short_title thay vì title
                     }
                 
                 # Get photo
@@ -265,7 +265,7 @@ def get_award_records(
                 class_doc = frappe.get_doc('SIS Class', entry['class_id'])
                 entry['classInfo'] = {
                     'name': class_doc.name,
-                    'title': class_doc.title
+                    'title': class_doc.short_title  # Sử dụng short_title thay vì title
                 }
                 
                 # Get class photo
@@ -368,7 +368,7 @@ def get_award_record_detail(name: str):
                 class_doc = frappe.get_doc('SIS Class', class_enrollment[0]['class_id'])
                 populated_entry['current_class'] = {
                     'name': class_doc.name,
-                    'title': class_doc.title
+                    'title': class_doc.short_title  # Sử dụng short_title thay vì title
                 }
             
             # Get photo
@@ -412,7 +412,7 @@ def get_award_record_detail(name: str):
                 'class_id': entry.class_id,
                 'classInfo': {
                     'name': class_doc.name,
-                    'title': class_doc.title
+                    'title': class_doc.short_title  # Sử dụng short_title thay vì title
                 },
                 'note_vn': entry.note_vn,
                 'note_en': entry.note_en
