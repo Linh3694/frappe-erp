@@ -608,6 +608,12 @@ def bulk_import_students():
                 form_data = frappe.form_dict
         else:
             form_data = frappe.form_dict
+        
+        # Debug log
+        print("=" * 80)
+        print("🔍 [BULK_IMPORT_STUDENTS] form_data keys:", form_data.keys() if isinstance(form_data, dict) else type(form_data))
+        print("🔍 [BULK_IMPORT_STUDENTS] form_data:", form_data)
+        print("=" * 80)
             
         award_category = form_data.get('award_category')
         sub_category_data = form_data.get('sub_category_data')
