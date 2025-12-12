@@ -1083,16 +1083,30 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
     Gets data from SIS Class Student to include current class information
     """
     try:
-        # Normalize parameters
+        # Debug: Log all request parameters
+        frappe.logger().info(f"🔍 DEBUG - Request parameters:")
+        frappe.logger().info(f"  - form_dict: {frappe.local.form_dict}")
+        frappe.logger().info(f"  - function args: search_term={search_term}, school_year_id={school_year_id}")
+        if hasattr(frappe.request, 'args'):
+            frappe.logger().info(f"  - request.args: {frappe.request.args}")
+        
+        # Normalize parameters - prefer form_dict values
         form = frappe.local.form_dict or {}
         if 'search_term' in form and (search_term is None or str(search_term).strip() == ''):
             search_term = form.get('search_term')
-        if 'school_year_id' in form and not school_year_id:
+        if 'school_year_id' in form and (school_year_id is None or str(school_year_id).strip() == ''):
             school_year_id = form.get('school_year_id')
+        
+        # Also try from request.args (GET parameters)
+        if hasattr(frappe.request, 'args') and not school_year_id:
+            school_year_id = frappe.request.args.get('school_year_id')
+        
+        # Clean and validate school_year_id
+        school_year_id = str(school_year_id).strip() if school_year_id else None
         
         frappe.logger().info(f"search_students_by_school_year called with school_year_id: '{school_year_id}', search_term: '{search_term}'")
         
-        if not school_year_id:
+        if not school_year_id or school_year_id == '' or school_year_id == 'None':
             return error_response(
                 message="Thiếu tham số năm học (school_year_id)",
                 code="MISSING_SCHOOL_YEAR"
