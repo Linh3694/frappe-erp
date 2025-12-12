@@ -424,6 +424,7 @@ def create_award_record():
         
         if not data:
             return validation_error_response(
+                message='Dữ liệu không hợp lệ',
                 errors={'data': ['Data is required']}
             )
         
@@ -432,6 +433,7 @@ def create_award_record():
         
         if not campus_id:
             return validation_error_response(
+                message='Thiếu thông tin campus',
                 errors={'campus_id': ['Campus is required']}
             )
         
@@ -443,7 +445,10 @@ def create_award_record():
                 errors[field] = [f'{field} is required']
         
         if errors:
-            return validation_error_response(errors=errors)
+            return validation_error_response(
+                message='Thiếu thông tin bắt buộc',
+                errors=errors
+            )
         
         # NOTE: Removed duplicate check - allow multiple records
         
@@ -491,11 +496,13 @@ def update_award_record():
         
         if not name:
             return validation_error_response(
+                message='Dữ liệu không hợp lệ',
                 errors={'name': ['Record name is required']}
             )
         
         if not data:
             return validation_error_response(
+                message='Dữ liệu không hợp lệ',
                 errors={'data': ['Data is required']}
             )
         
@@ -554,6 +561,7 @@ def delete_award_record():
         
         if not name:
             return validation_error_response(
+                message='Dữ liệu không hợp lệ',
                 errors={'name': ['Record name is required']}
             )
         
@@ -597,6 +605,7 @@ def bulk_import_students():
         
         if not campus_id:
             return validation_error_response(
+                message='Thiếu thông tin campus',
                 errors={'campus_id': ['Campus is required']}
             )
         
@@ -702,6 +711,7 @@ def bulk_import_classes():
         
         if not campus_id:
             return validation_error_response(
+                message='Thiếu thông tin campus',
                 errors={'campus_id': ['Campus is required']}
             )
         
