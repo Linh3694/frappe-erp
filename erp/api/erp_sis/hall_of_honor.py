@@ -119,17 +119,32 @@ def get_award_records(
         if campus_id:
             filters['campus_id'] = campus_id
         
-        # Debug logging
-        print("=" * 80)
-        print("🔍 [GET_AWARD_RECORDS] Filters being applied:")
-        print(f"   award_category: {award_category}")
-        print(f"   school_year_id: {school_year_id}")
-        print(f"   sub_category_type: {sub_category_type}")
-        print(f"   sub_category_label: {sub_category_label}")
-        print(f"   Final filters dict: {filters}")
-        print("=" * 80)
+        # Debug: Kiểm tra tất cả records trong DB
+        all_records_debug = frappe.db.get_all(
+            'SIS Award Record',
+            filters={'award_category': award_category, 'school_year_id': school_year_id},
+            fields=['name', 'sub_category_type', 'sub_category_label'],
+            as_list=False
+        )
         
-        records = frappe.get_all(
+        frappe.log_error(
+            title="DEBUG: All Records in DB",
+            message=f"""
+            Params received:
+            - award_category: {award_category}
+            - school_year_id: {school_year_id}
+            - sub_category_type: {sub_category_type}
+            - sub_category_label: {sub_category_label}
+            
+            All records in DB for this category+year: {len(all_records_debug)}
+            {json.dumps(all_records_debug, indent=2, ensure_ascii=False)}
+            
+            Filters dict: {filters}
+            """
+        )
+        
+        # Thử query với frappe.db.get_all thay vì frappe.get_all
+        records = frappe.db.get_all(
             'SIS Award Record',
             filters=filters,
             fields=[
@@ -144,18 +159,14 @@ def get_award_records(
                 'is_active',
                 'campus_id'
             ],
-            order_by='priority asc, modified desc'
+            order_by='priority asc, modified desc',
+            as_list=False
         )
         
-        # Debug logging kết quả
-        print("=" * 80)
-        print(f"📋 [GET_AWARD_RECORDS] Số lượng records tìm thấy: {len(records)}")
-        for i, rec in enumerate(records):
-            print(f"   Record {i+1}:")
-            print(f"      name: {rec.get('name')}")
-            print(f"      sub_category_type: {rec.get('sub_category_type')}")
-            print(f"      sub_category_label: {rec.get('sub_category_label')}")
-        print("=" * 80)
+        frappe.log_error(
+            title="DEBUG: Query Results", 
+            message=f"Found {len(records)} records: {json.dumps(records, indent=2, ensure_ascii=False)}"
+        )
         
         # Populate full data for each record
         for record in records:
