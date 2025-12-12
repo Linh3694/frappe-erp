@@ -600,9 +600,12 @@ def bulk_import_students():
     Creates individual records for each student to avoid duplicate issues
     """
     try:
-        # Lấy data từ JSON body
-        if frappe.request.data:
-            form_data = json.loads(frappe.request.data.decode('utf-8'))
+        # Lấy data từ JSON body hoặc form_dict
+        if frappe.request.data and len(frappe.request.data) > 0:
+            try:
+                form_data = json.loads(frappe.request.data.decode('utf-8'))
+            except json.JSONDecodeError:
+                form_data = frappe.form_dict
         else:
             form_data = frappe.form_dict
             
@@ -711,9 +714,12 @@ def bulk_import_classes():
     Creates individual records for each class
     """
     try:
-        # Lấy data từ JSON body
-        if frappe.request.data:
-            form_data = json.loads(frappe.request.data.decode('utf-8'))
+        # Lấy data từ JSON body hoặc form_dict
+        if frappe.request.data and len(frappe.request.data) > 0:
+            try:
+                form_data = json.loads(frappe.request.data.decode('utf-8'))
+            except json.JSONDecodeError:
+                form_data = frappe.form_dict
         else:
             form_data = frappe.form_dict
             
