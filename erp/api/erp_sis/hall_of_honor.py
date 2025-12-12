@@ -896,9 +896,9 @@ def bulk_import_classes():
         )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def get_school_years():
-    """Get all school years for dropdown"""
+    """Get all school years for dropdown - Allow guest access for public Hall of Honor page"""
     try:
         campus_id = get_current_campus_from_context()
         
