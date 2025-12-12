@@ -71,7 +71,7 @@
    "fieldname": "sub_category_type",
    "fieldtype": "Select",
    "label": "Sub Category Type",
-   "options": "month\nsemester\nyear\ncustom\ncustom_with_description",
+   "options": "month\nsemester\nyear\ncustom",
    "reqd": 1
   },
   {

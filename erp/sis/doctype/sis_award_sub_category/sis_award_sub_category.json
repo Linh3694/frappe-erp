@@ -33,7 +33,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Type",
-   "options": "month\nsemester\nyear\ncustom\ncustom_with_description",
+   "options": "month\nsemester\nyear\ncustom",
    "reqd": 1
   },
   {
