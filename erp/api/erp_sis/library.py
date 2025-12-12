@@ -1,9 +1,10 @@
 import json
 from typing import List, Dict, Any
+from datetime import datetime
 
 import frappe
 from frappe import _
-from frappe.utils import now, nowdate
+from frappe.utils import now, nowdate, getdate
 from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 from erp.utils.api_response import (
     success_response,
@@ -63,6 +64,31 @@ def _get_json_payload() -> Dict[str, Any]:
     except Exception:
         pass
     return frappe.form_dict or {}
+
+
+def _parse_date(date_value):
+    """Parse date từ nhiều format khác nhau về YYYY-MM-DD."""
+    if not date_value:
+        return None
+    
+    # Nếu đã là string dạng YYYY-MM-DD thì return luôn
+    if isinstance(date_value, str):
+        # Parse ISO 8601 format (có thể có timestamp)
+        if 'T' in date_value or 'Z' in date_value:
+            try:
+                # Parse ISO string và lấy phần date
+                dt = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+                return dt.strftime('%Y-%m-%d')
+            except:
+                pass
+        
+        # Thử dùng getdate của Frappe
+        try:
+            return getdate(date_value).strftime('%Y-%m-%d')
+        except:
+            return date_value
+    
+    return str(date_value)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -1447,24 +1473,30 @@ def create_event():
         return validation_error_response(message="Thiếu danh sách ngày", errors={"days": ["required"]})
     
     try:
+        # Parse start_date từ ISO format sang YYYY-MM-DD
+        start_date = _parse_date(data.get("start_date") or days_data[0].get("date"))
+        
         # Create event document
         event_doc = frappe.get_doc({
             "doctype": EVENT_DTYPE,
             "title": title,
             "description": data.get("description") or "",
-            "start_date": data.get("start_date") or days_data[0].get("date"),
+            "start_date": start_date,
         })
         event_doc.insert(ignore_permissions=True)
         
         # Create day documents
         for day_data in days_data:
+            # Parse date cho từng ngày
+            day_date = _parse_date(day_data.get("date"))
+            
             day_doc = frappe.get_doc({
                 "doctype": EVENT_DAY_DTYPE,
                 "parent": event_doc.name,
                 "parenttype": EVENT_DTYPE,
                 "parentfield": "days",
                 "day_number": day_data.get("day_number", 1),
-                "date": day_data.get("date"),
+                "date": day_date,
                 "title": day_data.get("title", ""),
                 "description": day_data.get("description", ""),
                 "is_published": day_data.get("is_published", True),
@@ -1477,7 +1509,9 @@ def create_event():
             message="Tạo sự kiện thành công",
         )
     except Exception as ex:
-        frappe.log_error(f"create_event failed: {ex}")
+        # Rút ngắn error message để tránh vượt quá 140 ký tự
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"create_event: {error_msg}", "Library Event Error")
         return error_response(message="Không tạo được sự kiện", code="EVENT_CREATE_ERROR")
 
 
@@ -1501,7 +1535,8 @@ def update_event():
         if "description" in data:
             event_doc.description = data.get("description", "")
         if "start_date" in data:
-            event_doc.start_date = data["start_date"]
+            # Parse start_date từ ISO format sang YYYY-MM-DD
+            event_doc.start_date = _parse_date(data["start_date"])
         
         event_doc.save(ignore_permissions=True)
         
@@ -1515,13 +1550,16 @@ def update_event():
             
             # Create new days
             for day_data in data["days"]:
+                # Parse date cho từng ngày
+                day_date = _parse_date(day_data.get("date"))
+                
                 day_doc = frappe.get_doc({
                     "doctype": EVENT_DAY_DTYPE,
                     "parent": event_doc.name,
                     "parenttype": EVENT_DTYPE,
                     "parentfield": "days",
                     "day_number": day_data.get("day_number", 1),
-                    "date": day_data.get("date"),
+                    "date": day_date,
                     "title": day_data.get("title", ""),
                     "description": day_data.get("description", ""),
                     "is_published": day_data.get("is_published", True),
@@ -1536,7 +1574,9 @@ def update_event():
     except frappe.DoesNotExistError:
         return not_found_response(message="Không tìm thấy sự kiện", code="EVENT_NOT_FOUND")
     except Exception as ex:
-        frappe.log_error(f"update_event failed: {ex}")
+        # Rút ngắn error message
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"update_event: {error_msg}", "Library Event Error")
         return error_response(message="Không cập nhật được sự kiện", code="EVENT_UPDATE_ERROR")
 
 
