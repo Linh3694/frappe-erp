@@ -578,14 +578,29 @@ def bulk_import_students(award_category: str, sub_category_data: dict, students_
         
         for student_data in students_data:
             try:
-                # Check if student exists in CRM Student
-                if not frappe.db.exists('CRM Student', student_data.get('student_id')):
+                # Lookup student by student_code
+                student_code = student_data.get('student_id')  # Frontend gửi student_code trong field này
+                if not student_code:
                     results['errors'].append({
                         'student': student_data,
-                        'error': 'Không tìm thấy học sinh trong hệ thống'
+                        'error': 'Thiếu mã học sinh (Code)'
                     })
                     results['summary']['failed'] += 1
                     continue
+                
+                # Find student by student_code
+                student_id = frappe.db.get_value('CRM Student', {'student_code': student_code}, 'name')
+                if not student_id:
+                    results['errors'].append({
+                        'student': student_data,
+                        'error': f'Không tìm thấy học sinh với mã: {student_code}'
+                    })
+                    results['summary']['failed'] += 1
+                    continue
+                
+                # Update student_data với student ID thực sự
+                student_entry = dict(student_data)
+                student_entry['student_id'] = student_id
                 
                 # NOTE: Removed duplicate check - allow multiple awards for same student
                 
@@ -597,10 +612,8 @@ def bulk_import_students(award_category: str, sub_category_data: dict, students_
                     'school_year_id': sub_category_data['school_year_id'],
                     'sub_category_type': sub_category_data['type'],
                     'sub_category_label': sub_category_data['label'],
-                    'semester': sub_category_data.get('semester'),
-                    'month': sub_category_data.get('month'),
                     'priority': sub_category_data.get('priority', 0),
-                    'student_entries': [student_data]
+                    'student_entries': [student_entry]
                 })
                 
                 doc.insert()
@@ -665,14 +678,29 @@ def bulk_import_classes(award_category: str, sub_category_data: dict, classes_da
         
         for class_data in classes_data:
             try:
-                # Check if class exists
-                if not frappe.db.exists('SIS Class', class_data.get('class_id')):
+                # Lookup class by short_title
+                class_short_title = class_data.get('class_id')  # Frontend gửi short_title trong field này
+                if not class_short_title:
                     results['errors'].append({
                         'class': class_data,
-                        'error': 'Không tìm thấy lớp trong hệ thống'
+                        'error': 'Thiếu mã lớp (Code)'
                     })
                     results['summary']['failed'] += 1
                     continue
+                
+                # Find class by short_title
+                class_id = frappe.db.get_value('SIS Class', {'short_title': class_short_title}, 'name')
+                if not class_id:
+                    results['errors'].append({
+                        'class': class_data,
+                        'error': f'Không tìm thấy lớp với mã: {class_short_title}'
+                    })
+                    results['summary']['failed'] += 1
+                    continue
+                
+                # Update class_data với class ID thực sự
+                class_entry = dict(class_data)
+                class_entry['class_id'] = class_id
                 
                 # NOTE: Removed duplicate check - allow multiple awards for same class
                 
@@ -684,10 +712,8 @@ def bulk_import_classes(award_category: str, sub_category_data: dict, classes_da
                     'school_year_id': sub_category_data['school_year_id'],
                     'sub_category_type': sub_category_data['type'],
                     'sub_category_label': sub_category_data['label'],
-                    'semester': sub_category_data.get('semester'),
-                    'month': sub_category_data.get('month'),
                     'priority': sub_category_data.get('priority', 0),
-                    'class_entries': [class_data]
+                    'class_entries': [class_entry]
                 })
                 
                 doc.insert()
