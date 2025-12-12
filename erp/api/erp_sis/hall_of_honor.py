@@ -160,8 +160,7 @@ def get_award_records(
                 entry['student'] = {
                     'name': student.name,
                     'student_name': student.student_name,
-                    'student_code': student.student_code,
-                    'email': student.email
+                    'student_code': student.student_code
                 }
                 
                 # Get current class from SIS Class Student
