@@ -119,6 +119,16 @@ def get_award_records(
         if campus_id:
             filters['campus_id'] = campus_id
         
+        # Debug logging
+        print("=" * 80)
+        print("🔍 [GET_AWARD_RECORDS] Filters being applied:")
+        print(f"   award_category: {award_category}")
+        print(f"   school_year_id: {school_year_id}")
+        print(f"   sub_category_type: {sub_category_type}")
+        print(f"   sub_category_label: {sub_category_label}")
+        print(f"   Final filters dict: {filters}")
+        print("=" * 80)
+        
         records = frappe.get_all(
             'SIS Award Record',
             filters=filters,
@@ -136,6 +146,16 @@ def get_award_records(
             ],
             order_by='priority asc, modified desc'
         )
+        
+        # Debug logging kết quả
+        print("=" * 80)
+        print(f"📋 [GET_AWARD_RECORDS] Số lượng records tìm thấy: {len(records)}")
+        for i, rec in enumerate(records):
+            print(f"   Record {i+1}:")
+            print(f"      name: {rec.get('name')}")
+            print(f"      sub_category_type: {rec.get('sub_category_type')}")
+            print(f"      sub_category_label: {rec.get('sub_category_label')}")
+        print("=" * 80)
         
         # Populate full data for each record
         for record in records:
