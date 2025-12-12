@@ -417,9 +417,14 @@ def get_award_record_detail(name: str):
 def create_award_record():
     """Create a new award record"""
     try:
-        # Lấy data từ JSON body (không phải form_dict)
-        # Frappe sẽ tự động parse JSON body vào frappe.form_dict
-        data = frappe.form_dict
+        # Lấy data từ JSON body
+        # Frappe API có thể gửi data qua form_dict hoặc request body
+        if frappe.request.data:
+            # Parse JSON từ request body
+            data = json.loads(frappe.request.data.decode('utf-8'))
+        else:
+            # Fallback to form_dict
+            data = frappe.form_dict
         
         if not data or not isinstance(data, dict):
             return validation_error_response(
@@ -487,7 +492,10 @@ def update_award_record():
     """Update an existing award record"""
     try:
         # Lấy toàn bộ data từ JSON body
-        form_data = frappe.form_dict
+        if frappe.request.data:
+            form_data = json.loads(frappe.request.data.decode('utf-8'))
+        else:
+            form_data = frappe.form_dict
         name = form_data.get('name')
         
         if not name:
@@ -550,7 +558,11 @@ def delete_award_record():
     """Delete an award record"""
     try:
         # Lấy name từ JSON body
-        name = frappe.form_dict.get('name')
+        if frappe.request.data:
+            form_data = json.loads(frappe.request.data.decode('utf-8'))
+            name = form_data.get('name')
+        else:
+            name = frappe.form_dict.get('name')
         
         if not name:
             return validation_error_response(
@@ -584,9 +596,14 @@ def bulk_import_students():
     """
     try:
         # Lấy data từ JSON body
-        award_category = frappe.form_dict.get('award_category')
-        sub_category_data = frappe.form_dict.get('sub_category_data')
-        students_data = frappe.form_dict.get('students_data')
+        if frappe.request.data:
+            form_data = json.loads(frappe.request.data.decode('utf-8'))
+        else:
+            form_data = frappe.form_dict
+            
+        award_category = form_data.get('award_category')
+        sub_category_data = form_data.get('sub_category_data')
+        students_data = form_data.get('students_data')
         
         campus_id = get_current_campus_from_context()
         
@@ -684,9 +701,14 @@ def bulk_import_classes():
     """
     try:
         # Lấy data từ JSON body
-        award_category = frappe.form_dict.get('award_category')
-        sub_category_data = frappe.form_dict.get('sub_category_data')
-        classes_data = frappe.form_dict.get('classes_data')
+        if frappe.request.data:
+            form_data = json.loads(frappe.request.data.decode('utf-8'))
+        else:
+            form_data = frappe.form_dict
+            
+        award_category = form_data.get('award_category')
+        sub_category_data = form_data.get('sub_category_data')
+        classes_data = form_data.get('classes_data')
         
         campus_id = get_current_campus_from_context()
         
