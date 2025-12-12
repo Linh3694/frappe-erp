@@ -417,12 +417,11 @@ def get_award_record_detail(name: str):
 def create_award_record():
     """Create a new award record"""
     try:
-        # Lấy data từ form_dict
-        data = frappe.form_dict.get('data')
-        if isinstance(data, str):
-            data = json.loads(data)
+        # Lấy data từ JSON body (không phải form_dict)
+        # Frappe sẽ tự động parse JSON body vào frappe.form_dict
+        data = frappe.form_dict
         
-        if not data:
+        if not data or not isinstance(data, dict):
             return validation_error_response(
                 message='Dữ liệu không hợp lệ',
                 errors={'data': ['Data is required']}
@@ -487,12 +486,9 @@ def create_award_record():
 def update_award_record():
     """Update an existing award record"""
     try:
-        # Lấy data từ form_dict
-        name = frappe.form_dict.get('name')
-        data = frappe.form_dict.get('data')
-        
-        if isinstance(data, str):
-            data = json.loads(data)
+        # Lấy toàn bộ data từ JSON body
+        form_data = frappe.form_dict
+        name = form_data.get('name')
         
         if not name:
             return validation_error_response(
@@ -500,11 +496,8 @@ def update_award_record():
                 errors={'name': ['Record name is required']}
             )
         
-        if not data:
-            return validation_error_response(
-                message='Dữ liệu không hợp lệ',
-                errors={'data': ['Data is required']}
-            )
+        # Extract data fields (bỏ qua 'name')
+        data = {k: v for k, v in form_data.items() if k != 'name'}
         
         if not frappe.db.exists('SIS Award Record', name):
             return not_found_response(message="Không tìm thấy bản ghi vinh danh")
@@ -556,7 +549,7 @@ def update_award_record():
 def delete_award_record():
     """Delete an award record"""
     try:
-        # Lấy name từ form_dict
+        # Lấy name từ JSON body
         name = frappe.form_dict.get('name')
         
         if not name:
@@ -590,16 +583,10 @@ def bulk_import_students():
     Creates individual records for each student to avoid duplicate issues
     """
     try:
-        # Lấy data từ form_dict
+        # Lấy data từ JSON body
         award_category = frappe.form_dict.get('award_category')
         sub_category_data = frappe.form_dict.get('sub_category_data')
         students_data = frappe.form_dict.get('students_data')
-        
-        if isinstance(sub_category_data, str):
-            sub_category_data = json.loads(sub_category_data)
-        
-        if isinstance(students_data, str):
-            students_data = json.loads(students_data)
         
         campus_id = get_current_campus_from_context()
         
@@ -696,16 +683,10 @@ def bulk_import_classes():
     Creates individual records for each class
     """
     try:
-        # Lấy data từ form_dict
+        # Lấy data từ JSON body
         award_category = frappe.form_dict.get('award_category')
         sub_category_data = frappe.form_dict.get('sub_category_data')
         classes_data = frappe.form_dict.get('classes_data')
-        
-        if isinstance(sub_category_data, str):
-            sub_category_data = json.loads(sub_category_data)
-        
-        if isinstance(classes_data, str):
-            classes_data = json.loads(classes_data)
         
         campus_id = get_current_campus_from_context()
         
