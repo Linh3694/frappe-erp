@@ -691,9 +691,15 @@ def bulk_import_students():
         )
         
     except Exception as e:
-        frappe.log_error(f"Error bulk importing students: {str(e)}")
+        import traceback
+        error_details = traceback.format_exc()
+        frappe.log_error(f"Error bulk importing students: {str(e)}\n{error_details}")
+        print("=" * 80)
+        print(f"❌ [BULK_IMPORT_STUDENTS] Error: {str(e)}")
+        print(error_details)
+        print("=" * 80)
         return error_response(
-            message="Lỗi khi import hàng loạt học sinh",
+            message=f"Lỗi khi import hàng loạt học sinh: {str(e)}",
             code="BULK_IMPORT_ERROR"
         )
 
