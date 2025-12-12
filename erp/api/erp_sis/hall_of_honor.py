@@ -296,9 +296,28 @@ def get_award_records(
             
             # Get school year info
             school_year = frappe.get_doc('SIS School Year', record['school_year_id'])
+            
+            # Get label_en from award category's sub_categories
+            label_en = record['sub_category_label']  # Fallback to Vietnamese
+            try:
+                # Lấy sub_categories từ category để tìm label_en
+                category_doc = frappe.get_doc('SIS Award Category', record['award_category'])
+                matching_sub = None
+                for sub in category_doc.sub_categories:
+                    if (sub.type == record['sub_category_type'] and 
+                        sub.label == record['sub_category_label']):
+                        matching_sub = sub
+                        break
+                
+                if matching_sub and matching_sub.label_en:
+                    label_en = matching_sub.label_en
+            except Exception as e:
+                print(f"⚠️ Could not get label_en: {str(e)}")
+            
             record['subAward'] = {
                 'type': record['sub_category_type'],
                 'label': record['sub_category_label'],
+                'label_en': label_en,  # Label tiếng Anh từ sub_category
                 'schoolYear': record['school_year_id'],
                 'semester': record.get('semester'),
                 'month': record.get('month'),
