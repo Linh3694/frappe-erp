@@ -1351,9 +1351,10 @@ def list_events(search: str | None = None, page: int = 1, page_size: int = 10):
                 "title",
                 "description",
                 "start_date",
-                "created_at",
-                "updated_at",
-                "created_by",
+                "creation",
+                "modified",
+                "owner",
+                "modified_by",
             ],
             limit_start=(page - 1) * page_size,
             limit=page_size,
@@ -1393,7 +1394,9 @@ def list_events(search: str | None = None, page: int = 1, page_size: int = 10):
             message="Fetched events",
         )
     except Exception as ex:
-        frappe.log_error(f"list_events failed: {ex}")
+        # Rút ngắn error message
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"list_events: {error_msg}", "Library Event Error")
         return error_response(message="Không lấy được sự kiện", code="EVENT_LIST_ERROR")
 
 
@@ -1453,7 +1456,9 @@ def get_event():
     except frappe.DoesNotExistError:
         return not_found_response(message="Không tìm thấy sự kiện", code="EVENT_NOT_FOUND")
     except Exception as ex:
-        frappe.log_error(f"get_event failed: {ex}")
+        # Rút ngắn error message
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"get_event: {error_msg}", "Library Event Error")
         return error_response(message="Không lấy được sự kiện", code="EVENT_GET_ERROR")
 
 
@@ -1603,7 +1608,8 @@ def delete_event():
         
         return success_response(data=True, message="Xóa sự kiện thành công")
     except Exception as ex:
-        frappe.log_error(f"delete_event failed: {ex}")
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"delete_event: {error_msg}", "Library Event Error")
         return error_response(message="Không xóa được sự kiện", code="EVENT_DELETE_ERROR")
 
 
@@ -1634,7 +1640,8 @@ def delete_event_day():
     except frappe.DoesNotExistError:
         return not_found_response(message="Không tìm thấy ngày", code="DAY_NOT_FOUND")
     except Exception as ex:
-        frappe.log_error(f"delete_event_day failed: {ex}")
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"delete_event_day: {error_msg}", "Library Event Error")
         return error_response(message="Không xóa được ngày", code="DAY_DELETE_ERROR")
 
 
@@ -1667,7 +1674,8 @@ def toggle_day_published():
     except frappe.DoesNotExistError:
         return not_found_response(message="Không tìm thấy ngày", code="DAY_NOT_FOUND")
     except Exception as ex:
-        frappe.log_error(f"toggle_day_published failed: {ex}")
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"toggle_day_published: {error_msg}", "Library Event Error")
         return error_response(message="Không cập nhật được trạng thái", code="DAY_TOGGLE_ERROR")
 
 
@@ -1747,7 +1755,8 @@ def upload_day_images():
     except frappe.DoesNotExistError:
         return not_found_response(message="Không tìm thấy ngày", code="DAY_NOT_FOUND")
     except Exception as ex:
-        frappe.log_error(f"upload_day_images failed: {ex}")
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"upload_day_images: {error_msg}", "Library Event Error")
         return error_response(message="Không upload được ảnh", code="IMAGE_UPLOAD_ERROR")
 
 
@@ -1798,5 +1807,6 @@ def delete_day_image():
     except frappe.DoesNotExistError:
         return not_found_response(message="Không tìm thấy ngày", code="DAY_NOT_FOUND")
     except Exception as ex:
-        frappe.log_error(f"delete_day_image failed: {ex}")
+        error_msg = str(ex)[:100]
+        frappe.log_error(f"delete_day_image: {error_msg}", "Library Event Error")
         return error_response(message="Không xóa được ảnh", code="IMAGE_DELETE_ERROR")
