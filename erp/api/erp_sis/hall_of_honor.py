@@ -62,7 +62,8 @@ def get_award_categories(campus_id: str = None, is_active: int = 1):
                     'school_year_id',
                     'semester',
                     'month',
-                    'priority'
+                    'priority',
+                    'cover_image'
                 ],
                 order_by='priority asc, idx asc'
             )

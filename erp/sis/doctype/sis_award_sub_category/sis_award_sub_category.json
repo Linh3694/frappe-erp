@@ -23,6 +23,8 @@
   "semester",
   "month",
   "priority",
+  "cover_image_section",
+  "cover_image",
   "description_section",
   "description",
   "description_en"
@@ -74,6 +76,16 @@
    "fieldtype": "Int",
    "label": "Priority",
    "default": "0"
+  },
+  {
+   "fieldname": "cover_image_section",
+   "fieldtype": "Section Break",
+   "label": "Cover Image"
+  },
+  {
+   "fieldname": "cover_image",
+   "fieldtype": "Attach Image",
+   "label": "Cover Image"
   },
   {
    "fieldname": "description_section",
