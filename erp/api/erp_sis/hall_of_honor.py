@@ -96,6 +96,15 @@ def get_award_records(
     Returns populated student and class data
     """
     try:
+        # Lấy params từ frappe.form_dict để đảm bảo nhận được giá trị
+        award_category = award_category or frappe.form_dict.get('award_category')
+        school_year_id = school_year_id or frappe.form_dict.get('school_year_id')
+        sub_category_type = sub_category_type or frappe.form_dict.get('sub_category_type')
+        sub_category_label = sub_category_label or frappe.form_dict.get('sub_category_label')
+        semester = semester if semester is not None else frappe.form_dict.get('semester')
+        month = month if month is not None else frappe.form_dict.get('month')
+        campus_id = campus_id or frappe.form_dict.get('campus_id')
+        
         filters = {}
         
         if award_category:
@@ -119,32 +128,17 @@ def get_award_records(
         if campus_id:
             filters['campus_id'] = campus_id
         
-        # Debug: Kiểm tra tất cả records trong DB
-        all_records_debug = frappe.db.get_all(
-            'SIS Award Record',
-            filters={'award_category': award_category, 'school_year_id': school_year_id},
-            fields=['name', 'sub_category_type', 'sub_category_label'],
-            as_list=False
-        )
+        # Debug logging để verify filters
+        print("=" * 80)
+        print("🔍 [GET_AWARD_RECORDS] Params sau khi lấy từ form_dict:")
+        print(f"   award_category: {award_category}")
+        print(f"   school_year_id: {school_year_id}")
+        print(f"   sub_category_type: {sub_category_type}")
+        print(f"   sub_category_label: {sub_category_label}")
+        print(f"   Filters dict: {filters}")
+        print("=" * 80)
         
-        frappe.log_error(
-            title="DEBUG: All Records in DB",
-            message=f"""
-            Params received:
-            - award_category: {award_category}
-            - school_year_id: {school_year_id}
-            - sub_category_type: {sub_category_type}
-            - sub_category_label: {sub_category_label}
-            
-            All records in DB for this category+year: {len(all_records_debug)}
-            {json.dumps(all_records_debug, indent=2, ensure_ascii=False)}
-            
-            Filters dict: {filters}
-            """
-        )
-        
-        # Thử query với frappe.db.get_all thay vì frappe.get_all
-        records = frappe.db.get_all(
+        records = frappe.get_all(
             'SIS Award Record',
             filters=filters,
             fields=[
@@ -159,14 +153,11 @@ def get_award_records(
                 'is_active',
                 'campus_id'
             ],
-            order_by='priority asc, modified desc',
-            as_list=False
+            order_by='priority asc, modified desc'
         )
         
-        frappe.log_error(
-            title="DEBUG: Query Results", 
-            message=f"Found {len(records)} records: {json.dumps(records, indent=2, ensure_ascii=False)}"
-        )
+        print(f"📋 [GET_AWARD_RECORDS] Tìm thấy {len(records)} records")
+        print("=" * 80)
         
         # Populate full data for each record
         for record in records:
