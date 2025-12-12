@@ -613,6 +613,25 @@ def bulk_import_students():
         sub_category_data = form_data.get('sub_category_data')
         students_data = form_data.get('students_data')
         
+        # Validate required fields
+        if not award_category:
+            return validation_error_response(
+                message='Thiếu thông tin bắt buộc',
+                errors={'award_category': ['Award category is required']}
+            )
+        
+        if not sub_category_data:
+            return validation_error_response(
+                message='Thiếu thông tin bắt buộc',
+                errors={'sub_category_data': ['Sub category data is required']}
+            )
+        
+        if not students_data or not isinstance(students_data, list):
+            return validation_error_response(
+                message='Thiếu thông tin bắt buộc',
+                errors={'students_data': ['Students data is required and must be an array']}
+            )
+        
         campus_id = get_current_campus_from_context()
         
         if not campus_id:
@@ -726,6 +745,25 @@ def bulk_import_classes():
         award_category = form_data.get('award_category')
         sub_category_data = form_data.get('sub_category_data')
         classes_data = form_data.get('classes_data')
+        
+        # Validate required fields
+        if not award_category:
+            return validation_error_response(
+                message='Thiếu thông tin bắt buộc',
+                errors={'award_category': ['Award category is required']}
+            )
+        
+        if not sub_category_data:
+            return validation_error_response(
+                message='Thiếu thông tin bắt buộc',
+                errors={'sub_category_data': ['Sub category data is required']}
+            )
+        
+        if not classes_data or not isinstance(classes_data, list):
+            return validation_error_response(
+                message='Thiếu thông tin bắt buộc',
+                errors={'classes_data': ['Classes data is required and must be an array']}
+            )
         
         campus_id = get_current_campus_from_context()
         
