@@ -96,14 +96,29 @@ def get_award_records(
     Returns populated student and class data
     """
     try:
-        # Lấy params từ frappe.form_dict để đảm bảo nhận được giá trị
-        award_category = award_category or frappe.form_dict.get('award_category')
-        school_year_id = school_year_id or frappe.form_dict.get('school_year_id')
-        sub_category_type = sub_category_type or frappe.form_dict.get('sub_category_type')
-        sub_category_label = sub_category_label or frappe.form_dict.get('sub_category_label')
-        semester = semester if semester is not None else frappe.form_dict.get('semester')
-        month = month if month is not None else frappe.form_dict.get('month')
-        campus_id = campus_id or frappe.form_dict.get('campus_id')
+        # Lấy params từ nhiều nguồn để đảm bảo nhận được giá trị
+        # Thử: function args -> form_dict -> request.args
+        award_category = (award_category or 
+                         frappe.form_dict.get('award_category') or 
+                         frappe.local.request.args.get('award_category'))
+        school_year_id = (school_year_id or 
+                         frappe.form_dict.get('school_year_id') or
+                         frappe.local.request.args.get('school_year_id'))
+        sub_category_type = (sub_category_type or 
+                            frappe.form_dict.get('sub_category_type') or
+                            frappe.local.request.args.get('sub_category_type'))
+        sub_category_label = (sub_category_label or 
+                             frappe.form_dict.get('sub_category_label') or
+                             frappe.local.request.args.get('sub_category_label'))
+        semester = (semester if semester is not None else 
+                   frappe.form_dict.get('semester') or
+                   frappe.local.request.args.get('semester'))
+        month = (month if month is not None else 
+                frappe.form_dict.get('month') or
+                frappe.local.request.args.get('month'))
+        campus_id = (campus_id or 
+                    frappe.form_dict.get('campus_id') or
+                    frappe.local.request.args.get('campus_id'))
         
         filters = {}
         
