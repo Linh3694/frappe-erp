@@ -275,9 +275,15 @@ def get_award_records(
         )
         
     except Exception as e:
-        frappe.log_error(f"Error getting award records: {str(e)}")
+        import traceback
+        error_details = traceback.format_exc()
+        frappe.log_error(f"Error getting award records: {str(e)}\n{error_details}")
+        print("=" * 80)
+        print(f"❌ [GET_AWARD_RECORDS] Error: {str(e)}")
+        print(error_details)
+        print("=" * 80)
         return error_response(
-            message="Lỗi khi lấy danh sách bản ghi vinh danh",
+            message=f"Lỗi khi lấy danh sách bản ghi vinh danh: {str(e)}",
             code="GET_RECORDS_ERROR"
         )
 
