@@ -83,35 +83,7 @@ def handle_wislife_event():
         return {"success": False, "message": str(e)}
 
 
-def get_user_email(user_id):
-    """
-    Get user email from user ID (MongoDB ObjectId)
-    Searches in CRM Teacher table
-    
-    Args:
-        user_id: MongoDB ObjectId string from social-service
-        
-    Returns:
-        User email string or None
-    """
-    try:
-        # Tìm trong bảng Teacher (vì social service dành cho staff)
-        teacher = frappe.db.sql("""
-            SELECT email
-            FROM `tabCRM Teacher`
-            WHERE social_user_id = %s
-            LIMIT 1
-        """, (user_id,), as_dict=True)
-        
-        if teacher and len(teacher) > 0:
-            return teacher[0].get('email')
-        
-        frappe.logger().warning(f"⚠️ [Wislife] User not found for social_user_id: {user_id}")
-        return None
-        
-    except Exception as e:
-        frappe.logger().error(f"❌ [Wislife] Error getting user email: {str(e)}")
-        return None
+# Note: Social-service giờ gửi email trực tiếp, không cần map từ MongoDB ObjectId nữa
 
 
 def handle_new_post_broadcast(event_data):
@@ -119,13 +91,13 @@ def handle_new_post_broadcast(event_data):
     Xử lý khi BOD/Admin đăng bài viết mới - gửi đến TẤT CẢ users
     
     Args:
-        event_data: Dictionary containing postId, authorId, authorName, content, type
+        event_data: Dictionary containing postId, authorEmail, authorName, content, type
     """
     try:
         author_name = event_data.get('authorName', 'Ai đó')
         post_id = event_data.get('postId')
         content_preview = event_data.get('content', '')[:50]
-        author_id = event_data.get('authorId')
+        author_email = event_data.get('authorEmail')
         
         frappe.logger().info(f"📱 [Wislife New Post] Broadcasting from {author_name}")
         
@@ -141,7 +113,6 @@ def handle_new_post_broadcast(event_data):
             return
         
         # Loại bỏ author khỏi danh sách nhận
-        author_email = get_user_email(author_id)
         recipient_emails = [t.user for t in all_tokens if t.user != author_email]
         
         frappe.logger().info(f"📱 [Wislife New Post] Broadcasting to {len(recipient_emails)} users")
@@ -179,12 +150,12 @@ def handle_post_reacted(event_data):
     Xử lý khi có người react bài viết
     
     Args:
-        event_data: Dictionary containing postId, recipientId, userId, userName, reactionType
+        event_data: Dictionary containing postId, recipientEmail, userEmail, userName, reactionType
     """
     try:
-        recipient_email = get_user_email(event_data.get('recipientId'))
+        recipient_email = event_data.get('recipientEmail')
         if not recipient_email:
-            frappe.logger().warning(f"⚠️ [Wislife Post React] User not found for recipientId: {event_data.get('recipientId')}")
+            frappe.logger().warning(f"⚠️ [Wislife Post React] No recipient email provided")
             return
             
         user_name = event_data.get('userName', 'Ai đó')
@@ -216,12 +187,12 @@ def handle_post_commented(event_data):
     Xử lý khi có người comment bài viết
     
     Args:
-        event_data: Dictionary containing postId, recipientId, userId, userName, content
+        event_data: Dictionary containing postId, recipientEmail, userEmail, userName, content
     """
     try:
-        recipient_email = get_user_email(event_data.get('recipientId'))
+        recipient_email = event_data.get('recipientEmail')
         if not recipient_email:
-            frappe.logger().warning(f"⚠️ [Wislife Post Comment] User not found for recipientId: {event_data.get('recipientId')}")
+            frappe.logger().warning(f"⚠️ [Wislife Post Comment] No recipient email provided")
             return
             
         user_name = event_data.get('userName', 'Ai đó')
@@ -252,12 +223,12 @@ def handle_comment_replied(event_data):
     Xử lý khi có người reply comment
     
     Args:
-        event_data: Dictionary containing postId, commentId, recipientId, userId, userName, content
+        event_data: Dictionary containing postId, commentId, recipientEmail, userEmail, userName, content
     """
     try:
-        recipient_email = get_user_email(event_data.get('recipientId'))
+        recipient_email = event_data.get('recipientEmail')
         if not recipient_email:
-            frappe.logger().warning(f"⚠️ [Wislife Comment Reply] User not found for recipientId: {event_data.get('recipientId')}")
+            frappe.logger().warning(f"⚠️ [Wislife Comment Reply] No recipient email provided")
             return
             
         user_name = event_data.get('userName', 'Ai đó')
@@ -289,12 +260,12 @@ def handle_comment_reacted(event_data):
     Xử lý khi có người react comment
     
     Args:
-        event_data: Dictionary containing postId, commentId, recipientId, userId, userName, reactionType
+        event_data: Dictionary containing postId, commentId, recipientEmail, userEmail, userName, reactionType
     """
     try:
-        recipient_email = get_user_email(event_data.get('recipientId'))
+        recipient_email = event_data.get('recipientEmail')
         if not recipient_email:
-            frappe.logger().warning(f"⚠️ [Wislife Comment React] User not found for recipientId: {event_data.get('recipientId')}")
+            frappe.logger().warning(f"⚠️ [Wislife Comment React] No recipient email provided")
             return
             
         user_name = event_data.get('userName', 'Ai đó')
