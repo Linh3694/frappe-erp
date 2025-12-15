@@ -1027,17 +1027,23 @@ def import_copies_excel():
                 }
             )
             doc.insert(ignore_permissions=True)
-            frappe.get_doc(
-                {
-                    "doctype": ACTIVITY_DTYPE,
-                    "book_copy": doc.name,
-                    "action": "import",
-                    "performed_by": frappe.session.user,
-                    "performed_at": now(),
-                    "note": "Import bản sao",
-                }
-            ).insert(ignore_permissions=True)
             created += 1
+            
+            # Tạo activity log - không fail nếu lỗi
+            try:
+                frappe.get_doc(
+                    {
+                        "doctype": ACTIVITY_DTYPE,
+                        "book_copy": doc.name,
+                        "action": "import",
+                        "performed_by": frappe.session.user,
+                        "performed_at": now(),
+                        "note": "Import bản sao",
+                    }
+                ).insert(ignore_permissions=True)
+            except Exception as activity_error:
+                # Log nhưng không fail import
+                frappe.log_error(f"Failed to create activity log for copy {doc.name}: {activity_error}")
         except Exception as ex:
             # Log chi tiết lỗi để debug
             error_msg = str(ex)
