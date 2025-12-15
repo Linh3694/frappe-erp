@@ -665,6 +665,56 @@ def update_title():
         return error_response(message="Không cập nhật được đầu sách", code="TITLE_UPDATE_ERROR")
 
 
+@frappe.whitelist(allow_guest=False)
+def delete_title():
+    """Xóa đầu sách - chỉ cho phép khi không có bản sao nào liên kết"""
+    if (resp := _require_library_role()):
+        return resp
+    data = _get_json_payload()
+    title_id = data.get("id")
+    if not title_id:
+        return validation_error_response(message="Thiếu id đầu sách", errors={"id": ["required"]})
+    
+    # Kiểm tra đầu sách có tồn tại không
+    if not frappe.db.exists(TITLE_DTYPE, title_id):
+        return not_found_response(message="Không tìm thấy đầu sách", code="TITLE_NOT_FOUND")
+    
+    # Kiểm tra có bản sao nào liên kết không
+    copy_count = frappe.db.count(COPY_DTYPE, {"title": title_id})
+    if copy_count > 0:
+        return validation_error_response(
+            message=f"Không thể xóa đầu sách vì còn {copy_count} bản sao liên kết. Vui lòng xóa các bản sao trước.",
+            errors={"title": ["has_copies"]},
+            code="TITLE_HAS_COPIES"
+        )
+    
+    try:
+        doc = frappe.get_doc(TITLE_DTYPE, title_id)
+        title_name = doc.title
+        title_code = doc.library_code or title_id
+        
+        # Xóa đầu sách
+        frappe.delete_doc(TITLE_DTYPE, title_id, ignore_permissions=True)
+        
+        # Ghi log hoạt động
+        try:
+            frappe.get_doc({
+                "doctype": ACTIVITY_DTYPE,
+                "action": "delete",
+                "performed_by": frappe.session.user,
+                "performed_at": now(),
+                "note": f"Xóa đầu sách: {title_name} ({title_code})"
+            }).insert(ignore_permissions=True)
+        except Exception as log_ex:
+            # Log lỗi nhưng không fail toàn bộ operation
+            frappe.log_error(f"delete_title activity log failed: {log_ex}")
+        
+        return success_response(data=True, message="Đã xóa đầu sách")
+    except Exception as ex:
+        frappe.log_error(f"delete_title failed: {ex}")
+        return error_response(message="Không xóa được đầu sách", code="TITLE_DELETE_ERROR")
+
+
 def _parse_bool_value(value) -> bool:
     """Parse boolean từ Excel - hỗ trợ 'Có', 'Không', 'Yes', 'No', 'X', '1', 'True'"""
     if value is None:
@@ -822,8 +872,8 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
 
 def _generate_copy_code(special_code: str, library_code: str = None) -> str:
     """
-    Sinh mã bản sao theo pattern: special_code.library_code.####
-    Ví dụ: BE3.0222.0001
+    Sinh mã bản sao theo pattern: special_code.library_code.###
+    Ví dụ: BE3.0222.001
     
     Args:
         special_code: Mã quy ước (bắt buộc)
@@ -831,8 +881,8 @@ def _generate_copy_code(special_code: str, library_code: str = None) -> str:
     """
     special = (special_code or "").strip() or "BK"
     
-    # Nếu có library_code, format: special.library_code.####
-    # Nếu không có, format: special.####
+    # Nếu có library_code, format: special.library_code.###
+    # Nếu không có, format: special.###
     if library_code and library_code.strip():
         prefix = f"{special}.{library_code.strip()}"
     else:
@@ -855,7 +905,7 @@ def _generate_copy_code(special_code: str, library_code: str = None) -> str:
             next_num = int(suffix) + 1
         except Exception:
             next_num = 1
-    return f"{prefix}.{next_num:04d}"
+    return f"{prefix}.{next_num:03d}"
 
 
 @frappe.whitelist(allow_guest=False)
