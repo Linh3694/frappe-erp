@@ -385,6 +385,9 @@ def list_titles(search: str | None = None, page: int = 1, page_size: int = 20):
         page = int(page) if page else int(frappe.form_dict.get("page", 1))
         page_size = int(page_size) if page_size else int(frappe.form_dict.get("page_size", 20))
         
+        # Debug logging
+        frappe.log_error(f"list_titles called with: search={search}, page={page}, page_size={page_size}", "Library API Debug")
+        
         filters = {}
         or_filters = None
         
