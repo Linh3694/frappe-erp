@@ -26,6 +26,34 @@ EMOJI_NAMES = {
 }
 
 
+def format_vietnamese_name(name):
+    """
+    Format tên từ 'Tên Họ-đệm Họ' sang 'Họ Họ-đệm Tên' (chuẩn Việt Nam)
+    
+    Ví dụ: 'Nam Dương Tuấn' -> 'Dương Tuấn Nam'
+    
+    Logic: 
+    - Tách tên thành các phần
+    - Nếu có 3 phần: part1 part2 part3 -> part2 part3 part1
+    - Nếu có 2 phần: part1 part2 -> part2 part1
+    - Nếu có 1 phần: giữ nguyên
+    """
+    if not name or name == 'Ai đó':
+        return name
+    
+    parts = name.strip().split()
+    
+    if len(parts) >= 3:
+        # Ví dụ: ['Nam', 'Dương', 'Tuấn'] -> ['Dương', 'Tuấn', 'Nam']
+        return ' '.join(parts[1:] + [parts[0]])
+    elif len(parts) == 2:
+        # Ví dụ: ['Nam', 'Dương'] -> ['Dương', 'Nam']
+        return f"{parts[1]} {parts[0]}"
+    else:
+        # Chỉ có 1 từ, giữ nguyên
+        return name
+
+
 @frappe.whitelist(allow_guest=True, methods=['POST'])
 def handle_wislife_event():
     """
@@ -95,7 +123,8 @@ def handle_new_post_broadcast(event_data):
         event_data: Dictionary containing postId, authorEmail, authorName, content, type
     """
     try:
-        author_name = event_data.get('authorName', 'Ai đó')
+        raw_author_name = event_data.get('authorName', 'Ai đó')
+        author_name = format_vietnamese_name(raw_author_name)
         post_id = event_data.get('postId')
         content_preview = event_data.get('content', '')[:50]
         author_email = event_data.get('authorEmail')
@@ -118,6 +147,8 @@ def handle_new_post_broadcast(event_data):
         
         frappe.logger().info(f"📱 [Wislife New Post] Broadcasting to {len(recipient_emails)} users")
         
+        notification_message = f'{author_name} vừa đăng: "{content_preview}..."'
+        
         # Gửi notification đến từng user
         success_count = 0
         saved_count = 0
@@ -127,7 +158,7 @@ def handle_new_post_broadcast(event_data):
                 result = send_mobile_notification(
                     user_email=user_email,
                     title='Wislife - Bài viết mới',
-                    body=f'{author_name} vừa đăng: "{content_preview}..."',
+                    body=notification_message,
                     data={
                         'type': 'wislife_new_post',
                         'postId': post_id,
@@ -142,7 +173,7 @@ def handle_new_post_broadcast(event_data):
                 try:
                     create_notification(
                         title="Wislife - Bài viết mới",
-                        message=f'{author_name} vừa đăng: "{content_preview}..."',
+                        message=notification_message,
                         recipient_user=user_email,
                         notification_type="system",
                         priority="normal",
@@ -183,15 +214,19 @@ def handle_post_reacted(event_data):
             frappe.logger().warning(f"⚠️ [Wislife Post React] No recipient email provided")
             return
             
-        user_name = event_data.get('userName', 'Ai đó')
-        emoji_name = EMOJI_NAMES.get(event_data.get('reactionType'), 'thả tim')
+        # Format tên theo chuẩn Việt Nam
+        raw_name = event_data.get('userName', 'Ai đó')
+        user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
+        
+        # Message đơn giản, không cần chi tiết emoji
+        notification_message = f'{user_name} đã bày tỏ cảm xúc về bài viết của bạn'
         
         # Gửi push notification
         result = send_mobile_notification(
             user_email=recipient_email,
             title='Wislife',
-            body=f'{user_name} đã {emoji_name} bài viết của bạn',
+            body=notification_message,
             data={
                 'type': 'wislife_post_reaction',
                 'postId': post_id,
@@ -208,7 +243,7 @@ def handle_post_reacted(event_data):
         try:
             create_notification(
                 title="Wislife",
-                message=f"{user_name} đã {emoji_name} bài viết của bạn",
+                message=notification_message,
                 recipient_user=recipient_email,
                 notification_type="system",
                 priority="low",
@@ -244,14 +279,18 @@ def handle_post_commented(event_data):
             frappe.logger().warning(f"⚠️ [Wislife Post Comment] No recipient email provided")
             return
             
-        user_name = event_data.get('userName', 'Ai đó')
+        # Format tên theo chuẩn Việt Nam
+        raw_name = event_data.get('userName', 'Ai đó')
+        user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
+        
+        notification_message = f'{user_name} đã bình luận bài viết của bạn'
         
         # Gửi push notification
         result = send_mobile_notification(
             user_email=recipient_email,
             title='Wislife',
-            body=f'{user_name} đã bình luận bài viết của bạn',
+            body=notification_message,
             data={
                 'type': 'wislife_post_comment',
                 'postId': post_id,
@@ -268,7 +307,7 @@ def handle_post_commented(event_data):
         try:
             create_notification(
                 title="Wislife",
-                message=f"{user_name} đã bình luận bài viết của bạn",
+                message=notification_message,
                 recipient_user=recipient_email,
                 notification_type="system",
                 priority="low",
@@ -303,15 +342,19 @@ def handle_comment_replied(event_data):
             frappe.logger().warning(f"⚠️ [Wislife Comment Reply] No recipient email provided")
             return
             
-        user_name = event_data.get('userName', 'Ai đó')
+        # Format tên theo chuẩn Việt Nam
+        raw_name = event_data.get('userName', 'Ai đó')
+        user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
+        
+        notification_message = f'{user_name} đã trả lời bình luận của bạn'
         
         # Gửi push notification
         result = send_mobile_notification(
             user_email=recipient_email,
             title='Wislife',
-            body=f'{user_name} đã trả lời bình luận của bạn',
+            body=notification_message,
             data={
                 'type': 'wislife_comment_reply',
                 'postId': post_id,
@@ -329,7 +372,7 @@ def handle_comment_replied(event_data):
         try:
             create_notification(
                 title="Wislife",
-                message=f"{user_name} đã trả lời bình luận của bạn",
+                message=notification_message,
                 recipient_user=recipient_email,
                 notification_type="system",
                 priority="low",
@@ -365,16 +408,20 @@ def handle_comment_reacted(event_data):
             frappe.logger().warning(f"⚠️ [Wislife Comment React] No recipient email provided")
             return
             
-        user_name = event_data.get('userName', 'Ai đó')
-        emoji_name = EMOJI_NAMES.get(event_data.get('reactionType'), 'thả tim')
+        # Format tên theo chuẩn Việt Nam
+        raw_name = event_data.get('userName', 'Ai đó')
+        user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
+        
+        # Message đơn giản
+        notification_message = f'{user_name} đã bày tỏ cảm xúc về bình luận của bạn'
         
         # Gửi push notification
         result = send_mobile_notification(
             user_email=recipient_email,
             title='Wislife',
-            body=f'{user_name} đã {emoji_name} bình luận của bạn',
+            body=notification_message,
             data={
                 'type': 'wislife_comment_reaction',
                 'postId': post_id,
@@ -392,7 +439,7 @@ def handle_comment_reacted(event_data):
         try:
             create_notification(
                 title="Wislife",
-                message=f"{user_name} đã {emoji_name} bình luận của bạn",
+                message=notification_message,
                 recipient_user=recipient_email,
                 notification_type="system",
                 priority="low",
@@ -425,7 +472,8 @@ def handle_post_mention(event_data):
     """
     try:
         mentioned_names = event_data.get('mentionedNames', [])
-        user_name = event_data.get('userName', 'Ai đó')
+        raw_name = event_data.get('userName', 'Ai đó')
+        user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
         
@@ -434,6 +482,8 @@ def handle_post_mention(event_data):
             return
         
         frappe.logger().info(f"📱 [Wislife Mention] Processing mentions: {mentioned_names}")
+        
+        notification_message = f'{user_name} đã nhắc đến bạn trong một bình luận'
         
         # Tìm users được mention bằng tên (fullname)
         success_count = 0
@@ -455,7 +505,7 @@ def handle_post_mention(event_data):
                     result = send_mobile_notification(
                         user_email=recipient_email,
                         title='Wislife',
-                        body=f'{user_name} đã nhắc đến bạn trong một bình luận',
+                        body=notification_message,
                         data={
                             'type': 'wislife_mention',
                             'postId': post_id,
@@ -472,7 +522,7 @@ def handle_post_mention(event_data):
                     try:
                         create_notification(
                             title="Wislife",
-                            message=f"{user_name} đã nhắc đến bạn trong một bình luận",
+                            message=notification_message,
                             recipient_user=recipient_email,
                             notification_type="system",
                             priority="normal",
