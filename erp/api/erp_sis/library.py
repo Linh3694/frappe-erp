@@ -820,11 +820,24 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
         return error_response(message="Không lấy được bản sao", code="COPY_LIST_ERROR")
 
 
-def _generate_copy_code(special_code: str) -> str:
-    """Sinh mã bản sao theo special_code.<####>."""
-    prefix = (special_code or "").strip()
-    if not prefix:
-        prefix = "BK"
+def _generate_copy_code(special_code: str, library_code: str = None) -> str:
+    """
+    Sinh mã bản sao theo pattern: special_code.library_code.####
+    Ví dụ: BE3.0222.0001
+    
+    Args:
+        special_code: Mã quy ước (bắt buộc)
+        library_code: Mã định danh đầu sách (tùy chọn)
+    """
+    special = (special_code or "").strip() or "BK"
+    
+    # Nếu có library_code, format: special.library_code.####
+    # Nếu không có, format: special.####
+    if library_code and library_code.strip():
+        prefix = f"{special}.{library_code.strip()}"
+    else:
+        prefix = special
+    
     existing = frappe.db.sql(
         """
         select generated_code from `tabSIS Library Book Copy`
@@ -837,6 +850,7 @@ def _generate_copy_code(special_code: str) -> str:
     if existing:
         last = existing[0][0]
         try:
+            # Lấy phần số cuối cùng sau dấu chấm
             suffix = last.split(".")[-1]
             next_num = int(suffix) + 1
         except Exception:
@@ -861,7 +875,15 @@ def create_book_copy():
         return validation_error_response(message="Trạng thái không hợp lệ", errors={"status": ["invalid"]})
 
     try:
-        generated_code = data.get("generated_code") or _generate_copy_code(special_code)
+        # Lấy library_code từ title để gen mã
+        title_library_code = None
+        if title_id:
+            try:
+                title_library_code = frappe.get_value(TITLE_DTYPE, title_id, "library_code")
+            except Exception:
+                pass
+        
+        generated_code = data.get("generated_code") or _generate_copy_code(special_code, title_library_code)
         doc = frappe.get_doc(
             {
                 "doctype": COPY_DTYPE,
@@ -993,12 +1015,29 @@ def import_copies_excel():
                 errors.append(f"Dòng {idx}: thiếu thông tin đầu sách (cần có title_id hoặc library_code)")
             continue
         try:
-            code = generated_code or _generate_copy_code(special_code or "BK")
-            
             # Validate special_code
             if not special_code:
                 errors.append(f"Dòng {idx}: thiếu mã quy ước")
                 continue
+            
+            # Lấy library_code từ title để gen mã
+            title_library_code = None
+            if title_id:
+                try:
+                    title_library_code = frappe.get_value(TITLE_DTYPE, title_id, "library_code")
+                except Exception:
+                    pass
+            
+            # OPTION 3: Hybrid - Validate trước khi dùng
+            if generated_code:
+                # Nếu Excel có mã, kiểm tra xem đã tồn tại chưa
+                if frappe.db.exists(COPY_DTYPE, {"generated_code": generated_code}):
+                    errors.append(f"Dòng {idx}: mã '{generated_code}' đã tồn tại trong hệ thống")
+                    continue
+                code = generated_code
+            else:
+                # Nếu không có mã trong Excel, gen tự động
+                code = _generate_copy_code(special_code, title_library_code)
             
             doc = frappe.get_doc(
                 {
