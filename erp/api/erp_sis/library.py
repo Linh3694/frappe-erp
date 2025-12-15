@@ -381,15 +381,22 @@ def list_titles():
     
     try:
         # Debug: xem form_dict chứa gì
-        import json
-        frappe.log_error(f"form_dict: {json.dumps(dict(frappe.form_dict))}", "DEBUG list_titles")
+        debug_info = {
+            "form_dict": dict(frappe.form_dict),
+            "request_method": frappe.request.method if hasattr(frappe, 'request') else None,
+            "request_args": dict(frappe.request.args) if hasattr(frappe, 'request') and hasattr(frappe.request, 'args') else None,
+        }
         
         # Lấy params từ form_dict - Frappe tự động parse cả GET query và POST body vào đây
         search = frappe.form_dict.get("search")
         page = int(frappe.form_dict.get("page", 1))
         page_size = int(frappe.form_dict.get("page_size", 20))
         
-        frappe.log_error(f"Parsed params: search={search}, page={page}, page_size={page_size}", "DEBUG list_titles")
+        debug_info["parsed_params"] = {
+            "search": search,
+            "page": page,
+            "page_size": page_size
+        }
         
         filters = {}
         or_filters = None
@@ -402,6 +409,7 @@ def list_titles():
                 ["library_code", "like", search_term],
                 ["authors", "like", search_term],
             ]
+            debug_info["or_filters"] = or_filters
         
         # Lấy data với pagination
         limit_start = (page - 1) * page_size
@@ -441,7 +449,7 @@ def list_titles():
         total = len(total_count)
         
         return list_response(
-            data={"items": data, "total": total},
+            data={"items": data, "total": total, "debug": debug_info},
             message="Fetched titles",
         )
     except Exception as ex:
