@@ -380,8 +380,10 @@ def list_titles(search: str | None = None, page: int = 1, page_size: int = 20):
         return resp
     
     try:
-        page = int(page)
-        page_size = int(page_size)
+        # Lấy params từ form_dict vì frappe.whitelist không auto-parse query params
+        search = search or frappe.form_dict.get("search")
+        page = int(page) if page else int(frappe.form_dict.get("page", 1))
+        page_size = int(page_size) if page_size else int(frappe.form_dict.get("page_size", 20))
         
         filters = {}
         or_filters = None
@@ -854,8 +856,12 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
     if (resp := _require_library_role()):
         return resp
     try:
-        page = int(page)
-        page_size = int(page_size)
+        # Lấy params từ form_dict vì frappe.whitelist không auto-parse query params
+        search = search or frappe.form_dict.get("search")
+        status = status or frappe.form_dict.get("status")
+        title_id = title_id or frappe.form_dict.get("title_id")
+        page = int(page) if page else int(frappe.form_dict.get("page", 1))
+        page_size = int(page_size) if page_size else int(frappe.form_dict.get("page_size", 20))
         
         filters: Dict[str, Any] = {}
         or_filters = None
@@ -1452,6 +1458,14 @@ def list_activities(action: str | None = None, book_code: str | None = None, fro
     if (resp := _require_library_role()):
         return resp
     try:
+        # Lấy params từ form_dict
+        action = action or frappe.form_dict.get("action")
+        book_code = book_code or frappe.form_dict.get("book_code")
+        from_date = from_date or frappe.form_dict.get("from_date")
+        to_date = to_date or frappe.form_dict.get("to_date")
+        page = int(page) if page else int(frappe.form_dict.get("page", 1))
+        page_size = int(page_size) if page_size else int(frappe.form_dict.get("page_size", 20))
+        
         filters: Dict[str, Any] = {}
         if action:
             filters["action"] = action
@@ -1532,6 +1546,11 @@ def list_events(search: str | None = None, page: int = 1, page_size: int = 10):
         return resp
     
     try:
+        # Lấy params từ form_dict
+        search = search or frappe.form_dict.get("search")
+        page = int(page) if page else int(frappe.form_dict.get("page", 1))
+        page_size = int(page_size) if page_size else int(frappe.form_dict.get("page_size", 10))
+        
         filters: Dict[str, Any] = {}
         if search:
             filters["title"] = ["like", f"%{search}%"]
