@@ -110,6 +110,8 @@ def _transform_title_to_public(doc) -> Dict[str, Any]:
         "introduction": introduction,
         "audioBook": audio_book,
         "publishYear": getattr(doc, 'publish_year', None),
+        "createdAt": str(doc.creation) if hasattr(doc, 'creation') else None,
+        "modifiedAt": str(doc.modified) if hasattr(doc, 'modified') else None,
         "borrowCount": 0,  # TODO: Count from copies if needed
         "rating": 4,  # Default rating
     }
