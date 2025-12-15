@@ -380,10 +380,16 @@ def list_titles():
         return resp
     
     try:
+        # Debug: xem form_dict chứa gì
+        import json
+        frappe.log_error(f"form_dict: {json.dumps(dict(frappe.form_dict))}", "DEBUG list_titles")
+        
         # Lấy params từ form_dict - Frappe tự động parse cả GET query và POST body vào đây
         search = frappe.form_dict.get("search")
         page = int(frappe.form_dict.get("page", 1))
         page_size = int(frappe.form_dict.get("page_size", 20))
+        
+        frappe.log_error(f"Parsed params: search={search}, page={page}, page_size={page_size}", "DEBUG list_titles")
         
         filters = {}
         or_filters = None
