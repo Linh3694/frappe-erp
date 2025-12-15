@@ -395,9 +395,6 @@ def list_titles(search: str | None = None, page: int = 1, page_size: int = 20):
                 ["authors", "like", search_term],
             ]
         
-        # Lấy tổng số để tính pagination
-        total = frappe.db.count(TITLE_DTYPE, filters=filters, or_filters=or_filters if or_filters else None)
-        
         # Lấy data với pagination
         limit_start = (page - 1) * page_size
         data = frappe.get_all(
@@ -422,6 +419,15 @@ def list_titles(search: str | None = None, page: int = 1, page_size: int = 20):
             limit_start=limit_start,
             limit_page_length=page_size,
         )
+        
+        # Lấy tổng số - dùng frappe.get_all với pluck='name' để đếm
+        total_count = frappe.get_all(
+            TITLE_DTYPE,
+            filters=filters,
+            or_filters=or_filters if or_filters else None,
+            pluck='name',
+        )
+        total = len(total_count)
         
         return list_response(
             data={"items": data, "total": total},
@@ -865,9 +871,6 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
                 ["book_title", "like", search_term],
             ]
 
-        # Lấy tổng số để tính pagination
-        total = frappe.db.count(COPY_DTYPE, filters=filters, or_filters=or_filters if or_filters else None)
-
         copies = frappe.get_all(
             COPY_DTYPE,
             filters=filters,
@@ -915,6 +918,15 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
                     copy["title_library_code"] = title_doc.library_code
                 except Exception:
                     pass
+        
+        # Lấy tổng số - dùng frappe.get_all với pluck='name' để đếm
+        total_count = frappe.get_all(
+            COPY_DTYPE,
+            filters=filters,
+            or_filters=or_filters if or_filters else None,
+            pluck='name',
+        )
+        total = len(total_count)
                     
         return list_response(data={"items": copies, "total": total}, message="Fetched copies")
     except Exception as ex:
