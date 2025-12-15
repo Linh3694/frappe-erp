@@ -937,8 +937,13 @@ def import_copies_excel():
                 title_doc = frappe.get_value(TITLE_DTYPE, {"library_code": library_code}, "name")
                 if title_doc:
                     title_id = title_doc
-            except Exception:
-                pass
+            except Exception as e:
+                frappe.log_error(f"Error finding title by library_code '{library_code}': {e}")
+        
+        # Validate title_id exists
+        if title_id and not frappe.db.exists(TITLE_DTYPE, title_id):
+            errors.append(f"Dòng {idx}: đầu sách với ID '{title_id}' không tồn tại")
+            continue
         
         special_code = row.get("special_code") or row.get("Mã quy ước") or row.get("code")
         generated_code = row.get("generated_code") or row.get("Mã bản sao") or row.get("Mã sách")
@@ -989,6 +994,12 @@ def import_copies_excel():
             continue
         try:
             code = generated_code or _generate_copy_code(special_code or "BK")
+            
+            # Validate special_code
+            if not special_code:
+                errors.append(f"Dòng {idx}: thiếu mã quy ước")
+                continue
+            
             doc = frappe.get_doc(
                 {
                     "doctype": COPY_DTYPE,
@@ -996,23 +1007,23 @@ def import_copies_excel():
                     "special_code": special_code,
                     "generated_code": code,
                     "status": status,
-                    "warehouse": warehouse,
-                    "language": language,
+                    "warehouse": warehouse or None,
+                    "language": language or None,
                     # Book info
-                    "isbn": isbn,
-                    "document_identifier": document_identifier,
-                    "book_title": book_title,
-                    "classification_sign": classification_sign,
-                    "series_name": series_name,
+                    "isbn": isbn or None,
+                    "document_identifier": document_identifier or None,
+                    "book_title": book_title or None,
+                    "classification_sign": classification_sign or None,
+                    "series_name": series_name or None,
                     # Publishing
-                    "publisher_name": publisher_name,
-                    "publisher_place_name": publisher_place_name,
-                    "publish_year": publish_year,
+                    "publisher_name": publisher_name or None,
+                    "publisher_place_name": publisher_place_name or None,
+                    "publish_year": publish_year or None,
                     # Description
-                    "pages": pages,
-                    "cover_price": cover_price,
-                    "cataloging_agency": cataloging_agency,
-                    "storage_location": storage_location,
+                    "pages": pages or None,
+                    "cover_price": cover_price or None,
+                    "cataloging_agency": cataloging_agency or "WIS",
+                    "storage_location": storage_location or None,
                 }
             )
             doc.insert(ignore_permissions=True)
@@ -1028,7 +1039,10 @@ def import_copies_excel():
             ).insert(ignore_permissions=True)
             created += 1
         except Exception as ex:
-            errors.append(f"Dòng {idx}: {ex}")
+            # Log chi tiết lỗi để debug
+            error_msg = str(ex)
+            frappe.log_error(f"Import copy error at row {idx}: {error_msg}\nData: title_id={title_id}, special_code={special_code}, code={code}")
+            errors.append(f"Dòng {idx}: {error_msg}")
 
     return success_response(
         data={"success_count": created, "total_count": len(rows), "errors": errors},
