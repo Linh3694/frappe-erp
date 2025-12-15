@@ -395,19 +395,28 @@ def list_audio_titles(limit: int = 4):
 
 
 @frappe.whitelist(allow_guest=True)
-def list_related_titles(category: str = "", limit: int = 10):
+def list_related_titles(
+    exclude_id: str = "",
+    category: str = "", 
+    series_name: str = "",
+    document_type: str = "",
+    authors: str = "",
+    limit: int = 10
+):
     """
-    Lấy danh sách sách liên quan theo category.
+    Lấy danh sách sách liên quan dựa trên nhiều tiêu chí.
+    Ưu tiên: cùng chủ đề > cùng tác giả > cùng phân loại > cùng thể loại
     URL: /api/method/erp.api.erp_sis.library_view.list_related_titles
     """
     try:
         limit = int(limit)
         
+        # Lấy tất cả sách (trừ sách hiện tại)
         filters = {}
-        if category:
-            filters["category"] = ["like", f"%{category}%"]
+        if exclude_id:
+            filters["name"] = ["!=", exclude_id]
         
-        titles = frappe.get_all(
+        all_titles = frappe.get_all(
             TITLE_DTYPE,
             filters=filters,
             fields=[
@@ -424,13 +433,65 @@ def list_related_titles(category: str = "", limit: int = 10):
                 "is_audio_book",
                 "cover_image",
             ],
-            limit=limit,
+            limit=1000,  # Lấy nhiều để tính điểm
             order_by="modified desc",
         )
         
+        # Parse authors từ JSON string
+        authors_list = []
+        if authors:
+            try:
+                authors_list = json.loads(authors) if isinstance(authors, str) else authors
+            except:
+                authors_list = [authors] if authors else []
+        
+        # Tính điểm cho mỗi sách
+        scored_titles = []
+        for title_dict in all_titles:
+            score = 0
+            
+            # Cùng chủ đề (series_name) - cao nhất
+            if series_name and title_dict.series_name and series_name == title_dict.series_name:
+                score += 10
+            
+            # Cùng tác giả
+            title_authors = []
+            if title_dict.authors:
+                try:
+                    title_authors = json.loads(title_dict.authors) if isinstance(title_dict.authors, str) else title_dict.authors
+                except:
+                    title_authors = []
+            
+            if authors_list and title_authors:
+                # Kiểm tra có tác giả chung không
+                common_authors = set(authors_list) & set(title_authors)
+                if common_authors:
+                    score += 7
+            
+            # Cùng phân loại tài liệu
+            if document_type and title_dict.document_type and document_type == title_dict.document_type:
+                score += 5
+            
+            # Cùng thể loại
+            if category and title_dict.category:
+                if category == title_dict.category:
+                    score += 3
+                elif category in title_dict.category or title_dict.category in category:
+                    score += 2
+            
+            # Chỉ thêm những sách có điểm > 0
+            if score > 0:
+                scored_titles.append((score, title_dict))
+        
+        # Sắp xếp theo điểm giảm dần
+        scored_titles.sort(key=lambda x: x[0], reverse=True)
+        
+        # Lấy top N sách
+        top_titles = [t[1] for t in scored_titles[:limit]]
+        
         # Transform data
         result = []
-        for title_dict in titles:
+        for title_dict in top_titles:
             try:
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
                 result.append(_transform_title_to_public(doc))
