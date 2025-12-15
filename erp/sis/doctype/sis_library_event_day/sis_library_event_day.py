@@ -8,3 +8,4 @@ from frappe.model.document import Document
 class SISLibraryEventDay(Document):
 	"""Ngày của sự kiện thư viện - child table."""
 	pass
+
