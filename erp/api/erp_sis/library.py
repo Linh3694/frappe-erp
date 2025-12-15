@@ -927,12 +927,24 @@ def import_copies_excel():
     errors: List[str] = []
 
     for idx, row in enumerate(rows, start=2):
+        # Tìm title_id trực tiếp hoặc qua library_code
         title_id = row.get("title_id") or row.get("Đầu sách") or row.get("title")
+        library_code = row.get("library_code") or row.get("Mã Đầu sách") or row.get("Mã đầu sách") or row.get("Mã định danh")
+        
+        # Nếu có library_code mà không có title_id, tìm title theo library_code
+        if not title_id and library_code:
+            try:
+                title_doc = frappe.get_value(TITLE_DTYPE, {"library_code": library_code}, "name")
+                if title_doc:
+                    title_id = title_doc
+            except Exception:
+                pass
+        
         special_code = row.get("special_code") or row.get("Mã quy ước") or row.get("code")
-        generated_code = row.get("generated_code") or row.get("Mã bản sao")
+        generated_code = row.get("generated_code") or row.get("Mã bản sao") or row.get("Mã sách")
         warehouse = row.get("warehouse") or row.get("Kho")
         language = row.get("language") or row.get("Ngôn ngữ")
-        status = (row.get("status") or "available").lower()
+        status = (row.get("status") or row.get("Trạng thái") or "available").lower()
 
         # Book info fields
         isbn = row.get("isbn") or row.get("ISBN")
@@ -970,7 +982,10 @@ def import_copies_excel():
         if status not in STATUS_MAP:
             status = "available"
         if not title_id:
-            errors.append(f"Dòng {idx}: thiếu title_id")
+            if library_code:
+                errors.append(f"Dòng {idx}: không tìm thấy đầu sách với mã '{library_code}'")
+            else:
+                errors.append(f"Dòng {idx}: thiếu thông tin đầu sách (cần có title_id hoặc library_code)")
             continue
         try:
             code = generated_code or _generate_copy_code(special_code or "BK")
