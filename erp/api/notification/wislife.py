@@ -12,6 +12,7 @@ from frappe.utils import now_datetime
 from datetime import datetime
 import json
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+from erp.common.doctype.erp_notification.erp_notification import create_notification
 
 
 # Emoji names mapping (Vietnamese)
@@ -119,8 +120,10 @@ def handle_new_post_broadcast(event_data):
         
         # Gửi notification đến từng user
         success_count = 0
+        saved_count = 0
         for user_email in recipient_emails:
             try:
+                # Gửi push notification
                 result = send_mobile_notification(
                     user_email=user_email,
                     title='Wislife - Bài viết mới',
@@ -134,11 +137,33 @@ def handle_new_post_broadcast(event_data):
                 
                 if result.get("success"):
                     success_count += 1
+                
+                # Lưu vào Notification Center
+                try:
+                    create_notification(
+                        title="Wislife - Bài viết mới",
+                        message=f'{author_name} vừa đăng: "{content_preview}..."',
+                        recipient_user=user_email,
+                        notification_type="system",
+                        priority="normal",
+                        data={
+                            'type': 'wislife_new_post',
+                            'postId': post_id,
+                            'action': 'open_post',
+                            'actorName': author_name
+                        },
+                        channel="mobile",
+                        event_timestamp=frappe.utils.now()
+                    )
+                    saved_count += 1
+                except Exception as db_error:
+                    frappe.logger().error(f"❌ [Wislife New Post] Failed to save to notification center for {user_email}: {str(db_error)}")
                     
             except Exception as user_error:
                 frappe.logger().error(f"❌ [Wislife New Post] Error sending to {user_email}: {str(user_error)}")
         
         frappe.logger().info(f"✅ [Wislife New Post] Broadcast sent to {success_count}/{len(recipient_emails)} users")
+        frappe.logger().info(f"✅ [Wislife New Post] Saved to notification center for {saved_count}/{len(recipient_emails)} users")
         
     except Exception as e:
         frappe.logger().error(f"❌ [Wislife New Post] Error in handle_new_post_broadcast: {str(e)}")
@@ -160,22 +185,46 @@ def handle_post_reacted(event_data):
             
         user_name = event_data.get('userName', 'Ai đó')
         emoji_name = EMOJI_NAMES.get(event_data.get('reactionType'), 'thả tim')
+        post_id = event_data.get('postId')
         
+        # Gửi push notification
         result = send_mobile_notification(
             user_email=recipient_email,
             title='Wislife',
             body=f'{user_name} đã {emoji_name} bài viết của bạn',
             data={
                 'type': 'wislife_post_reaction',
-                'postId': event_data.get('postId'),
+                'postId': post_id,
                 'action': 'open_post'
             }
         )
         
         if result.get("success"):
-            frappe.logger().info(f"✅ [Wislife Post React] Notification sent to {recipient_email}")
+            frappe.logger().info(f"✅ [Wislife Post React] Push notification sent to {recipient_email}")
         else:
-            frappe.logger().warning(f"⚠️ [Wislife Post React] Failed: {result.get('message')}")
+            frappe.logger().warning(f"⚠️ [Wislife Post React] Push notification failed: {result.get('message')}")
+        
+        # Lưu vào Notification Center để frontend có thể query và hiển thị
+        try:
+            create_notification(
+                title="Wislife",
+                message=f"{user_name} đã {emoji_name} bài viết của bạn",
+                recipient_user=recipient_email,
+                notification_type="system",
+                priority="low",
+                data={
+                    'type': 'wislife_post_reaction',
+                    'postId': post_id,
+                    'action': 'open_post',
+                    'actorName': user_name,
+                    'reactionType': event_data.get('reactionType')
+                },
+                channel="mobile",
+                event_timestamp=frappe.utils.now()
+            )
+            frappe.logger().info(f"✅ [Wislife Post React] Saved to notification center for {recipient_email}")
+        except Exception as db_error:
+            frappe.logger().error(f"❌ [Wislife Post React] Failed to save to notification center: {str(db_error)}")
             
     except Exception as e:
         frappe.logger().error(f"❌ [Wislife Post React] Error in handle_post_reacted: {str(e)}")
@@ -196,22 +245,45 @@ def handle_post_commented(event_data):
             return
             
         user_name = event_data.get('userName', 'Ai đó')
+        post_id = event_data.get('postId')
         
+        # Gửi push notification
         result = send_mobile_notification(
             user_email=recipient_email,
             title='Wislife',
             body=f'{user_name} đã bình luận bài viết của bạn',
             data={
                 'type': 'wislife_post_comment',
-                'postId': event_data.get('postId'),
+                'postId': post_id,
                 'action': 'open_post'
             }
         )
         
         if result.get("success"):
-            frappe.logger().info(f"✅ [Wislife Post Comment] Notification sent to {recipient_email}")
+            frappe.logger().info(f"✅ [Wislife Post Comment] Push notification sent to {recipient_email}")
         else:
-            frappe.logger().warning(f"⚠️ [Wislife Post Comment] Failed: {result.get('message')}")
+            frappe.logger().warning(f"⚠️ [Wislife Post Comment] Push notification failed: {result.get('message')}")
+        
+        # Lưu vào Notification Center
+        try:
+            create_notification(
+                title="Wislife",
+                message=f"{user_name} đã bình luận bài viết của bạn",
+                recipient_user=recipient_email,
+                notification_type="system",
+                priority="low",
+                data={
+                    'type': 'wislife_post_comment',
+                    'postId': post_id,
+                    'action': 'open_post',
+                    'actorName': user_name
+                },
+                channel="mobile",
+                event_timestamp=frappe.utils.now()
+            )
+            frappe.logger().info(f"✅ [Wislife Post Comment] Saved to notification center for {recipient_email}")
+        except Exception as db_error:
+            frappe.logger().error(f"❌ [Wislife Post Comment] Failed to save to notification center: {str(db_error)}")
             
     except Exception as e:
         frappe.logger().error(f"❌ [Wislife Post Comment] Error in handle_post_commented: {str(e)}")
@@ -232,23 +304,48 @@ def handle_comment_replied(event_data):
             return
             
         user_name = event_data.get('userName', 'Ai đó')
+        post_id = event_data.get('postId')
+        comment_id = event_data.get('commentId')
         
+        # Gửi push notification
         result = send_mobile_notification(
             user_email=recipient_email,
             title='Wislife',
             body=f'{user_name} đã trả lời bình luận của bạn',
             data={
                 'type': 'wislife_comment_reply',
-                'postId': event_data.get('postId'),
-                'commentId': event_data.get('commentId'),
+                'postId': post_id,
+                'commentId': comment_id,
                 'action': 'open_post'
             }
         )
         
         if result.get("success"):
-            frappe.logger().info(f"✅ [Wislife Comment Reply] Notification sent to {recipient_email}")
+            frappe.logger().info(f"✅ [Wislife Comment Reply] Push notification sent to {recipient_email}")
         else:
-            frappe.logger().warning(f"⚠️ [Wislife Comment Reply] Failed: {result.get('message')}")
+            frappe.logger().warning(f"⚠️ [Wislife Comment Reply] Push notification failed: {result.get('message')}")
+        
+        # Lưu vào Notification Center
+        try:
+            create_notification(
+                title="Wislife",
+                message=f"{user_name} đã trả lời bình luận của bạn",
+                recipient_user=recipient_email,
+                notification_type="system",
+                priority="low",
+                data={
+                    'type': 'wislife_comment_reply',
+                    'postId': post_id,
+                    'commentId': comment_id,
+                    'action': 'open_post',
+                    'actorName': user_name
+                },
+                channel="mobile",
+                event_timestamp=frappe.utils.now()
+            )
+            frappe.logger().info(f"✅ [Wislife Comment Reply] Saved to notification center for {recipient_email}")
+        except Exception as db_error:
+            frappe.logger().error(f"❌ [Wislife Comment Reply] Failed to save to notification center: {str(db_error)}")
             
     except Exception as e:
         frappe.logger().error(f"❌ [Wislife Comment Reply] Error in handle_comment_replied: {str(e)}")
@@ -270,23 +367,49 @@ def handle_comment_reacted(event_data):
             
         user_name = event_data.get('userName', 'Ai đó')
         emoji_name = EMOJI_NAMES.get(event_data.get('reactionType'), 'thả tim')
+        post_id = event_data.get('postId')
+        comment_id = event_data.get('commentId')
         
+        # Gửi push notification
         result = send_mobile_notification(
             user_email=recipient_email,
             title='Wislife',
             body=f'{user_name} đã {emoji_name} bình luận của bạn',
             data={
                 'type': 'wislife_comment_reaction',
-                'postId': event_data.get('postId'),
-                'commentId': event_data.get('commentId'),
+                'postId': post_id,
+                'commentId': comment_id,
                 'action': 'open_post'
             }
         )
         
         if result.get("success"):
-            frappe.logger().info(f"✅ [Wislife Comment React] Notification sent to {recipient_email}")
+            frappe.logger().info(f"✅ [Wislife Comment React] Push notification sent to {recipient_email}")
         else:
-            frappe.logger().warning(f"⚠️ [Wislife Comment React] Failed: {result.get('message')}")
+            frappe.logger().warning(f"⚠️ [Wislife Comment React] Push notification failed: {result.get('message')}")
+        
+        # Lưu vào Notification Center
+        try:
+            create_notification(
+                title="Wislife",
+                message=f"{user_name} đã {emoji_name} bình luận của bạn",
+                recipient_user=recipient_email,
+                notification_type="system",
+                priority="low",
+                data={
+                    'type': 'wislife_comment_reaction',
+                    'postId': post_id,
+                    'commentId': comment_id,
+                    'action': 'open_post',
+                    'actorName': user_name,
+                    'reactionType': event_data.get('reactionType')
+                },
+                channel="mobile",
+                event_timestamp=frappe.utils.now()
+            )
+            frappe.logger().info(f"✅ [Wislife Comment React] Saved to notification center for {recipient_email}")
+        except Exception as db_error:
+            frappe.logger().error(f"❌ [Wislife Comment React] Failed to save to notification center: {str(db_error)}")
             
     except Exception as e:
         frappe.logger().error(f"❌ [Wislife Comment React] Error in handle_comment_reacted: {str(e)}")
@@ -328,6 +451,7 @@ def handle_post_mention(event_data):
                 if teachers and len(teachers) > 0:
                     recipient_email = teachers[0].get('email')
                     
+                    # Gửi push notification
                     result = send_mobile_notification(
                         user_email=recipient_email,
                         title='Wislife',
@@ -342,7 +466,29 @@ def handle_post_mention(event_data):
                     
                     if result.get("success"):
                         success_count += 1
-                        frappe.logger().info(f"✅ [Wislife Mention] Notification sent to {recipient_email}")
+                        frappe.logger().info(f"✅ [Wislife Mention] Push notification sent to {recipient_email}")
+                    
+                    # Lưu vào Notification Center
+                    try:
+                        create_notification(
+                            title="Wislife",
+                            message=f"{user_name} đã nhắc đến bạn trong một bình luận",
+                            recipient_user=recipient_email,
+                            notification_type="system",
+                            priority="normal",
+                            data={
+                                'type': 'wislife_mention',
+                                'postId': post_id,
+                                'commentId': comment_id,
+                                'action': 'open_post',
+                                'actorName': user_name
+                            },
+                            channel="mobile",
+                            event_timestamp=frappe.utils.now()
+                        )
+                        frappe.logger().info(f"✅ [Wislife Mention] Saved to notification center for {recipient_email}")
+                    except Exception as db_error:
+                        frappe.logger().error(f"❌ [Wislife Mention] Failed to save to notification center: {str(db_error)}")
                 else:
                     frappe.logger().warning(f"⚠️ [Wislife Mention] No teacher found for name: {name}")
                         
