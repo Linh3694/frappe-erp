@@ -369,31 +369,67 @@ def import_lookups_excel():
 
 
 @frappe.whitelist(allow_guest=False)
-def list_titles():
+def list_titles(search: str | None = None, page: int = 1, page_size: int = 20):
+    """
+    List library titles with optional search and pagination.
+    - search: tìm kiếm theo tên sách, mã sách, tác giả
+    - page: trang hiện tại (bắt đầu từ 1)
+    - page_size: số mục trên mỗi trang
+    """
     if (resp := _require_library_role()):
         return resp
-    data = frappe.get_all(
-        TITLE_DTYPE,
-        fields=[
-            "name as id",
-            "title",
-            "library_code",
-            "authors",
-            "category",
-            "document_type",
-            "series_name",
-            "language",
-            "is_new_book",
-            "is_featured_book",
-            "is_audio_book",
-            "cover_image",
-        ],
-        order_by="modified desc",
-    )
-    return list_response(
-        data={"items": data, "total": len(data)},
-        message="Fetched titles",
-    )
+    
+    try:
+        page = int(page)
+        page_size = int(page_size)
+        
+        filters = {}
+        or_filters = []
+        
+        # Thêm search nếu có
+        if search and search.strip():
+            search_term = f"%{search.strip()}%"
+            or_filters = [
+                ["title", "like", search_term],
+                ["library_code", "like", search_term],
+                ["authors", "like", search_term],
+            ]
+        
+        # Lấy tổng số để tính pagination
+        total = frappe.db.count(TITLE_DTYPE, filters=filters, or_filters=or_filters if or_filters else None)
+        
+        # Lấy data với pagination
+        limit_start = (page - 1) * page_size
+        data = frappe.get_all(
+            TITLE_DTYPE,
+            filters=filters,
+            or_filters=or_filters if or_filters else None,
+            fields=[
+                "name as id",
+                "title",
+                "library_code",
+                "authors",
+                "category",
+                "document_type",
+                "series_name",
+                "language",
+                "is_new_book",
+                "is_featured_book",
+                "is_audio_book",
+                "cover_image",
+            ],
+            order_by="modified desc",
+            limit_start=limit_start,
+            limit_page_length=page_size,
+        )
+        
+        return list_response(
+            data={"items": data, "total": total},
+            message="Fetched titles",
+        )
+    except Exception as ex:
+        frappe.log_error(f"list_titles failed: {ex}")
+        return error_response(message="Không lấy được danh sách đầu sách", code="LIST_TITLES_ERROR")
 
 
 def _ensure_book_cover_folder():
@@ -800,27 +836,42 @@ def import_titles_excel():
 def list_book_copies(search: str | None = None, status: str | None = None, title_id: str | None = None, page: int = 1, page_size: int = 20):
     """
     List book copies with optional filters.
-    - search: search by generated_code
+    - search: tìm kiếm theo mã sách, ISBN, tên sách
     - status: filter by status (available, borrowed, reserved, overdue)
     - title_id: filter by title (đầu sách)
+    - page: trang hiện tại (bắt đầu từ 1)
+    - page_size: số mục trên mỗi trang
     """
     if (resp := _require_library_role()):
         return resp
     try:
+        page = int(page)
+        page_size = int(page_size)
+        
         filters: Dict[str, Any] = {}
+        or_filters = []
+        
         if status and status in STATUS_MAP:
             filters["status"] = status
         if title_id:
             filters["title_id"] = title_id
-        if search:
-            # Search by generated_code, isbn, or book_title
-            filters["generated_code"] = ["like", f"%{search}%"]
-            # For OR search, we use frappe.get_all with or_filters later
-            # For now, simple search on generated_code only
+            
+        # Search by generated_code, isbn, or book_title
+        if search and search.strip():
+            search_term = f"%{search.strip()}%"
+            or_filters = [
+                ["generated_code", "like", search_term],
+                ["isbn", "like", search_term],
+                ["book_title", "like", search_term],
+            ]
+
+        # Lấy tổng số để tính pagination
+        total = frappe.db.count(COPY_DTYPE, filters=filters, or_filters=or_filters if or_filters else None)
 
         copies = frappe.get_all(
             COPY_DTYPE,
             filters=filters,
+            or_filters=or_filters if or_filters else None,
             fields=[
                 "name as id",
                 "generated_code",
@@ -851,9 +902,10 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
                 "storage_location",
             ],
             limit_start=(page - 1) * page_size,
-            limit=page_size,
+            limit_page_length=page_size,
             order_by="modified desc",
         )
+        
         # Enrich with title info
         for copy in copies:
             if copy.get("title_id"):
@@ -863,7 +915,7 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
                     copy["title_library_code"] = title_doc.library_code
                 except Exception:
                     pass
-        total = frappe.db.count(COPY_DTYPE, filters=filters)
+                    
         return list_response(data={"items": copies, "total": total}, message="Fetched copies")
     except Exception as ex:
         frappe.log_error(f"list_book_copies failed: {ex}")
