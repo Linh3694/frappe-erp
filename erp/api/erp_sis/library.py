@@ -384,7 +384,7 @@ def list_titles(search: str | None = None, page: int = 1, page_size: int = 20):
         page_size = int(page_size)
         
         filters = {}
-        or_filters = []
+        or_filters = None
         
         # Thêm search nếu có
         if search and search.strip():
@@ -397,11 +397,10 @@ def list_titles(search: str | None = None, page: int = 1, page_size: int = 20):
         
         # Lấy data với pagination
         limit_start = (page - 1) * page_size
-        data = frappe.get_all(
-            TITLE_DTYPE,
-            filters=filters,
-            or_filters=or_filters if or_filters else None,
-            fields=[
+        
+        query_params = {
+            "filters": filters,
+            "fields": [
                 "name as id",
                 "title",
                 "library_code",
@@ -415,18 +414,22 @@ def list_titles(search: str | None = None, page: int = 1, page_size: int = 20):
                 "is_audio_book",
                 "cover_image",
             ],
-            order_by="modified desc",
-            limit_start=limit_start,
-            limit_page_length=page_size,
-        )
+            "order_by": "modified desc",
+            "limit_start": limit_start,
+            "limit_page_length": page_size,
+        }
+        
+        if or_filters:
+            query_params["or_filters"] = or_filters
+            
+        data = frappe.get_all(TITLE_DTYPE, **query_params)
         
         # Lấy tổng số - dùng frappe.get_all với pluck='name' để đếm
-        total_count = frappe.get_all(
-            TITLE_DTYPE,
-            filters=filters,
-            or_filters=or_filters if or_filters else None,
-            pluck='name',
-        )
+        count_params = {"filters": filters, "pluck": "name"}
+        if or_filters:
+            count_params["or_filters"] = or_filters
+            
+        total_count = frappe.get_all(TITLE_DTYPE, **count_params)
         total = len(total_count)
         
         return list_response(
@@ -855,7 +858,7 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
         page_size = int(page_size)
         
         filters: Dict[str, Any] = {}
-        or_filters = []
+        or_filters = None
         
         if status and status in STATUS_MAP:
             filters["status"] = status
@@ -871,11 +874,9 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
                 ["book_title", "like", search_term],
             ]
 
-        copies = frappe.get_all(
-            COPY_DTYPE,
-            filters=filters,
-            or_filters=or_filters if or_filters else None,
-            fields=[
+        query_params = {
+            "filters": filters,
+            "fields": [
                 "name as id",
                 "generated_code",
                 "special_code",
@@ -904,10 +905,15 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
                 "cataloging_agency",
                 "storage_location",
             ],
-            limit_start=(page - 1) * page_size,
-            limit_page_length=page_size,
-            order_by="modified desc",
-        )
+            "limit_start": (page - 1) * page_size,
+            "limit_page_length": page_size,
+            "order_by": "modified desc",
+        }
+        
+        if or_filters:
+            query_params["or_filters"] = or_filters
+            
+        copies = frappe.get_all(COPY_DTYPE, **query_params)
         
         # Enrich with title info
         for copy in copies:
@@ -920,12 +926,11 @@ def list_book_copies(search: str | None = None, status: str | None = None, title
                     pass
         
         # Lấy tổng số - dùng frappe.get_all với pluck='name' để đếm
-        total_count = frappe.get_all(
-            COPY_DTYPE,
-            filters=filters,
-            or_filters=or_filters if or_filters else None,
-            pluck='name',
-        )
+        count_params = {"filters": filters, "pluck": "name"}
+        if or_filters:
+            count_params["or_filters"] = or_filters
+            
+        total_count = frappe.get_all(COPY_DTYPE, **count_params)
         total = len(total_count)
                     
         return list_response(data={"items": copies, "total": total}, message="Fetched copies")
