@@ -152,7 +152,7 @@ def handle_new_post_broadcast(event_data):
                             'action': 'open_post',
                             'actorName': author_name
                         },
-                        channel="mobile",
+                        channel="push",
                         event_timestamp=frappe.utils.now()
                     )
                     saved_count += 1
@@ -219,7 +219,7 @@ def handle_post_reacted(event_data):
                     'actorName': user_name,
                     'reactionType': event_data.get('reactionType')
                 },
-                channel="mobile",
+                channel="push",
                 event_timestamp=frappe.utils.now()
             )
             frappe.logger().info(f"✅ [Wislife Post React] Saved to notification center for {recipient_email}")
@@ -278,7 +278,7 @@ def handle_post_commented(event_data):
                     'action': 'open_post',
                     'actorName': user_name
                 },
-                channel="mobile",
+                channel="push",
                 event_timestamp=frappe.utils.now()
             )
             frappe.logger().info(f"✅ [Wislife Post Comment] Saved to notification center for {recipient_email}")
@@ -340,7 +340,7 @@ def handle_comment_replied(event_data):
                     'action': 'open_post',
                     'actorName': user_name
                 },
-                channel="mobile",
+                channel="push",
                 event_timestamp=frappe.utils.now()
             )
             frappe.logger().info(f"✅ [Wislife Comment Reply] Saved to notification center for {recipient_email}")
@@ -404,7 +404,7 @@ def handle_comment_reacted(event_data):
                     'actorName': user_name,
                     'reactionType': event_data.get('reactionType')
                 },
-                channel="mobile",
+                channel="push",
                 event_timestamp=frappe.utils.now()
             )
             frappe.logger().info(f"✅ [Wislife Comment React] Saved to notification center for {recipient_email}")
@@ -483,7 +483,7 @@ def handle_post_mention(event_data):
                                 'action': 'open_post',
                                 'actorName': user_name
                             },
-                            channel="mobile",
+                            channel="push",
                             event_timestamp=frappe.utils.now()
                         )
                         frappe.logger().info(f"✅ [Wislife Mention] Saved to notification center for {recipient_email}")
