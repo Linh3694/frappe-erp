@@ -387,10 +387,10 @@ def list_titles():
             "request_args": dict(frappe.request.args) if hasattr(frappe, 'request') and hasattr(frappe.request, 'args') else None,
         }
         
-        # Lấy params từ form_dict - Frappe tự động parse cả GET query và POST body vào đây
-        search = frappe.form_dict.get("search")
-        page = int(frappe.form_dict.get("page", 1))
-        page_size = int(frappe.form_dict.get("page_size", 20))
+        # Lấy params từ request.args (GET) hoặc form_dict (POST)
+        search = frappe.request.args.get("search") or frappe.form_dict.get("search")
+        page = int(frappe.request.args.get("page") or frappe.form_dict.get("page") or 1)
+        page_size = int(frappe.request.args.get("page_size") or frappe.form_dict.get("page_size") or 20)
         
         debug_info["parsed_params"] = {
             "search": search,
@@ -870,12 +870,12 @@ def list_book_copies():
     if (resp := _require_library_role()):
         return resp
     try:
-        # Lấy params từ form_dict - Frappe tự động parse cả GET query và POST body vào đây
-        search = frappe.form_dict.get("search")
-        status = frappe.form_dict.get("status")
-        title_id = frappe.form_dict.get("title_id")
-        page = int(frappe.form_dict.get("page", 1))
-        page_size = int(frappe.form_dict.get("page_size", 20))
+        # Lấy params từ request.args (GET) hoặc form_dict (POST)
+        search = frappe.request.args.get("search") or frappe.form_dict.get("search")
+        status = frappe.request.args.get("status") or frappe.form_dict.get("status")
+        title_id = frappe.request.args.get("title_id") or frappe.form_dict.get("title_id")
+        page = int(frappe.request.args.get("page") or frappe.form_dict.get("page") or 1)
+        page_size = int(frappe.request.args.get("page_size") or frappe.form_dict.get("page_size") or 20)
         
         filters: Dict[str, Any] = {}
         or_filters = None
@@ -1472,13 +1472,13 @@ def list_activities():
     if (resp := _require_library_role()):
         return resp
     try:
-        # Lấy params từ form_dict - Frappe tự động parse cả GET query và POST body vào đây
-        action = frappe.form_dict.get("action")
-        book_code = frappe.form_dict.get("book_code")
-        from_date = frappe.form_dict.get("from_date")
-        to_date = frappe.form_dict.get("to_date")
-        page = int(frappe.form_dict.get("page", 1))
-        page_size = int(frappe.form_dict.get("page_size", 20))
+        # Lấy params từ request.args (GET) hoặc form_dict (POST)
+        action = frappe.request.args.get("action") or frappe.form_dict.get("action")
+        book_code = frappe.request.args.get("book_code") or frappe.form_dict.get("book_code")
+        from_date = frappe.request.args.get("from_date") or frappe.form_dict.get("from_date")
+        to_date = frappe.request.args.get("to_date") or frappe.form_dict.get("to_date")
+        page = int(frappe.request.args.get("page") or frappe.form_dict.get("page") or 1)
+        page_size = int(frappe.request.args.get("page_size") or frappe.form_dict.get("page_size") or 20)
         
         filters: Dict[str, Any] = {}
         if action:
@@ -1560,10 +1560,10 @@ def list_events():
         return resp
     
     try:
-        # Lấy params từ form_dict - Frappe tự động parse cả GET query và POST body vào đây
-        search = frappe.form_dict.get("search")
-        page = int(frappe.form_dict.get("page", 1))
-        page_size = int(frappe.form_dict.get("page_size", 10))
+        # Lấy params từ request.args (GET) hoặc form_dict (POST)
+        search = frappe.request.args.get("search") or frappe.form_dict.get("search")
+        page = int(frappe.request.args.get("page") or frappe.form_dict.get("page") or 1)
+        page_size = int(frappe.request.args.get("page_size") or frappe.form_dict.get("page_size") or 10)
         
         filters: Dict[str, Any] = {}
         if search:
