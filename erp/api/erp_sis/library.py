@@ -680,7 +680,7 @@ def delete_title():
         return not_found_response(message="Không tìm thấy đầu sách", code="TITLE_NOT_FOUND")
     
     # Kiểm tra có bản sao nào liên kết không
-    copy_count = frappe.db.count(COPY_DTYPE, {"title": title_id})
+    copy_count = frappe.db.count(COPY_DTYPE, {"title_id": title_id})
     if copy_count > 0:
         return validation_error_response(
             message=f"Không thể xóa đầu sách vì còn {copy_count} bản sao liên kết. Vui lòng xóa các bản sao trước.",
