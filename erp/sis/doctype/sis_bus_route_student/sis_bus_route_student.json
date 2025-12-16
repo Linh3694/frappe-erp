@@ -78,13 +78,13 @@
    "fieldname": "pickup_location",
    "fieldtype": "Data",
    "label": "Pickup Location",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "drop_off_location",
    "fieldtype": "Data",
    "label": "Drop-off Location",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "notes",
