@@ -1023,6 +1023,10 @@ def sync_route_to_daily_trips():
 			fields=["*"]
 		)
 		logs.append(f"📋 Tìm thấy {len(route_students)} route students")
+		
+		# Log route students details for debugging
+		for rs in route_students:
+			logs.append(f"   👤 {rs.student_id}: {rs.weekday} - {rs.trip_type}")
 
 		if not route_students:
 			return success_response(
@@ -1052,6 +1056,8 @@ def sync_route_to_daily_trips():
 			# Find route students matching this daily trip's weekday and trip_type
 			matching_students = [rs for rs in route_students 
 				if rs.weekday == daily_trip.weekday and rs.trip_type == daily_trip.trip_type]
+			
+			logs.append(f"📅 Daily trip {daily_trip.name} ({daily_trip.trip_date}, {daily_trip.weekday}, {daily_trip.trip_type}): {len(matching_students)} matching students")
 
 			for rs in matching_students:
 				# Check if student already exists in daily trip
