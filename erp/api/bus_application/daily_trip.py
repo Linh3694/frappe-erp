@@ -600,17 +600,22 @@ def update_student_status():
         if not user_email or user_email == 'Guest':
             return error_response("Authentication required", code="AUTH_REQUIRED")
 
-        # Get request data
+        # Get request data - support both JSON body and form data
         data = {}
         if frappe.request.data:
             try:
-                json_data = json.loads(frappe.request.data)
+                if isinstance(frappe.request.data, bytes):
+                    json_data = json.loads(frappe.request.data.decode('utf-8'))
+                else:
+                    json_data = json.loads(frappe.request.data)
                 if json_data:
                     data = json_data
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
                 data = frappe.local.form_dict
         else:
             data = frappe.local.form_dict
+        
+        frappe.logger().info(f"🔍 update_student_status data: {data}")
 
         daily_trip_student_id = data.get('daily_trip_student_id')
         student_status = data.get('student_status')
@@ -618,14 +623,14 @@ def update_student_status():
         notes = data.get('notes')
 
         if not daily_trip_student_id:
-            return validation_error_response({"daily_trip_student_id": ["ID is required"]})
+            return error_response("Daily trip student ID is required")
 
         if not student_status:
-            return validation_error_response({"student_status": ["Status is required"]})
+            return error_response("Student status is required")
 
         valid_statuses = ['Not Boarded', 'Boarded', 'Dropped Off', 'Absent']
         if student_status not in valid_statuses:
-            return validation_error_response({"student_status": [f"Must be one of: {', '.join(valid_statuses)}"]})
+            return error_response(f"Invalid student status. Must be one of: {', '.join(valid_statuses)}")
 
         # Get the trip student record
         trip_student = frappe.get_doc("SIS Bus Daily Trip Student", daily_trip_student_id)
