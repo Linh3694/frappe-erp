@@ -908,6 +908,90 @@ def remove_student_from_route():
 		return error_response(f"Failed to remove student from route: {str(e)}")
 
 
+@frappe.whitelist()
+def update_route_student():
+	"""Update a student's pickup/drop-off location in route and corresponding daily trips"""
+	try:
+		# Get data from request
+		data = {}
+		if frappe.request.data:
+			try:
+				if isinstance(frappe.request.data, bytes):
+					data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					data = json.loads(frappe.request.data)
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+				data = frappe.local.form_dict
+		else:
+			data = frappe.local.form_dict
+
+		route_student_id = data.get('route_student_id')
+		if not route_student_id:
+			return error_response("Route student ID is required")
+
+		# Get the route student document
+		route_student = frappe.get_doc("SIS Bus Route Student", route_student_id)
+
+		# Update fields if provided
+		updated_fields = []
+		if 'pickup_order' in data and data['pickup_order'] is not None:
+			route_student.pickup_order = data['pickup_order']
+			updated_fields.append('pickup_order')
+		if 'pickup_location' in data:
+			route_student.pickup_location = data['pickup_location'] or ''
+			updated_fields.append('pickup_location')
+		if 'drop_off_location' in data:
+			route_student.drop_off_location = data['drop_off_location'] or ''
+			updated_fields.append('drop_off_location')
+		if 'notes' in data:
+			route_student.notes = data['notes'] or ''
+			updated_fields.append('notes')
+
+		route_student.save()
+		frappe.db.commit()
+
+		# Also update corresponding daily trip students
+		daily_trips_updated = 0
+		try:
+			daily_trip_students = frappe.db.sql("""
+				SELECT dts.name 
+				FROM `tabSIS Bus Daily Trip Student` dts
+				INNER JOIN `tabSIS Bus Daily Trip` dt ON dts.daily_trip_id = dt.name
+				WHERE dt.route_id = %s 
+				AND dts.student_id = %s 
+				AND dt.weekday = %s 
+				AND dt.trip_type = %s
+			""", (route_student.route_id, route_student.student_id, route_student.weekday, route_student.trip_type), as_dict=True)
+
+			for dts in daily_trip_students:
+				try:
+					daily_student = frappe.get_doc("SIS Bus Daily Trip Student", dts.name)
+					if 'pickup_order' in data and data['pickup_order'] is not None:
+						daily_student.pickup_order = data['pickup_order']
+					if 'pickup_location' in data:
+						daily_student.pickup_location = data['pickup_location'] or ''
+					if 'drop_off_location' in data:
+						daily_student.drop_off_location = data['drop_off_location'] or ''
+					daily_student.save()
+					daily_trips_updated += 1
+				except Exception as e:
+					frappe.log_error(f"Error updating daily trip student {dts.name}: {str(e)}")
+
+			frappe.db.commit()
+		except Exception as e:
+			frappe.log_error(f"Error updating daily trip students: {str(e)}")
+
+		return success_response(
+			data=route_student.as_dict(),
+			message=f"Route student updated successfully. Updated {daily_trips_updated} daily trips.",
+			logs=[f"Updated fields: {', '.join(updated_fields)}"]
+		)
+	except Exception as e:
+		frappe.log_error(f"Error updating route student: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to update route student: {str(e)}")
+
+
 def remove_student_from_daily_trips(route_id, student_id, weekday, trip_type):
 	"""Remove student from all corresponding daily trips"""
 	logs = []
