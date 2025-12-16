@@ -661,6 +661,9 @@ def update_student_status():
         current_time = now_datetime()
         trip_auto_started = False
         
+        # Lưu user hiện tại để restore sau
+        original_user = frappe.session.user
+        
         frappe.set_user("Administrator")
         try:
             # Tự động bắt đầu chuyến xe nếu chưa bắt đầu và đang cập nhật trạng thái điểm danh
@@ -678,8 +681,18 @@ def update_student_status():
             elif student_status == 'Dropped Off':
                 trip_student.drop_off_time = current_time
                 trip_student.drop_off_method = 'manual'
-            elif student_status == 'Absent' and absent_reason:
-                trip_student.absent_reason = absent_reason
+            elif student_status == 'Absent':
+                # Map Vietnamese to English absent reasons (doctype uses English options)
+                reason_mapping = {
+                    'Nghỉ học': 'School Leave',
+                    'Nghỉ ốm': 'Sick Leave',
+                    'Nghỉ phép': 'Permission',
+                    'Lý do khác': 'Other'
+                }
+                if absent_reason:
+                    trip_student.absent_reason = reason_mapping.get(absent_reason, absent_reason)
+                else:
+                    trip_student.absent_reason = 'School Leave'  # Default reason
 
             if notes:
                 trip_student.notes = notes
@@ -687,8 +700,12 @@ def update_student_status():
             trip_student.flags.ignore_permissions = True
             trip_student.save(ignore_permissions=True)
             frappe.db.commit()
+        except Exception as save_error:
+            frappe.log_error(f"Error saving student status: {str(save_error)}")
+            frappe.set_user(original_user)
+            return error_response(f"Error saving: {str(save_error)}")
         finally:
-            frappe.set_user("Guest")
+            frappe.set_user(original_user)
 
         message = f"Đã cập nhật trạng thái học sinh thành {student_status}"
         if trip_auto_started:

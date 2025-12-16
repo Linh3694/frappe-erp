@@ -1890,13 +1890,24 @@ def update_student_status_in_trip():
 
 		doc = frappe.get_doc("SIS Bus Daily Trip Student", daily_trip_student_id)
 
+		# Map Vietnamese to English absent reasons (doctype uses English options)
+		reason_mapping = {
+			'Nghỉ học': 'School Leave',
+			'Nghỉ ốm': 'Sick Leave',
+			'Nghỉ phép': 'Permission',
+			'Lý do khác': 'Other'
+		}
+
 		# Update fields based on status
 		if student_status == 'Boarded' and boarding_time:
 			doc.boarding_time = boarding_time
 		elif student_status == 'Dropped Off' and drop_off_time:
 			doc.drop_off_time = drop_off_time
-		elif student_status == 'Absent' and absent_reason:
-			doc.absent_reason = absent_reason
+		elif student_status == 'Absent':
+			if absent_reason:
+				doc.absent_reason = reason_mapping.get(absent_reason, absent_reason)
+			else:
+				doc.absent_reason = 'School Leave'  # Default reason
 
 		doc.student_status = student_status
 		if notes:
