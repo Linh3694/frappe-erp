@@ -992,6 +992,143 @@ def update_route_student():
 		return error_response(f"Failed to update route student: {str(e)}")
 
 
+@frappe.whitelist()
+def sync_route_to_daily_trips():
+	"""Sync all route students to corresponding daily trips"""
+	try:
+		# Get route_id from request
+		data = {}
+		if frappe.request.data:
+			try:
+				if isinstance(frappe.request.data, bytes):
+					data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					data = json.loads(frappe.request.data)
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+				data = frappe.local.form_dict
+		else:
+			data = frappe.local.form_dict
+
+		route_id = data.get('route_id')
+		if not route_id:
+			return error_response("Route ID is required")
+
+		logs = []
+		logs.append(f"🔄 Bắt đầu sync route {route_id} sang daily trips...")
+
+		# Get all route students
+		route_students = frappe.get_all(
+			"SIS Bus Route Student",
+			filters={"route_id": route_id},
+			fields=["*"]
+		)
+		logs.append(f"📋 Tìm thấy {len(route_students)} route students")
+
+		if not route_students:
+			return success_response(
+				message="No route students to sync",
+				logs=logs
+			)
+
+		# Get all daily trips for this route
+		daily_trips = frappe.get_all(
+			"SIS Bus Daily Trip",
+			filters={"route_id": route_id},
+			fields=["name", "trip_date", "weekday", "trip_type"]
+		)
+		logs.append(f"📋 Tìm thấy {len(daily_trips)} daily trips")
+
+		if not daily_trips:
+			return success_response(
+				message="No daily trips to sync",
+				logs=logs
+			)
+
+		added_count = 0
+		updated_count = 0
+		skipped_count = 0
+
+		for daily_trip in daily_trips:
+			# Find route students matching this daily trip's weekday and trip_type
+			matching_students = [rs for rs in route_students 
+				if rs.weekday == daily_trip.weekday and rs.trip_type == daily_trip.trip_type]
+
+			for rs in matching_students:
+				# Check if student already exists in daily trip
+				existing = frappe.db.sql("""
+					SELECT name, pickup_location, drop_off_location, pickup_order 
+					FROM `tabSIS Bus Daily Trip Student`
+					WHERE daily_trip_id = %s AND student_id = %s
+					LIMIT 1
+				""", (daily_trip.name, rs.student_id), as_dict=True)
+
+				if existing:
+					# Update existing record if location changed
+					ex = existing[0]
+					if (ex.pickup_location != rs.pickup_location or 
+						ex.drop_off_location != rs.drop_off_location or
+						ex.pickup_order != rs.pickup_order):
+						try:
+							frappe.db.set_value("SIS Bus Daily Trip Student", ex.name, {
+								"pickup_location": rs.pickup_location or '',
+								"drop_off_location": rs.drop_off_location or '',
+								"pickup_order": rs.pickup_order
+							})
+							updated_count += 1
+						except Exception as e:
+							logs.append(f"   ❌ Lỗi update {daily_trip.name}: {str(e)}")
+					else:
+						skipped_count += 1
+				else:
+					# Add new student to daily trip
+					try:
+						# Get student info
+						student = frappe.get_doc("CRM Student", rs.student_id)
+						class_name = ""
+						if rs.class_student_id:
+							try:
+								class_student = frappe.get_doc("SIS Class Student", rs.class_student_id)
+								if class_student.class_id:
+									class_doc = frappe.get_doc("SIS Class", class_student.class_id)
+									class_name = class_doc.title or class_doc.name
+							except:
+								pass
+
+						frappe.get_doc({
+							"doctype": "SIS Bus Daily Trip Student",
+							"daily_trip_id": daily_trip.name,
+							"student_id": rs.student_id,
+							"class_student_id": rs.class_student_id,
+							"student_name": student.student_name,
+							"student_code": student.student_code,
+							"class_name": class_name,
+							"pickup_order": rs.pickup_order,
+							"pickup_location": rs.pickup_location or '',
+							"drop_off_location": rs.drop_off_location or '',
+							"student_status": "Not Boarded"
+						}).insert(ignore_permissions=True)
+						added_count += 1
+					except Exception as e:
+						logs.append(f"   ❌ Lỗi thêm vào {daily_trip.name}: {str(e)}")
+
+		frappe.db.commit()
+		logs.append(f"📊 Tổng kết: Thêm mới {added_count}, Cập nhật {updated_count}, Bỏ qua {skipped_count}")
+
+		return success_response(
+			data={
+				"added": added_count,
+				"updated": updated_count,
+				"skipped": skipped_count
+			},
+			message=f"Sync completed: Added {added_count}, Updated {updated_count}, Skipped {skipped_count}",
+			logs=logs
+		)
+	except Exception as e:
+		frappe.log_error(f"Error syncing route to daily trips: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Failed to sync: {str(e)}")
+
+
 def remove_student_from_daily_trips(route_id, student_id, weekday, trip_type):
 	"""Remove student from all corresponding daily trips"""
 	logs = []
