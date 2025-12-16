@@ -323,6 +323,19 @@ def check_student_in_trip():
 
         # Update status based on trip type
         current_time = now_datetime()
+        
+        # Tự động bắt đầu chuyến xe nếu chưa bắt đầu
+        trip_auto_started = False
+        if trip.trip_status == "Not Started":
+            frappe.set_user("Administrator")
+            try:
+                trip.trip_status = "In Progress"
+                trip.flags.ignore_permissions = True
+                trip.save(ignore_permissions=True)
+                frappe.db.commit()
+                trip_auto_started = True
+            finally:
+                frappe.set_user("Guest")
 
         if trip.trip_type == "Đón":  # Pickup trip
             if trip_student.student_status == "Boarded":
@@ -367,13 +380,18 @@ def check_student_in_trip():
             })
         }).insert(ignore_permissions=True)
 
+        message = "Student checked in successfully"
+        if trip_auto_started:
+            message += " (Trip auto-started)"
+            
         return single_item_response({
             "student_id": student_id,
             "trip_id": trip_id,
             "status": trip_student.student_status,
             "timestamp": current_time,
-            "method": method
-        }, f"Student checked in successfully")
+            "method": method,
+            "trip_auto_started": trip_auto_started
+        }, message)
 
     except frappe.DoesNotExistError:
         return not_found_response("Trip or student not found")
@@ -710,6 +728,20 @@ def verify_and_checkin():
         if auto_checkin:
             trip_student = frappe.get_doc("SIS Bus Daily Trip Student", trip_student_record.name)
             current_time = now_datetime()
+            
+            # Tự động bắt đầu chuyến xe nếu chưa bắt đầu
+            trip_auto_started = False
+            if trip.trip_status == "Not Started":
+                frappe.set_user("Administrator")
+                try:
+                    trip.trip_status = "In Progress"
+                    trip.flags.ignore_permissions = True
+                    trip.save(ignore_permissions=True)
+                    frappe.db.commit()
+                    trip_auto_started = True
+                    frappe.logger().info(f"[FaceRecognition] Trip {trip_id} auto-started due to first check-in")
+                finally:
+                    frappe.set_user("Guest")
 
             if trip.trip_type == "Đón":  # Pickup
                 if trip_student.student_status != "Boarded":
@@ -729,7 +761,10 @@ def verify_and_checkin():
                     _update_trip_statistics(trip_id)
                     result["checked_in"] = True
                     result["new_status"] = "Boarded"
+                    result["trip_auto_started"] = trip_auto_started
                     result["message"] = f"Đã điểm danh {trip_student_record.student_name} lên xe"
+                    if trip_auto_started:
+                        result["message"] += " (Chuyến xe đã tự động bắt đầu)"
                 else:
                     result["checked_in"] = False
                     result["message"] = f"{trip_student_record.student_name} đã điểm danh rồi"
@@ -751,7 +786,10 @@ def verify_and_checkin():
                     _update_trip_statistics(trip_id)
                     result["checked_in"] = True
                     result["new_status"] = "Dropped Off"
+                    result["trip_auto_started"] = trip_auto_started
                     result["message"] = f"Đã điểm danh {trip_student_record.student_name} xuống xe"
+                    if trip_auto_started:
+                        result["message"] += " (Chuyến xe đã tự động bắt đầu)"
                 else:
                     result["checked_in"] = False
                     result["message"] = f"{trip_student_record.student_name} đã xuống xe rồi"

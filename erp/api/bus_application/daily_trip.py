@@ -630,6 +630,9 @@ def update_student_status():
         # Get the trip student record
         trip_student = frappe.get_doc("SIS Bus Daily Trip Student", daily_trip_student_id)
         trip_id = trip_student.daily_trip_id
+        
+        # Lấy thông tin trip
+        trip = frappe.get_doc("SIS Bus Daily Trip", trip_id)
 
         # Check permissions (monitor or web user)
         is_monitor = "@busmonitor.wellspring.edu.vn" in user_email
@@ -645,16 +648,23 @@ def update_student_status():
                 return not_found_response("Bus monitor not found")
 
             monitor_id = monitors[0].name
-            trip = frappe.get_doc("SIS Bus Daily Trip", trip_id)
 
             if trip.monitor1_id != monitor_id and trip.monitor2_id != monitor_id:
                 return forbidden_response("Access denied to this trip")
 
         # Update the record (run as Administrator to bypass permissions)
         current_time = now_datetime()
+        trip_auto_started = False
         
         frappe.set_user("Administrator")
         try:
+            # Tự động bắt đầu chuyến xe nếu chưa bắt đầu và đang cập nhật trạng thái điểm danh
+            if trip.trip_status == "Not Started" and student_status in ['Boarded', 'Dropped Off']:
+                trip.trip_status = "In Progress"
+                trip.flags.ignore_permissions = True
+                trip.save(ignore_permissions=True)
+                trip_auto_started = True
+            
             trip_student.student_status = student_status
 
             if student_status == 'Boarded':
@@ -675,13 +685,19 @@ def update_student_status():
         finally:
             frappe.set_user("Guest")
 
+        message = f"Đã cập nhật trạng thái học sinh thành {student_status}"
+        if trip_auto_started:
+            message += " (Chuyến xe đã tự động bắt đầu)"
+            
         return single_item_response({
             "daily_trip_student_id": daily_trip_student_id,
             "student_id": trip_student.student_id,
             "student_name": trip_student.student_name,
             "student_status": student_status,
-            "updated_at": str(current_time)
-        }, f"Đã cập nhật trạng thái học sinh thành {student_status}")
+            "updated_at": str(current_time),
+            "trip_auto_started": trip_auto_started,
+            "trip_status": trip.trip_status
+        }, message)
 
     except frappe.DoesNotExistError:
         return not_found_response("Record not found")
