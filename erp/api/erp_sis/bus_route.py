@@ -851,7 +851,7 @@ def add_student_to_route():
 
 @frappe.whitelist()
 def remove_student_from_route():
-	"""Remove a student from a bus route schedule"""
+	"""Remove a student from a bus route schedule and corresponding daily trips"""
 	try:
 		# Get route_student_id from query params (frontend sends this)
 		route_student_id = frappe.local.form_dict.get('route_student_id') or frappe.request.args.get('route_student_id')
@@ -859,18 +859,79 @@ def remove_student_from_route():
 		if not route_student_id:
 			return error_response("Route student ID is required")
 
+		# Lấy thông tin route_student trước khi xóa
+		route_student = frappe.get_doc("SIS Bus Route Student", route_student_id)
+		route_id = route_student.route_id
+		student_id = route_student.student_id
+		weekday = route_student.weekday
+		trip_type = route_student.trip_type
+
+		# Xóa học sinh khỏi daily trips tương ứng
+		daily_trips_result = remove_student_from_daily_trips(route_id, student_id, weekday, trip_type)
+		
 		# Delete the SIS Bus Route Student document directly
-		# (It's a standalone DocType, not a child table)
 		frappe.delete_doc("SIS Bus Route Student", route_student_id)
 		frappe.db.commit()
 
+		removed_count = daily_trips_result.get('removed_count', 0) if daily_trips_result else 0
+		message = f"Student removed from route successfully and removed from {removed_count} daily trips"
+
 		return success_response(
-			message="Student removed from route successfully"
+			message=message,
+			logs=daily_trips_result.get('logs', []) if daily_trips_result else []
 		)
 	except Exception as e:
 		frappe.log_error(f"Error removing student from route: {str(e)}")
 		frappe.db.rollback()
 		return error_response(f"Failed to remove student from route: {str(e)}")
+
+
+def remove_student_from_daily_trips(route_id, student_id, weekday, trip_type):
+	"""Remove student from all corresponding daily trips"""
+	logs = []
+	try:
+		# Tìm tất cả daily trips cho route này với cùng weekday và trip_type
+		daily_trips = frappe.get_all(
+			"SIS Bus Daily Trip",
+			filters={
+				"route_id": route_id,
+				"weekday": weekday,
+				"trip_type": trip_type
+			},
+			fields=["name", "trip_date"]
+		)
+
+		logs.append(f"🔍 Tìm thấy {len(daily_trips)} daily trips cho route {route_id}, weekday={weekday}, trip_type={trip_type}")
+		
+		if len(daily_trips) == 0:
+			logs.append(f"⚠️ Không có daily trips nào matching")
+			return {"success": True, "logs": logs, "removed_count": 0}
+
+		# Xóa học sinh khỏi mỗi daily trip
+		removed_count = 0
+		
+		for daily_trip in daily_trips:
+			# Tìm và xóa học sinh trong daily trip
+			daily_trip_students = frappe.db.sql("""
+				SELECT name FROM `tabSIS Bus Daily Trip Student`
+				WHERE daily_trip_id = %s AND student_id = %s
+			""", (daily_trip.name, student_id), as_dict=True)
+			
+			for dts in daily_trip_students:
+				try:
+					frappe.delete_doc("SIS Bus Daily Trip Student", dts.name, ignore_permissions=True)
+					logs.append(f"   ✅ Đã xóa khỏi {daily_trip.name} ({daily_trip.trip_date})")
+					removed_count += 1
+				except Exception as e:
+					logs.append(f"   ❌ Lỗi xóa khỏi {daily_trip.name}: {str(e)}")
+
+		logs.append(f"📊 Tổng cộng đã xóa khỏi {removed_count} daily trips")
+		return {"success": True, "logs": logs, "removed_count": removed_count}
+		
+	except Exception as e:
+		logs.append(f"❌ Error: {str(e)}")
+		frappe.log_error(f"Error removing student from daily trips: {str(e)}")
+		return {"success": False, "logs": logs, "removed_count": 0}
 
 @frappe.whitelist()
 def update_student_in_route():
