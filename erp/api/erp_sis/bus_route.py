@@ -1680,12 +1680,14 @@ def add_student_to_daily_trip():
 
 		# Xử lý student_id: có thể là Bus Student ID hoặc CRM Student ID
 		crm_student_id = None
+		bus_student_class_id = None
 		
 		# Kiểm tra nếu student_id là Bus Student ID (format: SIS_BUS_STU-xxxxx)
 		if student_id.startswith("SIS_BUS_STU-"):
-			# Lấy Bus Student để tìm student_code
+			# Lấy Bus Student để tìm student_code và class_id
 			bus_student = frappe.get_doc("SIS Bus Student", student_id)
 			student_code = bus_student.student_code
+			bus_student_class_id = bus_student.class_id  # Lưu class_id từ Bus Student
 			
 			# Tìm CRM Student từ student_code
 			crm_student_id = frappe.db.get_value("CRM Student", {"student_code": student_code}, "name")
@@ -1708,15 +1710,41 @@ def add_student_to_daily_trip():
 		# Get student info
 		student = frappe.get_doc("CRM Student", crm_student_id)
 		
-		# Get class info if available
+		# Get class info - ưu tiên từ Bus Student, sau đó từ class_student_id
 		class_name = ""
 		class_student_id = data.get('class_student_id')
-		if class_student_id:
+		
+		# Ưu tiên 1: Lấy từ Bus Student class_id
+		if bus_student_class_id:
+			try:
+				class_doc = frappe.get_doc("SIS Class", bus_student_class_id)
+				class_name = class_doc.title or class_doc.name
+			except:
+				pass
+		
+		# Ưu tiên 2: Nếu chưa có class_name, thử từ class_student_id
+		if not class_name and class_student_id:
 			try:
 				class_student = frappe.get_doc("SIS Class Student", class_student_id)
 				if class_student.class_id:
 					class_doc = frappe.get_doc("SIS Class", class_student.class_id)
 					class_name = class_doc.title or class_doc.name
+			except:
+				pass
+		
+		# Ưu tiên 3: Nếu vẫn chưa có, tìm từ SIS Class Student với CRM Student ID
+		if not class_name:
+			try:
+				class_info = frappe.db.sql("""
+					SELECT c.title, c.name
+					FROM `tabSIS Class Student` cs
+					INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+					WHERE cs.student_id = %s AND cs.class_type = 'regular'
+					ORDER BY cs.creation DESC
+					LIMIT 1
+				""", (crm_student_id,), as_dict=True)
+				if class_info:
+					class_name = class_info[0].title or class_info[0].name
 			except:
 				pass
 
