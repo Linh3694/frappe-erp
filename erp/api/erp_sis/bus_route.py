@@ -658,6 +658,49 @@ def add_student_to_route():
 			raise e
 
 		try:
+			frappe.logger().info("🔍 STEP 2.5: Checking if student already belongs to another route...")
+			# Kiểm tra học sinh đã thuộc tuyến khác trong cùng weekday + trip_type chưa
+			existing_assignment = frappe.db.sql("""
+				SELECT rs.name, r.route_name 
+				FROM `tabSIS Bus Route Student` rs
+				INNER JOIN `tabSIS Bus Route` r ON rs.route_id = r.name
+				WHERE rs.student_id = %s 
+				AND rs.weekday = %s 
+				AND rs.trip_type = %s
+				AND rs.route_id != %s
+				LIMIT 1
+			""", (data['student_id'], data['weekday'], data['trip_type'], data['route_id']), as_dict=True)
+			
+			if existing_assignment:
+				route_name = existing_assignment[0].get('route_name', existing_assignment[0].get('name'))
+				frappe.logger().warning(f"⚠️ Student already assigned to route: {route_name}")
+				return error_response(
+					f"Học sinh này đã được phân vào tuyến '{route_name}' cho {data['weekday']} - {data['trip_type']}. "
+					f"Mỗi học sinh chỉ được phân vào 1 tuyến duy nhất cho mỗi ngày và chiều đi/về."
+				)
+			
+			# Kiểm tra học sinh đã có trong cùng route + weekday + trip_type chưa (tránh duplicate)
+			duplicate_check = frappe.db.sql("""
+				SELECT name FROM `tabSIS Bus Route Student`
+				WHERE route_id = %s 
+				AND student_id = %s 
+				AND weekday = %s 
+				AND trip_type = %s
+				LIMIT 1
+			""", (data['route_id'], data['student_id'], data['weekday'], data['trip_type']))
+			
+			if duplicate_check:
+				frappe.logger().warning(f"⚠️ Student already exists in this route for same weekday and trip_type")
+				return error_response(
+					f"Học sinh này đã có trong tuyến cho {data['weekday']} - {data['trip_type']}."
+				)
+			
+			frappe.logger().info("✅ Student not assigned to any other route for this weekday and trip_type")
+		except Exception as e:
+			frappe.logger().error(f"❌ STEP 2.5 FAILED: {str(e)}")
+			raise e
+
+		try:
 			frappe.logger().info("🔍 STEP 3: Finding class_student_id...")
 			# Find class_student_id for the student
 			class_student_id = None
