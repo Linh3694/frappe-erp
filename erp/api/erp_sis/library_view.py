@@ -21,6 +21,7 @@ from erp.utils.api_response import (
 TITLE_DTYPE = "SIS Library Title"
 EVENT_DTYPE = "SIS Library Event"
 EVENT_DAY_DTYPE = "SIS Library Event Day"
+BOOK_INTRO_DTYPE = "SIS Library Book Introduction"
 
 
 def _create_slug(title: str) -> str:
@@ -608,3 +609,200 @@ def list_public_events(page: int = 1, limit: int = 20):
     except Exception as ex:
         frappe.log_error(f"list_public_events failed: {ex}")
         return error_response(message="Không lấy được hoạt động", code="PUBLIC_EVENTS_ERROR")
+
+
+# ===========================
+# Book Introduction Public APIs
+# ===========================
+
+@frappe.whitelist(allow_guest=True)
+def list_public_book_introductions():
+    """
+    Lấy danh sách bài giới thiệu sách cho public (chỉ published)
+    Params:
+    - page: trang hiện tại (default: 1)
+    - limit: số items per page (default: 12)
+    - featured_only: chỉ lấy bài nổi bật (0/1, default: 0)
+    """
+    try:
+        page = int(frappe.request.args.get("page") or frappe.form_dict.get("page") or 1)
+        limit = int(frappe.request.args.get("limit") or frappe.form_dict.get("limit") or 12)
+        featured_only = int(frappe.request.args.get("featured_only") or frappe.form_dict.get("featured_only") or 0)
+        
+        # Build filters - chỉ lấy published
+        filters = {"status": "published"}
+        if featured_only:
+            filters["is_featured"] = 1
+        
+        # Get total count
+        total = frappe.db.count(BOOK_INTRO_DTYPE, filters)
+        
+        # Get introductions with pagination
+        intros = frappe.get_all(
+            BOOK_INTRO_DTYPE,
+            filters=filters,
+            fields=[
+                "name",
+                "title_id",
+                "title",
+                "description",
+                "content",
+                "is_featured",
+                "status",
+                "modified",
+                "created_by"
+            ],
+            order_by="is_featured desc, modified desc",
+            limit_start=(page - 1) * limit,
+            limit_page_length=limit,
+        )
+        
+        # Transform data và lấy thông tin title
+        result = []
+        for intro in intros:
+            # Lấy thông tin title
+            title_info = None
+            if intro.title_id:
+                try:
+                    title_doc = frappe.get_doc(TITLE_DTYPE, intro.title_id)
+                    title_info = {
+                        "id": title_doc.name,
+                        "title": title_doc.title,
+                        "library_code": title_doc.library_code,
+                        "cover_image": title_doc.cover_image or "",
+                        "authors": json.loads(title_doc.authors) if title_doc.authors else [],
+                        "category": title_doc.category or "",
+                    }
+                except:
+                    pass
+            
+            result.append({
+                "_id": intro.name,
+                "id": intro.name,
+                "slug": _create_slug(intro.title),
+                "title": intro.title,
+                "description": intro.description,
+                "content": intro.content,
+                "isFeatured": intro.is_featured,
+                "status": intro.status,
+                "modifiedAt": str(intro.modified),
+                "relatedBook": title_info,
+            })
+        
+        total_pages = (total // limit) + (1 if total % limit > 0 else 0)
+        
+        return success_response(
+            data={
+                "introductions": result,
+                "totalPages": total_pages,
+                "currentPage": page,
+                "total": total,
+            },
+            message="Fetched book introductions"
+        )
+    except Exception as ex:
+        frappe.log_error(f"list_public_book_introductions failed: {ex}")
+        return error_response(message="Không lấy được danh sách giới thiệu sách", code="PUBLIC_INTRO_LIST_ERROR")
+
+
+@frappe.whitelist(allow_guest=True)
+def get_public_book_introduction_by_slug():
+    """
+    Lấy chi tiết bài giới thiệu sách theo slug cho public
+    Params:
+    - slug: slug của bài giới thiệu
+    """
+    try:
+        slug = frappe.request.args.get("slug") or frappe.form_dict.get("slug")
+        
+        if not slug:
+            return validation_error_response(message="Thiếu slug", errors={"slug": ["required"]})
+        
+        # Tìm intro có title match với slug (status = published)
+        intros = frappe.get_all(
+            BOOK_INTRO_DTYPE,
+            filters={"status": "published"},
+            fields=["name", "title"],
+        )
+        
+        # Tìm intro có slug khớp
+        intro_id = None
+        for intro in intros:
+            if _create_slug(intro.title) == slug:
+                intro_id = intro.name
+                break
+        
+        if not intro_id:
+            return error_response(message="Không tìm thấy bài giới thiệu", code="INTRO_NOT_FOUND")
+        
+        # Get full intro data
+        intro_doc = frappe.get_doc(BOOK_INTRO_DTYPE, intro_id)
+        
+        # Lấy toàn bộ thông tin title
+        title_info = None
+        if intro_doc.title_id:
+            try:
+                title_doc = frappe.get_doc(TITLE_DTYPE, intro_doc.title_id)
+                
+                # Parse authors
+                authors = []
+                if title_doc.authors:
+                    try:
+                        authors = json.loads(title_doc.authors) if isinstance(title_doc.authors, str) else title_doc.authors
+                    except:
+                        authors = []
+                
+                # Parse description, introduction, audio_book
+                description = {}
+                if title_doc.description:
+                    try:
+                        description = json.loads(title_doc.description) if isinstance(title_doc.description, str) else title_doc.description
+                    except:
+                        description = {}
+                
+                introduction = {}
+                if title_doc.introduction:
+                    try:
+                        introduction = json.loads(title_doc.introduction) if isinstance(title_doc.introduction, str) else title_doc.introduction
+                    except:
+                        introduction = {}
+                
+                title_info = {
+                    "_id": title_doc.name,
+                    "libraryId": title_doc.name,
+                    "libraryCode": title_doc.library_code or "",
+                    "title": title_doc.title,
+                    "authors": authors,
+                    "category": title_doc.category or "",
+                    "coverImage": title_doc.cover_image or "",
+                    "documentType": title_doc.document_type or "",
+                    "seriesName": title_doc.series_name or "",
+                    "language": title_doc.language or "",
+                    "isNewBook": title_doc.is_new_book or False,
+                    "isFeaturedBook": title_doc.is_featured_book or False,
+                    "isAudioBook": title_doc.is_audio_book or False,
+                    "description": description,
+                    "introduction": introduction,
+                }
+            except Exception as e:
+                frappe.log_error(f"get title info failed: {e}")
+        
+        return success_response(
+            data={
+                "_id": intro_doc.name,
+                "id": intro_doc.name,
+                "slug": _create_slug(intro_doc.title),
+                "title": intro_doc.title,
+                "description": intro_doc.description,
+                "content": intro_doc.content,
+                "isFeatured": intro_doc.is_featured,
+                "status": intro_doc.status,
+                "modifiedAt": str(intro_doc.modified),
+                "createdBy": intro_doc.created_by,
+                "relatedBook": title_info,
+            },
+            message="Fetched book introduction"
+        )
+    except Exception as ex:
+        frappe.log_error(f"get_public_book_introduction_by_slug failed: {ex}")
+        return error_response(message="Không lấy được bài giới thiệu", code="PUBLIC_INTRO_GET_ERROR")
