@@ -10,12 +10,12 @@ from frappe import _
 APP_VERSIONS = {
     "wis_staff": {
         "ios": {
-            "version": "1.5.4",  # Version mới nhất trên App Store
+            "version": "1.5.5",  # Version mới nhất trên App Store
             "min_version": "1.0.0",  # Version tối thiểu bắt buộc (force update nếu thấp hơn)
             "store_url": "https://apps.apple.com/app/id6746143732",
         },
         "android": {
-            "version": "1.5.4",  # Version mới nhất trên Play Store
+            "version": "1.5.5",  # Version mới nhất trên Play Store
             "min_version": "1.0.0",  # Version tối thiểu bắt buộc
             "store_url": "https://play.google.com/store/apps/details?id=com.hailinh.n23.workspace",
         },
