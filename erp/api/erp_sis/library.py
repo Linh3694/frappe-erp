@@ -2373,3 +2373,46 @@ def toggle_introduction_published():
     except Exception as ex:
         frappe.log_error(f"toggle_introduction_published failed: {ex}")
         return error_response(message="Không cập nhật được trạng thái", code="INTRO_TOGGLE_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def upload_file_for_intro():
+    """
+    Custom upload file endpoint cho Book Introduction với library role check
+    """
+    # Check permissions
+    err = _require_library_role()
+    if err:
+        return err
+    
+    try:
+        # Get file from request
+        files = frappe.request.files
+        if not files or 'file' not in files:
+            return validation_error_response(message="Không tìm thấy file", code="FILE_MISSING")
+        
+        file = files['file']
+        
+        # Upload file using Frappe's file manager
+        from frappe.utils.file_manager import save_file
+        
+        ret = save_file(
+            fname=file.filename,
+            content=file.stream.read(),
+            dt=None,  # Not attached to any doctype
+            dn=None,
+            folder='Home',
+            is_private=0  # Public file
+        )
+        
+        return success_response(
+            data={
+                "file_name": ret.file_name,
+                "file_url": ret.file_url,
+            },
+            message="Upload file thành công"
+        )
+        
+    except Exception as ex:
+        frappe.log_error(f"upload_file_for_intro failed: {ex}")
+        return error_response(message=f"Không thể upload file: {str(ex)}", code="UPLOAD_ERROR")
