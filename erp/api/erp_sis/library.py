@@ -2375,7 +2375,7 @@ def toggle_introduction_published():
         return error_response(message="Không cập nhật được trạng thái", code="INTRO_TOGGLE_ERROR")
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False)
 def upload_file_for_intro():
     """
     Custom upload file endpoint cho Book Introduction với library role check
