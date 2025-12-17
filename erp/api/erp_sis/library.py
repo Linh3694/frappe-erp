@@ -430,6 +430,7 @@ def list_titles():
                 "is_featured_book",
                 "is_audio_book",
                 "cover_image",
+                "description",
             ],
             "order_by": "modified desc",
             "limit_start": limit_start,
