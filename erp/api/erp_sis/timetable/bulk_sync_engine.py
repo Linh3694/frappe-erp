@@ -194,11 +194,15 @@ class BulkSyncEngine:
 		frappe.logger().info(f"  ✓ Loaded {len(self.students_cache)} students")
 	
 	def _get_instance_rows(self) -> List[Dict]:
-		"""Get all rows for this instance with teachers from both old and new format."""
+		"""
+		Get all rows for this instance with teachers.
+		
+		⚡ UPDATED (2025-12-19): Thêm valid_from/valid_to cho pattern rows với date range.
+		"""
 		rows = frappe.db.sql("""
 			SELECT 
-				name, day_of_week, date, timetable_column_id,
-				subject_id, teacher_1_id, teacher_2_id, room_id
+				name, day_of_week, date, valid_from, valid_to,
+				timetable_column_id, subject_id, teacher_1_id, teacher_2_id, room_id
 			FROM `tabSIS Timetable Instance Row`
 			WHERE parent = %s
 		""", (self.instance_id,), as_dict=True)
@@ -206,9 +210,7 @@ class BulkSyncEngine:
 		if not rows:
 			return rows
 		
-		# ⚡ FIX: Also load teachers from child table (new format)
-		# This ensures we read teachers regardless of whether they're stored in
-		# old format (teacher_1_id, teacher_2_id) or new format (child table)
+		# Load teachers from child table (new format)
 		row_names = [r.name for r in rows]
 		teacher_children = frappe.db.sql("""
 			SELECT parent, teacher_id
@@ -226,12 +228,11 @@ class BulkSyncEngine:
 				teacher_map[child.parent] = []
 			teacher_map[child.parent].append(child.teacher_id)
 		
-		# Attach teachers to rows (merge with existing teacher_1_id, teacher_2_id)
+		# Attach teachers to rows
 		for row in rows:
 			teachers_from_child = teacher_map.get(row.name, [])
 			
 			if teachers_from_child:
-				# Use teachers from child table (new format takes precedence)
 				row['teachers_list'] = teachers_from_child
 			else:
 				# Fallback: Use teacher_1_id, teacher_2_id (old format)
@@ -245,14 +246,22 @@ class BulkSyncEngine:
 		return rows
 	
 	def _separate_rows(self, rows: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
-		"""Separate pattern rows (date=NULL) vs override rows (date!=NULL)."""
+		"""
+		Separate pattern rows vs override rows.
+		
+		⚡ UPDATED (2025-12-19): Hỗ trợ cả 2 formats:
+		- OLD: Pattern rows có date=NULL
+		- NEW: Pattern rows có valid_from/valid_to
+		"""
 		pattern_rows = []
 		override_rows = []
 		
 		for row in rows:
+			# OLD format: date != NULL là override row
 			if row.get("date"):
 				override_rows.append(row)
 			else:
+				# Pattern row (có thể có valid_from/valid_to hoặc không)
 				pattern_rows.append(row)
 		
 		return pattern_rows, override_rows
@@ -288,11 +297,74 @@ class BulkSyncEngine:
 		teachers = self.assignments_cache.get(key, set())
 		return teacher_id in teachers
 	
+	def _is_pattern_valid_for_date(self, row: Dict, target_date: date) -> bool:
+		"""
+		⚡ NEW (2025-12-19): Kiểm tra pattern row có valid cho ngày target_date không.
+		
+		Pattern row valid nếu:
+		- (valid_from IS NULL OR valid_from <= target_date)
+		- AND (valid_to IS NULL OR valid_to >= target_date)
+		"""
+		valid_from = row.get('valid_from')
+		valid_to = row.get('valid_to')
+		
+		# Parse dates if needed
+		if valid_from:
+			if isinstance(valid_from, str):
+				valid_from = datetime.strptime(valid_from, "%Y-%m-%d").date()
+			elif hasattr(valid_from, 'date'):
+				valid_from = valid_from.date()
+		
+		if valid_to:
+			if isinstance(valid_to, str):
+				valid_to = datetime.strptime(valid_to, "%Y-%m-%d").date()
+			elif hasattr(valid_to, 'date'):
+				valid_to = valid_to.date()
+		
+		# Check validity
+		if valid_from and target_date < valid_from:
+			return False
+		if valid_to and target_date > valid_to:
+			return False
+		
+		return True
+	
+	def _get_best_pattern_for_date(self, patterns: List[Dict], target_date: date) -> Optional[Dict]:
+		"""
+		⚡ NEW (2025-12-19): Tìm pattern row phù hợp nhất cho target_date.
+		
+		Nếu nhiều patterns match, chọn pattern có valid_from gần nhất với target_date.
+		(Pattern cụ thể hơn được ưu tiên)
+		"""
+		valid_patterns = [p for p in patterns if self._is_pattern_valid_for_date(p, target_date)]
+		
+		if not valid_patterns:
+			return None
+		
+		if len(valid_patterns) == 1:
+			return valid_patterns[0]
+		
+		# Sort by valid_from DESC (NULL treated as very old date)
+		def sort_key(p):
+			vf = p.get('valid_from')
+			if vf:
+				if isinstance(vf, str):
+					vf = datetime.strptime(vf, "%Y-%m-%d").date()
+				elif hasattr(vf, 'date'):
+					vf = vf.date()
+				return vf
+			return date(1900, 1, 1)  # NULL = very old
+		
+		valid_patterns.sort(key=sort_key, reverse=True)
+		return valid_patterns[0]  # Return pattern with most recent valid_from
+	
 	def _prepare_teacher_entries(self, pattern_rows: List[Dict], 
 	                             override_rows: List[Dict], 
 	                             all_weeks: List[date]) -> List[Dict]:
 		"""
 		Prepare all teacher timetable entries in memory.
+		
+		⚡ UPDATED (2025-12-19): Hỗ trợ pattern rows với valid_from/valid_to.
 		
 		Returns:
 			List of dicts ready for bulk insert
@@ -300,60 +372,66 @@ class BulkSyncEngine:
 		entries = []
 		override_dates = self._build_override_index(override_rows)
 		
-		# Process pattern rows
+		# Group pattern rows by (day_of_week, timetable_column_id)
+		# để có thể chọn pattern phù hợp nhất cho mỗi ngày
+		pattern_groups = {}
 		for row in pattern_rows:
 			normalized_day = self._normalize_day(row.day_of_week)
-			if normalized_day not in self.day_to_num:
-				continue
+			key = (normalized_day, row.timetable_column_id)
+			if key not in pattern_groups:
+				pattern_groups[key] = []
+			pattern_groups[key].append(row)
+		
+		# Generate entries for all dates in range
+		current_date = self.start_date
+		while current_date <= self.end_date:
+			day_of_week = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][current_date.weekday()]
 			
-			day_num = self.day_to_num[normalized_day]
-			
-			# ⚡ FIX: Get teachers from teachers_list (populated by _get_instance_rows)
-			# This includes teachers from both child table (new format) and 
-			# teacher_1_id/teacher_2_id (old format fallback)
-			teachers = row.get('teachers_list', [])
-			
-			# Fallback if teachers_list not populated
-			if not teachers:
-				if row.get('teacher_1_id'):
-					teachers.append(row['teacher_1_id'])
-				if row.get('teacher_2_id'):
-					teachers.append(row['teacher_2_id'])
-			
-			if not teachers:
-				continue
-			
-			# Generate entries for all weeks
-			for week_start in all_weeks:
-				specific_date = week_start + timedelta(days=day_num)
-				
-				# Skip if outside range
-				if specific_date < self.start_date or specific_date > self.end_date:
+			# Check each pattern group for this day
+			for (pattern_day, column_id), patterns in pattern_groups.items():
+				if pattern_day != day_of_week:
 					continue
 				
 				# Skip if has override
-				override_key = (normalized_day, row.timetable_column_id, specific_date)
+				override_key = (day_of_week, column_id, current_date)
 				if override_key in override_dates:
+					continue
+				
+				# Find best pattern for this date
+				best_pattern = self._get_best_pattern_for_date(patterns, current_date)
+				if not best_pattern:
+					continue
+				
+				# Get teachers
+				teachers = best_pattern.get('teachers_list', [])
+				if not teachers:
+					if best_pattern.get('teacher_1_id'):
+						teachers.append(best_pattern['teacher_1_id'])
+					if best_pattern.get('teacher_2_id'):
+						teachers.append(best_pattern['teacher_2_id'])
+				
+				if not teachers:
 					continue
 				
 				# Create entries for each teacher
 				for teacher_id in teachers:
-					# Check assignment (O(1) lookup)
-					if not self._has_assignment(teacher_id, row.subject_id):
+					if not self._has_assignment(teacher_id, best_pattern['subject_id']):
 						continue
 					
 					entries.append({
 						"teacher_id": teacher_id,
 						"class_id": self.class_id,
-						"day_of_week": normalized_day,
-						"timetable_column_id": row.timetable_column_id,
-						"subject_id": row.subject_id,
-						"room_id": row.room_id,
-						"date": specific_date,
+						"day_of_week": day_of_week,
+						"timetable_column_id": column_id,
+						"subject_id": best_pattern['subject_id'],
+						"room_id": best_pattern.get('room_id'),
+						"date": current_date,
 						"timetable_instance_id": self.instance_id
 					})
+			
+			current_date += timedelta(days=1)
 		
-		# Process override rows
+		# Process override rows (unchanged)
 		for row in override_rows:
 			normalized_day = self._normalize_day(row.day_of_week)
 			if normalized_day not in self.day_to_num:
@@ -369,17 +447,13 @@ class BulkSyncEngine:
 			if specific_date < self.start_date or specific_date > self.end_date:
 				continue
 			
-			# ⚡ FIX: Get teachers from teachers_list (same as pattern rows)
 			teachers = row.get('teachers_list', [])
-			
-			# Fallback if teachers_list not populated
 			if not teachers:
 				if row.get('teacher_1_id'):
 					teachers.append(row['teacher_1_id'])
 				if row.get('teacher_2_id'):
 					teachers.append(row['teacher_2_id'])
 			
-			# Create entries
 			for teacher_id in teachers:
 				if not self._has_assignment(teacher_id, row.subject_id):
 					continue

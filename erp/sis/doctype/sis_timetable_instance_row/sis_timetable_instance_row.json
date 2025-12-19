@@ -9,7 +9,7 @@
  "beta": 0,
  "creation": "2024-12-20 10:00:00.000000",
  "custom": 0,
- "description": "SIS Timetable Instance Row - Weekly pattern rows for timetable instances",
+ "description": "SIS Timetable Instance Row - Weekly pattern rows with date ranges for timetable instances. Use valid_from/valid_to for partial updates.",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -20,6 +20,8 @@
   "parent_timetable_instance",
   "day_of_week",
   "date",
+  "valid_from",
+  "valid_to",
   "timetable_column_id",
   "period_priority",
   "period_name",
@@ -54,8 +56,23 @@
   {
    "fieldname": "date",
    "fieldtype": "Date",
-   "label": "Date",
-   "description": "Specific date for this timetable row (for precise assignment filtering)",
+   "label": "Date (DEPRECATED)",
+   "description": "DEPRECATED: Use valid_from/valid_to instead. Kept for backward compatibility with override rows.",
+   "in_list_view": 0,
+   "hidden": 1
+  },
+  {
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Valid From",
+   "description": "Start date for this pattern (NULL = from instance start_date)",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "label": "Valid To",
+   "description": "End date for this pattern (NULL = until instance end_date)",
    "in_list_view": 1
   },
   {
@@ -132,6 +149,18 @@
   },
   {
    "unique": 0,
+   "fields": "parent,valid_from,valid_to"
+  },
+  {
+   "unique": 0,
+   "fields": "valid_from"
+  },
+  {
+   "unique": 0,
+   "fields": "valid_to"
+  },
+  {
+   "unique": 0,
    "fields": "teacher_1_id"
   },
   {
@@ -139,7 +168,7 @@
    "fields": "teacher_2_id"
   }
  ],
- "modified": "2025-11-15 21:45:00.000000",
+ "modified": "2025-12-19 17:30:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Timetable Instance Row",
