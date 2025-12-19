@@ -517,7 +517,13 @@ class TimetableImportExecutor:
 		frappe.logger().info(f"📊 Progress: {percentage}% - {message}")
 	
 	def _process_class(self, class_id: str, class_title: str, class_df: pd.DataFrame):
-		"""Process timetable for a single class"""
+		"""
+		Process timetable for a single class.
+		
+		⚡ FIX (2025-01-19): Support 2 modes:
+		1. FULL UPDATE: Xóa pattern rows cũ, tạo pattern rows mới
+		2. PARTIAL UPDATE: Giữ pattern rows, tạo override rows cho từng ngày trong range
+		"""
 		self.logs.append(f"🏫 Processing class: {class_title} ({len(class_df)} rows)")
 		frappe.logger().info(f"🏫 Starting _process_class for {class_title} with {len(class_df)} rows")
 		
@@ -525,28 +531,60 @@ class TimetableImportExecutor:
 		instance_id = self._create_or_get_instance(class_id)
 		frappe.logger().info(f"✅ Got instance: {instance_id} for class {class_id}")
 		
-		# Delete old pattern rows for this instance
-		self._delete_old_pattern_rows(instance_id)
+		# Check mode từ processed_instances
+		instance_info = self.processed_instances.get(instance_id, {})
+		is_partial_update = instance_info.get("is_partial_update", False)
 		
-		# Create pattern rows
-		rows_created = self._create_pattern_rows(instance_id, class_id, class_df)
-		frappe.logger().info(f"✅ Created {rows_created} pattern rows for {class_title}")
-		
-		self.stats["rows_created"] += rows_created
-		self.logs.append(f"  ✓ Created {rows_created} pattern rows for {class_title}")
+		if is_partial_update:
+			# ⚡ PARTIAL UPDATE MODE
+			# Giữ nguyên pattern rows, tạo override rows cho từng ngày trong range
+			frappe.logger().info(f"📝 PARTIAL UPDATE mode for {class_title}")
+			
+			# Xóa override rows cũ TRONG RANGE (không xóa pattern rows)
+			self._delete_override_rows_in_range(instance_id)
+			
+			# Tạo override rows cho từng ngày trong range
+			rows_created = self._create_override_rows(instance_id, class_id, class_df)
+			frappe.logger().info(f"✅ Created {rows_created} override rows for {class_title}")
+			
+			self.stats["rows_created"] += rows_created
+			self.logs.append(f"  ✓ Created {rows_created} override rows for {class_title} (partial update)")
+		else:
+			# FULL UPDATE MODE (như trước)
+			frappe.logger().info(f"📋 FULL UPDATE mode for {class_title}")
+			
+			# Delete old pattern rows for this instance
+			self._delete_old_pattern_rows(instance_id)
+			
+			# Create pattern rows
+			rows_created = self._create_pattern_rows(instance_id, class_id, class_df)
+			frappe.logger().info(f"✅ Created {rows_created} pattern rows for {class_title}")
+			
+			self.stats["rows_created"] += rows_created
+			self.logs.append(f"  ✓ Created {rows_created} pattern rows for {class_title}")
 	
 	def _create_or_get_instance(self, class_id: str) -> str:
 		"""
 		Create or get timetable instance for class.
 		
-		Date validation rules (Option 1: Conservative):
-		- ✅ ALLOW: Extend forward (end_date increases)
-		- ✅ ALLOW: Same range (no change)
-		- ✅ ALLOW: Shrink range (end_date decreases) with warning
-		- ❌ BLOCK: Backdate (start_date decreases) - STRICTLY FORBIDDEN
-		- ❌ BLOCK: Shift backward (start_date decreases even if end_date increases)
+		⚡ FIX (2025-01-19): Support PARTIAL UPDATE mode
 		
-		This prevents conflicts with existing attendance data.
+		Có 2 modes:
+		1. FULL UPDATE: Range mới = range instance → thay đổi pattern rows
+		2. PARTIAL UPDATE: Range mới NẰM TRONG range instance → tạo override rows
+		
+		Date validation rules:
+		- ✅ ALLOW: Partial update (range mới nằm trong range instance)
+		- ✅ ALLOW: Same range (no change to instance dates)
+		- ✅ ALLOW: Extend forward (end_date increases)
+		- ❌ BLOCK: Range mới vượt ngoài range instance (cần mở rộng instance trước)
+		
+		PARTIAL UPDATE behavior:
+		- KHÔNG thay đổi range của instance
+		- KHÔNG xóa pattern rows (giữ nguyên pattern cũ cho các ngày khác)
+		- CHỈ xóa override rows trong range mới
+		- TẠO MỚI override rows cho từng ngày trong range mới
+		- CHỈ sync Teacher Timetable cho range mới
 		"""
 		timetable_id = self.stats["timetable_id"]
 		new_start_date = self.metadata["start_date"]
@@ -569,7 +607,8 @@ class TimetableImportExecutor:
 			as_dict=True
 		)
 		
-		is_shrink = False  # Flag for deletion mode
+		# Flags for sync behavior
+		is_partial_update = False  # Mode: partial update (override rows) vs full update (pattern rows)
 		
 		if existing:
 			# Parse existing dates
@@ -581,60 +620,55 @@ class TimetableImportExecutor:
 			if isinstance(existing_end, str):
 				existing_end = datetime.strptime(existing_end, "%Y-%m-%d").date()
 			
-			# VALIDATION: Check for forbidden date changes
-			if new_start < existing_start:
+			# ⚡ DETECT UPDATE MODE
+			# PARTIAL UPDATE: Range mới NẰM HOÀN TOÀN TRONG range instance
+			# Điều kiện: new_start >= existing_start AND new_end <= existing_end
+			# VÀ không phải same range (nếu same range thì vẫn là full update)
+			is_same_range = (new_start == existing_start and new_end == existing_end)
+			is_within_range = (new_start >= existing_start and new_end <= existing_end)
+			
+			if is_within_range and not is_same_range:
+				# ✅ PARTIAL UPDATE MODE
+				is_partial_update = True
+				self.logs.append(
+					f"  📝 Lớp {class_id}: PARTIAL UPDATE mode - "
+					f"Chỉ cập nhật từ {new_start.strftime('%d/%m/%Y')} đến {new_end.strftime('%d/%m/%Y')} "
+					f"(instance: {existing_start.strftime('%d/%m/%Y')} → {existing_end.strftime('%d/%m/%Y')})"
+				)
+				# KHÔNG thay đổi range của instance - giữ nguyên
+				# KHÔNG xóa pattern rows - sẽ tạo override rows thay thế
+				
+			elif new_start < existing_start:
 				# ❌ BACKDATE - STRICTLY FORBIDDEN
 				raise Exception(
 					f"❌ Không được phép backdate thời khóa biểu!\n\n"
 					f"Lớp: {class_id}\n"
-					f"Ngày bắt đầu hiện tại: {existing_start.strftime('%d/%m/%Y')}\n"
-					f"Ngày bắt đầu mới: {new_start.strftime('%d/%m/%Y')}\n\n"
+					f"Instance hiện tại: {existing_start.strftime('%d/%m/%Y')} → {existing_end.strftime('%d/%m/%Y')}\n"
+					f"Range mới: {new_start.strftime('%d/%m/%Y')} → {new_end.strftime('%d/%m/%Y')}\n\n"
 					f"⚠️ Backdate có thể gây xung đột với dữ liệu điểm danh đã có.\n"
-					f"Chỉ được phép mở rộng thời khóa biểu về tương lai (tăng ngày kết thúc)."
+					f"Chọn ngày bắt đầu >= {existing_start.strftime('%d/%m/%Y')}."
 				)
 			
-			# Check date range changes
-			if new_start == existing_start and new_end == existing_end:
-				# Same range - just update rows
-				self.logs.append(f"  ℹ️ Lớp {class_id}: Cùng khoảng thời gian, cập nhật nội dung TKB")
 			elif new_end > existing_end:
-				# ✅ EXTEND FORWARD - Safe operation
-				self.logs.append(
-					f"  ✅ Lớp {class_id}: Mở rộng TKB từ {existing_end.strftime('%d/%m/%Y')} "
-					f"đến {new_end.strftime('%d/%m/%Y')}"
+				# ❌ EXTEND BEYOND - cần mở rộng instance trước
+				raise Exception(
+					f"❌ Range vượt ngoài thời khóa biểu hiện có!\n\n"
+					f"Lớp: {class_id}\n"
+					f"Instance hiện tại: {existing_start.strftime('%d/%m/%Y')} → {existing_end.strftime('%d/%m/%Y')}\n"
+					f"Range mới: {new_start.strftime('%d/%m/%Y')} → {new_end.strftime('%d/%m/%Y')}\n\n"
+					f"Để cập nhật vượt quá {existing_end.strftime('%d/%m/%Y')}, "
+					f"cần mở rộng thời khóa biểu trước bằng cách chọn toàn bộ range."
 				)
-				# Update instance dates
-				frappe.db.set_value(
-					"SIS Timetable Instance",
-					existing.name,
-					{
-						"start_date": new_start_date,
-						"end_date": new_end_date
-					}
-				)
-			elif new_end < existing_end:
-				# ⚠️ SHRINK - Allowed but with warning
-				days_lost = (existing_end - new_end).days
-				is_shrink = True  # Mark for cleanup deletion
-				self.logs.append(
-					f"  ⚠️ Lớp {class_id}: Thu hẹp TKB, mất {days_lost} ngày "
-					f"(từ {new_end.strftime('%d/%m/%Y')} đến {existing_end.strftime('%d/%m/%Y')})"
-				)
-				# Update instance dates
-				frappe.db.set_value(
-					"SIS Timetable Instance",
-					existing.name,
-					{
-						"start_date": new_start_date,
-						"end_date": new_end_date
-					}
-				)
+			
+			else:
+				# SAME RANGE - FULL UPDATE (thay đổi pattern rows)
+				self.logs.append(f"  ℹ️ Lớp {class_id}: FULL UPDATE mode - Cập nhật toàn bộ TKB")
 			
 			self.stats["instances_updated"] += 1
 			instance_id = existing.name
 			
 		else:
-			# Create new instance
+			# Create new instance (FULL UPDATE mode)
 			instance_doc = frappe.get_doc({
 				"doctype": "SIS Timetable Instance",
 				"timetable_id": timetable_id,
@@ -655,7 +689,7 @@ class TimetableImportExecutor:
 			"class_id": class_id,
 			"start_date": new_start_date,
 			"end_date": new_end_date,
-			"is_shrink": is_shrink  # Pass shrink flag to background job
+			"is_partial_update": is_partial_update,  # ⚡ New flag for partial update mode
 		}
 		
 		return instance_id
@@ -667,6 +701,136 @@ class TimetableImportExecutor:
 			WHERE parent = %s
 			  AND date IS NULL
 		""", (instance_id,))
+	
+	def _delete_override_rows_in_range(self, instance_id: str):
+		"""
+		⚡ NEW: Delete override rows (date!=NULL) ONLY within the specified date range.
+		
+		Dùng cho PARTIAL UPDATE mode - xóa override rows cũ trong range
+		trước khi tạo override rows mới.
+		"""
+		start_date = self.metadata["start_date"]
+		end_date = self.metadata["end_date"]
+		
+		deleted = frappe.db.sql("""
+			DELETE FROM `tabSIS Timetable Instance Row`
+			WHERE parent = %s
+			  AND date IS NOT NULL
+			  AND date BETWEEN %s AND %s
+		""", (instance_id, start_date, end_date))
+		
+		frappe.logger().info(
+			f"🗑️ Deleted override rows in range {start_date} → {end_date}: {deleted or 0} rows"
+		)
+	
+	def _create_override_rows(self, instance_id: str, class_id: str, class_df: pd.DataFrame) -> int:
+		"""
+		⚡ NEW: Create override rows for EACH DATE in the range.
+		
+		Dùng cho PARTIAL UPDATE mode:
+		- Với mỗi ngày trong range [start_date, end_date]
+		- Tạo override rows cho các tiết học từ file Excel
+		- Override rows có date != NULL, sẽ được ưu tiên hơn pattern rows
+		
+		Returns:
+			int: Number of rows created
+		"""
+		from datetime import datetime, timedelta
+		
+		start_date = datetime.strptime(str(self.metadata["start_date"]), "%Y-%m-%d").date()
+		end_date = datetime.strptime(str(self.metadata["end_date"]), "%Y-%m-%d").date()
+		
+		rows_created = 0
+		
+		# Tạo map day_of_week -> list of rows từ Excel
+		day_to_rows = {}
+		for _, row in class_df.iterrows():
+			day_of_week = self._normalize_day_of_week(row["Thứ"])
+			if day_of_week not in day_to_rows:
+				day_to_rows[day_of_week] = []
+			day_to_rows[day_of_week].append(row)
+		
+		# Day of week mapping
+		day_num_to_code = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+		
+		# Iterate through each date in range
+		current_date = start_date
+		while current_date <= end_date:
+			day_of_week = day_num_to_code[current_date.weekday()]
+			
+			# Get rows for this day from Excel
+			excel_rows = day_to_rows.get(day_of_week, [])
+			
+			for excel_row in excel_rows:
+				subject_title = excel_row["Môn học"]
+				period_name = excel_row["Tiết"]
+				
+				subject_id = self.cache["subjects"].get(subject_title)
+				period_id = self.cache["periods"].get(period_name)
+				
+				if not subject_id or not period_id:
+					continue
+				
+				# Get teacher from Subject Assignment
+				actual_subject_id = frappe.db.get_value("SIS Subject", subject_id, "actual_subject_id")
+				teachers = self._get_teachers_for_class_subject(class_id, actual_subject_id, day_of_week)
+				
+				# Get period details
+				period_info = frappe.db.get_value(
+					"SIS Timetable Column",
+					period_id,
+					["period_priority", "period_name"],
+					as_dict=True
+				)
+				
+				# Get room
+				room_id = None
+				if "Phòng" in excel_row and pd.notna(excel_row["Phòng"]):
+					room_name = excel_row["Phòng"]
+					room_id = frappe.db.get_value(
+						"ERP Administrative Room",
+						{"room_name": room_name},
+						"name"
+					)
+				
+				# Create OVERRIDE row (date != NULL)
+				row_doc = frappe.get_doc({
+					"doctype": "SIS Timetable Instance Row",
+					"parent": instance_id,
+					"parent_timetable_instance": instance_id,
+					"parenttype": "SIS Timetable Instance",
+					"parentfield": "weekly_pattern",
+					"day_of_week": day_of_week,
+					"date": current_date,  # ⚡ Override row với date cụ thể
+					"timetable_column_id": period_id,
+					"period_priority": period_info.period_priority,
+					"period_name": period_info.period_name,
+					"subject_id": subject_id,
+					"room_id": room_id
+				})
+				
+				# Insert first
+				row_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+				
+				# Add teachers
+				for idx, teacher_id in enumerate(teachers):
+					row_doc.append("teachers", {
+						"teacher_id": teacher_id,
+						"sort_order": idx
+					})
+				
+				if teachers:
+					row_doc.save(ignore_permissions=True)
+				
+				rows_created += 1
+			
+			# Next day
+			current_date += timedelta(days=1)
+		
+		frappe.logger().info(
+			f"✅ Created {rows_created} override rows for range {start_date} → {end_date}"
+		)
+		return rows_created
 	
 	def _create_pattern_rows(self, instance_id: str, class_id: str, class_df: pd.DataFrame) -> int:
 		"""
@@ -1449,14 +1613,23 @@ def sync_teacher_timetable_background(instances_data, campus_id, job_id=None, pr
 				except Exception as e:
 					frappe.logger().warning(f"Failed to update progress cache: {str(e)}")
 			
-			# Detect if this is a shrink operation by checking if it's an update
-			# (instance_info will have a flag if dates were changed during _create_or_get_instance)
-			is_shrink = instance_info.get("is_shrink", False)
+			# ⚡ FIX (2025-01-19): Detect PARTIAL UPDATE mode
+			is_partial_update = instance_info.get("is_partial_update", False)
 			
-			# SMART RANGE DELETION
-			# - Normal mode: Only delete entries in the new range (preserves old entries outside)
-			# - Shrink mode: Delete ALL entries (will regenerate only new range)
-			delete_entries_in_range(instance_id, start_date, end_date, delete_all_outside=is_shrink)
+			if is_partial_update:
+				# PARTIAL UPDATE: Chỉ xóa và sync entries TRONG RANGE
+				# KHÔNG xóa entries ngoài range (giữ nguyên TKB trước và sau)
+				frappe.logger().info(
+					f"📝 PARTIAL UPDATE mode for {class_id}: "
+					f"Only syncing range {start_date} → {end_date}"
+				)
+				# Xóa entries CHỈ TRONG RANGE
+				delete_entries_in_range(instance_id, start_date, end_date, delete_all_outside=False)
+			else:
+				# FULL UPDATE: Xóa TẤT CẢ entries và sync lại toàn bộ
+				# (behavior cũ)
+				frappe.logger().info(f"📋 FULL UPDATE mode for {class_id}")
+				delete_entries_in_range(instance_id, start_date, end_date, delete_all_outside=False)
 			
 			# BULK SYNC: Use optimized engine (preload assignments, bulk insert)
 			teacher_count, student_count = sync_instance_bulk(
