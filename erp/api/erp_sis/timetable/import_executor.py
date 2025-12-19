@@ -682,39 +682,26 @@ class TimetableImportExecutor:
 	
 	def _delete_overlapping_pattern_rows(self, instance_id: str):
 		"""
-		⚡ NEW (2025-12-19): Xóa pattern rows có date range overlap với range mới.
+		⚡ FIXED (2025-12-19): Xử lý pattern rows có date range overlap với range mới.
 		
-		Logic:
-		- Xóa rows có (valid_from, valid_to) overlap với (new_start, new_end)
-		- Overlap xảy ra khi: valid_from <= new_end AND valid_to >= new_start
-		- Cũng xóa old-style pattern rows (date=NULL, valid_from=NULL, valid_to=NULL)
-		  nếu range mới bao phủ toàn bộ instance range
+		Logic mới:
+		1. Tìm pattern rows có overlap với range mới
+		2. Với mỗi pattern row overlap:
+		   - Nếu pattern nằm hoàn toàn trong range mới → XÓA
+		   - Nếu pattern bắt đầu trước range mới → TRUNCATE (cập nhật valid_to = new_start - 1)
+		   - Nếu pattern kết thúc sau range mới → TRUNCATE (cập nhật valid_from = new_end + 1)
+		   - Nếu pattern bao phủ range mới → SPLIT thành 2 patterns
+		3. Cũng xử lý old-style pattern rows (valid_from=NULL, valid_to=NULL)
 		"""
-		start_date = self.metadata["start_date"]
-		end_date = self.metadata["end_date"]
+		from datetime import datetime, timedelta
 		
-		# Xóa pattern rows có date range overlap
-		deleted_with_range = frappe.db.sql("""
-			DELETE FROM `tabSIS Timetable Instance Row`
-			WHERE parent = %s
-			  AND (
-			    -- Pattern rows với date range overlap
-			    (valid_from IS NOT NULL AND valid_to IS NOT NULL
-			     AND valid_from <= %s AND valid_to >= %s)
-			    OR
-			    -- Pattern rows với valid_from nhưng không có valid_to
-			    (valid_from IS NOT NULL AND valid_to IS NULL
-			     AND valid_from <= %s)
-			    OR
-			    -- Pattern rows với valid_to nhưng không có valid_from
-			    (valid_from IS NULL AND valid_to IS NOT NULL
-			     AND valid_to >= %s)
-			  )
-		""", (instance_id, end_date, start_date, end_date, start_date))
+		start_date_str = self.metadata["start_date"]
+		end_date_str = self.metadata["end_date"]
 		
-		# Kiểm tra xem có cần xóa old-style pattern rows không
-		# (rows có date=NULL, valid_from=NULL, valid_to=NULL)
-		# Chỉ xóa nếu instance không có pattern rows khác với date ranges
+		new_start = datetime.strptime(str(start_date_str), "%Y-%m-%d").date()
+		new_end = datetime.strptime(str(end_date_str), "%Y-%m-%d").date()
+		
+		# Lấy instance range
 		instance = frappe.db.get_value(
 			"SIS Timetable Instance",
 			instance_id,
@@ -722,24 +709,172 @@ class TimetableImportExecutor:
 			as_dict=True
 		)
 		
-		if instance:
-			inst_start = str(instance.start_date)
-			inst_end = str(instance.end_date)
+		if not instance:
+			return
+		
+		inst_start = instance.start_date
+		inst_end = instance.end_date
+		if isinstance(inst_start, str):
+			inst_start = datetime.strptime(inst_start, "%Y-%m-%d").date()
+		if isinstance(inst_end, str):
+			inst_end = datetime.strptime(inst_end, "%Y-%m-%d").date()
+		
+		# 1. Xử lý old-style pattern rows (valid_from=NULL, valid_to=NULL)
+		# Coi như có valid_from = inst_start, valid_to = inst_end
+		old_style_rows = frappe.db.sql("""
+			SELECT name, day_of_week, timetable_column_id, subject_id, room_id
+			FROM `tabSIS Timetable Instance Row`
+			WHERE parent = %s
+			  AND date IS NULL
+			  AND valid_from IS NULL
+			  AND valid_to IS NULL
+		""", (instance_id,), as_dict=True)
+		
+		for row in old_style_rows:
+			# Old-style row có range = instance range
+			# Kiểm tra overlap với range mới
+			if new_start <= inst_start and new_end >= inst_end:
+				# Range mới bao phủ hoàn toàn → XÓA
+				frappe.db.sql("DELETE FROM `tabSIS Timetable Instance Row` WHERE name = %s", (row.name,))
+				frappe.logger().info(f"🗑️ Deleted old-style row {row.name} (fully covered)")
+			elif new_start > inst_start and new_end < inst_end:
+				# Range mới nằm giữa → SPLIT
+				# Update row cũ: valid_to = new_start - 1
+				frappe.db.set_value("SIS Timetable Instance Row", row.name, {
+					"valid_from": str(inst_start),
+					"valid_to": str(new_start - timedelta(days=1))
+				})
+				# Tạo row mới cho phần sau: valid_from = new_end + 1
+				self._duplicate_pattern_row(row.name, instance_id, 
+					valid_from=str(new_end + timedelta(days=1)),
+					valid_to=str(inst_end))
+				frappe.logger().info(f"✂️ Split old-style row {row.name}")
+			elif new_start > inst_start:
+				# Range mới bắt đầu sau → TRUNCATE phần trước
+				frappe.db.set_value("SIS Timetable Instance Row", row.name, {
+					"valid_from": str(inst_start),
+					"valid_to": str(new_start - timedelta(days=1))
+				})
+				frappe.logger().info(f"✂️ Truncated old-style row {row.name} to end at {new_start - timedelta(days=1)}")
+			elif new_end < inst_end:
+				# Range mới kết thúc trước → TRUNCATE phần sau
+				frappe.db.set_value("SIS Timetable Instance Row", row.name, {
+					"valid_from": str(new_end + timedelta(days=1)),
+					"valid_to": str(inst_end)
+				})
+				frappe.logger().info(f"✂️ Truncated old-style row {row.name} to start at {new_end + timedelta(days=1)}")
+			else:
+				# Overlap hoàn toàn → XÓA
+				frappe.db.sql("DELETE FROM `tabSIS Timetable Instance Row` WHERE name = %s", (row.name,))
+		
+		# 2. Xử lý pattern rows có valid_from/valid_to
+		dated_rows = frappe.db.sql("""
+			SELECT name, day_of_week, timetable_column_id, subject_id, room_id,
+			       valid_from, valid_to
+			FROM `tabSIS Timetable Instance Row`
+			WHERE parent = %s
+			  AND date IS NULL
+			  AND valid_from IS NOT NULL
+			  AND valid_to IS NOT NULL
+			  AND valid_from <= %s
+			  AND valid_to >= %s
+		""", (instance_id, str(new_end), str(new_start)), as_dict=True)
+		
+		for row in dated_rows:
+			row_start = row.valid_from
+			row_end = row.valid_to
+			if isinstance(row_start, str):
+				row_start = datetime.strptime(row_start, "%Y-%m-%d").date()
+			if isinstance(row_end, str):
+				row_end = datetime.strptime(row_end, "%Y-%m-%d").date()
 			
-			# Nếu range mới = range instance, xóa old-style patterns
-			if start_date == inst_start and end_date == inst_end:
-				deleted_old_style = frappe.db.sql("""
-					DELETE FROM `tabSIS Timetable Instance Row`
-					WHERE parent = %s
-					  AND date IS NULL
-					  AND valid_from IS NULL
-					  AND valid_to IS NULL
-				""", (instance_id,))
-				frappe.logger().info(f"🗑️ Deleted old-style pattern rows: {deleted_old_style or 0}")
+			if new_start <= row_start and new_end >= row_end:
+				# Range mới bao phủ hoàn toàn → XÓA
+				frappe.db.sql("DELETE FROM `tabSIS Timetable Instance Row` WHERE name = %s", (row.name,))
+				frappe.logger().info(f"🗑️ Deleted dated row {row.name}")
+			elif new_start > row_start and new_end < row_end:
+				# Range mới nằm giữa → SPLIT
+				frappe.db.set_value("SIS Timetable Instance Row", row.name, {
+					"valid_to": str(new_start - timedelta(days=1))
+				})
+				self._duplicate_pattern_row(row.name, instance_id,
+					valid_from=str(new_end + timedelta(days=1)),
+					valid_to=str(row_end))
+				frappe.logger().info(f"✂️ Split dated row {row.name}")
+			elif new_start > row_start:
+				# TRUNCATE: Cập nhật valid_to = new_start - 1
+				frappe.db.set_value("SIS Timetable Instance Row", row.name, {
+					"valid_to": str(new_start - timedelta(days=1))
+				})
+				frappe.logger().info(f"✂️ Truncated row {row.name} to {new_start - timedelta(days=1)}")
+			elif new_end < row_end:
+				# TRUNCATE: Cập nhật valid_from = new_end + 1
+				frappe.db.set_value("SIS Timetable Instance Row", row.name, {
+					"valid_from": str(new_end + timedelta(days=1))
+				})
+				frappe.logger().info(f"✂️ Truncated row {row.name} from {new_end + timedelta(days=1)}")
+			else:
+				# Overlap hoàn toàn → XÓA
+				frappe.db.sql("DELETE FROM `tabSIS Timetable Instance Row` WHERE name = %s", (row.name,))
 		
 		frappe.logger().info(
-			f"🗑️ Deleted overlapping pattern rows in range {start_date} → {end_date}"
+			f"✅ Processed overlapping pattern rows for range {start_date_str} → {end_date_str}"
 		)
+	
+	def _duplicate_pattern_row(self, source_row_name: str, instance_id: str, 
+	                          valid_from: str, valid_to: str):
+		"""
+		Duplicate a pattern row với valid_from/valid_to mới.
+		Dùng cho SPLIT operation.
+		"""
+		source = frappe.db.get_value(
+			"SIS Timetable Instance Row",
+			source_row_name,
+			["day_of_week", "timetable_column_id", "period_priority", "period_name",
+			 "subject_id", "room_id"],
+			as_dict=True
+		)
+		
+		if not source:
+			return
+		
+		# Create new row
+		new_row = frappe.get_doc({
+			"doctype": "SIS Timetable Instance Row",
+			"parent": instance_id,
+			"parent_timetable_instance": instance_id,
+			"parenttype": "SIS Timetable Instance",
+			"parentfield": "weekly_pattern",
+			"day_of_week": source.day_of_week,
+			"date": None,
+			"valid_from": valid_from,
+			"valid_to": valid_to,
+			"timetable_column_id": source.timetable_column_id,
+			"period_priority": source.period_priority,
+			"period_name": source.period_name,
+			"subject_id": source.subject_id,
+			"room_id": source.room_id
+		})
+		new_row.insert(ignore_permissions=True, ignore_mandatory=True)
+		
+		# Copy teachers
+		teachers = frappe.db.sql("""
+			SELECT teacher_id, sort_order
+			FROM `tabSIS Timetable Instance Row Teacher`
+			WHERE parent = %s
+			ORDER BY sort_order
+		""", (source_row_name,), as_dict=True)
+		
+		for t in teachers:
+			new_row.append("teachers", {
+				"teacher_id": t.teacher_id,
+				"sort_order": t.sort_order
+			})
+		
+		if teachers:
+			new_row.save(ignore_permissions=True)
+		
+		frappe.logger().info(f"📋 Duplicated row {source_row_name} → {new_row.name}")
 	
 	def _create_pattern_rows_with_date_range(self, instance_id: str, class_id: str, class_df: pd.DataFrame) -> int:
 		"""
