@@ -304,29 +304,112 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
     
     frappe.logger().info(f"📊 _build_entries: {len(pattern_rows)} pattern rows, {len(override_rows)} override rows")
     
+    # ⚡ NEW (2025-12-20): Filter pattern rows by valid_from/valid_to for the week
+    # Pattern rows có valid_from/valid_to chỉ áp dụng trong date range cụ thể
+    # Cần kiểm tra xem pattern có valid cho tuần được query không
+    week_end = _add_days(week_start, 6)
+    
+    def is_pattern_valid_for_week(row, ws, we):
+        """
+        Kiểm tra pattern row có valid cho tuần ws → we không.
+        
+        Logic:
+        - Pattern có valid_from/valid_to → chỉ valid nếu overlap với tuần
+        - Pattern không có valid_from/valid_to → valid cho tất cả (legacy)
+        """
+        valid_from = row.get("valid_from")
+        valid_to = row.get("valid_to")
+        
+        # Legacy pattern (không có date range) → always valid
+        if not valid_from and not valid_to:
+            return True
+        
+        # Parse dates
+        from datetime import datetime
+        
+        if valid_from:
+            if isinstance(valid_from, str):
+                valid_from = datetime.strptime(valid_from, "%Y-%m-%d").date()
+            elif hasattr(valid_from, 'date'):
+                valid_from = valid_from.date()
+        
+        if valid_to:
+            if isinstance(valid_to, str):
+                valid_to = datetime.strptime(valid_to, "%Y-%m-%d").date()
+            elif hasattr(valid_to, 'date'):
+                valid_to = valid_to.date()
+        
+        ws_date = ws.date() if hasattr(ws, 'date') else ws
+        we_date = we.date() if hasattr(we, 'date') else we
+        
+        # Check overlap: pattern range phải overlap với tuần
+        # Overlap nếu: valid_from <= we AND valid_to >= ws
+        if valid_from and valid_from > we_date:
+            return False
+        if valid_to and valid_to < ws_date:
+            return False
+        
+        return True
+    
+    # Lọc pattern rows theo week range
+    filtered_pattern_rows = [r for r in pattern_rows if is_pattern_valid_for_week(r, week_start, week_end)]
+    frappe.logger().info(f"📊 _build_entries: After date filter: {len(filtered_pattern_rows)}/{len(pattern_rows)} pattern rows valid for week {week_start.strftime('%Y-%m-%d')}")
+    
+    # Ghi nhận các rows bị loại để debug
+    excluded_count = len(pattern_rows) - len(filtered_pattern_rows)
+    if excluded_count > 0:
+        frappe.logger().info(f"  ⚠️ Excluded {excluded_count} pattern rows due to date range filter")
+    
+    pattern_rows = filtered_pattern_rows
+    
     # 🔍 CRITICAL: Deduplicate pattern rows - if multiple rows have same subject/day/column,
-    # prefer rows with teachers assigned
+    # prefer rows with:
+    # 1. valid_from mới nhất (pattern rows mới hơn ưu tiên)
+    # 2. Có teachers assigned (nếu valid_from bằng nhau)
     pattern_rows_deduped = {}
+    
+    def get_valid_from_date(row):
+        """Lấy valid_from date để so sánh. NULL = rất cũ (1900-01-01)"""
+        from datetime import datetime, date
+        vf = row.get("valid_from")
+        if vf:
+            if isinstance(vf, str):
+                return datetime.strptime(vf, "%Y-%m-%d").date()
+            elif hasattr(vf, 'date'):
+                return vf.date()
+            elif isinstance(vf, date):
+                return vf
+        return date(1900, 1, 1)  # NULL = rất cũ
+    
     for r in pattern_rows:
         key = (r.get("subject_id"), r.get("day_of_week"), r.get("timetable_column_id"))
         has_teacher = bool(r.get("teacher_1_id") or r.get("teacher_2_id"))
+        current_valid_from = get_valid_from_date(r)
         
         if key not in pattern_rows_deduped:
             # First row with this key - use it
             pattern_rows_deduped[key] = r
         else:
-            # Check if existing row has teacher
+            # Compare with existing row
             existing = pattern_rows_deduped[key]
             existing_has_teacher = bool(existing.get("teacher_1_id") or existing.get("teacher_2_id"))
+            existing_valid_from = get_valid_from_date(existing)
             
-            # Prefer row with teacher over row without teacher
-            if has_teacher and not existing_has_teacher:
+            # ⚡ Priority 1: valid_from mới nhất (pattern rows mới hơn ưu tiên)
+            if current_valid_from > existing_valid_from:
                 pattern_rows_deduped[key] = r
-            # If both have teachers or both don't, keep the first one (or the one with more recent name)
-            elif has_teacher == existing_has_teacher:
-                # Keep the one with more recent name (higher number = newer)
-                if r.get("name", "") > existing.get("name", ""):
+                frappe.logger().debug(
+                    f"  ⚡ Replaced pattern: {existing.get('name')} (valid_from={existing_valid_from}) "
+                    f"→ {r.get('name')} (valid_from={current_valid_from})"
+                )
+            elif current_valid_from == existing_valid_from:
+                # Priority 2: Prefer row with teacher over row without teacher
+                if has_teacher and not existing_has_teacher:
                     pattern_rows_deduped[key] = r
+                # Priority 3: Keep the one with more recent name (higher number = newer)
+                elif has_teacher == existing_has_teacher:
+                    if r.get("name", "") > existing.get("name", ""):
+                        pattern_rows_deduped[key] = r
     
     pattern_rows = list(pattern_rows_deduped.values())
     frappe.logger().info(f"📊 _build_entries: After deduplication: {len(pattern_rows)} pattern rows")

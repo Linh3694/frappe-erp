@@ -627,3 +627,5 @@ def test_wislife_notification():
         frappe.logger().error(f"❌ [Wislife Test] Error: {str(e)}")
         return {"success": False, "message": str(e)}
 
+
+

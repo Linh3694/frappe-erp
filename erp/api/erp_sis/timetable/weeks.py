@@ -480,6 +480,7 @@ def get_class_week():
             }
             
             # Query pattern rows
+            # ⚡ UPDATED (2025-12-20): Thêm valid_from/valid_to cho date range filtering
             pattern_rows = frappe.get_all(
                 "SIS Timetable Instance Row",
                 fields=[
@@ -487,6 +488,8 @@ def get_class_week():
                     "parent",
                     "day_of_week",
                     "date",
+                    "valid_from",  # ⚡ NEW: Pattern row date range start
+                    "valid_to",    # ⚡ NEW: Pattern row date range end
                     "timetable_column_id",
                     "subject_id",
                     "room_id",
@@ -503,6 +506,8 @@ def get_class_week():
                     "parent",
                     "day_of_week",
                     "date",
+                    "valid_from",  # ⚡ For consistency
+                    "valid_to",    # ⚡ For consistency
                     "timetable_column_id",
                     "subject_id",
                     "room_id",
@@ -525,7 +530,9 @@ def get_class_week():
                         "name",
                         "parent_timetable_instance",
                         "day_of_week",
-                        "date",  # ✅ ADD: Support date-specific override rows
+                        "date",  # ✅ Support date-specific override rows
+                        "valid_from",  # ⚡ NEW
+                        "valid_to",    # ⚡ NEW
                         "timetable_column_id",
                         "subject_id",
                     ],
@@ -540,7 +547,7 @@ def get_class_week():
             if not rows:
                 placeholders = ",".join(["%s"] * len(instance_ids))
                 sql = f"""
-                    SELECT name, parent_timetable_instance, day_of_week, date, timetable_column_id, subject_id
+                    SELECT name, parent_timetable_instance, day_of_week, date, valid_from, valid_to, timetable_column_id, subject_id
                     FROM `tabSIS Timetable Instance Row`
                     WHERE parent_timetable_instance IN ({placeholders})
                 """
