@@ -739,6 +739,12 @@ def bulk_import_students():
                 student_entry = dict(student_data)
                 student_entry['student_id'] = student_id
                 
+                # Convert activities arrays to JSON strings (DocType expects Small Text with JSON)
+                if 'activities_vn' in student_entry and isinstance(student_entry['activities_vn'], list):
+                    student_entry['activities_vn'] = json.dumps(student_entry['activities_vn'], ensure_ascii=False)
+                if 'activities_en' in student_entry and isinstance(student_entry['activities_en'], list):
+                    student_entry['activities_en'] = json.dumps(student_entry['activities_en'], ensure_ascii=False)
+                
                 # NOTE: Removed duplicate check - allow multiple awards for same student
                 
                 # Create new record for this student
