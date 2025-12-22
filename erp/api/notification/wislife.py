@@ -100,9 +100,10 @@ def handle_new_post_broadcast(event_data):
         frappe.logger().info(f"📱 [Wislife New Post] Enqueueing broadcast job...")
         
         # Enqueue background job để không block response
+        # Dùng queue 'long' vì broadcast đến nhiều users có thể mất vài phút
         frappe.enqueue(
             'erp.api.notification.wislife._do_broadcast_new_post',
-            queue='default',
+            queue='long',
             timeout=600,  # 10 phút timeout cho job
             event_data=event_data
         )
