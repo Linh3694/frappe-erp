@@ -91,9 +91,32 @@ def handle_wislife_event():
 def handle_new_post_broadcast(event_data):
     """
     Xử lý khi BOD/Admin đăng bài viết mới - gửi đến TẤT CẢ users
+    Enqueue job để chạy background, không block response
     
     Args:
         event_data: Dictionary containing postId, authorEmail, authorName, content, type
+    """
+    try:
+        frappe.logger().info(f"📱 [Wislife New Post] Enqueueing broadcast job...")
+        
+        # Enqueue background job để không block response
+        frappe.enqueue(
+            'erp.api.notification.wislife._do_broadcast_new_post',
+            queue='default',
+            timeout=600,  # 10 phút timeout cho job
+            event_data=event_data
+        )
+        
+        frappe.logger().info(f"📱 [Wislife New Post] Broadcast job enqueued successfully")
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Wislife New Post] Error enqueueing broadcast: {str(e)}")
+        frappe.log_error(message=str(e), title="Wislife New Post Broadcast Error")
+
+
+def _do_broadcast_new_post(event_data):
+    """
+    Background job: Thực hiện gửi notification đến tất cả users
     """
     try:
         raw_author_name = event_data.get('authorName', 'Ai đó')
@@ -102,7 +125,7 @@ def handle_new_post_broadcast(event_data):
         content_preview = event_data.get('content', '')[:50]
         author_email = event_data.get('authorEmail')
         
-        frappe.logger().info(f"📱 [Wislife New Post] Broadcasting from {author_name}")
+        frappe.logger().info(f"📱 [Wislife Broadcast Job] Starting for post by {author_name}")
         
         # Lấy tất cả users có device token đã đăng ký
         all_tokens = frappe.get_all("Mobile Device Token",
@@ -112,13 +135,13 @@ def handle_new_post_broadcast(event_data):
         )
         
         if not all_tokens:
-            frappe.logger().warning("📱 [Wislife New Post] No device tokens found for broadcast")
+            frappe.logger().warning("📱 [Wislife Broadcast Job] No device tokens found")
             return
         
         # Loại bỏ author khỏi danh sách nhận
         recipient_emails = [t.user for t in all_tokens if t.user != author_email]
         
-        frappe.logger().info(f"📱 [Wislife New Post] Broadcasting to {len(recipient_emails)} users")
+        frappe.logger().info(f"📱 [Wislife Broadcast Job] Broadcasting to {len(recipient_emails)} users")
         
         notification_message = f'{author_name} vừa đăng: "{content_preview}..."'
         
@@ -161,17 +184,17 @@ def handle_new_post_broadcast(event_data):
                     )
                     saved_count += 1
                 except Exception as db_error:
-                    frappe.logger().error(f"❌ [Wislife New Post] Failed to save to notification center for {user_email}: {str(db_error)}")
+                    frappe.logger().error(f"❌ [Wislife Broadcast Job] DB save failed for {user_email}: {str(db_error)}")
                     
             except Exception as user_error:
-                frappe.logger().error(f"❌ [Wislife New Post] Error sending to {user_email}: {str(user_error)}")
+                frappe.logger().error(f"❌ [Wislife Broadcast Job] Error for {user_email}: {str(user_error)}")
         
-        frappe.logger().info(f"✅ [Wislife New Post] Broadcast sent to {success_count}/{len(recipient_emails)} users")
-        frappe.logger().info(f"✅ [Wislife New Post] Saved to notification center for {saved_count}/{len(recipient_emails)} users")
+        frappe.logger().info(f"✅ [Wislife Broadcast Job] Push sent: {success_count}/{len(recipient_emails)}")
+        frappe.logger().info(f"✅ [Wislife Broadcast Job] Saved to DB: {saved_count}/{len(recipient_emails)}")
         
     except Exception as e:
-        frappe.logger().error(f"❌ [Wislife New Post] Error in handle_new_post_broadcast: {str(e)}")
-        frappe.log_error(message=str(e), title="Wislife New Post Broadcast Error")
+        frappe.logger().error(f"❌ [Wislife Broadcast Job] Error: {str(e)}")
+        frappe.log_error(message=str(e), title="Wislife Broadcast Job Error")
 
 
 def handle_post_reacted(event_data):
