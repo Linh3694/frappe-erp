@@ -441,39 +441,34 @@ def handle_post_mention(event_data):
     Xử lý khi có người mention trong comment
     
     Args:
-        event_data: Dictionary containing postId, commentId, mentionedNames (array), userId, userName
+        event_data: Dictionary containing:
+            - postId: ID bài viết
+            - commentId: ID comment
+            - mentionedEmails: Array emails người được mention (new format)
+            - mentionedNames: Array tên người được mention (legacy format)
+            - userId: ID người mention
+            - userName: Tên người mention
     """
     try:
+        # Ưu tiên mentionedEmails (new format) trước mentionedNames (legacy)
+        mentioned_emails = event_data.get('mentionedEmails', [])
         mentioned_names = event_data.get('mentionedNames', [])
+        
         raw_name = event_data.get('userName', 'Ai đó')
         user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
         
-        if not mentioned_names:
-            frappe.logger().warning("⚠️ [Wislife Mention] No mentioned names provided")
-            return
-        
-        frappe.logger().info(f"📱 [Wislife Mention] Processing mentions: {mentioned_names}")
-        
-        notification_message = f'{user_name} đã nhắc đến bạn trong một bình luận'
-        
-        # Tìm users được mention bằng tên (fullname)
-        success_count = 0
-        for name in mentioned_names:
-            try:
-                # Tìm teacher có tên trùng khớp
-                teachers = frappe.db.sql("""
-                    SELECT email
-                    FROM `tabCRM Teacher`
-                    WHERE teacher_name LIKE %s
-                    AND email IS NOT NULL
-                    LIMIT 1
-                """, (f"%{name}%",), as_dict=True)
-                
-                if teachers and len(teachers) > 0:
-                    recipient_email = teachers[0].get('email')
-                    
+        # Nếu có mentionedEmails, sử dụng trực tiếp (không cần lookup)
+        if mentioned_emails and len(mentioned_emails) > 0:
+            frappe.logger().info(f"📱 [Wislife Mention] Processing {len(mentioned_emails)} mentions by email")
+            
+            notification_message = f'{user_name} đã nhắc đến bạn trong một bình luận'
+            success_count = 0
+            saved_count = 0
+            
+            for recipient_email in mentioned_emails:
+                try:
                     # Gửi push notification
                     result = send_mobile_notification(
                         user_email=recipient_email,
@@ -489,7 +484,6 @@ def handle_post_mention(event_data):
                     
                     if result.get("success"):
                         success_count += 1
-                        frappe.logger().info(f"✅ [Wislife Mention] Push notification sent to {recipient_email}")
                     
                     # Lưu vào Notification Center
                     try:
@@ -509,19 +503,95 @@ def handle_post_mention(event_data):
                             channel="push",
                             event_timestamp=frappe.utils.now()
                         )
-                        frappe.logger().info(f"✅ [Wislife Mention] Saved to notification center for {recipient_email}")
+                        saved_count += 1
                     except Exception as db_error:
-                        frappe.logger().error(f"❌ [Wislife Mention] Failed to save to notification center: {str(db_error)}")
+                        frappe.logger().error(f"❌ [Wislife Mention] DB error for {recipient_email}: {str(db_error)}")
+                        
+                except Exception as user_error:
+                    frappe.logger().error(f"❌ [Wislife Mention] Error sending to {recipient_email}: {str(user_error)}")
+            
+            frappe.logger().info(f"✅ [Wislife Mention] Push: {success_count}/{len(mentioned_emails)}, Saved: {saved_count}/{len(mentioned_emails)}")
+            return
+        
+        # Legacy: Tìm users theo tên nếu không có emails
+        if not mentioned_names:
+            frappe.logger().warning("⚠️ [Wislife Mention] No mentions provided")
+            return
+        
+        frappe.logger().info(f"📱 [Wislife Mention] Processing mentions by name (legacy): {mentioned_names}")
+        
+        notification_message = f'{user_name} đã nhắc đến bạn trong một bình luận'
+        success_count = 0
+        
+        for name in mentioned_names:
+            try:
+                # Tìm user có tên trùng khớp - tìm trong User trước
+                users = frappe.db.sql("""
+                    SELECT email
+                    FROM `tabUser`
+                    WHERE full_name LIKE %s
+                    AND enabled = 1
+                    AND email IS NOT NULL
+                    LIMIT 1
+                """, (f"%{name}%",), as_dict=True)
+                
+                # Fallback: tìm trong CRM Teacher
+                if not users:
+                    users = frappe.db.sql("""
+                        SELECT email
+                        FROM `tabCRM Teacher`
+                        WHERE teacher_name LIKE %s
+                        AND email IS NOT NULL
+                        LIMIT 1
+                    """, (f"%{name}%",), as_dict=True)
+                
+                if users and len(users) > 0:
+                    recipient_email = users[0].get('email')
+                    
+                    result = send_mobile_notification(
+                        user_email=recipient_email,
+                        title='Wislife',
+                        body=notification_message,
+                        data={
+                            'type': 'wislife_mention',
+                            'postId': post_id,
+                            'commentId': comment_id,
+                            'action': 'open_post'
+                        }
+                    )
+                    
+                    if result.get("success"):
+                        success_count += 1
+                    
+                    try:
+                        create_notification(
+                            title="Wislife",
+                            message=notification_message,
+                            recipient_user=recipient_email,
+                            notification_type="system",
+                            priority="normal",
+                            data={
+                                'type': 'wislife_mention',
+                                'postId': post_id,
+                                'commentId': comment_id,
+                                'action': 'open_post',
+                                'actorName': user_name
+                            },
+                            channel="push",
+                            event_timestamp=frappe.utils.now()
+                        )
+                    except Exception as db_error:
+                        frappe.logger().error(f"❌ [Wislife Mention] DB error: {str(db_error)}")
                 else:
-                    frappe.logger().warning(f"⚠️ [Wislife Mention] No teacher found for name: {name}")
+                    frappe.logger().warning(f"⚠️ [Wislife Mention] No user found for name: {name}")
                         
             except Exception as user_error:
-                frappe.logger().error(f"❌ [Wislife Mention] Error sending to {name}: {str(user_error)}")
+                frappe.logger().error(f"❌ [Wislife Mention] Error for {name}: {str(user_error)}")
         
-        frappe.logger().info(f"✅ [Wislife Mention] Sent to {success_count}/{len(mentioned_names)} users")
+        frappe.logger().info(f"✅ [Wislife Mention] Sent to {success_count}/{len(mentioned_names)} users (legacy)")
         
     except Exception as e:
-        frappe.logger().error(f"❌ [Wislife Mention] Error in handle_post_mention: {str(e)}")
+        frappe.logger().error(f"❌ [Wislife Mention] Error: {str(e)}")
         frappe.log_error(message=str(e), title="Wislife Mention Error")
 
 
