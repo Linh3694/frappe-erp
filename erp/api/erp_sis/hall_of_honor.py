@@ -13,6 +13,31 @@ from erp.utils.api_response import (
 
 
 # ============================================
+# HELPER FUNCTIONS
+# ============================================
+
+def _convert_student_entry_activities(entry_data: dict) -> dict:
+    """
+    Convert activities arrays to JSON strings for student entry
+    DocType expects Small Text field with JSON string, not array
+    """
+    if 'activities_vn' in entry_data and isinstance(entry_data['activities_vn'], list):
+        entry_data['activities_vn'] = json.dumps(entry_data['activities_vn'], ensure_ascii=False)
+    if 'activities_en' in entry_data and isinstance(entry_data['activities_en'], list):
+        entry_data['activities_en'] = json.dumps(entry_data['activities_en'], ensure_ascii=False)
+    return entry_data
+
+
+def _process_student_entries(entries: list) -> list:
+    """
+    Process list of student entries, converting activities arrays to JSON strings
+    """
+    if not entries:
+        return []
+    return [_convert_student_entry_activities(dict(entry)) for entry in entries]
+
+
+# ============================================
 # PUBLIC APIs (allow_guest=True)
 # ============================================
 
@@ -201,16 +226,16 @@ def get_award_records(
                     'student_code': student.student_code
                 }
                 
-                # Get current class from SIS Class Student
-                class_enrollment = frappe.get_all(
-                    'SIS Class Student',
-                    filters={
-                        'student_id': entry['student_id'],
-                        'school_year_id': record['school_year_id']
-                    },
-                    fields=['class_id'],
-                    limit=1
-                )
+                # Get current class from SIS Class Student (chỉ lấy lớp regular, không lấy mixed/club)
+                class_enrollment = frappe.db.sql("""
+                    SELECT cs.class_id
+                    FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                    WHERE cs.student_id = %s 
+                    AND cs.school_year_id = %s
+                    AND c.class_type = 'regular'
+                    LIMIT 1
+                """, (entry['student_id'], record['school_year_id']), as_dict=True)
                 
                 if class_enrollment:
                     class_doc = frappe.get_doc('SIS Class', class_enrollment[0]['class_id'])
@@ -373,16 +398,16 @@ def get_award_record_detail(name: str):
                 'score': entry.score
             }
             
-            # Get current class
-            class_enrollment = frappe.get_all(
-                'SIS Class Student',
-                filters={
-                    'student_id': entry.student_id,
-                    'school_year_id': record.school_year_id
-                },
-                fields=['class_id'],
-                limit=1
-            )
+            # Get current class (chỉ lấy lớp regular, không lấy mixed/club)
+            class_enrollment = frappe.db.sql("""
+                SELECT cs.class_id
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                WHERE cs.student_id = %s 
+                AND cs.school_year_id = %s
+                AND c.class_type = 'regular'
+                LIMIT 1
+            """, (entry.student_id, record.school_year_id), as_dict=True)
             
             if class_enrollment:
                 class_doc = frappe.get_doc('SIS Class', class_enrollment[0]['class_id'])
@@ -518,6 +543,9 @@ def create_award_record():
         
         # NOTE: Removed duplicate check - allow multiple records
         
+        # Process student entries - convert activities arrays to JSON strings
+        student_entries = _process_student_entries(data.get('student_entries', []))
+        
         # Create record
         doc = frappe.get_doc({
             'doctype': 'SIS Award Record',
@@ -529,7 +557,7 @@ def create_award_record():
             'semester': data.get('semester'),
             'month': data.get('month'),
             'priority': data.get('priority', 0),
-            'student_entries': data.get('student_entries', []),
+            'student_entries': student_entries,
             'class_entries': data.get('class_entries', [])
         })
         
@@ -590,7 +618,9 @@ def update_award_record():
         # Update student entries if provided
         if 'student_entries' in data:
             doc.student_entries = []
-            for entry_data in data['student_entries']:
+            # Convert activities arrays to JSON strings
+            processed_entries = _process_student_entries(data['student_entries'])
+            for entry_data in processed_entries:
                 doc.append('student_entries', entry_data)
         
         # Update class entries if provided
@@ -740,10 +770,7 @@ def bulk_import_students():
                 student_entry['student_id'] = student_id
                 
                 # Convert activities arrays to JSON strings (DocType expects Small Text with JSON)
-                if 'activities_vn' in student_entry and isinstance(student_entry['activities_vn'], list):
-                    student_entry['activities_vn'] = json.dumps(student_entry['activities_vn'], ensure_ascii=False)
-                if 'activities_en' in student_entry and isinstance(student_entry['activities_en'], list):
-                    student_entry['activities_en'] = json.dumps(student_entry['activities_en'], ensure_ascii=False)
+                student_entry = _convert_student_entry_activities(student_entry)
                 
                 # NOTE: Removed duplicate check - allow multiple awards for same student
                 
