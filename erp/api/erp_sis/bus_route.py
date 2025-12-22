@@ -604,6 +604,7 @@ def get_available_students(campus_id=None, school_year_id=None):
 			FROM `tabSIS Bus Route Student`
 			WHERE student_id IS NOT NULL
 		)
+		AND cs.class_type = 'regular'
 		AND {where_clause}
 		ORDER BY s.full_name
 	""", params, as_dict=True)
@@ -724,12 +725,14 @@ def add_student_to_route():
 
 		try:
 			frappe.logger().info("🔍 STEP 3: Finding class_student_id...")
-			# Find class_student_id for the student
+			# Find class_student_id for the student (chỉ lấy lớp regular, không lấy mixed/club)
 			class_student_id = None
 			if data.get('student_id'):
 				result = frappe.db.sql("""
-					SELECT name FROM `tabSIS Class Student`
-					WHERE student_id = %s
+					SELECT cs.name FROM `tabSIS Class Student` cs
+					INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+					WHERE cs.student_id = %s AND c.class_type = 'regular'
+					ORDER BY cs.creation DESC
 					LIMIT 1
 				""", (data['student_id'],))
 				class_student_id = result[0][0] if result else None
@@ -2290,6 +2293,7 @@ def get_available_students_for_daily_trip():
 		trip = trip_info[0]
 
 		# Get students from route that match weekday/trip_type but not already in daily trip
+		# Chỉ lấy lớp regular, không lấy mixed/club
 		available_students = frappe.db.sql("""
 			SELECT 
 				brs.student_id,
@@ -2302,7 +2306,7 @@ def get_available_students_for_daily_trip():
 			FROM `tabSIS Bus Route Student` brs
 			INNER JOIN `tabCRM Student` s ON brs.student_id = s.name
 			LEFT JOIN `tabSIS Class Student` cs ON brs.class_student_id = cs.name
-			LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
+			LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name AND c.class_type = 'regular'
 			WHERE brs.route_id = %s
 				AND brs.weekday = %s
 				AND brs.trip_type = %s
