@@ -5,6 +5,86 @@
 import frappe
 from frappe import _
 from typing import Dict, Any, List, Optional
+import unicodedata
+
+
+# ========================================================================
+# Vietnamese Name Formatting Utilities
+# ========================================================================
+
+# Danh sách họ Việt Nam phổ biến - dùng để detect format tên
+VIETNAMESE_SURNAMES = [
+    'nguyễn', 'nguyen', 'trần', 'tran', 'lê', 'le', 'phạm', 'pham',
+    'huỳnh', 'huynh', 'hoàng', 'hoang', 'vũ', 'vu', 'võ', 'vo',
+    'phan', 'trương', 'truong', 'bùi', 'bui', 'đặng', 'dang',
+    'đỗ', 'do', 'ngô', 'ngo', 'hồ', 'ho', 'dương', 'duong',
+    'đinh', 'dinh', 'lý', 'ly', 'lương', 'luong', 'mai', 'đào', 'dao',
+    'trịnh', 'trinh', 'tô', 'to', 'tạ', 'ta', 'chu', 'châu', 'chau',
+    'quách', 'quach', 'cao', 'la', 'thái', 'thai', 'lưu', 'luu',
+    'phùng', 'phung', 'vương', 'vuong', 'từ', 'tu', 'hà', 'ha',
+    'kiều', 'kieu', 'đoàn', 'doan', 'tăng', 'tang', 'lam', 'mã', 'ma',
+    'tống', 'tong', 'triệu', 'trieu', 'nghiêm', 'nghiem', 'thạch', 'thach',
+    'quang', 'doãn', 'doan', 'khương', 'khuong', 'ninh'
+]
+
+
+def remove_vietnamese_tones(text: str) -> str:
+    """Loại bỏ dấu tiếng Việt để so sánh"""
+    if not text:
+        return ''
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+    text = text.replace('đ', 'd').replace('Đ', 'D')
+    return text.lower()
+
+
+def is_vietnamese_surname(word: str) -> bool:
+    """Kiểm tra xem một từ có phải là họ Việt Nam không"""
+    if not word:
+        return False
+    normalized = remove_vietnamese_tones(word.lower())
+    return normalized in [remove_vietnamese_tones(s) for s in VIETNAMESE_SURNAMES]
+
+
+def format_vietnamese_name(name: str) -> str:
+    """
+    Format tên sang chuẩn Việt Nam (Họ + Đệm + Tên) với logic phát hiện thông minh
+    
+    Ví dụ:
+    - 'Duy Hiếu Nguyễn' -> 'Nguyễn Duy Hiếu' (format Tây -> VN)
+    - 'Nguyễn Hải Linh' -> 'Nguyễn Hải Linh' (đã chuẩn VN -> giữ nguyên)
+    
+    Logic:
+    - Nếu phần đầu là họ VN -> đã chuẩn format VN, giữ nguyên
+    - Nếu phần cuối là họ VN -> format Tây, cần đảo
+    """
+    if not name:
+        return name
+    
+    parts = name.strip().split()
+    
+    if len(parts) <= 1:
+        return name
+    
+    first_part = parts[0]
+    last_part = parts[-1]
+    
+    # Nếu phần đầu là họ VN -> đã chuẩn format VN
+    if is_vietnamese_surname(first_part):
+        return name
+    
+    # Nếu phần cuối là họ VN -> format Tây, cần đảo
+    if is_vietnamese_surname(last_part):
+        # Đảo: [First, Middle, Last] -> [Last, First, Middle]
+        return ' '.join([last_part] + parts[:-1])
+    
+    # Không xác định được -> giữ nguyên
+    return name
+
+
+# ========================================================================
+# Standard CRUD Utilities
+# ========================================================================
 
 
 def get_list(doctype: str, page: int = 1, limit: int = 20, filters: Optional[Dict[str, Any]] = None,

@@ -1,280 +1,282 @@
-# Timetable Module 📚
+# Timetable Module
 
-Clean, modular implementation of Wellspring SIS Timetable system.
+## Tổng quan
 
----
+Module xử lý thời khóa biểu (TKB) cho hệ thống SIS. Hỗ trợ:
+- Import TKB từ Excel
+- Hiển thị TKB theo tuần cho lớp/giáo viên
+- Chỉnh sửa TKB trực tiếp trên grid
+- Xử lý date range overlapping khi upload TKB mới
 
-## 📁 Structure
+## Cấu trúc Files
 
 ```
 timetable/
-├── columns.py          # Period/Column CRUD
-├── crud.py             # Timetable CRUD
-├── weeks.py            # Weekly queries (teacher/class)
-├── instance_rows.py    # Individual period edits
-├── overrides.py        # Date-specific changes
-├── helpers.py          # Shared utilities
-│
-├── import_excel.py     # ✅ Excel import API
-├── import_validator.py # ✅ Validation logic
-└── import_executor.py  # ✅ Execution logic
+├── __init__.py              # Export các functions
+├── README.md                # File này
+├── import_excel.py          # API endpoint nhận file upload
+├── import_executor.py       # Xử lý logic import chính
+├── import_validator.py      # Validate dữ liệu trước khi import
+├── weeks.py                 # API lấy TKB theo tuần (get_class_week, get_teacher_week)
+├── helpers.py               # Hàm helper (_build_entries, ...)
+├── bulk_sync_engine.py      # Sync Teacher Timetable materialized view
+├── instance_rows.py         # CRUD cho từng cell trong TKB
+├── columns.py               # Quản lý periods/columns
+├── crud.py                  # CRUD cho Timetable header
+├── overrides.py             # Xử lý date-specific overrides
+└── legacy.py                # Code cũ (deprecated)
 ```
 
 ---
 
-## 🎯 API Endpoints (16 total)
+## 🔄 Luồng Upload Thời Khóa Biểu
 
-### Timetable Column (4)
+### Bước 1: Frontend gọi API Import
 
-- `create_timetable_column()` - Create period
-- `update_timetable_column()` - Update period
-- `delete_timetable_column()` - Delete period
-- `get_education_stages_for_timetable_column()` - Get dropdown data
-
-### Timetable CRUD (4)
-
-- `get_timetables()` - List with pagination
-- `get_timetable_detail()` - Get detail
-- `delete_timetable()` - Delete timetable
-- `test_class_week_api()` - Test endpoint
-
-### Excel Import (3)
-
-- `import_timetable()` - Upload & enqueue
-- `get_import_job_status()` - Poll progress
-- `process_with_new_executor()` - Direct execution
-
-### Weekly Queries (2)
-
-- `get_teacher_week()` - Teacher weekly timetable
-- `get_class_week()` - Class weekly timetable
-
-### Instance Rows (2)
-
-- `get_instance_row_details()` - Get row details
-- `update_instance_row()` - Update specific period
-
-### Date Overrides (2)
-
-- `create_or_update_timetable_override()` - Create/update override
-- `delete_timetable_override()` - Delete override
-
----
-
-## 🚀 Quick Start
-
-### Import Timetable from Excel
-
-```python
-from erp.api.erp_sis.timetable import import_timetable
-
-# Frontend calls this endpoint
+```
 POST /api/method/erp.api.erp_sis.timetable.import_timetable
+
+FormData:
+- file: Excel file
+- title_vn: "TKB HK2 2024-2025"
+- campus_id: "CAMPUS-001"
+- school_year_id: "SY-2024-2025"
+- education_stage_id: "ES-PRIMARY"
+- start_date: "2026-01-05"
+- end_date: "2026-06-30"
 ```
 
-### Get Teacher's Weekly Timetable
+### Bước 2: Validation (import_validator.py)
 
 ```python
-from erp.api.erp_sis.timetable import get_teacher_week
+TimetableImportValidator(file_path, metadata).validate()
+```
 
-# Frontend calls this endpoint
+Kiểm tra:
+- Cấu trúc file Excel (columns, format)
+- Lớp học có tồn tại trong hệ thống
+- Môn học có mapping với SIS Subject
+- Periods có cấu hình đúng
+
+### Bước 3: Execution (import_executor.py)
+
+```python
+TimetableImportExecutor(file_path, metadata).execute()
+```
+
+#### 3.1. Tạo/Cập nhật Timetable Header
+
+```python
+_create_or_update_timetable_header()
+```
+
+- Tìm Timetable có cùng (campus_id, school_year_id, education_stage_id)
+- Nếu có → Cập nhật title, date range
+- Nếu chưa → Tạo mới
+
+#### 3.2. Xử lý từng lớp
+
+```python
+_process_class(class_id, class_title, class_df)
+```
+
+**a) Tìm/Tạo Timetable Instance:**
+
+```python
+_create_or_get_instance(class_id)
+```
+
+- Instance = TKB cho 1 lớp cụ thể
+- Kiểm tra date range:
+  - ❌ **BACKDATE bị cấm**: Không được upload với start_date sớm hơn instance hiện tại
+  - ✅ **Extend forward**: Có thể mở rộng end_date về tương lai
+
+**b) Xóa/Truncate pattern rows overlap:**
+
+```python
+_delete_overlapping_pattern_rows(instance_id)
+```
+
+⚡ **Logic xử lý date range overlap (QUAN TRỌNG):**
+
+```
+Trường hợp 1: Range mới BAO PHỦ hoàn toàn range cũ
+┌─────────────────────────────────────┐ NEW
+     ┌───────────────────┐              OLD
+→ XÓA pattern row cũ
+
+Trường hợp 2: Range mới NẰM GIỮA range cũ
+┌───┐ OLD-1     ┌─────────┐ NEW     ┌───┐ OLD-2
+             ┌─────────────────────────┐ OLD
+→ SPLIT pattern row cũ thành 2 phần
+
+Trường hợp 3: Range mới BẮT ĐẦU SAU range cũ (CÓ OVERLAP)
+                   ┌─────────────────────┐ NEW
+┌────────────────────────────────────────┐ OLD
+→ TRUNCATE valid_to của row cũ = new_start - 1 ngày
+
+Trường hợp 4: Range mới KẾT THÚC TRƯỚC range cũ (CÓ OVERLAP)
+┌─────────────────────┐ NEW
+    ┌────────────────────────────────────┐ OLD
+→ TRUNCATE valid_from của row cũ = new_end + 1 ngày
+```
+
+**c) Tạo pattern rows mới:**
+
+```python
+_create_pattern_rows_with_date_range(instance_id, class_id, class_df)
+```
+
+- Mỗi row có `valid_from` và `valid_to` để xác định date range
+- Pattern row KHÔNG có `date` (NULL) - áp dụng cho nhiều tuần
+- Override row CÓ `date` cụ thể - áp dụng cho 1 ngày
+
+### Bước 4: Sync Teacher Timetable
+
+```python
+sync_teacher_timetable_background()
+```
+
+- Tạo entries trong `SIS Teacher Timetable` cho mỗi ngày trong range
+- Chỉ tạo cho ngày mà pattern row có `valid_from <= date <= valid_to`
+
+---
+
+## 📖 Luồng Hiển Thị TKB (weeks.py)
+
+### API Lấy TKB Theo Tuần
+
+```
+GET /api/method/erp.api.erp_sis.timetable.get_class_week
+Params: class_id, week_start, week_end
+
 GET /api/method/erp.api.erp_sis.timetable.get_teacher_week
+Params: teacher_id, week_start, week_end, education_stage
+```
+
+### Luồng xử lý (helpers.py → _build_entries_with_date_precedence)
+
+```
+1. Query TẤT CẢ pattern rows và override rows từ Instance
+
+2. ⚡ LỌC pattern rows theo valid_from/valid_to:
+   - Chỉ giữ rows có overlap với tuần được query
+   - Pattern cũ (valid_to < week_start) → LOẠI
+   - Pattern chưa có hiệu lực (valid_from > week_end) → LOẠI
+
+3. DEDUPLICATION:
+   - Nếu nhiều patterns cùng (subject, day, column)
+   - Ưu tiên: valid_from mới nhất → có teacher → name cao hơn
+
+4. BUILD entries cho từng ngày trong tuần:
+   - Pattern rows → tạo entry cho mỗi ngày matching day_of_week
+   - Override rows → chỉ áp dụng cho date cụ thể
+   - Override có ưu tiên cao hơn pattern
+
+5. Apply Timetable Overrides (Priority 3):
+   - Từ bảng Timetable_Date_Override
 ```
 
 ---
 
-## 📖 Import Flow
+## 📊 Data Model
+
+### SIS Timetable (Header)
 
 ```
-1. Upload Excel
-   ↓
-2. Validate structure & data (TimetableImportValidator)
-   ↓
-3. If validation fails → return errors
-   ↓
-4. If dry_run → return preview
-   ↓
-5. Execute import (TimetableImportExecutor)
-   ↓
-6. Create Timetable + Instances + Rows
-   ↓
-7. Sync materialized views
-   ↓
-8. Return success + stats
+- name: "TT-2024-2025-PRIMARY"
+- title_vn: "TKB Tiểu học HK2"
+- campus_id → Campus
+- school_year_id → School Year
+- education_stage_id → Education Stage
+- start_date, end_date
 ```
 
----
+### SIS Timetable Instance (Per-Class)
 
-## 🔧 Validation Rules
-
-### Excel Structure
-
-- Must have "Day of Week" and "Period" columns
-- Class columns follow after
-- Supports both old (row-based) and new (column-based) layouts
-
-### Data Validation
-
-- ✅ All classes must exist in SIS Class
-- ✅ All subjects must map to SIS Subject
-- ✅ Date range must be valid
-- ⚠️ Teachers optional (warning if missing)
-
-### Error Messages
-
-```json
-{
-  "errors": [
-    "Row 5: Subject 'Math' not found in SIS Subject",
-    "Row 12: Class '1A' not found"
-  ],
-  "warnings": ["Row 20: No teacher assigned for Period 1"]
-}
+```
+- name: "TT-INST-001"
+- timetable_id → Timetable Header
+- class_id → SIS Class
+- campus_id → Campus
+- start_date, end_date
+- weekly_pattern: [Instance Row]  # Child table
 ```
 
----
+### SIS Timetable Instance Row (Pattern/Override)
 
-## 💡 Key Features
-
-### 1. Progress Tracking
-
-Real-time progress for large imports (40+ classes):
-
-```python
-{
-    "phase": "importing",
-    "current": 15,
-    "total": 40,
-    "current_class": "1A",
-    "percentage": 37,
-    "message": "Đang xử lý lớp 1A (15/40)"
-}
+```
+- parent → Instance
+- day_of_week: "mon", "tue", ...
+- date: NULL (pattern) hoặc "2026-01-06" (override)
+- valid_from: "2026-01-05" (⚡ NEW - pattern date range)
+- valid_to: "2026-06-30" (⚡ NEW - pattern date range)
+- timetable_column_id → Period
+- subject_id → SIS Subject
+- room_id → Room (optional)
+- teachers: [Row Teacher]  # Child table
 ```
 
-### 2. Transaction Safety
+### SIS Teacher Timetable (Materialized View)
 
-All-or-nothing approach:
-
-- If any error → rollback all changes
-- No partial imports
-- Database consistency guaranteed
-
-### 3. Dry Run Mode
-
-Preview import without creating records:
-
-```python
-{
-    "dry_run": True,
-    "preview": {
-        "classes": 40,
-        "subjects": 25,
-        "total_periods": 1200
-    }
-}
+```
+- teacher_id → SIS Teacher
+- class_id → SIS Class
+- date: "2026-01-06"
+- day_of_week: "mon"
+- timetable_column_id → Period
+- subject_id → SIS Subject
+- timetable_instance_id → Instance
 ```
 
 ---
 
-## 🧪 Testing
-
-### Unit Tests
+## 🔧 Các Lệnh Console Hữu Ích
 
 ```bash
-# Run validator tests
-python -m pytest tests/test_import_validator.py
+# Resync tất cả Teacher Timetable
+bench --site [site] execute erp.api.erp_sis.timetable.import_executor.resync_all_teacher_timetables
 
-# Run executor tests
-python -m pytest tests/test_import_executor.py
-```
+# Sync tất cả Subject Assignments vào TKB
+bench --site [site] execute erp.api.erp_sis.timetable.import_executor.sync_all_subject_assignments
 
-### Integration Tests
+# Clear cache
+bench --site [site] clear-cache
 
-```bash
-# Test with real Excel file
-python -m pytest tests/test_import_integration.py
-```
-
-### Manual Testing
-
-```python
-# Test 1 class import
-from erp.api.erp_sis.timetable import process_with_new_executor
-
-result = process_with_new_executor(
-    file_path="/path/to/test.xlsx",
-    title_vn="Test",
-    title_en="Test",
-    campus_id="campus-1",
-    school_year_id="2024-2025",
-    education_stage_id="primary",
-    start_date="2024-09-01",
-    end_date="2025-01-15"
-)
+# Migrate old-style pattern rows (valid_from=NULL → có date range)
+bench --site [site] execute erp.api.erp_sis.timetable.cleanup_old_data.migrate_old_pattern_rows --kwargs '{"dry_run": false}'
 ```
 
 ---
 
-## 📚 Documentation
+## ⚠️ Lưu Ý Quan Trọng
 
-- **Migration Guide:** `MIGRATION_COMPLETE.md`
-- **API Reference:** See docstrings in each module
-- **Architecture:** See `SUBJECT_ASSIGNMENT_TIMETABLE_ARCHITECTURE.md` (root)
+### 1. Không được Backdate TKB
+- Upload TKB mới không được có `start_date` sớm hơn TKB hiện tại
+- Chỉ được mở rộng về tương lai
 
----
+### 2. Pattern Rows vs Override Rows
+- **Pattern row**: `date = NULL`, áp dụng lặp lại mỗi tuần
+- **Override row**: `date = cụ thể`, chỉ áp dụng cho ngày đó
+- Override luôn có ưu tiên cao hơn pattern
 
-## 🐛 Troubleshooting
+### 3. Date Range (valid_from/valid_to)
+- Khi upload TKB mới chồng lấn date range:
+  - Pattern cũ bị TRUNCATE hoặc XÓA
+  - Pattern mới được tạo với valid_from/valid_to
+- Khi hiển thị: Chỉ lấy patterns có valid cho tuần đang xem
 
-### Import fails with "Subject not found"
-
-→ Check SIS Subject has correct `timetable_subject_id` mapping
-
-### Progress tracking not working
-
-→ Check Redis cache is running: `redis-cli ping`
-
-### Validation passes but execution fails
-
-→ Check logs: Frappe → Error Log → "Timetable Import Failed"
-
-### Performance issues
-
-→ Check materialized views are up to date:
-
-```sql
-REFRESH MATERIALIZED VIEW `SIS Teacher Timetable`;
-REFRESH MATERIALIZED VIEW `SIS Student Timetable`;
-```
+### 4. Teacher Timetable Sync
+- Là materialized view, CẦN sync sau khi thay đổi TKB
+- Sync tự động sau import
+- Có thể manual resync nếu cần
 
 ---
 
-## 🔄 Changelog
+## 📝 Changelog
 
-**v2.0 (2025-01-14)** - Full Migration
-
-- ✅ Replaced monolithic code with modular structure
-- ✅ Validator + Executor pattern
-- ✅ Progress tracking
-- ✅ Transaction safety
-- ⚠️ Legacy code deprecated (will remove after 2 weeks)
-
-**v1.0 (2024-xx-xx)** - Legacy Version
-
-- Basic Excel import
-- Inline validation
-- No progress tracking
-
----
-
-## 📞 Contact
-
-For issues or questions:
-
-- Check Error Log in Frappe
-- Check RQ Dashboard for background jobs
-- Review logs with emoji markers (🚀, ✅, ❌, ⚠️)
-
----
-
-**Last Updated:** 2025-01-14  
-**Maintained by:** SIS Development Team
+### 2025-12-20
+- ⚡ Fix: Pattern rows với `valid_from/valid_to` không được lọc đúng khi hiển thị
+- Thêm logic lọc pattern theo date range trong `helpers.py`
+- Cập nhật queries trong `weeks.py` để lấy fields `valid_from/valid_to`
+- Ưu tiên pattern có `valid_from` mới nhất khi deduplication

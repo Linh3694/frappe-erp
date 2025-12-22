@@ -13,6 +13,7 @@ import secrets
 import base64
 import urllib.parse
 from erp.utils.api_response import success_response, error_response
+from erp.api.utils import format_vietnamese_name
 
 
 def _extract_origin(url: str | None) -> str | None:
@@ -739,13 +740,16 @@ def create_frappe_user(ms_user, user_data):
         if not last_name:
             last_name = ""  # last_name can be empty
 
+        # Format tên theo chuẩn Việt Nam (Họ + Đệm + Tên)
+        formatted_name = format_vietnamese_name(display_name)
+        
         user_doc = frappe.get_doc({
             "doctype": "User",
             "email": email,
             "first_name": first_name,
             "last_name": last_name,
-            # Full Name phải khớp Display Name từ Microsoft
-            "full_name": display_name,
+            # Full Name đã được format theo chuẩn Việt Nam
+            "full_name": formatted_name,
             "enabled": user_data.get("accountEnabled", True),
             "user_type": "System User",
             "send_welcome_email": 0,
@@ -761,11 +765,11 @@ def create_frappe_user(ms_user, user_data):
         
         user_doc.flags.ignore_permissions = True
         user_doc.insert()
-        # Clear middle_name nếu có, và đảm bảo full_name = display_name
+        # Clear middle_name nếu có, và đảm bảo full_name đã được format đúng
         try:
             if hasattr(user_doc, 'middle_name'):
                 setattr(user_doc, 'middle_name', "")
-            user_doc.full_name = display_name
+            user_doc.full_name = formatted_name
             user_doc.flags.ignore_permissions = True
             user_doc.save()
         except Exception:
@@ -792,16 +796,17 @@ def update_frappe_user(user_doc, ms_user, user_data):
         # Update basic info
         new_first = user_data.get("givenName") or user_doc.first_name
         new_last = user_data.get("surname") or user_doc.last_name
-        # Full Name phải khớp Display Name từ Microsoft nếu có
+        # Full Name từ Microsoft và format theo chuẩn Việt Nam
         display_name = (user_data.get("displayName") or user_doc.full_name)
+        formatted_name = format_vietnamese_name(display_name)
         
         # Frappe requires first_name to be non-empty
         if not new_first:
-            new_first = display_name or user_doc.email.split('@')[0]
+            new_first = formatted_name or user_doc.email.split('@')[0]
         
         user_doc.first_name = new_first
         user_doc.last_name = new_last
-        user_doc.full_name = display_name
+        user_doc.full_name = formatted_name
         user_doc.enabled = user_data.get("accountEnabled", True)
         
         # Update Microsoft-specific fields (if they exist)
@@ -889,7 +894,9 @@ def handle_microsoft_user_login(ms_user):
             frappe_user.email = email
             frappe_user.first_name = ms_user.given_name or email.split('@')[0]
             frappe_user.last_name = ms_user.surname or ""
-            frappe_user.full_name = f"{frappe_user.first_name} {frappe_user.last_name}".strip()
+            # Format tên theo chuẩn Việt Nam
+            raw_full_name = f"{frappe_user.first_name} {frappe_user.last_name}".strip()
+            frappe_user.full_name = format_vietnamese_name(raw_full_name)
             frappe_user.enabled = 1
             frappe_user.send_welcome_email = 0  # Don't send welcome email
             frappe_user.user_type = "System User"

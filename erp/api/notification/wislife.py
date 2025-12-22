@@ -13,6 +13,7 @@ from datetime import datetime
 import json
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
 from erp.common.doctype.erp_notification.erp_notification import create_notification
+from erp.api.utils import format_vietnamese_name
 
 
 # Emoji names mapping (Vietnamese)
@@ -24,34 +25,6 @@ EMOJI_NAMES = {
     'sad': 'Buồn',
     'angry': 'Phẫn nộ'
 }
-
-
-def format_vietnamese_name(name):
-    """
-    Format tên từ 'Tên Họ-đệm Họ' sang 'Họ Họ-đệm Tên' (chuẩn Việt Nam)
-    
-    Ví dụ: 'Nam Dương Tuấn' -> 'Dương Tuấn Nam'
-    
-    Logic: 
-    - Tách tên thành các phần
-    - Nếu có 3 phần: part1 part2 part3 -> part2 part3 part1
-    - Nếu có 2 phần: part1 part2 -> part2 part1
-    - Nếu có 1 phần: giữ nguyên
-    """
-    if not name or name == 'Ai đó':
-        return name
-    
-    parts = name.strip().split()
-    
-    if len(parts) >= 3:
-        # Ví dụ: ['Nam', 'Dương', 'Tuấn'] -> ['Dương', 'Tuấn', 'Nam']
-        return ' '.join(parts[1:] + [parts[0]])
-    elif len(parts) == 2:
-        # Ví dụ: ['Nam', 'Dương'] -> ['Dương', 'Nam']
-        return f"{parts[1]} {parts[0]}"
-    else:
-        # Chỉ có 1 từ, giữ nguyên
-        return name
 
 
 @frappe.whitelist(allow_guest=True, methods=['POST'])
@@ -626,6 +599,7 @@ def test_wislife_notification():
     except Exception as e:
         frappe.logger().error(f"❌ [Wislife Test] Error: {str(e)}")
         return {"success": False, "message": str(e)}
+
 
 
 
