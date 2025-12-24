@@ -241,22 +241,21 @@ def get_award_records(
                 if key not in student_photos:
                     student_photos[key] = p['photo']
         
-        # 5. Batch lấy class photos
+        # 5. Batch lấy class photos - lấy photo mới nhất của mỗi class (không filter school_year)
         class_photos = {}
-        if class_ids and school_year_ids:
+        if class_ids:
             photos = frappe.db.sql("""
-                SELECT class_id, school_year_id, photo
+                SELECT class_id, photo
                 FROM `tabSIS Photo`
                 WHERE class_id IN %(class_ids)s
-                AND school_year_id IN %(school_year_ids)s
                 AND type = 'class'
                 ORDER BY upload_date DESC
-            """, {'class_ids': class_ids, 'school_year_ids': school_year_ids}, as_dict=True)
+            """, {'class_ids': class_ids}, as_dict=True)
             
             for p in photos:
-                key = (p['class_id'], p['school_year_id'])
-                if key not in class_photos:
-                    class_photos[key] = p['photo']
+                # Chỉ lấy photo đầu tiên (mới nhất) cho mỗi class
+                if p['class_id'] not in class_photos:
+                    class_photos[p['class_id']] = p['photo']
         
         # 6. Batch lấy current class cho students
         student_classes = {}
@@ -374,10 +373,9 @@ def get_award_records(
                     }
                 }
                 
-                # Add class photo
-                photo_key = (entry['class_id'], school_year_id)
-                if photo_key in class_photos:
-                    class_data['classImage'] = class_photos[photo_key]
+                # Add class photo - dùng class_id làm key
+                if entry['class_id'] in class_photos:
+                    class_data['classImage'] = class_photos[entry['class_id']]
                 
                 classes.append(class_data)
             
