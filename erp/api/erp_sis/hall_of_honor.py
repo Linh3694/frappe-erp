@@ -228,34 +228,101 @@ def get_award_records(
         student_photos = {}
         if student_ids and school_year_ids:
             photos = frappe.db.sql("""
-                SELECT student_id, school_year_id, photo
-                FROM `tabSIS Photo`
-                WHERE student_id IN %(student_ids)s
-                AND school_year_id IN %(school_year_ids)s
-                AND type = 'student'
-                ORDER BY upload_date DESC
+                SELECT sp.name as photo_name, sp.student_id, sp.school_year_id, sp.photo, sp.description
+                FROM `tabSIS Photo` sp
+                WHERE sp.student_id IN %(student_ids)s
+                AND sp.school_year_id IN %(school_year_ids)s
+                AND sp.type = 'student'
+                ORDER BY sp.upload_date DESC
             """, {'student_ids': student_ids, 'school_year_ids': school_year_ids}, as_dict=True)
+            
+            # Recover từ File attachment nếu photo field là None
+            photo_names_to_recover = [p['photo_name'] for p in photos if not p.get('photo') and p.get('photo_name')]
+            file_attachments = {}
+            if photo_names_to_recover:
+                files = frappe.db.sql("""
+                    SELECT attached_to_name, file_url, file_name, is_private
+                    FROM `tabFile`
+                    WHERE attached_to_doctype = 'SIS Photo'
+                    AND attached_to_name IN %(names)s
+                    ORDER BY creation DESC
+                """, {'names': photo_names_to_recover}, as_dict=True)
+                for f in files:
+                    if f['attached_to_name'] not in file_attachments:
+                        file_attachments[f['attached_to_name']] = f
             
             for p in photos:
                 key = (p['student_id'], p['school_year_id'])
                 if key not in student_photos:
-                    student_photos[key] = p['photo']
+                    photo_url = p.get('photo')
+                    
+                    # Recover từ File attachment nếu photo field là None
+                    if not photo_url and p.get('photo_name') in file_attachments:
+                        f = file_attachments[p['photo_name']]
+                        photo_url = f.get('file_url')
+                        if not photo_url:
+                            is_priv = bool(f.get('is_private'))
+                            base_path = '/private/files' if is_priv else '/files'
+                            photo_url = f"{base_path}/{f.get('file_name')}"
+                    
+                    if photo_url:
+                        student_photos[key] = photo_url
         
         # 5. Batch lấy class photos - lấy photo mới nhất của mỗi class (không filter school_year)
         class_photos = {}
         if class_ids:
             photos = frappe.db.sql("""
-                SELECT class_id, photo
-                FROM `tabSIS Photo`
-                WHERE class_id IN %(class_ids)s
-                AND type = 'class'
-                ORDER BY upload_date DESC
+                SELECT sp.name as photo_name, sp.class_id, sp.photo, sp.description
+                FROM `tabSIS Photo` sp
+                WHERE sp.class_id IN %(class_ids)s
+                AND sp.type = 'class'
+                ORDER BY sp.upload_date DESC
             """, {'class_ids': class_ids}, as_dict=True)
+            
+            # Nếu photo field là None, thử recover từ File attachment
+            photo_names_to_recover = [p['photo_name'] for p in photos if not p.get('photo') and p.get('photo_name')]
+            file_attachments = {}
+            if photo_names_to_recover:
+                files = frappe.db.sql("""
+                    SELECT attached_to_name, file_url, file_name, is_private
+                    FROM `tabFile`
+                    WHERE attached_to_doctype = 'SIS Photo'
+                    AND attached_to_name IN %(names)s
+                    ORDER BY creation DESC
+                """, {'names': photo_names_to_recover}, as_dict=True)
+                for f in files:
+                    if f['attached_to_name'] not in file_attachments:
+                        file_attachments[f['attached_to_name']] = f
             
             for p in photos:
                 # Chỉ lấy photo đầu tiên (mới nhất) cho mỗi class
                 if p['class_id'] not in class_photos:
-                    class_photos[p['class_id']] = p['photo']
+                    photo_url = p.get('photo')
+                    
+                    # Recover từ File attachment nếu photo field là None
+                    if not photo_url and p.get('photo_name') in file_attachments:
+                        f = file_attachments[p['photo_name']]
+                        photo_url = f.get('file_url')
+                        if not photo_url:
+                            is_priv = bool(f.get('is_private'))
+                            base_path = '/private/files' if is_priv else '/files'
+                            photo_url = f"{base_path}/{f.get('file_name')}"
+                    
+                    # Fallback: recover từ description
+                    if not photo_url and p.get('description'):
+                        desc = p.get('description', '')
+                        if ':' in desc:
+                            candidate = desc.split(':', 1)[1].strip()
+                            if candidate:
+                                import os
+                                import unicodedata
+                                normalized = unicodedata.normalize('NFC', candidate)
+                                public_path = frappe.get_site_path("public", "files", normalized)
+                                if os.path.exists(public_path):
+                                    photo_url = f"/files/{normalized}"
+                    
+                    if photo_url:
+                        class_photos[p['class_id']] = photo_url
         
         # 6. Batch lấy current class cho students
         student_classes = {}

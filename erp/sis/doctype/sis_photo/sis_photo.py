@@ -1103,6 +1103,26 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
         )
 
         frappe.logger().info(f"📋 Found {len(photos)} photos with filters: {filters}")
+        
+        # Lấy tất cả photo names để batch query File attachments
+        photo_names = [p.get("name") for p in photos if p.get("name")]
+        
+        # Batch query tất cả File attachments cho các SIS Photo
+        all_files = {}
+        if photo_names:
+            file_rows = frappe.db.sql("""
+                SELECT attached_to_name, file_url, file_name, is_private
+                FROM `tabFile`
+                WHERE attached_to_doctype = 'SIS Photo' 
+                AND attached_to_name IN %(names)s
+                ORDER BY creation DESC
+            """, {'names': photo_names}, as_dict=True)
+            
+            for row in file_rows:
+                if row.get('attached_to_name') not in all_files:
+                    # Chỉ lấy file mới nhất cho mỗi SIS Photo
+                    all_files[row.get('attached_to_name')] = row
+        
         for photo in photos:
             frappe.logger().info(f"📋 Photo {photo.get('name')}: student_id={photo.get('student_id')}, photo='{photo.get('photo')}'")
 
@@ -1115,76 +1135,43 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             if photo.get("student_id") is None:
                 del photo["student_id"]
 
-            # If photo URL missing, try to reconstruct from File attachment
+            # If photo URL missing, try to reconstruct from File attachment (using batch query result)
             if not photo.get("photo"):
                 frappe.logger().info(f"📭 Photo URL missing for {photo.get('name')} (student_id: {photo.get('student_id')}), trying to recover...")
                 try:
-                    # For student photos, also check filename pattern to ensure correct recovery
-                    expected_filename = None
-                    if photo.get("type") == "student" and photo.get("student_id"):
-                        # Student photos should have filename matching student_id or student_code
-                        expected_filename = photo.get("student_id")
-                        frappe.logger().info(f"🎯 Student photo recovery: expected filename pattern for {expected_filename}")
-
-                    # First try public files with exact match
-                    file_rows = frappe.get_all(
-                        "File",
-                        filters={
-                            "attached_to_doctype": "SIS Photo",
-                            "attached_to_name": photo.get("name"),
-                            "is_private": 0,
-                        },
-                        fields=["file_url", "file_name", "is_private"],
-                        order_by="creation desc",
-                        limit=1,
-                    )
-
-                    # If not found, try private files as well
-                    if not file_rows:
-                        file_rows = frappe.get_all(
-                            "File",
-                            filters={
-                                "attached_to_doctype": "SIS Photo",
-                                "attached_to_name": photo.get("name"),
-                            },
-                            fields=["file_url", "file_name", "is_private"],
-                            order_by="creation desc",
-                            limit=1,
-                        )
-
-                    frappe.logger().info(f"📎 Found {len(file_rows)} attached files for {photo.get('name')}")
-                    if file_rows:
-                        file_row = file_rows[0]
+                    # Sử dụng kết quả từ batch query
+                    file_row = all_files.get(photo.get("name"))
+                    
+                    if file_row:
                         file_url = file_row.get("file_url")
-
-                        # Additional validation for student photos
-                        if expected_filename and photo.get("type") == "student":
+                        
+                        # For student photos, validate filename pattern
+                        if photo.get("type") == "student" and photo.get("student_id"):
+                            expected_filename = photo.get("student_id")
                             file_name = file_row.get("file_name", "")
                             if expected_filename not in file_name:
                                 frappe.logger().warning(f"⚠️ File {file_name} doesn't match expected student pattern {expected_filename}")
-                                # Don't use this file for student photos if it doesn't match
                                 file_url = None
-
+                        
                         if not file_url:
                             # Build URL based on privacy
                             is_priv = bool(file_row.get("is_private"))
                             base_path = "/private/files" if is_priv else "/files"
                             file_url = f"{base_path}/{file_row.get('file_name')}"
-
-                        frappe.logger().info(f"📎 File URL recovered: {file_url}")
+                        
                         if file_url:
                             photo["photo"] = file_url
-                            frappe.logger().info(f"✅ Set photo URL for {photo.get('name')} (student: {photo.get('student_id')}): {file_url}")
+                            frappe.logger().info(f"✅ Set photo URL for {photo.get('name')}: {file_url}")
                         else:
                             frappe.logger().warning(f"❌ Empty file URL for {photo.get('name')}")
                     else:
-                        frappe.logger().warning(f"❌ No attached files found for {photo.get('name')}")
+                        frappe.logger().warning(f"❌ No attached files found in batch for {photo.get('name')}")
                 except Exception as recovery_err:
                     frappe.logger().error(f"❌ Error recovering photo URL for {photo.get('name')}: {str(recovery_err)}")
             else:
                 frappe.logger().info(f"✅ Photo URL already exists for {photo.get('name')}: {photo.get('photo')}")
             if not photo.get("photo") and "photo" in photo:
-                # Try again without privacy constraint before removing field
+                # Try again without privacy constraint before giving up
                 try:
                     recovery_attempt = frappe.get_all(
                         "File",
@@ -1207,33 +1194,74 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                             photo["photo"] = recovered_url
                             frappe.logger().info(f"✅ Recovered photo URL for {photo.get('name')}: {recovered_url}")
                         else:
-                            del photo["photo"]
+                            # Giữ field photo = None thay vì xóa
+                            photo["photo"] = None
                     else:
-                        del photo["photo"]
+                        # Giữ field photo = None thay vì xóa  
+                        photo["photo"] = None
                 except Exception as recovery_error:
                     frappe.logger().warning(f"Failed to recover photo URL for {photo.get('name')}: {str(recovery_error)}")
-                    del photo["photo"]
+                    # Giữ field photo = None thay vì xóa
+                    photo["photo"] = None
 
             # Final fallback: infer from description's filename if exists on disk
             if not photo.get("photo"):
                 try:
                     desc = photo.get("description") or ""
-                    # Expect pattern like: "Single photo upload: 1A1.jpg"
+                    # Expect pattern like: "Single photo upload: 1A1.jpg" hoặc "Single photo upload: Lớp 1A5.jpg"
                     marker = ":"
                     if marker in desc:
                         candidate = desc.split(marker, 1)[1].strip()
                         # sanitize and check both public and private files
                         if candidate:
-                            public_path = frappe.get_site_path("public", "files", candidate)
-                            private_path = frappe.get_site_path("private", "files", candidate)
+                            import unicodedata
+                            # Normalize Unicode để match với file trên disk
+                            normalized_candidate = unicodedata.normalize('NFC', candidate)
+                            
+                            public_path = frappe.get_site_path("public", "files", normalized_candidate)
+                            private_path = frappe.get_site_path("private", "files", normalized_candidate)
+                            
                             if os.path.exists(public_path):
-                                photo["photo"] = f"/files/{candidate}"
+                                photo["photo"] = f"/files/{normalized_candidate}"
                                 frappe.logger().info(f"✅ Recovered from description (public): {photo.get('photo')}")
                             elif os.path.exists(private_path):
-                                photo["photo"] = f"/private/files/{candidate}"
+                                photo["photo"] = f"/private/files/{normalized_candidate}"
                                 frappe.logger().info(f"✅ Recovered from description (private): {photo.get('photo')}")
+                            else:
+                                # Thử tìm file với glob pattern nếu không tìm thấy chính xác
+                                import glob as glob_module
+                                public_dir = frappe.get_site_path("public", "files")
+                                # Escape special regex characters but keep the base filename
+                                base_name = os.path.splitext(normalized_candidate)[0]
+                                ext = os.path.splitext(normalized_candidate)[1]
+                                
+                                # Tìm file có tên tương tự
+                                matches = glob_module.glob(os.path.join(public_dir, f"*{base_name}*{ext}"))
+                                if matches:
+                                    matched_file = os.path.basename(matches[0])
+                                    photo["photo"] = f"/files/{matched_file}"
+                                    frappe.logger().info(f"✅ Recovered from glob match (public): {photo.get('photo')}")
                 except Exception as infer_err:
                     frappe.logger().warning(f"Failed to infer photo URL from description for {photo.get('name')}: {str(infer_err)}")
+            
+            # Fallback cuối cùng cho class photos: tìm file dựa trên class_id
+            if not photo.get("photo") and photo.get("type") == "class" and photo.get("class_id"):
+                try:
+                    # Lấy title của class để tìm file
+                    class_title = frappe.db.get_value("SIS Class", photo.get("class_id"), "title")
+                    if class_title:
+                        import glob as glob_module
+                        public_dir = frappe.get_site_path("public", "files")
+                        # Tìm file có tên chứa class title
+                        for ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                            matches = glob_module.glob(os.path.join(public_dir, f"*{class_title}*{ext}"))
+                            if matches:
+                                matched_file = os.path.basename(matches[0])
+                                photo["photo"] = f"/files/{matched_file}"
+                                frappe.logger().info(f"✅ Recovered from class title match: {photo.get('photo')}")
+                                break
+                except Exception as class_err:
+                    frappe.logger().warning(f"Failed to recover photo from class title for {photo.get('name')}: {str(class_err)}")
 
             if photo.get("description") is None:
                 del photo["description"]
