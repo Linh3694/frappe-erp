@@ -117,13 +117,12 @@ def get_award_records(
     campus_id: str = None
 ):
     """
-    Get award records with filters
+    Get award records with filters - OPTIMIZED VERSION
     Allow guest access for public Hall of Honor page
-    Returns populated student and class data
+    Returns populated student and class data using batch queries
     """
     try:
         # Lấy params từ nhiều nguồn để đảm bảo nhận được giá trị
-        # Thử: function args -> form_dict -> request.args
         award_category = (award_category or 
                          frappe.form_dict.get('award_category') or 
                          frappe.local.request.args.get('award_category'))
@@ -169,14 +168,8 @@ def get_award_records(
         if campus_id:
             filters['campus_id'] = campus_id
         
-        # Debug logging để verify filters
         print("=" * 80)
-        print("🔍 [GET_AWARD_RECORDS] Params sau khi lấy từ form_dict:")
-        print(f"   award_category: {award_category}")
-        print(f"   school_year_id: {school_year_id}")
-        print(f"   sub_category_type: {sub_category_type}")
-        print(f"   sub_category_label: {sub_category_label}")
-        print(f"   Filters dict: {filters}")
+        print("🔍 [GET_AWARD_RECORDS] Filters:", filters)
         print("=" * 80)
         
         records = frappe.get_all(
@@ -197,158 +190,223 @@ def get_award_records(
             order_by='priority asc, modified desc'
         )
         
-        print(f"📋 [GET_AWARD_RECORDS] Tìm thấy {len(records)} records")
-        print("=" * 80)
+        if not records:
+            return success_response(data=[], message="Không có bản ghi vinh danh nào")
         
-        # Populate full data for each record
-        for record in records:
-            # Get student entries with populated data
-            student_entries = frappe.get_all(
-                'SIS Award Student Entry',
-                filters={'parent': record['name']},
-                fields=[
-                    'student_id',
-                    'note_vn',
-                    'note_en',
-                    'activities_vn',
-                    'activities_en',
-                    'exam',
-                    'score'
-                ]
-            )
+        print(f"📋 [GET_AWARD_RECORDS] Tìm thấy {len(records)} records")
+        
+        # ========== BATCH QUERIES để tối ưu performance ==========
+        record_names = [r['name'] for r in records]
+        
+        # 1. Batch lấy tất cả student entries
+        all_student_entries = frappe.db.sql("""
+            SELECT 
+                se.parent, se.student_id, se.note_vn, se.note_en,
+                se.activities_vn, se.activities_en, se.exam, se.score,
+                s.name as student_name_id, s.student_name, s.student_code
+            FROM `tabSIS Award Student Entry` se
+            LEFT JOIN `tabCRM Student` s ON s.name = se.student_id
+            WHERE se.parent IN %(record_names)s
+        """, {'record_names': record_names}, as_dict=True)
+        
+        # 2. Batch lấy tất cả class entries
+        all_class_entries = frappe.db.sql("""
+            SELECT 
+                ce.parent, ce.class_id, ce.note_vn, ce.note_en,
+                c.name as class_name, c.short_title as class_title
+            FROM `tabSIS Award Class Entry` ce
+            LEFT JOIN `tabSIS Class` c ON c.name = ce.class_id
+            WHERE ce.parent IN %(record_names)s
+        """, {'record_names': record_names}, as_dict=True)
+        
+        # 3. Lấy tất cả student_ids và school_year_ids để batch query photos và classes
+        student_ids = list(set([e['student_id'] for e in all_student_entries if e.get('student_id')]))
+        class_ids = list(set([e['class_id'] for e in all_class_entries if e.get('class_id')]))
+        school_year_ids = list(set([r['school_year_id'] for r in records if r.get('school_year_id')]))
+        
+        # 4. Batch lấy student photos
+        student_photos = {}
+        if student_ids and school_year_ids:
+            photos = frappe.db.sql("""
+                SELECT student_id, school_year_id, photo
+                FROM `tabSIS Photo`
+                WHERE student_id IN %(student_ids)s
+                AND school_year_id IN %(school_year_ids)s
+                AND type = 'student'
+                ORDER BY upload_date DESC
+            """, {'student_ids': student_ids, 'school_year_ids': school_year_ids}, as_dict=True)
             
-            # Populate student data
-            for entry in student_entries:
-                student = frappe.get_doc('CRM Student', entry['student_id'])
-                entry['student'] = {
-                    'name': student.name,
-                    'student_name': student.student_name,
-                    'student_code': student.student_code
+            for p in photos:
+                key = (p['student_id'], p['school_year_id'])
+                if key not in student_photos:
+                    student_photos[key] = p['photo']
+        
+        # 5. Batch lấy class photos
+        class_photos = {}
+        if class_ids and school_year_ids:
+            photos = frappe.db.sql("""
+                SELECT class_id, school_year_id, photo
+                FROM `tabSIS Photo`
+                WHERE class_id IN %(class_ids)s
+                AND school_year_id IN %(school_year_ids)s
+                AND type = 'class'
+                ORDER BY upload_date DESC
+            """, {'class_ids': class_ids, 'school_year_ids': school_year_ids}, as_dict=True)
+            
+            for p in photos:
+                key = (p['class_id'], p['school_year_id'])
+                if key not in class_photos:
+                    class_photos[key] = p['photo']
+        
+        # 6. Batch lấy current class cho students
+        student_classes = {}
+        if student_ids and school_year_ids:
+            enrollments = frappe.db.sql("""
+                SELECT cs.student_id, cs.school_year_id, cs.class_id, c.short_title
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                WHERE cs.student_id IN %(student_ids)s
+                AND cs.school_year_id IN %(school_year_ids)s
+                AND c.class_type = 'regular'
+            """, {'student_ids': student_ids, 'school_year_ids': school_year_ids}, as_dict=True)
+            
+            for e in enrollments:
+                key = (e['student_id'], e['school_year_id'])
+                if key not in student_classes:
+                    student_classes[key] = {'name': e['class_id'], 'title': e['short_title']}
+        
+        # 7. Batch lấy category info (chỉ cần lấy 1 lần nếu filter theo category)
+        category_cache = {}
+        category_ids = list(set([r['award_category'] for r in records]))
+        for cat_id in category_ids:
+            try:
+                cat = frappe.get_doc('SIS Award Category', cat_id)
+                # Build sub_category label_en map
+                label_en_map = {}
+                for sub in cat.sub_categories:
+                    key = (sub.type, sub.label)
+                    label_en_map[key] = sub.label_en or sub.label
+                
+                category_cache[cat_id] = {
+                    'info': {
+                        'name': cat.name,
+                        'title_vn': cat.title_vn,
+                        'title_en': cat.title_en
+                    },
+                    'label_en_map': label_en_map
+                }
+            except Exception as e:
+                print(f"⚠️ Could not load category {cat_id}: {str(e)}")
+        
+        # ========== Gắn data vào records ==========
+        # Group student entries by parent
+        student_entries_by_record = {}
+        for entry in all_student_entries:
+            parent = entry['parent']
+            if parent not in student_entries_by_record:
+                student_entries_by_record[parent] = []
+            student_entries_by_record[parent].append(entry)
+        
+        # Group class entries by parent
+        class_entries_by_record = {}
+        for entry in all_class_entries:
+            parent = entry['parent']
+            if parent not in class_entries_by_record:
+                class_entries_by_record[parent] = []
+            class_entries_by_record[parent].append(entry)
+        
+        # Populate records
+        for record in records:
+            school_year_id = record['school_year_id']
+            
+            # Process student entries
+            students = []
+            for entry in student_entries_by_record.get(record['name'], []):
+                student_data = {
+                    'student_id': entry['student_id'],
+                    'note_vn': entry.get('note_vn'),
+                    'note_en': entry.get('note_en'),
+                    'exam': entry.get('exam'),
+                    'score': entry.get('score'),
+                    'student': {
+                        'name': entry['student_name_id'],
+                        'student_name': entry['student_name'],
+                        'student_code': entry['student_code']
+                    }
                 }
                 
-                # Get current class from SIS Class Student (chỉ lấy lớp regular, không lấy mixed/club)
-                class_enrollment = frappe.db.sql("""
-                    SELECT cs.class_id
-                    FROM `tabSIS Class Student` cs
-                    INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
-                    WHERE cs.student_id = %s 
-                    AND cs.school_year_id = %s
-                    AND c.class_type = 'regular'
-                    LIMIT 1
-                """, (entry['student_id'], record['school_year_id']), as_dict=True)
+                # Add current class
+                class_key = (entry['student_id'], school_year_id)
+                if class_key in student_classes:
+                    student_data['current_class'] = student_classes[class_key]
                 
-                if class_enrollment:
-                    class_doc = frappe.get_doc('SIS Class', class_enrollment[0]['class_id'])
-                    entry['current_class'] = {
-                        'name': class_doc.name,
-                        'title': class_doc.short_title  # Sử dụng short_title thay vì title
-                    }
+                # Add photo
+                photo_key = (entry['student_id'], school_year_id)
+                if photo_key in student_photos:
+                    student_data['photo'] = {'photoUrl': student_photos[photo_key]}
                 
-                # Get photo
-                photo = frappe.get_all(
-                    'SIS Photo',
-                    filters={
-                        'student_id': entry['student_id'],
-                        'school_year_id': record['school_year_id'],
-                        'type': 'student'
-                    },
-                    fields=['photo'],
-                    order_by='upload_date desc',
-                    limit=1
-                )
-                
-                if photo:
-                    entry['photo'] = {'photoUrl': photo[0]['photo']}
-                
-                # Parse JSON arrays for activities
+                # Parse activities
                 if entry.get('activities_vn'):
                     try:
-                        entry['activities_vn'] = json.loads(entry['activities_vn'])
+                        student_data['activities_vn'] = json.loads(entry['activities_vn'])
                     except:
                         pass
-                
                 if entry.get('activities_en'):
                     try:
-                        entry['activities_en'] = json.loads(entry['activities_en'])
+                        student_data['activities_en'] = json.loads(entry['activities_en'])
                     except:
                         pass
+                
+                students.append(student_data)
             
-            record['students'] = student_entries
+            record['students'] = students
             
-            # Get class entries with populated data
-            class_entries = frappe.get_all(
-                'SIS Award Class Entry',
-                filters={'parent': record['name']},
-                fields=[
-                    'class_id',
-                    'note_vn',
-                    'note_en'
-                ]
-            )
-            
-            # Populate class data
-            for entry in class_entries:
-                class_doc = frappe.get_doc('SIS Class', entry['class_id'])
-                entry['classInfo'] = {
-                    'name': class_doc.name,
-                    'title': class_doc.short_title  # Sử dụng short_title thay vì title
+            # Process class entries
+            classes = []
+            for entry in class_entries_by_record.get(record['name'], []):
+                class_data = {
+                    'class_id': entry['class_id'],
+                    'note_vn': entry.get('note_vn'),
+                    'note_en': entry.get('note_en'),
+                    'classInfo': {
+                        'name': entry['class_name'],
+                        'title': entry['class_title']
+                    }
                 }
                 
-                # Get class photo
-                photo = frappe.get_all(
-                    'SIS Photo',
-                    filters={
-                        'class_id': entry['class_id'],
-                        'school_year_id': record['school_year_id'],
-                        'type': 'class'
-                    },
-                    fields=['photo'],
-                    order_by='upload_date desc',
-                    limit=1
-                )
+                # Add class photo
+                photo_key = (entry['class_id'], school_year_id)
+                if photo_key in class_photos:
+                    class_data['classImage'] = class_photos[photo_key]
                 
-                if photo:
-                    entry['classImage'] = photo[0]['photo']
+                classes.append(class_data)
             
-            record['awardClasses'] = class_entries
+            record['awardClasses'] = classes
             
-            # Get category info
-            category = frappe.get_doc('SIS Award Category', record['award_category'])
-            record['awardCategory'] = {
-                'name': category.name,
-                'title_vn': category.title_vn,
-                'title_en': category.title_en
-            }
-            
-            # Get school year info
-            school_year = frappe.get_doc('SIS School Year', record['school_year_id'])
-            
-            # Get label_en from award category's sub_categories
-            label_en = record['sub_category_label']  # Fallback to Vietnamese
-            try:
-                # Lấy sub_categories từ category để tìm label_en
-                category_doc = frappe.get_doc('SIS Award Category', record['award_category'])
-                matching_sub = None
-                for sub in category_doc.sub_categories:
-                    if (sub.type == record['sub_category_type'] and 
-                        sub.label == record['sub_category_label']):
-                        matching_sub = sub
-                        break
+            # Add category info
+            cat_id = record['award_category']
+            if cat_id in category_cache:
+                record['awardCategory'] = category_cache[cat_id]['info']
                 
-                if matching_sub and matching_sub.label_en:
-                    label_en = matching_sub.label_en
-            except Exception as e:
-                print(f"⚠️ Could not get label_en: {str(e)}")
+                # Get label_en
+                label_key = (record['sub_category_type'], record['sub_category_label'])
+                label_en = category_cache[cat_id]['label_en_map'].get(label_key, record['sub_category_label'])
+            else:
+                record['awardCategory'] = {'name': cat_id, 'title_vn': '', 'title_en': ''}
+                label_en = record['sub_category_label']
             
             record['subAward'] = {
                 'type': record['sub_category_type'],
                 'label': record['sub_category_label'],
-                'label_en': label_en,  # Label tiếng Anh từ sub_category
+                'label_en': label_en,
                 'schoolYear': record['school_year_id'],
                 'semester': record.get('semester'),
                 'month': record.get('month'),
                 'priority': record.get('priority', 0)
             }
+        
+        print(f"✅ [GET_AWARD_RECORDS] Done processing {len(records)} records")
+        print("=" * 80)
         
         return success_response(
             data=records,
