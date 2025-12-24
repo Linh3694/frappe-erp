@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "",
+ "beta": 0,
+ "creation": "2024-12-24 00:00:00.000000",
+ "custom": 0,
+ "description": "Chi tiết mức ưu đãi tái ghi danh theo thời hạn",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "deadline",
+  "description",
+  "column_break_1",
+  "annual_discount",
+  "semester_discount"
+ ],
+ "fields": [
+  {
+   "fieldname": "deadline",
+   "fieldtype": "Date",
+   "label": "Hạn cuối",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Hạn cuối để được áp dụng mức ưu đãi này"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Data",
+   "label": "Mô tả",
+   "in_list_view": 1,
+   "description": "VD: Trước 05/02/2026"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "annual_discount",
+   "fieldtype": "Percent",
+   "label": "Ưu đãi đóng theo năm (%)",
+   "reqd": 1,
+   "in_list_view": 1,
+   "default": "0",
+   "description": "Phần trăm ưu đãi khi đóng học phí theo năm"
+  },
+  {
+   "fieldname": "semester_discount",
+   "fieldtype": "Percent",
+   "label": "Ưu đãi đóng theo kỳ (%)",
+   "reqd": 1,
+   "in_list_view": 1,
+   "default": "0",
+   "description": "Phần trăm ưu đãi khi đóng học phí theo kỳ"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-12-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Re-enrollment Discount",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "deadline",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}
+

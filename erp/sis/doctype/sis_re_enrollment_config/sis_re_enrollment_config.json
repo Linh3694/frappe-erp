@@ -1,0 +1,201 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-REENROLL-CFG-{#####}",
+ "beta": 0,
+ "creation": "2024-12-24 00:00:00.000000",
+ "custom": 0,
+ "description": "Cấu hình đợt tái ghi danh",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "title",
+  "school_year_id",
+  "campus_id",
+  "column_break_basic",
+  "is_active",
+  "start_date",
+  "end_date",
+  "documents_section",
+  "service_document",
+  "agreement_text",
+  "discounts_section",
+  "discounts",
+  "system_information",
+  "created_by",
+  "created_at",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tên đợt tái ghi danh",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "VD: Tái ghi danh năm học 2026-2027"
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học mục tiêu",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Năm học mà học sinh sẽ đăng ký"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Đang mở",
+   "default": 0,
+   "in_list_view": 1,
+   "description": "Bật/tắt đợt tái ghi danh"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Ngày bắt đầu",
+   "reqd": 1,
+   "description": "Ngày bắt đầu nhận đơn tái ghi danh"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "Ngày kết thúc",
+   "reqd": 1,
+   "description": "Ngày kết thúc nhận đơn tái ghi danh"
+  },
+  {
+   "fieldname": "documents_section",
+   "fieldtype": "Section Break",
+   "label": "Tài liệu"
+  },
+  {
+   "fieldname": "service_document",
+   "fieldtype": "Attach",
+   "label": "File dịch vụ học sinh",
+   "description": "Upload file PDF/DOC mô tả dịch vụ học sinh"
+  },
+  {
+   "fieldname": "agreement_text",
+   "fieldtype": "Text Editor",
+   "label": "Nội dung cam kết",
+   "description": "Nội dung điều khoản phụ huynh cần đọc và đồng ý"
+  },
+  {
+   "fieldname": "discounts_section",
+   "fieldtype": "Section Break",
+   "label": "Cấu hình ưu đãi"
+  },
+  {
+   "fieldname": "discounts",
+   "fieldtype": "Table",
+   "label": "Bảng ưu đãi",
+   "options": "SIS Re-enrollment Discount",
+   "description": "Các mức ưu đãi theo thời hạn đóng phí"
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "label": "Người tạo",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày cập nhật",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-12-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Re-enrollment Config",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}
+

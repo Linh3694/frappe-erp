@@ -1,0 +1,624 @@
+"""
+Parent Portal Re-enrollment API
+Handles re-enrollment submission for parent portal
+
+API endpoints cho phụ huynh nộp đơn tái ghi danh qua Parent Portal.
+"""
+
+import frappe
+from frappe import _
+from frappe.utils import nowdate, getdate, now
+import json
+from erp.utils.api_response import (
+    validation_error_response, 
+    list_response, 
+    error_response, 
+    success_response, 
+    single_item_response,
+    not_found_response
+)
+
+
+def _get_current_parent():
+    """Lấy thông tin phụ huynh đang đăng nhập"""
+    user_email = frappe.session.user
+    if user_email == "Guest":
+        return None
+
+    # Format email: guardian_id@parent.wellspring.edu.vn
+    if "@parent.wellspring.edu.vn" not in user_email:
+        return None
+
+    guardian_id = user_email.split("@")[0]
+
+    # Lấy guardian name từ guardian_id
+    guardian = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_id}, "name")
+    return guardian
+
+
+def _get_parent_students(parent_id):
+    """
+    Lấy danh sách học sinh của phụ huynh.
+    Trả về list các student với thông tin lớp hiện tại.
+    """
+    if not parent_id:
+        return []
+    
+    # Query CRM Family Relationship để lấy danh sách học sinh
+    relationships = frappe.get_all(
+        "CRM Family Relationship",
+        filters={"guardian": parent_id},
+        fields=["student", "relationship_type", "key_person"]
+    )
+    
+    students = []
+    for rel in relationships:
+        try:
+            student = frappe.get_doc("CRM Student", rel.student)
+            
+            # Lấy lớp hiện tại
+            current_class = _get_student_current_class(student.name, student.campus_id)
+            
+            students.append({
+                "name": student.name,
+                "student_name": student.student_name,
+                "student_code": student.student_code,
+                "campus_id": student.campus_id,
+                "current_class": current_class.get("class_title") if current_class else None,
+                "current_class_id": current_class.get("class_id") if current_class else None,
+                "relationship_type": rel.relationship_type,
+                "is_key_person": rel.key_person
+            })
+        except Exception as e:
+            frappe.logger().error(f"Error getting student {rel.student}: {str(e)}")
+            continue
+    
+    return students
+
+
+def _get_student_current_class(student_id, campus_id=None):
+    """Lấy lớp hiện tại của học sinh"""
+    if not student_id:
+        return None
+    
+    # Lấy campus_id nếu chưa có
+    if not campus_id:
+        campus_id = frappe.db.get_value("CRM Student", student_id, "campus_id")
+    
+    if not campus_id:
+        return None
+    
+    # Lấy năm học hiện tại (đang active)
+    current_school_year = frappe.db.get_value(
+        "SIS School Year",
+        {"is_enable": 1, "campus_id": campus_id},
+        "name",
+        order_by="start_date desc"
+    )
+    
+    if not current_school_year:
+        return None
+    
+    # Tìm lớp regular của học sinh
+    class_student = frappe.db.sql("""
+        SELECT cs.class_id, c.title as class_title
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+        WHERE cs.student_id = %s
+        AND cs.school_year_id = %s
+        AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
+        LIMIT 1
+    """, (student_id, current_school_year), as_dict=True)
+    
+    if class_student:
+        return {
+            "class_id": class_student[0].class_id,
+            "class_title": class_student[0].class_title
+        }
+    
+    return None
+
+
+@frappe.whitelist()
+def get_active_config():
+    """
+    Lấy cấu hình tái ghi danh đang mở cho campus của phụ huynh.
+    Trả về config với đầy đủ thông tin bao gồm bảng ưu đãi.
+    """
+    logs = []
+    
+    try:
+        logs.append("Đang lấy cấu hình tái ghi danh đang mở")
+        
+        # Lấy thông tin phụ huynh
+        parent_id = _get_current_parent()
+        if not parent_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        logs.append(f"Parent ID: {parent_id}")
+        
+        # Lấy danh sách học sinh của phụ huynh
+        students = _get_parent_students(parent_id)
+        if not students:
+            return error_response("Không tìm thấy học sinh", logs=logs)
+        
+        # Lấy campus_id từ học sinh đầu tiên
+        campus_id = students[0].get("campus_id") if students else None
+        
+        if not campus_id:
+            return error_response("Không xác định được campus", logs=logs)
+        
+        logs.append(f"Campus: {campus_id}")
+        
+        # Tìm config đang active cho campus này
+        config = frappe.db.get_value(
+            "SIS Re-enrollment Config",
+            {
+                "is_active": 1,
+                "campus_id": campus_id
+            },
+            ["name", "title", "school_year_id", "campus_id", "start_date", "end_date",
+             "service_document", "agreement_text"],
+            as_dict=True
+        )
+        
+        if not config:
+            logs.append("Không có đợt tái ghi danh nào đang mở")
+            return success_response(
+                data=None,
+                message="Không có đợt tái ghi danh nào đang mở",
+                logs=logs
+            )
+        
+        # Kiểm tra thời gian
+        today = getdate(nowdate())
+        start_date = getdate(config.start_date) if config.start_date else None
+        end_date = getdate(config.end_date) if config.end_date else None
+        
+        if start_date and today < start_date:
+            logs.append(f"Chưa đến thời gian tái ghi danh. Bắt đầu: {config.start_date}")
+            return success_response(
+                data={
+                    "status": "not_started",
+                    "start_date": str(config.start_date),
+                    "message": f"Đợt tái ghi danh sẽ bắt đầu từ ngày {config.start_date}"
+                },
+                message="Chưa đến thời gian tái ghi danh",
+                logs=logs
+            )
+        
+        if end_date and today > end_date:
+            logs.append(f"Đã hết thời gian tái ghi danh. Kết thúc: {config.end_date}")
+            return success_response(
+                data={
+                    "status": "ended",
+                    "end_date": str(config.end_date),
+                    "message": f"Đợt tái ghi danh đã kết thúc ngày {config.end_date}"
+                },
+                message="Đã hết thời gian tái ghi danh",
+                logs=logs
+            )
+        
+        # Lấy bảng ưu đãi
+        discounts = frappe.get_all(
+            "SIS Re-enrollment Discount",
+            filters={"parent": config.name},
+            fields=["deadline", "description", "annual_discount", "semester_discount"],
+            order_by="deadline asc"
+        )
+        
+        # Lấy tên năm học
+        school_year_name = frappe.db.get_value(
+            "SIS School Year", 
+            config.school_year_id, 
+            ["title_vn", "title_en"],
+            as_dict=True
+        )
+        
+        # Tìm mức ưu đãi hiện tại
+        current_discount = None
+        for discount in discounts:
+            if today <= getdate(discount.deadline):
+                current_discount = discount
+                break
+        
+        # Kiểm tra xem các học sinh đã nộp đơn chưa
+        for student in students:
+            existing = frappe.db.exists(
+                "SIS Re-enrollment",
+                {
+                    "student_id": student["name"],
+                    "config_id": config.name
+                }
+            )
+            student["has_submitted"] = bool(existing)
+            if existing:
+                # Lấy thông tin đơn đã nộp
+                submission = frappe.db.get_value(
+                    "SIS Re-enrollment",
+                    existing,
+                    ["name", "decision", "payment_type", "status", "submitted_at"],
+                    as_dict=True
+                )
+                student["submission"] = submission
+        
+        logs.append(f"Tìm thấy config: {config.name}")
+        
+        return success_response(
+            data={
+                "config": {
+                    "name": config.name,
+                    "title": config.title,
+                    "school_year_id": config.school_year_id,
+                    "school_year_name_vn": school_year_name.title_vn if school_year_name else None,
+                    "school_year_name_en": school_year_name.title_en if school_year_name else None,
+                    "start_date": str(config.start_date),
+                    "end_date": str(config.end_date),
+                    "service_document": config.service_document,
+                    "agreement_text": config.agreement_text
+                },
+                "discounts": discounts,
+                "current_discount": current_discount,
+                "students": students,
+                "status": "open"
+            },
+            message="Lấy cấu hình tái ghi danh thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Get Re-enrollment Config Error")
+        return error_response(
+            message=f"Lỗi khi lấy cấu hình tái ghi danh: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def get_student_re_enrollment(student_id=None):
+    """
+    Lấy đơn tái ghi danh của học sinh (nếu có).
+    Dùng để kiểm tra học sinh đã nộp đơn chưa.
+    """
+    logs = []
+    
+    try:
+        # Lấy student_id từ query params nếu không truyền vào
+        if not student_id:
+            student_id = frappe.request.args.get('student_id')
+        
+        if not student_id:
+            return validation_error_response(
+                "Thiếu student_id", 
+                {"student_id": ["Student ID là bắt buộc"]}
+            )
+        
+        logs.append(f"Kiểm tra đơn tái ghi danh cho học sinh: {student_id}")
+        
+        # Kiểm tra phụ huynh có quyền xem không
+        parent_id = _get_current_parent()
+        if not parent_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        # Kiểm tra học sinh có thuộc phụ huynh này không
+        relationship = frappe.db.exists(
+            "CRM Family Relationship",
+            {"guardian": parent_id, "student": student_id}
+        )
+        
+        if not relationship:
+            return error_response("Bạn không có quyền xem thông tin học sinh này", logs=logs)
+        
+        # Tìm config đang active
+        campus_id = frappe.db.get_value("CRM Student", student_id, "campus_id")
+        config = frappe.db.get_value(
+            "SIS Re-enrollment Config",
+            {"is_active": 1, "campus_id": campus_id},
+            "name"
+        )
+        
+        if not config:
+            return success_response(
+                data=None,
+                message="Không có đợt tái ghi danh nào đang mở",
+                logs=logs
+            )
+        
+        # Tìm đơn đã nộp
+        submission = frappe.db.get_value(
+            "SIS Re-enrollment",
+            {"student_id": student_id, "config_id": config},
+            ["name", "decision", "payment_type", "not_re_enroll_reason", 
+             "status", "submitted_at", "current_class"],
+            as_dict=True
+        )
+        
+        if not submission:
+            return success_response(
+                data=None,
+                message="Học sinh chưa nộp đơn tái ghi danh",
+                logs=logs
+            )
+        
+        logs.append(f"Tìm thấy đơn: {submission.name}")
+        
+        return single_item_response(
+            data=submission,
+            message="Lấy thông tin đơn tái ghi danh thành công"
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Get Student Re-enrollment Error")
+        return error_response(
+            message=f"Lỗi khi lấy thông tin đơn tái ghi danh: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def submit_re_enrollment():
+    """
+    Nộp đơn tái ghi danh cho học sinh.
+    Phụ huynh gọi API này để submit form tái ghi danh.
+    """
+    logs = []
+    
+    try:
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        logs.append(f"Nhận request submit tái ghi danh: {json.dumps(data, default=str)}")
+        
+        # Validate required fields
+        required_fields = ['student_id', 'decision', 'agreement_accepted']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                return validation_error_response(
+                    f"Thiếu trường bắt buộc: {field}",
+                    {field: [f"Trường {field} là bắt buộc"]}
+                )
+        
+        student_id = data['student_id']
+        decision = data['decision']
+        agreement_accepted = data['agreement_accepted']
+        
+        # Validate decision
+        if decision not in ['re_enroll', 'not_re_enroll']:
+            return validation_error_response(
+                "Quyết định không hợp lệ",
+                {"decision": ["Quyết định phải là 're_enroll' hoặc 'not_re_enroll'"]}
+            )
+        
+        # Validate agreement
+        if not agreement_accepted:
+            return validation_error_response(
+                "Bạn cần đồng ý với điều khoản",
+                {"agreement_accepted": ["Vui lòng đọc và đồng ý với điều khoản"]}
+            )
+        
+        # Validate conditional fields
+        if decision == 're_enroll':
+            if 'payment_type' not in data or not data['payment_type']:
+                return validation_error_response(
+                    "Vui lòng chọn phương thức thanh toán",
+                    {"payment_type": ["Phương thức thanh toán là bắt buộc khi tái ghi danh"]}
+                )
+            if data['payment_type'] not in ['annual', 'semester']:
+                return validation_error_response(
+                    "Phương thức thanh toán không hợp lệ",
+                    {"payment_type": ["Phương thức phải là 'annual' hoặc 'semester'"]}
+                )
+        
+        if decision == 'not_re_enroll':
+            if 'not_re_enroll_reason' not in data or not data.get('not_re_enroll_reason', '').strip():
+                return validation_error_response(
+                    "Vui lòng nhập lý do không tái ghi danh",
+                    {"not_re_enroll_reason": ["Lý do là bắt buộc khi không tái ghi danh"]}
+                )
+        
+        # Get current parent
+        parent_id = _get_current_parent()
+        if not parent_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        logs.append(f"Parent: {parent_id}")
+        
+        # Kiểm tra học sinh thuộc phụ huynh này
+        relationship = frappe.db.exists(
+            "CRM Family Relationship",
+            {"guardian": parent_id, "student": student_id}
+        )
+        
+        if not relationship:
+            return error_response(
+                "Bạn không có quyền nộp đơn cho học sinh này",
+                logs=logs
+            )
+        
+        # Lấy thông tin học sinh và campus
+        student = frappe.get_doc("CRM Student", student_id)
+        campus_id = student.campus_id
+        
+        # Tìm config đang active
+        config = frappe.db.get_value(
+            "SIS Re-enrollment Config",
+            {"is_active": 1, "campus_id": campus_id},
+            ["name", "start_date", "end_date"],
+            as_dict=True
+        )
+        
+        if not config:
+            return error_response(
+                "Không có đợt tái ghi danh nào đang mở",
+                logs=logs
+            )
+        
+        # Kiểm tra thời gian
+        today = getdate(nowdate())
+        if config.start_date and today < getdate(config.start_date):
+            return error_response(
+                f"Chưa đến thời gian tái ghi danh. Bắt đầu: {config.start_date}",
+                logs=logs
+            )
+        
+        if config.end_date and today > getdate(config.end_date):
+            return error_response(
+                f"Đã hết thời gian tái ghi danh. Kết thúc: {config.end_date}",
+                logs=logs
+            )
+        
+        # Kiểm tra đã nộp đơn chưa
+        existing = frappe.db.exists(
+            "SIS Re-enrollment",
+            {"student_id": student_id, "config_id": config.name}
+        )
+        
+        if existing:
+            return error_response(
+                f"Học sinh đã nộp đơn tái ghi danh. Mã đơn: {existing}",
+                logs=logs
+            )
+        
+        logs.append(f"Config: {config.name}")
+        
+        # Lấy lớp hiện tại
+        current_class_info = _get_student_current_class(student_id, campus_id)
+        current_class = current_class_info.get("class_title") if current_class_info else None
+        
+        # Tạo đơn tái ghi danh
+        re_enrollment_doc = frappe.get_doc({
+            "doctype": "SIS Re-enrollment",
+            "config_id": config.name,
+            "student_id": student_id,
+            "guardian_id": parent_id,
+            "current_class": current_class,
+            "campus_id": campus_id,
+            "decision": decision,
+            "payment_type": data.get('payment_type') if decision == 're_enroll' else None,
+            "not_re_enroll_reason": data.get('not_re_enroll_reason') if decision == 'not_re_enroll' else None,
+            "agreement_accepted": 1,
+            "status": "pending",
+            "submitted_at": now()
+        })
+        
+        # Insert với bypass permission
+        re_enrollment_doc.flags.ignore_permissions = True
+        re_enrollment_doc.insert()
+        
+        frappe.db.commit()
+        
+        logs.append(f"Đã tạo đơn: {re_enrollment_doc.name}")
+        
+        # Chuẩn bị response
+        decision_display = "Tái ghi danh" if decision == 're_enroll' else "Không tái ghi danh"
+        payment_display = ""
+        if decision == 're_enroll':
+            payment_display = "Đóng theo năm" if data.get('payment_type') == 'annual' else "Đóng theo kỳ"
+        
+        return success_response(
+            data={
+                "id": re_enrollment_doc.name,
+                "student_id": student_id,
+                "student_name": student.student_name,
+                "decision": decision,
+                "decision_display": decision_display,
+                "payment_type": data.get('payment_type'),
+                "payment_display": payment_display,
+                "submitted_at": str(re_enrollment_doc.submitted_at)
+            },
+            message=f"Đã nộp đơn tái ghi danh thành công cho {student.student_name}",
+            logs=logs
+        )
+        
+    except frappe.exceptions.DuplicateEntryError:
+        return error_response(
+            "Học sinh đã nộp đơn tái ghi danh cho đợt này",
+            logs=logs
+        )
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Submit Re-enrollment Error")
+        return error_response(
+            message=f"Lỗi khi nộp đơn tái ghi danh: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def get_my_re_enrollments():
+    """
+    Lấy danh sách tất cả đơn tái ghi danh của phụ huynh.
+    Dùng để hiển thị lịch sử đơn đã nộp.
+    """
+    logs = []
+    
+    try:
+        parent_id = _get_current_parent()
+        if not parent_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        logs.append(f"Parent: {parent_id}")
+        
+        # Lấy tất cả học sinh của phụ huynh
+        relationships = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"guardian": parent_id},
+            fields=["student"]
+        )
+        student_ids = [rel.student for rel in relationships]
+        
+        if not student_ids:
+            return list_response([])
+        
+        # Lấy tất cả đơn tái ghi danh
+        submissions = frappe.get_all(
+            "SIS Re-enrollment",
+            filters={"student_id": ["in", student_ids]},
+            fields=[
+                "name", "config_id", "student_id", "student_name", "student_code",
+                "current_class", "decision", "payment_type", "not_re_enroll_reason",
+                "status", "submitted_at"
+            ],
+            order_by="submitted_at desc"
+        )
+        
+        # Thêm thông tin config cho mỗi đơn
+        for submission in submissions:
+            config_info = frappe.db.get_value(
+                "SIS Re-enrollment Config",
+                submission.config_id,
+                ["title", "school_year_id"],
+                as_dict=True
+            )
+            submission["config_title"] = config_info.title if config_info else None
+            
+            # Display values
+            submission["decision_display"] = "Tái ghi danh" if submission.decision == 're_enroll' else "Không tái ghi danh"
+            if submission.payment_type:
+                submission["payment_display"] = "Đóng theo năm" if submission.payment_type == 'annual' else "Đóng theo kỳ"
+            
+            # Status display
+            status_map = {
+                "pending": "Chờ xử lý",
+                "approved": "Đã duyệt",
+                "rejected": "Từ chối"
+            }
+            submission["status_display"] = status_map.get(submission.status, submission.status)
+        
+        logs.append(f"Tìm thấy {len(submissions)} đơn")
+        
+        return list_response(submissions)
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Get My Re-enrollments Error")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách đơn tái ghi danh: {str(e)}",
+            logs=logs
+        )
+

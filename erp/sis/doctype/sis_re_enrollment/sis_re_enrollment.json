@@ -1,0 +1,278 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:SIS-REENROLL-{#####}",
+ "beta": 0,
+ "creation": "2024-12-24 00:00:00.000000",
+ "custom": 0,
+ "description": "Đơn tái ghi danh của học sinh",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "config_id",
+  "student_id",
+  "student_name",
+  "student_code",
+  "column_break_basic",
+  "guardian_id",
+  "guardian_name",
+  "current_class",
+  "campus_id",
+  "decision_section",
+  "decision",
+  "payment_type",
+  "selected_discount_deadline",
+  "column_break_decision",
+  "not_re_enroll_reason",
+  "agreement_section",
+  "agreement_accepted",
+  "status_section",
+  "status",
+  "submitted_at",
+  "column_break_status",
+  "modified_by_admin",
+  "admin_modified_at",
+  "admin_notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "config_id",
+   "fieldtype": "Link",
+   "label": "Đợt tái ghi danh",
+   "options": "SIS Re-enrollment Config",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Tên học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_name"
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Mã học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_code",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "guardian_id",
+   "fieldtype": "Link",
+   "label": "Phụ huynh nộp đơn",
+   "options": "CRM Guardian",
+   "reqd": 1
+  },
+  {
+   "fieldname": "guardian_name",
+   "fieldtype": "Data",
+   "label": "Tên phụ huynh",
+   "read_only": 1,
+   "fetch_from": "guardian_id.guardian_name"
+  },
+  {
+   "fieldname": "current_class",
+   "fieldtype": "Data",
+   "label": "Lớp hiện tại",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Lớp học hiện tại của học sinh"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "read_only": 1
+  },
+  {
+   "fieldname": "decision_section",
+   "fieldtype": "Section Break",
+   "label": "Quyết định tái ghi danh"
+  },
+  {
+   "fieldname": "decision",
+   "fieldtype": "Select",
+   "label": "Quyết định",
+   "options": "\nre_enroll\nnot_re_enroll",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "re_enroll: Tái ghi danh, not_re_enroll: Không tái ghi danh"
+  },
+  {
+   "fieldname": "payment_type",
+   "fieldtype": "Select",
+   "label": "Phương thức thanh toán",
+   "options": "\nannual\nsemester",
+   "depends_on": "eval:doc.decision=='re_enroll'",
+   "mandatory_depends_on": "eval:doc.decision=='re_enroll'",
+   "description": "annual: Đóng theo năm, semester: Đóng theo kỳ"
+  },
+  {
+   "fieldname": "selected_discount_deadline",
+   "fieldtype": "Date",
+   "label": "Hạn ưu đãi đã chọn",
+   "read_only": 1,
+   "depends_on": "eval:doc.decision=='re_enroll'",
+   "description": "Hạn ưu đãi tại thời điểm nộp đơn"
+  },
+  {
+   "fieldname": "column_break_decision",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "not_re_enroll_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do không tái ghi danh",
+   "depends_on": "eval:doc.decision=='not_re_enroll'",
+   "mandatory_depends_on": "eval:doc.decision=='not_re_enroll'"
+  },
+  {
+   "fieldname": "agreement_section",
+   "fieldtype": "Section Break",
+   "label": "Xác nhận"
+  },
+  {
+   "fieldname": "agreement_accepted",
+   "fieldtype": "Check",
+   "label": "Đã đọc và đồng ý điều khoản",
+   "reqd": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "pending\napproved\nrejected",
+   "default": "pending",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian nộp đơn",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "modified_by_admin",
+   "fieldtype": "Link",
+   "label": "Admin chỉnh sửa",
+   "options": "User",
+   "read_only": 1,
+   "description": "Admin/Tuyển sinh đã chỉnh sửa đơn này"
+  },
+  {
+   "fieldname": "admin_modified_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian admin sửa",
+   "read_only": 1
+  },
+  {
+   "fieldname": "admin_notes",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú của admin",
+   "description": "Ghi chú khi admin chỉnh sửa đơn"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-12-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Re-enrollment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}
+
