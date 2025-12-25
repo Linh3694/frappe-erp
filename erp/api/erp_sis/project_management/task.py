@@ -880,7 +880,7 @@ def get_task_comments():
         task_id = frappe.form_dict.get('task_id')
         
         if not task_id:
-            return validation_error_response("task_id là bắt buộc")
+            return error_response("task_id là bắt buộc")
         
         # Kiểm tra task tồn tại
         task = frappe.get_doc("PM Task", task_id)
@@ -939,10 +939,10 @@ def create_task_comment():
         
         # Validate input
         if not task_id:
-            return validation_error_response("task_id là bắt buộc")
+            return error_response("task_id là bắt buộc")
         
         if not comment_text or not comment_text.strip():
-            return validation_error_response("Nội dung comment không được để trống")
+            return error_response("Nội dung comment không được để trống")
         
         # Kiểm tra task tồn tại
         task = frappe.get_doc("PM Task", task_id)
@@ -1009,10 +1009,10 @@ def update_task_comment():
         
         # Validate input
         if not comment_id:
-            return validation_error_response("comment_id là bắt buộc")
+            return error_response("comment_id là bắt buộc")
         
         if not comment_text or not comment_text.strip():
-            return validation_error_response("Nội dung comment không được để trống")
+            return error_response("Nội dung comment không được để trống")
         
         # Lấy comment
         comment = frappe.get_doc("PM Task Comment", comment_id)
@@ -1073,7 +1073,7 @@ def delete_task_comment():
         
         # Validate input
         if not comment_id:
-            return validation_error_response("comment_id là bắt buộc")
+            return error_response("comment_id là bắt buộc")
         
         # Lấy comment
         comment = frappe.get_doc("PM Task Comment", comment_id)
@@ -1118,7 +1118,7 @@ def get_task_comment_count():
         task_id = frappe.form_dict.get('task_id')
         
         if not task_id:
-            return validation_error_response("task_id là bắt buộc")
+            return error_response("task_id là bắt buộc")
         
         count = frappe.db.count("PM Task Comment", {"task_id": task_id})
         return success_response(data={"count": count})
