@@ -876,18 +876,11 @@ def get_task_comments():
     Returns: List comments với thông tin người tạo
     """
     try:
-        # Try multiple ways to get task_id
+        # Lấy task_id từ form_dict
         task_id = frappe.form_dict.get('task_id')
-        if not task_id:
-            task_id = frappe.local.form_dict.get('task_id')
-        if not task_id:
-            # Try from request args
-            import frappe.request
-            if hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
-                task_id = frappe.request.args.get('task_id')
         
         # Debug log
-        frappe.log_error(f"get_task_comments - form_dict: {frappe.form_dict}", "Comment Debug")
+        frappe.log_error(f"get_task_comments - form_dict: {dict(frappe.form_dict)}", "Comment Debug")
         frappe.log_error(f"get_task_comments - task_id: {task_id}", "Comment Debug")
         
         if not task_id:
