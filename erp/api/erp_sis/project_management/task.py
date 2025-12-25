@@ -101,12 +101,18 @@ def get_board_tasks():
     try:
         user = frappe.session.user
         
+        # Debug: log request params
+        frappe.logger().info(f"[get_board_tasks] frappe.form_dict: {frappe.form_dict}")
+        
         # Lấy params từ request
         project_id = frappe.form_dict.get("project_id")
         status = frappe.form_dict.get("status")
         
+        frappe.logger().info(f"[get_board_tasks] project_id: {project_id}, status: {status}")
+        
         # Validate project_id
         if not project_id:
+            frappe.logger().error(f"[get_board_tasks] project_id is missing! form_dict: {frappe.form_dict}")
             return error_response("project_id is required", code="MISSING_PARAMETER")
         
         # Kiểm tra quyền truy cập project

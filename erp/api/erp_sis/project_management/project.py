@@ -153,11 +153,17 @@ def get_project():
     try:
         user = frappe.session.user
         
+        # Debug: log request params
+        frappe.logger().info(f"[get_project] frappe.form_dict: {frappe.form_dict}")
+        
         # Lấy project_id từ request params
         project_id = frappe.form_dict.get("project_id")
         
+        frappe.logger().info(f"[get_project] project_id: {project_id}")
+        
         # Validate project_id
         if not project_id:
+            frappe.logger().error(f"[get_project] project_id is missing! form_dict: {frappe.form_dict}")
             return error_response("project_id is required", code="MISSING_PARAMETER")
         
         # Kiểm tra project tồn tại
@@ -460,11 +466,17 @@ def get_project_members():
     try:
         user = frappe.session.user
         
+        # Debug: log request params
+        frappe.logger().info(f"[get_project_members] frappe.form_dict: {frappe.form_dict}")
+        
         # Lấy project_id từ request params
         project_id = frappe.form_dict.get("project_id")
         
+        frappe.logger().info(f"[get_project_members] project_id: {project_id}")
+        
         # Validate project_id
         if not project_id:
+            frappe.logger().error(f"[get_project_members] project_id is missing! form_dict: {frappe.form_dict}")
             return error_response("project_id is required", code="MISSING_PARAMETER")
         
         # Kiểm tra quyền truy cập
