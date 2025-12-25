@@ -133,10 +133,10 @@ def upload_resource():
     try:
         user = frappe.session.user
         
-        # Lấy form data
-        project_id = frappe.form_dict.get("project_id")
-        target_type = frappe.form_dict.get("target_type", "project")
-        target_id = frappe.form_dict.get("target_id")
+        # Lấy form data từ multipart/form-data (hỗ trợ cả request.form và form_dict)
+        project_id = frappe.request.form.get("project_id") or frappe.form_dict.get("project_id")
+        target_type = frappe.request.form.get("target_type") or frappe.form_dict.get("target_type") or "project"
+        target_id = frappe.request.form.get("target_id") or frappe.form_dict.get("target_id")
         
         # Validate required fields
         if not project_id:
