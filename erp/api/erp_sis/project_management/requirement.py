@@ -74,20 +74,25 @@ def log_requirement_change(project_id: str, requirement_id: str, action: str,
 
 
 @frappe.whitelist(allow_guest=False)
-def get_requirements(project_id: str = None, status: str = None, priority: str = None):
+def get_requirements():
     """
     Lấy danh sách requirements của project
     
     Args:
-        project_id: ID của project
-        status: Filter theo status (new/approved/rejected)
-        priority: Filter theo priority
+        project_id: ID của project (from query params)
+        status: Filter theo status (new/approved/rejected, from query params)
+        priority: Filter theo priority (from query params)
     
     Returns:
         List requirements
     """
     try:
         user = frappe.session.user
+        
+        # Lấy params từ request
+        project_id = frappe.form_dict.get("project_id")
+        status = frappe.form_dict.get("status")
+        priority = frappe.form_dict.get("priority")
         
         # Validate project_id
         if not project_id:

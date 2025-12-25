@@ -140,18 +140,21 @@ def get_my_projects(status: str = None, visibility: str = None):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_project(project_id: str = None):
+def get_project():
     """
     Lấy chi tiết một project
     
     Args:
-        project_id: ID của project
+        project_id: ID của project (from query params)
     
     Returns:
         Chi tiết project với members và stats
     """
     try:
         user = frappe.session.user
+        
+        # Lấy project_id từ request params
+        project_id = frappe.form_dict.get("project_id")
         
         # Validate project_id
         if not project_id:
@@ -444,18 +447,21 @@ def delete_project(project_id: str):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_project_members(project_id: str = None):
+def get_project_members():
     """
     Lấy danh sách thành viên của project
     
     Args:
-        project_id: ID của project
+        project_id: ID của project (from query params)
     
     Returns:
         List các members với thông tin chi tiết
     """
     try:
         user = frappe.session.user
+        
+        # Lấy project_id từ request params
+        project_id = frappe.form_dict.get("project_id")
         
         # Validate project_id
         if not project_id:

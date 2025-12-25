@@ -58,19 +58,24 @@ def enrich_resource_data(resource: dict) -> dict:
 
 
 @frappe.whitelist(allow_guest=False)
-def get_resources(project_id: str = None, target_type: str = None, target_id: str = None):
+def get_resources():
     """
     Lấy danh sách resources của project
     
     Args:
-        project_id: ID của project
-        target_type: Filter theo loại (project/requirement/task)
-        target_id: Filter theo target cụ thể
+        project_id: ID của project (from query params)
+        target_type: Filter theo loại (project/requirement/task, from query params)
+        target_id: Filter theo target cụ thể (from query params)
     
     Returns:
         List resources
     """
     try:
+        # Lấy params từ request
+        project_id = frappe.form_dict.get("project_id")
+        target_type = frappe.form_dict.get("target_type")
+        target_id = frappe.form_dict.get("target_id")
+        
         # Validate project_id
         if not project_id:
             return error_response("project_id is required", code="MISSING_PARAMETER")

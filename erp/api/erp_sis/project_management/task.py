@@ -87,19 +87,23 @@ def log_task_change(project_id: str, task_id: str, action: str, old_value: dict,
 
 
 @frappe.whitelist(allow_guest=False)
-def get_board_tasks(project_id: str = None, status: str = None):
+def get_board_tasks():
     """
     Lấy danh sách tasks cho Kanban board
     
     Args:
-        project_id: ID của project
-        status: Filter theo status (optional)
+        project_id: ID của project (from query params)
+        status: Filter theo status (optional, from query params)
     
     Returns:
         Tasks grouped by status
     """
     try:
         user = frappe.session.user
+        
+        # Lấy params từ request
+        project_id = frappe.form_dict.get("project_id")
+        status = frappe.form_dict.get("status")
         
         # Validate project_id
         if not project_id:
@@ -706,14 +710,12 @@ def unassign_task(task_id: str, user_id: str):
 
 
 @frappe.whitelist(allow_guest=False)
-def search_tasks(project_id: str = None, query: str = None, status: str = None,
-                priority: str = None, assignee_id: str = None, 
-                has_due_date: str = None, overdue: str = None):
+def search_tasks():
     """
     Tìm kiếm và filter tasks
     
     Args:
-        project_id: ID của project
+        project_id: ID của project (from query params)
         query: Từ khóa tìm kiếm (title, description)
         status: Filter theo status
         priority: Filter theo priority
@@ -726,6 +728,15 @@ def search_tasks(project_id: str = None, query: str = None, status: str = None,
     """
     try:
         user = frappe.session.user
+        
+        # Lấy params từ request
+        project_id = frappe.form_dict.get("project_id")
+        query = frappe.form_dict.get("query")
+        status = frappe.form_dict.get("status")
+        priority = frappe.form_dict.get("priority")
+        assignee_id = frappe.form_dict.get("assignee_id")
+        has_due_date = frappe.form_dict.get("has_due_date")
+        overdue = frappe.form_dict.get("overdue")
         
         # Validate project_id
         if not project_id:

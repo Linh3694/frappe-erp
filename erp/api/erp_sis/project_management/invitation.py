@@ -173,19 +173,23 @@ def get_my_invitations(status: str = "pending"):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_project_invitations(project_id: str = None, status: str = None):
+def get_project_invitations():
     """
     Lấy danh sách lời mời của project (cho owner/manager)
     
     Args:
-        project_id: ID của project
-        status: Filter theo status
+        project_id: ID của project (from query params)
+        status: Filter theo status (from query params)
     
     Returns:
         List các invitations
     """
     try:
         user = frappe.session.user
+        
+        # Lấy params từ request
+        project_id = frappe.form_dict.get("project_id")
+        status = frappe.form_dict.get("status")
         
         # Validate project_id
         if not project_id:

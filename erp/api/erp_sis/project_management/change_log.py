@@ -82,23 +82,29 @@ def format_log_description(log: dict) -> str:
 
 
 @frappe.whitelist(allow_guest=False)
-def get_logs(project_id: str = None, target_type: str = None, target_id: str = None,
-            limit: int = 50, offset: int = 0):
+def get_logs():
     """
     Lấy danh sách change logs của project
     
     Args:
-        project_id: ID của project (required)
-        target_type: Filter theo loại target (project/requirement/task/member)
-        target_id: Filter theo target cụ thể
-        limit: Giới hạn số records (default: 50)
-        offset: Offset cho pagination (default: 0)
+        project_id: ID của project (required, from query params)
+        target_type: Filter theo loại target (project/requirement/task/member, from query params)
+        target_id: Filter theo target cụ thể (from query params)
+        limit: Giới hạn số records (default: 50, from query params)
+        offset: Offset cho pagination (default: 0, from query params)
     
     Returns:
         List change logs
     """
     try:
         user = frappe.session.user
+        
+        # Lấy params từ request
+        project_id = frappe.form_dict.get("project_id")
+        target_type = frappe.form_dict.get("target_type")
+        target_id = frappe.form_dict.get("target_id")
+        limit = int(frappe.form_dict.get("limit", 50))
+        offset = int(frappe.form_dict.get("offset", 0))
         
         # Validate project_id
         if not project_id:
@@ -214,19 +220,23 @@ def get_task_logs(task_id: str, limit: int = 20):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_activity_summary(project_id: str = None, days: int = 7):
+def get_activity_summary():
     """
     Lấy tóm tắt hoạt động của project trong N ngày gần nhất
     
     Args:
-        project_id: ID của project
-        days: Số ngày (default: 7)
+        project_id: ID của project (from query params)
+        days: Số ngày (default: 7, from query params)
     
     Returns:
         Tóm tắt hoạt động theo ngày và theo action
     """
     try:
         user = frappe.session.user
+        
+        # Lấy params từ request
+        project_id = frappe.form_dict.get("project_id")
+        days = int(frappe.form_dict.get("days", 7))
         
         # Validate project_id
         if not project_id:
