@@ -876,12 +876,8 @@ def get_task_comments():
     Returns: List comments với thông tin người tạo
     """
     try:
-        # Lấy task_id từ form_dict
-        task_id = frappe.form_dict.get('task_id')
-        
-        # Debug log
-        frappe.log_error(f"get_task_comments - form_dict: {dict(frappe.form_dict)}", "Comment Debug")
-        frappe.log_error(f"get_task_comments - task_id: {task_id}", "Comment Debug")
+        # Lấy task_id từ request.form (vì form_dict không có data khi dùng postForm)
+        task_id = frappe.request.form.get('task_id') or frappe.form_dict.get('task_id')
         
         if not task_id:
             return error_response(f"task_id là bắt buộc. form_dict: {dict(frappe.form_dict)}")
@@ -948,9 +944,9 @@ def create_task_comment():
             "form_dict": dict(frappe.form_dict),
         }
         
-        # Lấy params từ form_dict
-        task_id = frappe.form_dict.get('task_id')
-        comment_text = frappe.form_dict.get('comment_text')
+        # Lấy params từ request.form (vì form_dict không có data khi dùng postForm)
+        task_id = frappe.request.form.get('task_id') or frappe.form_dict.get('task_id')
+        comment_text = frappe.request.form.get('comment_text') or frappe.form_dict.get('comment_text')
         
         debug_info["parsed_task_id"] = task_id
         debug_info["parsed_comment_text"] = comment_text
@@ -1034,9 +1030,9 @@ def update_task_comment():
     Returns: Comment đã cập nhật
     """
     try:
-        # Lấy params từ form_dict
-        comment_id = frappe.form_dict.get('comment_id')
-        comment_text = frappe.form_dict.get('comment_text')
+        # Lấy params từ request.form (vì form_dict không có data khi dùng postForm)
+        comment_id = frappe.request.form.get('comment_id') or frappe.form_dict.get('comment_id')
+        comment_text = frappe.request.form.get('comment_text') or frappe.form_dict.get('comment_text')
         
         # Validate input
         if not comment_id:
@@ -1099,8 +1095,8 @@ def delete_task_comment():
     Returns: Success message
     """
     try:
-        # Lấy params từ form_dict
-        comment_id = frappe.form_dict.get('comment_id')
+        # Lấy params từ request.form (vì form_dict không có data khi dùng postForm)
+        comment_id = frappe.request.form.get('comment_id') or frappe.form_dict.get('comment_id')
         
         # Validate input
         if not comment_id:
@@ -1145,8 +1141,8 @@ def get_task_comment_count():
     Returns: {"count": int}
     """
     try:
-        # Lấy params từ form_dict
-        task_id = frappe.form_dict.get('task_id')
+        # Lấy params từ request.form (vì form_dict không có data khi dùng postForm)
+        task_id = frappe.request.form.get('task_id') or frappe.form_dict.get('task_id')
         
         if not task_id:
             return error_response("task_id là bắt buộc")
