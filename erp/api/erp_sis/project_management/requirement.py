@@ -272,8 +272,8 @@ def update_requirement():
     """
     try:
         user = frappe.session.user
-        # Đọc requirement_id từ form_dict (query parameters)
-        requirement_id = frappe.form_dict.get("requirement_id")
+        # Đọc requirement_id từ query parameters (hỗ trợ cả form_dict và request.args)
+        requirement_id = frappe.form_dict.get("requirement_id") or frappe.local.request.args.get("requirement_id")
         
         if not requirement_id:
             return validation_error_response("Requirement ID là bắt buộc", {"requirement_id": ["Requirement ID không được để trống"]})
@@ -349,8 +349,8 @@ def delete_requirement():
     """
     try:
         user = frappe.session.user
-        # Đọc requirement_id từ form_dict (query parameters)
-        requirement_id = frappe.form_dict.get("requirement_id")
+        # Đọc requirement_id từ query parameters (hỗ trợ cả form_dict và request.args)
+        requirement_id = frappe.form_dict.get("requirement_id") or frappe.local.request.args.get("requirement_id")
         
         if not requirement_id:
             return validation_error_response("Requirement ID là bắt buộc", {"requirement_id": ["Requirement ID không được để trống"]})

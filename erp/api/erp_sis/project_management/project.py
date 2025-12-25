@@ -260,8 +260,8 @@ def update_project():
     """
     try:
         user = frappe.session.user
-        # Đọc project_id từ form_dict (query parameters)
-        project_id = frappe.form_dict.get("project_id")
+        # Đọc project_id từ query parameters (hỗ trợ cả form_dict và request.args)
+        project_id = frappe.form_dict.get("project_id") or frappe.local.request.args.get("project_id")
         
         if not project_id:
             return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
@@ -330,8 +330,8 @@ def archive_project():
     """
     try:
         user = frappe.session.user
-        # Đọc project_id từ form_dict (query parameters)
-        project_id = frappe.form_dict.get("project_id")
+        # Đọc project_id từ query parameters (hỗ trợ cả form_dict và request.args)
+        project_id = frappe.form_dict.get("project_id") or frappe.local.request.args.get("project_id")
         
         if not project_id:
             return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
@@ -377,8 +377,8 @@ def restore_project():
     """
     try:
         user = frappe.session.user
-        # Đọc project_id từ form_dict (query parameters)
-        project_id = frappe.form_dict.get("project_id")
+        # Đọc project_id từ query parameters (hỗ trợ cả form_dict và request.args)
+        project_id = frappe.form_dict.get("project_id") or frappe.local.request.args.get("project_id")
         
         if not project_id:
             return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
@@ -424,8 +424,8 @@ def delete_project():
     """
     try:
         user = frappe.session.user
-        # Đọc project_id từ form_dict (query parameters)
-        project_id = frappe.form_dict.get("project_id")
+        # Đọc project_id từ query parameters (hỗ trợ cả form_dict và request.args)
+        project_id = frappe.form_dict.get("project_id") or frappe.local.request.args.get("project_id")
         
         if not project_id:
             return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
@@ -538,10 +538,10 @@ def update_member_role():
     """
     try:
         user = frappe.session.user
-        # Đọc parameters từ form_dict (query parameters)
-        project_id = frappe.form_dict.get("project_id")
-        member_user_id = frappe.form_dict.get("member_user_id")
-        new_role = frappe.form_dict.get("new_role")
+        # Đọc parameters từ query parameters (hỗ trợ cả form_dict và request.args)
+        project_id = frappe.form_dict.get("project_id") or frappe.local.request.args.get("project_id")
+        member_user_id = frappe.form_dict.get("member_user_id") or frappe.local.request.args.get("member_user_id")
+        new_role = frappe.form_dict.get("new_role") or frappe.local.request.args.get("new_role")
         
         if not project_id:
             return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})

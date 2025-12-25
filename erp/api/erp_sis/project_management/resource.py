@@ -237,7 +237,7 @@ def delete_resource():
     """
     try:
         user = frappe.session.user
-        resource_id = frappe.form_dict.get("resource_id")
+        resource_id = frappe.form_dict.get("resource_id") or frappe.local.request.args.get("resource_id")
         
         if not resource_id:
             return validation_error_response("Resource ID là bắt buộc", {"resource_id": ["Resource ID không được để trống"]})
@@ -287,7 +287,7 @@ def get_resource():
     """
     try:
         user = frappe.session.user
-        resource_id = frappe.form_dict.get("resource_id")
+        resource_id = frappe.form_dict.get("resource_id") or frappe.local.request.args.get("resource_id")
         
         if not resource_id:
             return validation_error_response("Resource ID là bắt buộc", {"resource_id": ["Resource ID không được để trống"]})
