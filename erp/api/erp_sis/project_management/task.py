@@ -132,7 +132,7 @@ def get_board_tasks():
         tasks = frappe.get_all(
             "PM Task",
             filters=filters,
-            fields=["name", "title", "description", "status", "priority",
+            fields=["name", "project_id", "title", "description", "status", "priority",
                    "created_by", "due_date", "tags", "order_index",
                    "creation", "modified"],
             order_by="order_index asc, modified desc"
@@ -832,7 +832,7 @@ def search_tasks():
         
         # Query tasks
         tasks = frappe.db.sql(f"""
-            SELECT name, title, description, status, priority,
+            SELECT name, project_id, title, description, status, priority,
                    created_by, due_date, tags, order_index,
                    creation, modified
             FROM `tabPM Task`
