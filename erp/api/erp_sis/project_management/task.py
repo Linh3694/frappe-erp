@@ -865,7 +865,7 @@ def search_tasks():
 
 # ==================== TASK COMMENT APIs ====================
 
-@frappe.whitelist(allow_guest=False, methods=['GET'])
+@frappe.whitelist(allow_guest=False)
 def get_task_comments():
     """
     Lấy tất cả comments của một task
@@ -948,9 +948,14 @@ def create_task_comment():
         task_id = frappe.form_dict.get('task_id')
         comment_text = frappe.form_dict.get('comment_text')
         
+        # Debug log - REMOVE AFTER TESTING
+        frappe.log_error(f"create_task_comment - form_dict: {dict(frappe.form_dict)}", "Create Comment Debug")
+        frappe.log_error(f"create_task_comment - task_id: {task_id}, comment_text: {comment_text}", "Create Comment Debug")
+        
         # Validate input
         if not task_id:
-            return error_response("task_id là bắt buộc")
+            frappe.log_error(f"task_id missing! form_dict was: {dict(frappe.form_dict)}", "Create Comment Debug")
+            return error_response(f"task_id là bắt buộc. Received: {dict(frappe.form_dict)}")
         
         if not comment_text or not comment_text.strip():
             return error_response("Nội dung comment không được để trống")
