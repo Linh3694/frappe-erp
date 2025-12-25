@@ -101,18 +101,12 @@ def get_board_tasks():
     try:
         user = frappe.session.user
         
-        # Debug: log request params
-        frappe.logger().info(f"[get_board_tasks] frappe.form_dict: {frappe.form_dict}")
-        
-        # Lấy params từ request
-        project_id = frappe.form_dict.get("project_id")
-        status = frappe.form_dict.get("status")
-        
-        frappe.logger().info(f"[get_board_tasks] project_id: {project_id}, status: {status}")
+        # Lấy params từ GET query params
+        project_id = frappe.request.args.get("project_id") or frappe.form_dict.get("project_id")
+        status = frappe.request.args.get("status") or frappe.form_dict.get("status")
         
         # Validate project_id
         if not project_id:
-            frappe.logger().error(f"[get_board_tasks] project_id is missing! form_dict: {frappe.form_dict}")
             return error_response("project_id is required", code="MISSING_PARAMETER")
         
         # Kiểm tra quyền truy cập project
@@ -735,14 +729,14 @@ def search_tasks():
     try:
         user = frappe.session.user
         
-        # Lấy params từ request
-        project_id = frappe.form_dict.get("project_id")
-        query = frappe.form_dict.get("query")
-        status = frappe.form_dict.get("status")
-        priority = frappe.form_dict.get("priority")
-        assignee_id = frappe.form_dict.get("assignee_id")
-        has_due_date = frappe.form_dict.get("has_due_date")
-        overdue = frappe.form_dict.get("overdue")
+        # Lấy params từ GET query params
+        project_id = frappe.request.args.get("project_id") or frappe.form_dict.get("project_id")
+        query = frappe.request.args.get("query") or frappe.form_dict.get("query")
+        status = frappe.request.args.get("status") or frappe.form_dict.get("status")
+        priority = frappe.request.args.get("priority") or frappe.form_dict.get("priority")
+        assignee_id = frappe.request.args.get("assignee_id") or frappe.form_dict.get("assignee_id")
+        has_due_date = frappe.request.args.get("has_due_date") or frappe.form_dict.get("has_due_date")
+        overdue = frappe.request.args.get("overdue") or frappe.form_dict.get("overdue")
         
         # Validate project_id
         if not project_id:

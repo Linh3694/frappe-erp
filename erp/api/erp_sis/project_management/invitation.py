@@ -187,9 +187,9 @@ def get_project_invitations():
     try:
         user = frappe.session.user
         
-        # Lấy params từ request
-        project_id = frappe.form_dict.get("project_id")
-        status = frappe.form_dict.get("status")
+        # Lấy params từ GET query params
+        project_id = frappe.request.args.get("project_id") or frappe.form_dict.get("project_id")
+        status = frappe.request.args.get("status") or frappe.form_dict.get("status")
         
         # Validate project_id
         if not project_id:

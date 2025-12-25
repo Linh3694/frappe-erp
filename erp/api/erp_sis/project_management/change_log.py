@@ -99,12 +99,12 @@ def get_logs():
     try:
         user = frappe.session.user
         
-        # Lấy params từ request
-        project_id = frappe.form_dict.get("project_id")
-        target_type = frappe.form_dict.get("target_type")
-        target_id = frappe.form_dict.get("target_id")
-        limit = int(frappe.form_dict.get("limit", 50))
-        offset = int(frappe.form_dict.get("offset", 0))
+        # Lấy params từ GET query params
+        project_id = frappe.request.args.get("project_id") or frappe.form_dict.get("project_id")
+        target_type = frappe.request.args.get("target_type") or frappe.form_dict.get("target_type")
+        target_id = frappe.request.args.get("target_id") or frappe.form_dict.get("target_id")
+        limit = int(frappe.request.args.get("limit") or frappe.form_dict.get("limit") or 50)
+        offset = int(frappe.request.args.get("offset") or frappe.form_dict.get("offset") or 0)
         
         # Validate project_id
         if not project_id:
@@ -234,9 +234,9 @@ def get_activity_summary():
     try:
         user = frappe.session.user
         
-        # Lấy params từ request
-        project_id = frappe.form_dict.get("project_id")
-        days = int(frappe.form_dict.get("days", 7))
+        # Lấy params từ GET query params
+        project_id = frappe.request.args.get("project_id") or frappe.form_dict.get("project_id")
+        days = int(frappe.request.args.get("days") or frappe.form_dict.get("days") or 7)
         
         # Validate project_id
         if not project_id:

@@ -71,10 +71,10 @@ def get_resources():
         List resources
     """
     try:
-        # Lấy params từ request
-        project_id = frappe.form_dict.get("project_id")
-        target_type = frappe.form_dict.get("target_type")
-        target_id = frappe.form_dict.get("target_id")
+        # Lấy params từ GET query params
+        project_id = frappe.request.args.get("project_id") or frappe.form_dict.get("project_id")
+        target_type = frappe.request.args.get("target_type") or frappe.form_dict.get("target_type")
+        target_id = frappe.request.args.get("target_id") or frappe.form_dict.get("target_id")
         
         # Validate project_id
         if not project_id:
