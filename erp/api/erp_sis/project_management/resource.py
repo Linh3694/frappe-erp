@@ -184,33 +184,34 @@ def upload_resource():
         uploaded_file = files["file"]
         filename = uploaded_file.filename
         
-        # Lưu file vào Frappe
-        file_doc = frappe.get_doc({
-            "doctype": "File",
-            "file_name": filename,
-            "attached_to_doctype": "PM Resource",
-            "is_private": 1,
-            "content": uploaded_file.read()
-        })
-        file_doc.insert()
-        
-        # Lấy thông tin file
-        file_size = file_doc.file_size or 0
-        file_type = uploaded_file.content_type or ""
-        
-        # Tạo PM Resource
+        # Bước 1: Tạo PM Resource trước (để có name)
         resource = frappe.get_doc({
             "doctype": "PM Resource",
             "project_id": project_id,
             "target_type": target_type,
             "target_id": target_id,
             "filename": filename,
-            "file_url": file_doc.file_url,
-            "file_type": file_type,
-            "file_size": file_size,
             "uploaded_by": user
         })
         resource.insert()
+        
+        # Bước 2: Upload file và attach vào PM Resource
+        file_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": filename,
+            "attached_to_doctype": "PM Resource",
+            "attached_to_name": resource.name,  # ← Thêm attached_to_name
+            "is_private": 1,
+            "content": uploaded_file.read()
+        })
+        file_doc.insert()
+        
+        # Bước 3: Cập nhật PM Resource với thông tin file
+        resource.file_url = file_doc.file_url
+        resource.file_type = uploaded_file.content_type or ""
+        resource.file_size = file_doc.file_size or 0
+        resource.save()
+        
         frappe.db.commit()
         
         # Enrich và return
