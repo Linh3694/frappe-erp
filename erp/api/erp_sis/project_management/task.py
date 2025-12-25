@@ -865,7 +865,7 @@ def search_tasks():
 
 # ==================== TASK COMMENT APIs ====================
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=False, methods=['GET'])
 def get_task_comments():
     """
     Lấy tất cả comments của một task
@@ -876,15 +876,22 @@ def get_task_comments():
     Returns: List comments với thông tin người tạo
     """
     try:
-        # Lấy params từ form_dict (works for both GET and POST)
+        # Try multiple ways to get task_id
         task_id = frappe.form_dict.get('task_id')
+        if not task_id:
+            task_id = frappe.local.form_dict.get('task_id')
+        if not task_id:
+            # Try from request args
+            import frappe.request
+            if hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+                task_id = frappe.request.args.get('task_id')
         
         # Debug log
-        frappe.logger().debug(f"get_task_comments called with task_id: {task_id}")
-        frappe.logger().debug(f"form_dict: {frappe.form_dict}")
+        frappe.log_error(f"get_task_comments - form_dict: {frappe.form_dict}", "Comment Debug")
+        frappe.log_error(f"get_task_comments - task_id: {task_id}", "Comment Debug")
         
         if not task_id:
-            return error_response(f"task_id là bắt buộc. Received form_dict: {frappe.form_dict}")
+            return error_response(f"task_id là bắt buộc. form_dict: {dict(frappe.form_dict)}")
         
         # Kiểm tra task tồn tại
         task = frappe.get_doc("PM Task", task_id)
