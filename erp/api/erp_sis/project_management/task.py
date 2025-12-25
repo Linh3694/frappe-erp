@@ -937,6 +937,14 @@ def create_task_comment():
     Returns: Comment vừa tạo
     """
     try:
+        # Debug: Log raw request
+        import json
+        frappe.log_error(f"create_task_comment CALLED - Headers: {dict(frappe.request.headers)}", "Create Comment Debug")
+        frappe.log_error(f"create_task_comment - Request method: {frappe.request.method}", "Create Comment Debug")
+        frappe.log_error(f"create_task_comment - Request form: {dict(frappe.request.form)}", "Create Comment Debug")
+        frappe.log_error(f"create_task_comment - Request data: {frappe.request.data}", "Create Comment Debug")
+        frappe.log_error(f"create_task_comment - form_dict keys: {list(frappe.form_dict.keys())}", "Create Comment Debug")
+        
         # Lấy params từ form_dict
         task_id = frappe.form_dict.get('task_id')
         comment_text = frappe.form_dict.get('comment_text')
