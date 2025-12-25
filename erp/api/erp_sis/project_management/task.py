@@ -337,8 +337,8 @@ def update_task():
     """
     try:
         user = frappe.session.user
-        # Đọc task_id từ form_dict (query parameters)
-        task_id = frappe.form_dict.get("task_id")
+        # Đọc task_id từ query parameters (hỗ trợ cả form_dict và request.args)
+        task_id = frappe.form_dict.get("task_id") or frappe.local.request.args.get("task_id")
         
         if not task_id:
             return validation_error_response("Task ID là bắt buộc", {"task_id": ["Task ID không được để trống"]})
@@ -575,8 +575,8 @@ def delete_task():
     """
     try:
         user = frappe.session.user
-        # Đọc task_id từ form_dict (query parameters)
-        task_id = frappe.form_dict.get("task_id")
+        # Đọc task_id từ query parameters (hỗ trợ cả form_dict và request.args)
+        task_id = frappe.form_dict.get("task_id") or frappe.local.request.args.get("task_id")
         
         if not task_id:
             return validation_error_response("Task ID là bắt buộc", {"task_id": ["Task ID không được để trống"]})
