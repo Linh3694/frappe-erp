@@ -13,9 +13,7 @@ from erp.utils.api_response import (
     error_response,
     single_item_response,
     not_found_response,
-    forbidden_response,
-    validation_error_response,
-    validation_error_response
+    forbidden_response
 )
 from .project import get_user_project_role, check_project_access
 
@@ -105,7 +103,7 @@ def get_board_tasks(project_id: str = None, status: str = None):
         
         # Validate project_id
         if not project_id:
-            return validation_error_response("project_id is required")
+            return error_response("project_id is required", code="MISSING_PARAMETER")
         
         # Kiểm tra quyền truy cập project
         if not check_project_access(project_id, user):
@@ -731,7 +729,7 @@ def search_tasks(project_id: str = None, query: str = None, status: str = None,
         
         # Validate project_id
         if not project_id:
-            return validation_error_response("project_id is required")
+            return error_response("project_id is required", code="MISSING_PARAMETER")
         
         # Kiểm tra quyền
         if not check_project_access(project_id, user):

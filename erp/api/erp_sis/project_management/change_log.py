@@ -12,8 +12,7 @@ from erp.utils.api_response import (
     success_response,
     error_response,
     not_found_response,
-    forbidden_response,
-    validation_error_response
+    forbidden_response
 )
 from .project import check_project_access
 
@@ -103,7 +102,7 @@ def get_logs(project_id: str = None, target_type: str = None, target_id: str = N
         
         # Validate project_id
         if not project_id:
-            return validation_error_response("project_id is required")
+            return error_response("project_id is required", code="MISSING_PARAMETER")
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
@@ -231,7 +230,7 @@ def get_activity_summary(project_id: str = None, days: int = 7):
         
         # Validate project_id
         if not project_id:
-            return validation_error_response("project_id is required")
+            return error_response("project_id is required", code="MISSING_PARAMETER")
         
         # Kiểm tra quyền truy cập
         if not check_project_access(project_id, user):
