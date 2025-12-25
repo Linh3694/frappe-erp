@@ -194,6 +194,9 @@ def upload_resource():
             "content": file_content
         })
         file_doc.insert()
+        file_url = file_doc.file_url
+        file_size = file_doc.file_size or 0
+        file_name = file_doc.name  # Lưu name để reload sau
         
         # Bước 2: Tạo PM Resource với file_url từ file đã upload
         resource = frappe.get_doc({
@@ -202,17 +205,19 @@ def upload_resource():
             "target_type": target_type,
             "target_id": target_id,
             "filename": filename,
-            "file_url": file_doc.file_url,
+            "file_url": file_url,
             "file_type": file_type,
-            "file_size": file_doc.file_size or 0,
+            "file_size": file_size,
             "uploaded_by": user
         })
         resource.insert()
         
         # Bước 3: Cập nhật file để attach vào PM Resource
+        # Reload file_doc để tránh TimestampMismatchError
+        file_doc = frappe.get_doc("File", file_name)
         file_doc.attached_to_doctype = "PM Resource"
         file_doc.attached_to_name = resource.name
-        file_doc.save()
+        file_doc.save(ignore_version=True)  # Bỏ qua version tracking
         
         frappe.db.commit()
         
@@ -223,7 +228,10 @@ def upload_resource():
         return single_item_response(res_data, "Upload tài nguyên thành công")
         
     except Exception as e:
-        frappe.log_error(f"Error uploading resource: {str(e)}")
+        # Log error ra console thay vì frappe.log_error (tránh CharacterLengthExceededError)
+        print(f"❌ Error uploading resource: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return error_response(str(e))
 
 
