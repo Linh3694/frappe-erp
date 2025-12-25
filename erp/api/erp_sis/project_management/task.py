@@ -937,29 +937,34 @@ def create_task_comment():
     Returns: Comment vừa tạo
     """
     try:
-        # Debug: Log raw request
-        import json
-        frappe.log_error(f"create_task_comment CALLED - Headers: {dict(frappe.request.headers)}", "Create Comment Debug")
-        frappe.log_error(f"create_task_comment - Request method: {frappe.request.method}", "Create Comment Debug")
-        frappe.log_error(f"create_task_comment - Request form: {dict(frappe.request.form)}", "Create Comment Debug")
-        frappe.log_error(f"create_task_comment - Request data: {frappe.request.data}", "Create Comment Debug")
-        frappe.log_error(f"create_task_comment - form_dict keys: {list(frappe.form_dict.keys())}", "Create Comment Debug")
+        # Collect debug info để đưa vào response
+        debug_info = {
+            "request_method": frappe.request.method,
+            "content_type": frappe.request.content_type,
+            "content_length": frappe.request.content_length,
+            "request_data_raw": frappe.request.data.decode('utf-8') if frappe.request.data else None,
+            "request_form": dict(frappe.request.form),
+            "form_dict_keys": list(frappe.form_dict.keys()),
+            "form_dict": dict(frappe.form_dict),
+        }
         
         # Lấy params từ form_dict
         task_id = frappe.form_dict.get('task_id')
         comment_text = frappe.form_dict.get('comment_text')
         
-        # Debug log - REMOVE AFTER TESTING
-        frappe.log_error(f"create_task_comment - form_dict: {dict(frappe.form_dict)}", "Create Comment Debug")
-        frappe.log_error(f"create_task_comment - task_id: {task_id}, comment_text: {comment_text}", "Create Comment Debug")
+        debug_info["parsed_task_id"] = task_id
+        debug_info["parsed_comment_text"] = comment_text
         
         # Validate input
         if not task_id:
-            frappe.log_error(f"task_id missing! form_dict was: {dict(frappe.form_dict)}", "Create Comment Debug")
-            return error_response(f"task_id là bắt buộc. Received: {dict(frappe.form_dict)}")
+            return error_response(
+                f"task_id là bắt buộc. Debug info: {debug_info}"
+            )
         
         if not comment_text or not comment_text.strip():
-            return error_response("Nội dung comment không được để trống")
+            return error_response(
+                f"Nội dung comment không được để trống. Debug info: {debug_info}"
+            )
         
         # Kiểm tra task tồn tại
         task = frappe.get_doc("PM Task", task_id)
@@ -999,13 +1004,22 @@ def create_task_comment():
             result["created_by_full_name"] = user_info.get("full_name")
             result["created_by_image"] = user_info.get("user_image")
         
-        return single_item_response(result, "Comment đã được tạo")
+        # Thêm debug info vào response (tạm thời để debug)
+        result["_debug_info"] = debug_info
+        
+        return single_item_response(result, f"Comment đã được tạo. Debug: request có {len(debug_info.get('request_data_raw', '') or '')} bytes")
         
     except frappe.DoesNotExistError:
-        return not_found_response("Task")
+        return error_response(f"Task không tồn tại. Debug info: {debug_info if 'debug_info' in locals() else 'N/A'}")
     except Exception as e:
-        frappe.log_error(f"Error creating task comment: {str(e)}")
-        return error_response(str(e))
+        # Đưa debug info vào error response
+        import traceback
+        error_detail = {
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "debug_info": debug_info if 'debug_info' in locals() else None
+        }
+        return error_response(f"Lỗi: {str(e)}. Debug: {error_detail}")
 
 
 @frappe.whitelist()
