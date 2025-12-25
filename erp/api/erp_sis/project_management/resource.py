@@ -187,10 +187,11 @@ def upload_resource():
         file_type = uploaded_file.content_type or ""
         
         # Bước 1: Upload file trước (không attach vào doctype nào)
+        # is_private = 0 để file có thể truy cập trực tiếp (cần cho image preview)
         file_doc = frappe.get_doc({
             "doctype": "File",
             "file_name": filename,
-            "is_private": 1,
+            "is_private": 0,  # Public file để có thể xem ảnh trực tiếp
             "content": file_content
         })
         file_doc.insert()
