@@ -13,7 +13,8 @@ from erp.utils.api_response import (
     error_response,
     single_item_response,
     not_found_response,
-    forbidden_response
+    forbidden_response,
+    validation_error_response
 )
 from .project import get_user_project_role, check_project_access
 
@@ -224,18 +225,22 @@ def upload_resource():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def delete_resource(resource_id: str):
+def delete_resource():
     """
     Xóa resource
     
-    Args:
-        resource_id: ID của resource
+    Query params:
+        resource_id: ID của resource (required)
     
     Returns:
         Success message
     """
     try:
         user = frappe.session.user
+        resource_id = frappe.form_dict.get("resource_id")
+        
+        if not resource_id:
+            return validation_error_response("Resource ID là bắt buộc", {"resource_id": ["Resource ID không được để trống"]})
         
         # Kiểm tra resource tồn tại
         if not frappe.db.exists("PM Resource", resource_id):
@@ -270,18 +275,22 @@ def delete_resource(resource_id: str):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_resource(resource_id: str):
+def get_resource():
     """
     Lấy chi tiết một resource
     
-    Args:
-        resource_id: ID của resource
+    Query params:
+        resource_id: ID của resource (required)
     
     Returns:
         Chi tiết resource
     """
     try:
         user = frappe.session.user
+        resource_id = frappe.form_dict.get("resource_id")
+        
+        if not resource_id:
+            return validation_error_response("Resource ID là bắt buộc", {"resource_id": ["Resource ID không được để trống"]})
         
         # Kiểm tra resource tồn tại
         if not frappe.db.exists("PM Resource", resource_id):

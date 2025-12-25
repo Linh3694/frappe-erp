@@ -56,7 +56,7 @@
    "fieldname": "target_type",
    "fieldtype": "Select",
    "label": "Loại đối tượng",
-   "options": "project\nrequirement\ntask\nmember",
+   "options": "project\nrequirement\ntask\nmember\nmeeting\nresource",
    "in_standard_filter": 1
   },
   {
