@@ -1,0 +1,124 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:PM-INV-{#####}",
+ "beta": 0,
+ "creation": "2024-12-25 09:00:00.000000",
+ "custom": 0,
+ "description": "Project Management - Lời mời tham gia dự án",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "project_id",
+  "inviter_id",
+  "invitee_id",
+  "role",
+  "status",
+  "expires_at",
+  "message"
+ ],
+ "fields": [
+  {
+   "fieldname": "project_id",
+   "fieldtype": "Link",
+   "label": "Dự án",
+   "options": "PM Project",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "inviter_id",
+   "fieldtype": "Link",
+   "label": "Người mời",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "invitee_id",
+   "fieldtype": "Link",
+   "label": "Người được mời",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "role",
+   "fieldtype": "Select",
+   "label": "Vai trò được mời",
+   "options": "manager\nmember\nviewer",
+   "default": "member",
+   "reqd": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "pending\naccepted\ndeclined\nexpired",
+   "default": "pending",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Hết hạn lúc",
+   "description": "Mặc định: 7 ngày sau khi tạo"
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Text",
+   "label": "Lời nhắn",
+   "description": "Lời nhắn từ người mời"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-12-25 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Management",
+ "name": "PM Project Invitation",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
+

@@ -1,0 +1,146 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:PM-RES-{#####}",
+ "beta": 0,
+ "creation": "2024-12-25 09:00:00.000000",
+ "custom": 0,
+ "description": "Project Management - Tài nguyên/File đính kèm",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "project_id",
+  "target_type",
+  "target_id",
+  "file_section",
+  "filename",
+  "file_url",
+  "column_break_1",
+  "file_type",
+  "file_size",
+  "uploaded_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "project_id",
+   "fieldtype": "Link",
+   "label": "Dự án",
+   "options": "PM Project",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "target_type",
+   "fieldtype": "Select",
+   "label": "Loại đối tượng",
+   "options": "project\nrequirement\ntask",
+   "default": "project",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "description": "Resource được gắn vào Project, Requirement hay Task"
+  },
+  {
+   "fieldname": "target_id",
+   "fieldtype": "Data",
+   "label": "ID đối tượng",
+   "description": "ID của Project/Requirement/Task mà resource được gắn vào"
+  },
+  {
+   "fieldname": "file_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin file"
+  },
+  {
+   "fieldname": "filename",
+   "fieldtype": "Data",
+   "label": "Tên file",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "file_url",
+   "fieldtype": "Attach",
+   "label": "File",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "file_type",
+   "fieldtype": "Data",
+   "label": "Loại file",
+   "in_list_view": 1,
+   "description": "MIME type của file"
+  },
+  {
+   "fieldname": "file_size",
+   "fieldtype": "Int",
+   "label": "Kích thước (bytes)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "uploaded_by",
+   "fieldtype": "Link",
+   "label": "Người upload",
+   "options": "User",
+   "read_only": 1,
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-12-25 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Management",
+ "name": "PM Resource",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "filename",
+ "track_changes": 1
+}
+

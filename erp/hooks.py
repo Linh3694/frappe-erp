@@ -791,5 +791,9 @@ scheduler_events = {
         "0 23 * * *": [
             "erp.api.analytics.portal_analytics.aggregate_portal_analytics"
         ]
-    }
+    },
+    # Project Management - Auto-expire pending invitations
+    "daily": [
+        "erp.project_management.cron.expire_pending_invitations"
+    ]
 }
