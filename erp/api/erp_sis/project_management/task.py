@@ -315,12 +315,12 @@ def create_task():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def update_task(task_id: str):
+def update_task():
     """
     Cập nhật thông tin task
     
-    Args:
-        task_id: ID của task
+    Query params:
+        task_id: ID của task (required)
     
     Payload:
         title: Tiêu đề
@@ -329,12 +329,19 @@ def update_task(task_id: str):
         priority: Độ ưu tiên
         due_date: Hạn hoàn thành
         tags: Tags
+        assignee_ids: Danh sách user IDs để gán task
     
     Returns:
         Task sau khi cập nhật
     """
     try:
         user = frappe.session.user
+        # Đọc task_id từ form_dict (query parameters)
+        task_id = frappe.form_dict.get("task_id")
+        
+        if not task_id:
+            return validation_error_response("Task ID là bắt buộc", {"task_id": ["Task ID không được để trống"]})
+        
         data = json.loads(frappe.request.data) if frappe.request.data else {}
         
         # Kiểm tra task tồn tại
@@ -374,6 +381,41 @@ def update_task(task_id: str):
             task.due_date = data["due_date"]
         if "tags" in data:
             task.tags = data["tags"]
+        
+        # Cập nhật assignees nếu có trong payload
+        if "assignee_ids" in data:
+            new_assignee_ids = data.get("assignee_ids", [])
+            
+            # Lấy danh sách assignees hiện tại
+            current_assignees = frappe.get_all(
+                "PM Task Assignee",
+                filters={"task_id": task_id},
+                pluck="user_id"
+            )
+            
+            # Tìm assignees cần xóa
+            to_remove = set(current_assignees) - set(new_assignee_ids)
+            for user_id in to_remove:
+                assignee_name = frappe.db.get_value(
+                    "PM Task Assignee",
+                    {"task_id": task_id, "user_id": user_id}
+                )
+                if assignee_name:
+                    frappe.delete_doc("PM Task Assignee", assignee_name, force=True)
+            
+            # Tìm assignees cần thêm
+            to_add = set(new_assignee_ids) - set(current_assignees)
+            for user_id in to_add:
+                if frappe.db.exists("User", user_id):
+                    # Kiểm tra user là member của project
+                    if get_user_project_role(task.project_id, user_id):
+                        assignee = frappe.get_doc({
+                            "doctype": "PM Task Assignee",
+                            "task_id": task_id,
+                            "user_id": user_id,
+                            "assigned_by": user
+                        })
+                        assignee.insert()
         
         task.save()
         frappe.db.commit()
@@ -520,18 +562,23 @@ def move_task():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def delete_task(task_id: str):
+def delete_task():
     """
     Xóa task
     
-    Args:
-        task_id: ID của task
+    Query params:
+        task_id: ID của task (required)
     
     Returns:
         Success message
     """
     try:
         user = frappe.session.user
+        # Đọc task_id từ form_dict (query parameters)
+        task_id = frappe.form_dict.get("task_id")
+        
+        if not task_id:
+            return validation_error_response("Task ID là bắt buộc", {"task_id": ["Task ID không được để trống"]})
         
         # Kiểm tra task tồn tại
         if not frappe.db.exists("PM Task", task_id):

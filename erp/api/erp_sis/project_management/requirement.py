@@ -253,12 +253,12 @@ def create_requirement():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def update_requirement(requirement_id: str):
+def update_requirement():
     """
     Cập nhật requirement
     
-    Args:
-        requirement_id: ID của requirement
+    Query params:
+        requirement_id: ID của requirement (required)
     
     Payload:
         title: Tiêu đề
@@ -271,6 +271,12 @@ def update_requirement(requirement_id: str):
     """
     try:
         user = frappe.session.user
+        # Đọc requirement_id từ form_dict (query parameters)
+        requirement_id = frappe.form_dict.get("requirement_id")
+        
+        if not requirement_id:
+            return validation_error_response("Requirement ID là bắt buộc", {"requirement_id": ["Requirement ID không được để trống"]})
+        
         data = json.loads(frappe.request.data) if frappe.request.data else {}
         
         # Kiểm tra requirement tồn tại
@@ -330,18 +336,23 @@ def update_requirement(requirement_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def delete_requirement(requirement_id: str):
+def delete_requirement():
     """
     Xóa requirement
     
-    Args:
-        requirement_id: ID của requirement
+    Query params:
+        requirement_id: ID của requirement (required)
     
     Returns:
         Success message
     """
     try:
         user = frappe.session.user
+        # Đọc requirement_id từ form_dict (query parameters)
+        requirement_id = frappe.form_dict.get("requirement_id")
+        
+        if not requirement_id:
+            return validation_error_response("Requirement ID là bắt buộc", {"requirement_id": ["Requirement ID không được để trống"]})
         
         # Kiểm tra requirement tồn tại
         if not frappe.db.exists("PM Requirement", requirement_id):

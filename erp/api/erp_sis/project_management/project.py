@@ -241,12 +241,12 @@ def create_project():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def update_project(project_id: str):
+def update_project():
     """
     Cập nhật thông tin project
     
-    Args:
-        project_id: ID của project
+    Query params:
+        project_id: ID của project (required)
     
     Payload:
         title: Tên dự án
@@ -259,6 +259,12 @@ def update_project(project_id: str):
     """
     try:
         user = frappe.session.user
+        # Đọc project_id từ form_dict (query parameters)
+        project_id = frappe.form_dict.get("project_id")
+        
+        if not project_id:
+            return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
+        
         data = json.loads(frappe.request.data) if frappe.request.data else {}
         
         # Kiểm tra project tồn tại
@@ -311,18 +317,23 @@ def update_project(project_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def archive_project(project_id: str):
+def archive_project():
     """
     Archive một project (chuyển status thành archived)
     
-    Args:
-        project_id: ID của project
+    Query params:
+        project_id: ID của project (required)
     
     Returns:
         Project sau khi archive
     """
     try:
         user = frappe.session.user
+        # Đọc project_id từ form_dict (query parameters)
+        project_id = frappe.form_dict.get("project_id")
+        
+        if not project_id:
+            return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
@@ -353,18 +364,23 @@ def archive_project(project_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def restore_project(project_id: str):
+def restore_project():
     """
     Khôi phục project từ archived về active
     
-    Args:
-        project_id: ID của project
+    Query params:
+        project_id: ID của project (required)
     
     Returns:
         Project sau khi restore
     """
     try:
         user = frappe.session.user
+        # Đọc project_id từ form_dict (query parameters)
+        project_id = frappe.form_dict.get("project_id")
+        
+        if not project_id:
+            return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
@@ -395,18 +411,23 @@ def restore_project(project_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def delete_project(project_id: str):
+def delete_project():
     """
     Xóa project (chỉ owner có quyền)
     
-    Args:
-        project_id: ID của project
+    Query params:
+        project_id: ID của project (required)
     
     Returns:
         Success message
     """
     try:
         user = frappe.session.user
+        # Đọc project_id từ form_dict (query parameters)
+        project_id = frappe.form_dict.get("project_id")
+        
+        if not project_id:
+            return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
@@ -502,20 +523,31 @@ def get_project_members():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def update_member_role(project_id: str, member_user_id: str, new_role: str):
+def update_member_role():
     """
     Cập nhật role của member trong project
     
-    Args:
-        project_id: ID của project
-        member_user_id: User ID của member cần update
-        new_role: Role mới (manager/member/viewer)
+    Query params:
+        project_id: ID của project (required)
+        member_user_id: User ID của member cần update (required)
+        new_role: Role mới (manager/member/viewer) (required)
     
     Returns:
         Success message
     """
     try:
         user = frappe.session.user
+        # Đọc parameters từ form_dict (query parameters)
+        project_id = frappe.form_dict.get("project_id")
+        member_user_id = frappe.form_dict.get("member_user_id")
+        new_role = frappe.form_dict.get("new_role")
+        
+        if not project_id:
+            return validation_error_response("Project ID là bắt buộc", {"project_id": ["Project ID không được để trống"]})
+        if not member_user_id:
+            return validation_error_response("Member User ID là bắt buộc", {"member_user_id": ["Member User ID không được để trống"]})
+        if not new_role:
+            return validation_error_response("New role là bắt buộc", {"new_role": ["New role không được để trống"]})
         
         # Validate role
         valid_roles = ["manager", "member", "viewer"]
