@@ -866,13 +866,22 @@ def search_tasks():
 # ==================== TASK COMMENT APIs ====================
 
 @frappe.whitelist()
-def get_task_comments(task_id: str):
+def get_task_comments():
     """
     Lấy tất cả comments của một task
     
+    Query params:
+        task_id: ID của task
+        
     Returns: List comments với thông tin người tạo
     """
     try:
+        # Lấy params từ form_dict
+        task_id = frappe.form_dict.get('task_id')
+        
+        if not task_id:
+            return validation_error_response("task_id là bắt buộc")
+        
         # Kiểm tra task tồn tại
         task = frappe.get_doc("PM Task", task_id)
         
@@ -913,18 +922,25 @@ def get_task_comments(task_id: str):
 
 
 @frappe.whitelist()
-def create_task_comment(task_id: str, comment_text: str):
+def create_task_comment():
     """
     Tạo comment mới cho task
     
-    Args:
+    Form params:
         task_id: ID của task
         comment_text: Nội dung comment
         
     Returns: Comment vừa tạo
     """
     try:
+        # Lấy params từ form_dict
+        task_id = frappe.form_dict.get('task_id')
+        comment_text = frappe.form_dict.get('comment_text')
+        
         # Validate input
+        if not task_id:
+            return validation_error_response("task_id là bắt buộc")
+        
         if not comment_text or not comment_text.strip():
             return validation_error_response("Nội dung comment không được để trống")
         
@@ -976,18 +992,25 @@ def create_task_comment(task_id: str, comment_text: str):
 
 
 @frappe.whitelist()
-def update_task_comment(comment_id: str, comment_text: str):
+def update_task_comment():
     """
     Cập nhật comment
     
-    Args:
+    Form params:
         comment_id: ID của comment
         comment_text: Nội dung mới
         
     Returns: Comment đã cập nhật
     """
     try:
+        # Lấy params từ form_dict
+        comment_id = frappe.form_dict.get('comment_id')
+        comment_text = frappe.form_dict.get('comment_text')
+        
         # Validate input
+        if not comment_id:
+            return validation_error_response("comment_id là bắt buộc")
+        
         if not comment_text or not comment_text.strip():
             return validation_error_response("Nội dung comment không được để trống")
         
@@ -1035,16 +1058,23 @@ def update_task_comment(comment_id: str, comment_text: str):
 
 
 @frappe.whitelist()
-def delete_task_comment(comment_id: str):
+def delete_task_comment():
     """
     Xóa comment
     
-    Args:
+    Form params:
         comment_id: ID của comment
         
     Returns: Success message
     """
     try:
+        # Lấy params từ form_dict
+        comment_id = frappe.form_dict.get('comment_id')
+        
+        # Validate input
+        if not comment_id:
+            return validation_error_response("comment_id là bắt buộc")
+        
         # Lấy comment
         comment = frappe.get_doc("PM Task Comment", comment_id)
         
@@ -1074,13 +1104,22 @@ def delete_task_comment(comment_id: str):
 
 
 @frappe.whitelist()
-def get_task_comment_count(task_id: str):
+def get_task_comment_count():
     """
     Lấy số lượng comments của task
     
+    Query params:
+        task_id: ID của task
+        
     Returns: {"count": int}
     """
     try:
+        # Lấy params từ form_dict
+        task_id = frappe.form_dict.get('task_id')
+        
+        if not task_id:
+            return validation_error_response("task_id là bắt buộc")
+        
         count = frappe.db.count("PM Task Comment", {"task_id": task_id})
         return success_response(data={"count": count})
         
