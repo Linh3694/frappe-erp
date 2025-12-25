@@ -141,7 +141,7 @@ def get_my_projects(status: str = None, visibility: str = None):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_project(project_id: str):
+def get_project(project_id: str = None):
     """
     Lấy chi tiết một project
     
@@ -153,6 +153,10 @@ def get_project(project_id: str):
     """
     try:
         user = frappe.session.user
+        
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
@@ -441,7 +445,7 @@ def delete_project(project_id: str):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_project_members(project_id: str):
+def get_project_members(project_id: str = None):
     """
     Lấy danh sách thành viên của project
     
@@ -453,6 +457,10 @@ def get_project_members(project_id: str):
     """
     try:
         user = frappe.session.user
+        
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         
         # Kiểm tra quyền truy cập
         if not check_project_access(project_id, user):

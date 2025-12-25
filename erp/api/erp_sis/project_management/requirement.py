@@ -14,6 +14,7 @@ from erp.utils.api_response import (
     single_item_response,
     not_found_response,
     forbidden_response,
+    validation_error_response,
     validation_error_response
 )
 from .project import get_user_project_role, check_project_access
@@ -75,7 +76,7 @@ def log_requirement_change(project_id: str, requirement_id: str, action: str,
 
 
 @frappe.whitelist(allow_guest=False)
-def get_requirements(project_id: str, status: str = None, priority: str = None):
+def get_requirements(project_id: str = None, status: str = None, priority: str = None):
     """
     Lấy danh sách requirements của project
     
@@ -89,6 +90,10 @@ def get_requirements(project_id: str, status: str = None, priority: str = None):
     """
     try:
         user = frappe.session.user
+        
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         
         # Kiểm tra quyền truy cập
         if not check_project_access(project_id, user):

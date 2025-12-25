@@ -14,6 +14,7 @@ from erp.utils.api_response import (
     single_item_response,
     not_found_response,
     forbidden_response,
+    validation_error_response,
     validation_error_response
 )
 from .project import get_user_project_role, check_project_access
@@ -59,7 +60,7 @@ def enrich_resource_data(resource: dict) -> dict:
 
 
 @frappe.whitelist(allow_guest=False)
-def get_resources(project_id: str, target_type: str = None, target_id: str = None):
+def get_resources(project_id: str = None, target_type: str = None, target_id: str = None):
     """
     Lấy danh sách resources của project
     
@@ -72,6 +73,9 @@ def get_resources(project_id: str, target_type: str = None, target_id: str = Non
         List resources
     """
     try:
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         user = frappe.session.user
         
         # Kiểm tra quyền truy cập

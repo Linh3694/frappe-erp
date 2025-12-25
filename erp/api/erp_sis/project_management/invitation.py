@@ -15,6 +15,7 @@ from erp.utils.api_response import (
     single_item_response,
     not_found_response,
     forbidden_response,
+    validation_error_response,
     validation_error_response
 )
 from .project import get_user_project_role, check_project_access, log_project_change
@@ -174,7 +175,7 @@ def get_my_invitations(status: str = "pending"):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_project_invitations(project_id: str, status: str = None):
+def get_project_invitations(project_id: str = None, status: str = None):
     """
     Lấy danh sách lời mời của project (cho owner/manager)
     
@@ -187,6 +188,10 @@ def get_project_invitations(project_id: str, status: str = None):
     """
     try:
         user = frappe.session.user
+        
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         
         # Kiểm tra quyền
         role = get_user_project_role(project_id, user)

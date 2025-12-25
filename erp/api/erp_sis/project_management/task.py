@@ -14,6 +14,7 @@ from erp.utils.api_response import (
     single_item_response,
     not_found_response,
     forbidden_response,
+    validation_error_response,
     validation_error_response
 )
 from .project import get_user_project_role, check_project_access
@@ -88,7 +89,7 @@ def log_task_change(project_id: str, task_id: str, action: str, old_value: dict,
 
 
 @frappe.whitelist(allow_guest=False)
-def get_board_tasks(project_id: str, status: str = None):
+def get_board_tasks(project_id: str = None, status: str = None):
     """
     Lấy danh sách tasks cho Kanban board
     
@@ -101,6 +102,10 @@ def get_board_tasks(project_id: str, status: str = None):
     """
     try:
         user = frappe.session.user
+        
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         
         # Kiểm tra quyền truy cập project
         if not check_project_access(project_id, user):
@@ -703,7 +708,7 @@ def unassign_task(task_id: str, user_id: str):
 
 
 @frappe.whitelist(allow_guest=False)
-def search_tasks(project_id: str, query: str = None, status: str = None,
+def search_tasks(project_id: str = None, query: str = None, status: str = None,
                 priority: str = None, assignee_id: str = None, 
                 has_due_date: str = None, overdue: str = None):
     """
@@ -723,6 +728,10 @@ def search_tasks(project_id: str, query: str = None, status: str = None,
     """
     try:
         user = frappe.session.user
+        
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         
         # Kiểm tra quyền
         if not check_project_access(project_id, user):

@@ -12,7 +12,8 @@ from erp.utils.api_response import (
     success_response,
     error_response,
     not_found_response,
-    forbidden_response
+    forbidden_response,
+    validation_error_response
 )
 from .project import check_project_access
 
@@ -82,7 +83,7 @@ def format_log_description(log: dict) -> str:
 
 
 @frappe.whitelist(allow_guest=False)
-def get_logs(project_id: str, target_type: str = None, target_id: str = None,
+def get_logs(project_id: str = None, target_type: str = None, target_id: str = None,
             limit: int = 50, offset: int = 0):
     """
     Lấy danh sách change logs của project
@@ -99,6 +100,10 @@ def get_logs(project_id: str, target_type: str = None, target_id: str = None,
     """
     try:
         user = frappe.session.user
+        
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
@@ -210,7 +215,7 @@ def get_task_logs(task_id: str, limit: int = 20):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_activity_summary(project_id: str, days: int = 7):
+def get_activity_summary(project_id: str = None, days: int = 7):
     """
     Lấy tóm tắt hoạt động của project trong N ngày gần nhất
     
@@ -223,6 +228,10 @@ def get_activity_summary(project_id: str, days: int = 7):
     """
     try:
         user = frappe.session.user
+        
+        # Validate project_id
+        if not project_id:
+            return validation_error_response("project_id is required")
         
         # Kiểm tra quyền truy cập
         if not check_project_access(project_id, user):
