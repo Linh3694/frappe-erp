@@ -83,7 +83,7 @@ def get_meetings():
     """
     try:
         user = frappe.session.user
-        project_id = frappe.form_dict.get("project_id")
+        project_id = frappe.form_dict.get("project_id") or frappe.local.request.args.get("project_id")
         
         if not project_id:
             return error_response("project_id is required", code="MISSING_PARAMETER")
@@ -131,7 +131,7 @@ def get_meeting():
     """
     try:
         user = frappe.session.user
-        meeting_id = frappe.form_dict.get("meeting_id")
+        meeting_id = frappe.form_dict.get("meeting_id") or frappe.local.request.args.get("meeting_id")
         
         if not meeting_id:
             return validation_error_response("Meeting ID là bắt buộc", {"meeting_id": ["Meeting ID không được để trống"]})
@@ -264,7 +264,7 @@ def update_meeting():
     """
     try:
         user = frappe.session.user
-        meeting_id = frappe.form_dict.get("meeting_id")
+        meeting_id = frappe.form_dict.get("meeting_id") or frappe.local.request.args.get("meeting_id")
         
         if not meeting_id:
             return validation_error_response("Meeting ID là bắt buộc", {"meeting_id": ["Meeting ID không được để trống"]})
@@ -339,7 +339,7 @@ def delete_meeting():
     """
     try:
         user = frappe.session.user
-        meeting_id = frappe.form_dict.get("meeting_id")
+        meeting_id = frappe.form_dict.get("meeting_id") or frappe.local.request.args.get("meeting_id")
         
         if not meeting_id:
             return validation_error_response("Meeting ID là bắt buộc", {"meeting_id": ["Meeting ID không được để trống"]})
