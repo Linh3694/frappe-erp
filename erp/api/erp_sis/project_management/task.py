@@ -66,6 +66,15 @@ def enrich_task_data(task: dict) -> dict:
             task["created_by_full_name"] = creator_info.get("full_name")
             task["created_by_image"] = creator_info.get("user_image")
     
+    # Thêm comment count
+    task["comment_count"] = frappe.db.count("PM Task Comment", {"task_id": task["name"]})
+    
+    # Thêm attachment/resource count
+    task["attachment_count"] = frappe.db.count("PM Resource", {
+        "target_type": "task",
+        "target_id": task["name"]
+    })
+    
     return task
 
 
@@ -851,5 +860,231 @@ def search_tasks():
         
     except Exception as e:
         frappe.log_error(f"Error searching tasks: {str(e)}")
+        return error_response(str(e))
+
+
+# ==================== TASK COMMENT APIs ====================
+
+@frappe.whitelist()
+def get_task_comments(task_id: str):
+    """
+    Lấy tất cả comments của một task
+    
+    Returns: List comments với thông tin người tạo
+    """
+    try:
+        # Kiểm tra task tồn tại
+        task = frappe.get_doc("PM Task", task_id)
+        
+        # Kiểm tra quyền đọc task (phải là member của project)
+        if not check_project_access(task.project_id, frappe.session.user):
+            return forbidden_response("Bạn không có quyền xem task này")
+        
+        # Lấy comments
+        comments = frappe.get_all(
+            "PM Task Comment",
+            filters={"task_id": task_id},
+            fields=["name", "task_id", "comment_text", "created_by", "creation_date", "creation", "modified"],
+            order_by="creation DESC"
+        )
+        
+        # Enrich with user info
+        for comment in comments:
+            user_info = frappe.db.get_value(
+                "User",
+                comment["created_by"],
+                ["full_name", "user_image"],
+                as_dict=True
+            )
+            if user_info:
+                comment["created_by_full_name"] = user_info.get("full_name")
+                comment["created_by_image"] = user_info.get("user_image")
+        
+        return success_response(
+            data=comments,
+            message=f"Tìm thấy {len(comments)} comment"
+        )
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Task")
+    except Exception as e:
+        frappe.log_error(f"Error getting task comments: {str(e)}")
+        return error_response(str(e))
+
+
+@frappe.whitelist()
+def create_task_comment(task_id: str, comment_text: str):
+    """
+    Tạo comment mới cho task
+    
+    Args:
+        task_id: ID của task
+        comment_text: Nội dung comment
+        
+    Returns: Comment vừa tạo
+    """
+    try:
+        # Validate input
+        if not comment_text or not comment_text.strip():
+            return validation_error_response("Nội dung comment không được để trống")
+        
+        # Kiểm tra task tồn tại
+        task = frappe.get_doc("PM Task", task_id)
+        
+        # Kiểm tra quyền (phải là member của project)
+        if not check_project_access(task.project_id, frappe.session.user):
+            return forbidden_response("Bạn không có quyền comment vào task này")
+        
+        # Tạo comment
+        comment = frappe.get_doc({
+            "doctype": "PM Task Comment",
+            "task_id": task_id,
+            "comment_text": comment_text.strip(),
+        })
+        comment.insert()
+        frappe.db.commit()
+        
+        # Enrich with user info
+        user_info = frappe.db.get_value(
+            "User",
+            comment.created_by,
+            ["full_name", "user_image"],
+            as_dict=True
+        )
+        
+        result = {
+            "name": comment.name,
+            "task_id": comment.task_id,
+            "comment_text": comment.comment_text,
+            "created_by": comment.created_by,
+            "creation_date": comment.creation_date,
+            "creation": comment.creation,
+            "modified": comment.modified,
+        }
+        
+        if user_info:
+            result["created_by_full_name"] = user_info.get("full_name")
+            result["created_by_image"] = user_info.get("user_image")
+        
+        return single_item_response(result, "Comment đã được tạo")
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Task")
+    except Exception as e:
+        frappe.log_error(f"Error creating task comment: {str(e)}")
+        return error_response(str(e))
+
+
+@frappe.whitelist()
+def update_task_comment(comment_id: str, comment_text: str):
+    """
+    Cập nhật comment
+    
+    Args:
+        comment_id: ID của comment
+        comment_text: Nội dung mới
+        
+    Returns: Comment đã cập nhật
+    """
+    try:
+        # Validate input
+        if not comment_text or not comment_text.strip():
+            return validation_error_response("Nội dung comment không được để trống")
+        
+        # Lấy comment
+        comment = frappe.get_doc("PM Task Comment", comment_id)
+        
+        # Kiểm tra quyền (chỉ người tạo mới được sửa)
+        if comment.created_by != frappe.session.user:
+            return forbidden_response("Bạn chỉ có thể sửa comment của mình")
+        
+        # Cập nhật
+        comment.comment_text = comment_text.strip()
+        comment.save()
+        frappe.db.commit()
+        
+        # Enrich with user info
+        user_info = frappe.db.get_value(
+            "User",
+            comment.created_by,
+            ["full_name", "user_image"],
+            as_dict=True
+        )
+        
+        result = {
+            "name": comment.name,
+            "task_id": comment.task_id,
+            "comment_text": comment.comment_text,
+            "created_by": comment.created_by,
+            "creation_date": comment.creation_date,
+            "creation": comment.creation,
+            "modified": comment.modified,
+        }
+        
+        if user_info:
+            result["created_by_full_name"] = user_info.get("full_name")
+            result["created_by_image"] = user_info.get("user_image")
+        
+        return single_item_response(result, "Comment đã được cập nhật")
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Comment")
+    except Exception as e:
+        frappe.log_error(f"Error updating task comment: {str(e)}")
+        return error_response(str(e))
+
+
+@frappe.whitelist()
+def delete_task_comment(comment_id: str):
+    """
+    Xóa comment
+    
+    Args:
+        comment_id: ID của comment
+        
+    Returns: Success message
+    """
+    try:
+        # Lấy comment
+        comment = frappe.get_doc("PM Task Comment", comment_id)
+        
+        # Kiểm tra quyền (chỉ người tạo hoặc owner/manager của project mới được xóa)
+        task = frappe.get_doc("PM Task", comment.task_id)
+        user_role = get_user_project_role(task.project_id, frappe.session.user)
+        
+        can_delete = (
+            comment.created_by == frappe.session.user or
+            user_role in ["owner", "manager"]
+        )
+        
+        if not can_delete:
+            return forbidden_response("Bạn không có quyền xóa comment này")
+        
+        # Xóa comment
+        frappe.delete_doc("PM Task Comment", comment_id)
+        frappe.db.commit()
+        
+        return success_response(message="Comment đã được xóa")
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Comment")
+    except Exception as e:
+        frappe.log_error(f"Error deleting task comment: {str(e)}")
+        return error_response(str(e))
+
+
+@frappe.whitelist()
+def get_task_comment_count(task_id: str):
+    """
+    Lấy số lượng comments của task
+    
+    Returns: {"count": int}
+    """
+    try:
+        count = frappe.db.count("PM Task Comment", {"task_id": task_id})
+        return success_response(data={"count": count})
+        
+    except Exception as e:
+        frappe.log_error(f"Error getting comment count: {str(e)}")
         return error_response(str(e))
 
