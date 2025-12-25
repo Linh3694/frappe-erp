@@ -876,11 +876,15 @@ def get_task_comments():
     Returns: List comments với thông tin người tạo
     """
     try:
-        # Lấy params từ form_dict
+        # Lấy params từ form_dict (works for both GET and POST)
         task_id = frappe.form_dict.get('task_id')
         
+        # Debug log
+        frappe.logger().debug(f"get_task_comments called with task_id: {task_id}")
+        frappe.logger().debug(f"form_dict: {frappe.form_dict}")
+        
         if not task_id:
-            return error_response("task_id là bắt buộc")
+            return error_response(f"task_id là bắt buộc. Received form_dict: {frappe.form_dict}")
         
         # Kiểm tra task tồn tại
         task = frappe.get_doc("PM Task", task_id)
