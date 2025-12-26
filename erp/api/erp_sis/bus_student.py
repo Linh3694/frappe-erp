@@ -23,15 +23,18 @@ def get_all_bus_students():
 		filters = {"campus_id": campus_id}
 
 		# Get all bus students with route information
+		# Also join with CRM Student to get crm_student_id for compatibility with Bus Route Student
 		students = frappe.db.sql("""
 			SELECT
 				bs.name, bs.full_name, bs.student_code, bs.class_id,
 				bs.route_id, bs.status, bs.campus_id, bs.school_year_id,
 				bs.creation as created_at, bs.modified as updated_at,
-				r.route_name, c.title as class_name
+				r.route_name, c.title as class_name,
+				s.name as crm_student_id
 			FROM `tabSIS Bus Student` bs
 			LEFT JOIN `tabSIS Bus Route` r ON bs.route_id = r.name
 			LEFT JOIN `tabSIS Class` c ON bs.class_id = c.name
+			LEFT JOIN `tabCRM Student` s ON bs.student_code = s.student_code
 			WHERE bs.campus_id = %s
 			ORDER BY bs.full_name ASC
 		""", (campus_id,), as_dict=True)
@@ -1349,3 +1352,148 @@ def get_compreface_sync_status():
 	except Exception as e:
 		frappe.log_error(f"Error getting CompreFace sync status: {str(e)}")
 		return error_response(f"Lỗi: {str(e)}")
+
+
+@frappe.whitelist()
+def migrate_route_students_to_bus_students():
+	"""
+	Migrate students from existing Bus Route Students to Bus Students.
+	This is a one-time migration to transfer students from the old system to the new one.
+	
+	Process:
+	1. Get all unique student_ids from SIS Bus Route Student
+	2. For each student, get information from CRM Student and SIS Class Student
+	3. Create SIS Bus Student if not already exists (check by student_code)
+	
+	Returns:
+		Summary of migration operation
+	"""
+	try:
+		# Get current user's campus
+		campus_id = get_current_campus_from_context()
+		if not campus_id:
+			campus_id = "campus-1"
+		
+		# Get current school year
+		school_year = frappe.db.get_value("SIS School Year", {"is_current": 1}, "name")
+		if not school_year:
+			# Try to get latest school year
+			school_year_doc = frappe.get_all(
+				"SIS School Year", 
+				filters={},
+				fields=["name"],
+				order_by="creation desc",
+				limit=1
+			)
+			school_year = school_year_doc[0].name if school_year_doc else "2024-2025"
+		
+		# Get all unique students from Bus Route Students with their info
+		route_students = frappe.db.sql("""
+			SELECT DISTINCT
+				rs.student_id,
+				s.student_name,
+				s.student_code,
+				s.campus_id,
+				cs.class_id,
+				cs.school_year_id
+			FROM `tabSIS Bus Route Student` rs
+			INNER JOIN `tabCRM Student` s ON rs.student_id = s.name
+			LEFT JOIN `tabSIS Class Student` cs ON (
+				cs.student_id = rs.student_id 
+				AND (cs.class_type = 'regular' OR cs.class_type IS NULL)
+			)
+			WHERE s.student_code IS NOT NULL
+			ORDER BY s.student_name ASC
+		""", as_dict=True)
+		
+		if not route_students:
+			return success_response(
+				data={"total": 0, "migrated": 0, "skipped": 0, "failed": 0},
+				message="Không có học sinh nào để migrate"
+			)
+		
+		# Get existing bus students to avoid duplicates
+		existing_bus_students = frappe.db.sql("""
+			SELECT student_code 
+			FROM `tabSIS Bus Student`
+			WHERE campus_id = %s
+		""", (campus_id,), as_dict=True)
+		
+		existing_codes = set([s.student_code for s in existing_bus_students])
+		
+		results = {
+			"total": len(route_students),
+			"migrated": 0,
+			"skipped": 0,
+			"failed": 0,
+			"details": []
+		}
+		
+		# Deduplicate by student_code (in case same student appears multiple times)
+		processed_codes = set()
+		
+		for student in route_students:
+			student_code = student.get("student_code")
+			
+			# Skip if already processed in this batch
+			if student_code in processed_codes:
+				continue
+			processed_codes.add(student_code)
+			
+			# Skip if already exists in Bus Student
+			if student_code in existing_codes:
+				results["skipped"] += 1
+				results["details"].append({
+					"student_code": student_code,
+					"student_name": student.get("student_name"),
+					"status": "skipped",
+					"reason": "Đã tồn tại trong Bus Student"
+				})
+				continue
+			
+			try:
+				# Create new Bus Student
+				doc = frappe.get_doc({
+					"doctype": "SIS Bus Student",
+					"full_name": student.get("student_name"),
+					"student_code": student_code,
+					"class_id": student.get("class_id"),
+					"status": "Active",
+					"campus_id": student.get("campus_id") or campus_id,
+					"school_year_id": student.get("school_year_id") or school_year
+				})
+				doc.insert(ignore_permissions=True)
+				
+				results["migrated"] += 1
+				results["details"].append({
+					"student_code": student_code,
+					"student_name": student.get("student_name"),
+					"status": "migrated",
+					"bus_student_id": doc.name
+				})
+				
+			except Exception as e:
+				results["failed"] += 1
+				results["details"].append({
+					"student_code": student_code,
+					"student_name": student.get("student_name"),
+					"status": "failed",
+					"reason": str(e)
+				})
+		
+		frappe.db.commit()
+		
+		message = f"Đã migrate {results['migrated']}/{results['total']} học sinh. "
+		if results["skipped"] > 0:
+			message += f"Đã bỏ qua (tồn tại): {results['skipped']}. "
+		if results["failed"] > 0:
+			message += f"Thất bại: {results['failed']}."
+		
+		return success_response(
+			data=results,
+			message=message
+		)
+		
+	except Exception as e:
+		frappe.log_error(f"Error migrating route students to bus students: {str(e)}")
+		return error_response(f"Lỗi migration: {str(e)}")
