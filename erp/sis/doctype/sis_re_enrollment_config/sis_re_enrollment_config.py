@@ -6,7 +6,7 @@ from frappe.model.document import Document
 from frappe.utils import nowdate, getdate
 
 
-class SISReEnrollmentConfig(Document):
+class SISReenrollmentConfig(Document):
 	"""
 	Cấu hình đợt tái ghi danh.
 	Quản lý thời gian, tài liệu và các mức ưu đãi.

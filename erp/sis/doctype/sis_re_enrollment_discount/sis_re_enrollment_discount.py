@@ -5,7 +5,7 @@ import frappe
 from frappe.model.document import Document
 
 
-class SISReEnrollmentDiscount(Document):
+class SISReenrollmentDiscount(Document):
 	"""
 	Child table để lưu các mức ưu đãi theo thời hạn đóng phí.
 	Được sử dụng trong SIS Re-enrollment Config.

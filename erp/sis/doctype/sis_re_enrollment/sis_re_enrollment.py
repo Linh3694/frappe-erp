@@ -6,7 +6,7 @@ from frappe.model.document import Document
 from frappe.utils import nowdate, getdate, now
 
 
-class SISReEnrollment(Document):
+class SISReenrollment(Document):
 	"""
 	Đơn tái ghi danh của học sinh.
 	Phụ huynh nộp đơn qua Parent Portal.
