@@ -1374,18 +1374,24 @@ def migrate_route_students_to_bus_students():
 		if not campus_id:
 			campus_id = "campus-1"
 		
-		# Get current school year
-		school_year = frappe.db.get_value("SIS School Year", {"is_current": 1}, "name")
-		if not school_year:
-			# Try to get latest school year
+		# Get active school year (is_enable = 1, ordered by start_date desc)
+		school_year_doc = frappe.get_all(
+			"SIS School Year", 
+			filters={"is_enable": 1, "campus_id": campus_id},
+			fields=["name"],
+			order_by="start_date desc",
+			limit=1
+		)
+		if not school_year_doc:
+			# Fallback: get any school year
 			school_year_doc = frappe.get_all(
 				"SIS School Year", 
-				filters={},
+				filters={"campus_id": campus_id},
 				fields=["name"],
 				order_by="creation desc",
 				limit=1
 			)
-			school_year = school_year_doc[0].name if school_year_doc else "2024-2025"
+		school_year = school_year_doc[0].name if school_year_doc else None
 		
 		# Get all unique students from Bus Route Students with their info
 		route_students = frappe.db.sql("""
@@ -1452,6 +1458,28 @@ def migrate_route_students_to_bus_students():
 				continue
 			
 			try:
+				# Determine school_year_id: prefer from student data, then fallback
+				student_school_year = student.get("school_year_id") or school_year
+				if not student_school_year:
+					# Last fallback: get any school year from campus
+					any_school_year = frappe.get_all(
+						"SIS School Year",
+						filters={"campus_id": campus_id},
+						fields=["name"],
+						limit=1
+					)
+					student_school_year = any_school_year[0].name if any_school_year else None
+				
+				if not student_school_year:
+					results["failed"] += 1
+					results["details"].append({
+						"student_code": student_code,
+						"student_name": student.get("student_name"),
+						"status": "failed",
+						"reason": "Không tìm thấy năm học"
+					})
+					continue
+				
 				# Create new Bus Student
 				doc = frappe.get_doc({
 					"doctype": "SIS Bus Student",
@@ -1460,7 +1488,7 @@ def migrate_route_students_to_bus_students():
 					"class_id": student.get("class_id"),
 					"status": "Active",
 					"campus_id": student.get("campus_id") or campus_id,
-					"school_year_id": student.get("school_year_id") or school_year
+					"school_year_id": student_school_year
 				})
 				doc.insert(ignore_permissions=True)
 				
