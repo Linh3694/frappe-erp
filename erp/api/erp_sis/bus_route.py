@@ -2324,3 +2324,368 @@ def get_available_students_for_daily_trip():
 	except Exception as e:
 		frappe.log_error(f"Error getting available students for daily trip: {str(e)}")
 		return error_response(f"Lỗi: {str(e)}")
+
+
+@frappe.whitelist()
+def get_daily_trips_paginated():
+	"""
+	Get daily trips với server-side pagination và filtering.
+	Tối ưu cho danh sách lớn với hàng chục nghìn bản ghi.
+	
+	Parameters (from request):
+		- page: Số trang (default: 1)
+		- page_size: Số bản ghi/trang (default: 50, max: 200)
+		- date_from: Ngày bắt đầu (default: hôm nay)
+		- date_to: Ngày kết thúc (default: 7 ngày tới)
+		- trip_status: Lọc theo trạng thái (Not Started, In Progress, Completed)
+		- route_id: Lọc theo route cụ thể
+		- search: Tìm kiếm theo route_name, vehicle_code, driver_name
+	"""
+	from datetime import datetime, timedelta
+	from math import ceil
+	
+	try:
+		# Parse request params
+		data = {}
+		if frappe.request.data:
+			try:
+				if isinstance(frappe.request.data, bytes):
+					data = json.loads(frappe.request.data.decode('utf-8'))
+				else:
+					data = json.loads(frappe.request.data)
+			except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+				data = frappe.local.form_dict
+		else:
+			data = frappe.local.form_dict
+		
+		# Pagination params
+		page = int(data.get('page', 1))
+		page_size = min(int(data.get('page_size', 50)), 200)  # Max 200
+		offset = (page - 1) * page_size
+		
+		# Date filter params (default: hôm nay đến 7 ngày tới)
+		today = datetime.now().date()
+		default_date_from = today.strftime('%Y-%m-%d')
+		default_date_to = (today + timedelta(days=7)).strftime('%Y-%m-%d')
+		
+		date_from = data.get('date_from', default_date_from)
+		date_to = data.get('date_to', default_date_to)
+		
+		# Other filters
+		trip_status = data.get('trip_status')
+		route_id = data.get('route_id')
+		search = data.get('search', '').strip()
+		
+		# Get campus
+		campus_id = get_current_campus_from_context()
+		if not campus_id:
+			campus_id = "campus-1"
+		
+		# Build WHERE conditions
+		conditions = ["dt.campus_id = %s", "dt.trip_date >= %s", "dt.trip_date <= %s"]
+		params = [campus_id, date_from, date_to]
+		
+		if trip_status:
+			conditions.append("dt.trip_status = %s")
+			params.append(trip_status)
+		
+		if route_id:
+			conditions.append("dt.route_id = %s")
+			params.append(route_id)
+		
+		if search:
+			conditions.append("""(
+				r.route_name LIKE %s 
+				OR v.vehicle_code LIKE %s 
+				OR d.full_name LIKE %s
+			)""")
+			search_param = f"%{search}%"
+			params.extend([search_param, search_param, search_param])
+		
+		where_clause = " AND ".join(conditions)
+		
+		# Count total records
+		count_query = f"""
+			SELECT COUNT(DISTINCT dt.name)
+			FROM `tabSIS Bus Daily Trip` dt
+			LEFT JOIN `tabSIS Bus Route` r ON dt.route_id = r.name
+			LEFT JOIN `tabSIS Bus Transportation` v ON dt.vehicle_id = v.name
+			LEFT JOIN `tabSIS Bus Driver` d ON dt.driver_id = d.name
+			WHERE {where_clause}
+		"""
+		total = frappe.db.sql(count_query, params)[0][0]
+		
+		# Get paginated data với JOINs để tối ưu (không cần N+1 queries)
+		data_query = f"""
+			SELECT
+				dt.name, dt.route_id, dt.trip_date, dt.weekday, dt.trip_type,
+				dt.vehicle_id, dt.driver_id, dt.monitor1_id, dt.monitor2_id,
+				dt.trip_status, dt.campus_id, dt.school_year_id,
+				dt.creation as created_at, dt.modified as updated_at,
+				r.route_name,
+				v.vehicle_code, v.license_plate, v.vehicle_type,
+				d.full_name as driver_name, d.phone_number as driver_phone,
+				m1.full_name as monitor1_name, m1.phone_number as monitor1_phone,
+				m2.full_name as monitor2_name, m2.phone_number as monitor2_phone,
+				(SELECT COUNT(*) FROM `tabSIS Bus Daily Trip Student` WHERE daily_trip_id = dt.name) as student_count
+			FROM `tabSIS Bus Daily Trip` dt
+			LEFT JOIN `tabSIS Bus Route` r ON dt.route_id = r.name
+			LEFT JOIN `tabSIS Bus Transportation` v ON dt.vehicle_id = v.name
+			LEFT JOIN `tabSIS Bus Driver` d ON dt.driver_id = d.name
+			LEFT JOIN `tabSIS Bus Monitor` m1 ON dt.monitor1_id = m1.name
+			LEFT JOIN `tabSIS Bus Monitor` m2 ON dt.monitor2_id = m2.name
+			WHERE {where_clause}
+			ORDER BY dt.trip_date ASC, dt.trip_type ASC, r.route_name ASC
+			LIMIT %s OFFSET %s
+		"""
+		
+		trips = frappe.db.sql(data_query, params + [page_size, offset], as_dict=True)
+		
+		# Tính toán thông tin pagination
+		total_pages = ceil(total / page_size) if total > 0 else 1
+		
+		return success_response(
+			data={
+				"trips": trips,
+				"pagination": {
+					"page": page,
+					"page_size": page_size,
+					"total": total,
+					"total_pages": total_pages,
+					"has_next": page < total_pages,
+					"has_prev": page > 1
+				},
+				"filters": {
+					"date_from": date_from,
+					"date_to": date_to,
+					"trip_status": trip_status,
+					"route_id": route_id,
+					"search": search
+				}
+			},
+			message=f"Lấy {len(trips)}/{total} daily trips (trang {page}/{total_pages})"
+		)
+		
+	except Exception as e:
+		frappe.log_error(f"Error in get_daily_trips_paginated: {str(e)}")
+		return error_response(f"Lỗi: {str(e)}")
+
+
+@frappe.whitelist()
+def archive_old_daily_trips():
+	"""
+	Archive daily trips cũ hơn 30 ngày sang bảng archive.
+	Giữ lại data để báo cáo nhưng giảm tải cho bảng chính.
+	"""
+	from datetime import datetime, timedelta
+	
+	try:
+		cutoff_date = (datetime.now().date() - timedelta(days=30)).strftime('%Y-%m-%d')
+		
+		# Chỉ archive trips đã Completed
+		# Lấy danh sách trips cần archive
+		trips_to_archive = frappe.db.sql("""
+			SELECT name FROM `tabSIS Bus Daily Trip`
+			WHERE trip_date < %s AND trip_status = 'Completed'
+		""", (cutoff_date,), as_dict=True)
+		
+		if not trips_to_archive:
+			return success_response(
+				data={"archived_count": 0, "student_records_archived": 0},
+				message="Không có daily trips nào cần archive"
+			)
+		
+		trip_names = [t.name for t in trips_to_archive]
+		archived_count = 0
+		student_records_archived = 0
+		
+		for trip_name in trip_names:
+			try:
+				# Lấy trip data
+				trip = frappe.get_doc("SIS Bus Daily Trip", trip_name)
+				
+				# Lấy students của trip
+				students = frappe.get_all(
+					"SIS Bus Daily Trip Student",
+					filters={"daily_trip_id": trip_name},
+					fields=["*"]
+				)
+				
+				# Tạo bản ghi archive
+				archive_doc = frappe.get_doc({
+					"doctype": "SIS Bus Daily Trip Archive",
+					"original_trip_id": trip.name,
+					"route_id": trip.route_id,
+					"trip_date": trip.trip_date,
+					"weekday": trip.weekday,
+					"trip_type": trip.trip_type,
+					"vehicle_id": trip.vehicle_id,
+					"driver_id": trip.driver_id,
+					"monitor1_id": trip.monitor1_id,
+					"monitor2_id": trip.monitor2_id,
+					"trip_status": trip.trip_status,
+					"campus_id": trip.campus_id,
+					"school_year_id": trip.school_year_id,
+					"student_count": len(students),
+					"students_data": json.dumps([s for s in students]),  # Lưu JSON
+					"archived_at": datetime.now()
+				})
+				archive_doc.insert(ignore_permissions=True)
+				
+				# Xóa students của trip gốc
+				frappe.db.sql("""
+					DELETE FROM `tabSIS Bus Daily Trip Student`
+					WHERE daily_trip_id = %s
+				""", (trip_name,))
+				student_records_archived += len(students)
+				
+				# Xóa trip gốc
+				frappe.delete_doc("SIS Bus Daily Trip", trip_name, ignore_permissions=True)
+				archived_count += 1
+				
+			except Exception as e:
+				frappe.log_error(f"Error archiving trip {trip_name}: {str(e)}")
+				continue
+		
+		frappe.db.commit()
+		
+		return success_response(
+			data={
+				"archived_count": archived_count,
+				"student_records_archived": student_records_archived,
+				"cutoff_date": cutoff_date
+			},
+			message=f"Đã archive {archived_count} daily trips và {student_records_archived} student records"
+		)
+		
+	except Exception as e:
+		frappe.log_error(f"Error in archive_old_daily_trips: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Lỗi: {str(e)}")
+
+
+@frappe.whitelist()
+def extend_daily_trips_for_all_routes():
+	"""
+	Tạo daily trips cho ngày tiếp theo cho tất cả routes.
+	Được gọi bởi scheduled job hàng ngày.
+	"""
+	from datetime import datetime, timedelta
+	
+	try:
+		# Tính ngày cần tạo (7 ngày tới)
+		target_date = datetime.now().date() + timedelta(days=7)
+		target_weekday_num = target_date.weekday()
+		
+		weekdays_map = {
+			0: "Thứ 2",
+			1: "Thứ 3",
+			2: "Thứ 4",
+			3: "Thứ 5",
+			4: "Thứ 6",
+			5: "Thứ 7",
+			6: "Chủ nhật"
+		}
+		target_weekday = weekdays_map.get(target_weekday_num)
+		
+		# Bỏ qua nếu là cuối tuần (tùy config)
+		# if target_weekday_num >= 5:
+		#     return success_response(data={"created": 0}, message="Bỏ qua cuối tuần")
+		
+		# Lấy tất cả active routes
+		active_routes = frappe.get_all(
+			"SIS Bus Route",
+			filters={"status": "Active"},
+			fields=["name", "route_name", "vehicle_id", "driver_id", "monitor1_id", "monitor2_id", "campus_id", "school_year_id"]
+		)
+		
+		created_count = 0
+		skipped_count = 0
+		errors = []
+		
+		for route in active_routes:
+			# Lấy route students cho ngày này
+			route_students = frappe.get_all(
+				"SIS Bus Route Student",
+				filters={"route_id": route.name, "weekday": target_weekday},
+				fields=["*"]
+			)
+			
+			# Nhóm theo trip_type
+			trip_types = set([rs.trip_type for rs in route_students])
+			if not trip_types:
+				trip_types = {'Đón', 'Trả'}  # Default nếu không có students
+			
+			for trip_type in trip_types:
+				# Check if trip already exists
+				existing = frappe.db.exists("SIS Bus Daily Trip", {
+					"route_id": route.name,
+					"trip_date": target_date,
+					"trip_type": trip_type
+				})
+				
+				if existing:
+					skipped_count += 1
+					continue
+				
+				try:
+					# Tạo daily trip
+					daily_trip = frappe.get_doc({
+						"doctype": "SIS Bus Daily Trip",
+						"route_id": route.name,
+						"trip_date": target_date,
+						"weekday": target_weekday,
+						"trip_type": trip_type,
+						"vehicle_id": route.vehicle_id,
+						"driver_id": route.driver_id,
+						"monitor1_id": route.monitor1_id,
+						"monitor2_id": route.monitor2_id,
+						"trip_status": "Not Started",
+						"campus_id": route.campus_id,
+						"school_year_id": route.school_year_id
+					})
+					daily_trip.insert(ignore_permissions=True)
+					
+					# Thêm students vào trip
+					students_for_trip = [rs for rs in route_students if rs.trip_type == trip_type]
+					for rs in students_for_trip:
+						# Lấy student info
+						student_info = frappe.db.get_value(
+							"CRM Student", rs.student_id,
+							["student_code", "student_name"], as_dict=True
+						)
+						if student_info:
+							frappe.get_doc({
+								"doctype": "SIS Bus Daily Trip Student",
+								"daily_trip_id": daily_trip.name,
+								"student_id": rs.student_id,
+								"student_code": student_info.student_code,
+								"student_name": student_info.student_name,
+								"pickup_order": rs.pickup_order,
+								"pickup_location": rs.pickup_location,
+								"drop_off_location": rs.drop_off_location,
+								"student_status": "Not Boarded"
+							}).insert(ignore_permissions=True)
+					
+					created_count += 1
+					
+				except Exception as e:
+					errors.append(f"Route {route.name}: {str(e)}")
+		
+		frappe.db.commit()
+		
+		return success_response(
+			data={
+				"target_date": str(target_date),
+				"target_weekday": target_weekday,
+				"created_count": created_count,
+				"skipped_count": skipped_count,
+				"errors": errors[:10]  # Chỉ trả về 10 errors đầu
+			},
+			message=f"Đã tạo {created_count} daily trips cho {target_date} ({target_weekday})"
+		)
+		
+	except Exception as e:
+		frappe.log_error(f"Error in extend_daily_trips_for_all_routes: {str(e)}")
+		frappe.db.rollback()
+		return error_response(f"Lỗi: {str(e)}")

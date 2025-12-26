@@ -256,11 +256,15 @@ class SISBusRoute(Document):
 		frappe.logger().info(f"✅ Updated {updated_count}/{len(future_trips)} future daily trips for route {self.name}")
 
 	def create_daily_trips(self):
-		"""Create daily trips for the next 30 days (weekdays only)"""
+		"""
+		Create daily trips for the next 7 days (weekdays only).
+		Giảm từ 30 ngày xuống 7 ngày để tối ưu performance.
+		Scheduled job sẽ tự động extend thêm mỗi ngày.
+		"""
 		from datetime import datetime, timedelta
 
 		start_date = datetime.now().date()
-		end_date = start_date + timedelta(days=30)
+		end_date = start_date + timedelta(days=7)  # Chỉ tạo 7 ngày tới
 
 		current_date = start_date
 		weekdays_map = {

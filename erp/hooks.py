@@ -790,6 +790,14 @@ scheduler_events = {
         # Aggregate Parent Portal Analytics lúc 23:00 hàng ngày
         "0 23 * * *": [
             "erp.api.analytics.portal_analytics.aggregate_portal_analytics"
+        ],
+        # Bus Daily Trips - Tạo trips cho ngày tiếp theo lúc 00:30 AM
+        "30 0 * * *": [
+            "erp.sis.tasks.bus_daily_trips.extend_daily_trips_job"
+        ],
+        # Bus Daily Trips - Archive trips cũ lúc 01:00 AM Chủ nhật
+        "0 1 * * 0": [
+            "erp.sis.tasks.bus_daily_trips.archive_old_trips_job"
         ]
     },
     # Project Management - Auto-expire pending invitations
