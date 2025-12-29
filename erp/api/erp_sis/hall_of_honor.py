@@ -504,6 +504,14 @@ def get_award_record_detail(name: str):
         # Build response similar to get_award_records but for single record
         data = record.as_dict()
         
+        # Lấy năm học hiện tại để dùng cho cả student và class photo fallback
+        current_school_year = frappe.db.get_value(
+            "SIS School Year",
+            {"is_enable": 1},
+            "name",
+            order_by="start_date desc"
+        )
+        
         # Populate student entries
         student_entries = []
         for entry in record.student_entries:
@@ -539,19 +547,21 @@ def get_award_record_detail(name: str):
                     'title': class_doc.short_title  # Sử dụng short_title thay vì title
                 }
             
-            # Get photo
-            photo = frappe.get_all(
-                'SIS Photo',
-                filters={
-                    'student_id': entry.student_id,
-                    'school_year_id': record.school_year_id,
-                    'type': 'student',
-                    'status': 'Active'
-                },
-                fields=['photo', 'upload_date'],
-                order_by='upload_date desc, creation desc',
-                limit=1
-            )
+            # Get photo - Ưu tiên: 1) Năm học của record, 2) Năm học hiện tại, 3) Ảnh mới nhất
+            photo = frappe.db.sql("""
+                SELECT photo
+                FROM `tabSIS Photo`
+                WHERE student_id = %s
+                    AND type = 'student'
+                    AND status = 'Active'
+                ORDER BY 
+                    CASE WHEN school_year_id = %s THEN 0
+                         WHEN school_year_id = %s THEN 1
+                         ELSE 2 END,
+                    upload_date DESC,
+                    creation DESC
+                LIMIT 1
+            """, (entry.student_id, record.school_year_id, current_school_year), as_dict=True)
             
             if photo:
                 populated_entry['photo'] = {'photoUrl': photo[0]['photo']}
@@ -587,18 +597,22 @@ def get_award_record_detail(name: str):
                 'note_en': entry.note_en
             }
             
-            # Get class photo
-            photo = frappe.get_all(
-                'SIS Photo',
-                filters={
-                    'class_id': entry.class_id,
-                    'school_year_id': record.school_year_id,
-                    'type': 'class'
-                },
-                fields=['photo'],
-                order_by='upload_date desc',
-                limit=1
-            )
+            # Get class photo - Ưu tiên: 1) Năm học của record, 2) Năm học hiện tại, 3) Ảnh mới nhất
+            # Sử dụng current_school_year đã lấy từ trên
+            photo = frappe.db.sql("""
+                SELECT photo
+                FROM `tabSIS Photo`
+                WHERE class_id = %s
+                    AND type = 'class'
+                    AND status = 'Active'
+                ORDER BY 
+                    CASE WHEN school_year_id = %s THEN 0
+                         WHEN school_year_id = %s THEN 1
+                         ELSE 2 END,
+                    upload_date DESC,
+                    creation DESC
+                LIMIT 1
+            """, (entry.class_id, record.school_year_id, current_school_year), as_dict=True)
             
             if photo:
                 populated_entry['classImage'] = photo[0]['photo']
