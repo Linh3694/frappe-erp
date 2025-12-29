@@ -283,35 +283,33 @@ class TimetableImportValidator:
 		return len(self.errors) == 0
 	
 	def _validate_class_references(self, class_titles: List[str], campus_id: str):
-		"""
-		Validate class titles exist.
-		
-		⚡ FIX: Thêm filter school_year_id để đảm bảo validate đúng lớp của năm học được chọn.
-		Nếu không có filter này, có thể validate pass nhưng thực tế import lớp sai năm học.
-		"""
-		school_year_id = self.metadata.get("school_year_id")
-		
+		"""Validate class titles exist"""
 		for title in class_titles:
-			# Build filters với school_year_id để validate chính xác
-			filters = {"campus_id": campus_id, "short_title": title}
-			if school_year_id:
-				filters["school_year_id"] = school_year_id
-			
-			class_id = frappe.db.get_value("SIS Class", filters, "name")
+			# Try to find class by short_title or title
+			class_id = frappe.db.get_value(
+				"SIS Class",
+				{
+					"campus_id": campus_id,
+					"short_title": title
+				},
+				"name"
+			)
 			
 			if not class_id:
-				# Try by title thay vì short_title
-				filters_by_title = {"campus_id": campus_id, "title": title}
-				if school_year_id:
-					filters_by_title["school_year_id"] = school_year_id
-				class_id = frappe.db.get_value("SIS Class", filters_by_title, "name")
+				# Try by title
+				class_id = frappe.db.get_value(
+					"SIS Class",
+					{
+						"campus_id": campus_id,
+						"title": title
+					},
+					"name"
+				)
 			
 			if class_id:
 				self.cache["classes"][title] = class_id
 			else:
-				# Thêm thông tin năm học vào error message để user biết rõ nguyên nhân
-				year_info = f" trong năm học {school_year_id}" if school_year_id else ""
-				self.errors.append(f"Class not found: '{title}'{year_info}")
+				self.errors.append(f"Class not found: '{title}'")
 	
 	def _validate_subject_references(self, subject_titles: List[str], education_stage_id: str, campus_id: str):
 		"""Validate subject titles exist"""
