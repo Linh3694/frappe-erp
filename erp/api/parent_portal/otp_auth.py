@@ -662,16 +662,27 @@ def get_guardian_comprehensive_data(guardian_name):
                             }
 
                             # Get SIS Photo
-                            sis_photos = frappe.get_all("SIS Photo",
-                                filters={
-                                    "student_id": student.name,
-                                    "type": "student",
-                                    "status": "Active"
-                                },
-                                fields=["photo", "title", "upload_date"],
-                                order_by="upload_date desc",
-                                limit_page_length=1
+                            # Lấy năm học hiện tại đang active
+                            current_school_year = frappe.db.get_value(
+                                "SIS School Year",
+                                {"is_enable": 1},
+                                "name",
+                                order_by="start_date desc"
                             )
+                            
+                            # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
+                            sis_photos = frappe.db.sql("""
+                                SELECT photo, title, upload_date, school_year_id
+                                FROM `tabSIS Photo`
+                                WHERE student_id = %s
+                                    AND type = 'student'
+                                    AND status = 'Active'
+                                ORDER BY 
+                                    CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                                    upload_date DESC,
+                                    creation DESC
+                                LIMIT 1
+                            """, (student.name, current_school_year), as_dict=True)
 
                             if sis_photos:
                                 student_details["sis_photo"] = sis_photos[0]["photo"]

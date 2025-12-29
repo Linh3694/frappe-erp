@@ -545,10 +545,11 @@ def get_award_record_detail(name: str):
                 filters={
                     'student_id': entry.student_id,
                     'school_year_id': record.school_year_id,
-                    'type': 'student'
+                    'type': 'student',
+                    'status': 'Active'
                 },
-                fields=['photo'],
-                order_by='upload_date desc',
+                fields=['photo', 'upload_date'],
+                order_by='upload_date desc, creation desc',
                 limit=1
             )
             

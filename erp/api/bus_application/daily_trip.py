@@ -189,13 +189,28 @@ def get_daily_trip_detail(trip_id=None):
         for student in students:
             student.photo_url = None
             try:
-                sis_photos = frappe.get_all(
-                    "SIS Photo",
-                    filters={"student_id": student.student_id, "type": "student", "status": "Active"},
-                    fields=["photo"],
-                    order_by="upload_date desc",
-                    limit=1
+                # Lấy năm học hiện tại đang active
+                current_school_year = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1},
+                    "name",
+                    order_by="start_date desc"
                 )
+                
+                # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
+                sis_photos = frappe.db.sql("""
+                    SELECT photo
+                    FROM `tabSIS Photo`
+                    WHERE student_id = %s
+                        AND type = 'student'
+                        AND status = 'Active'
+                    ORDER BY 
+                        CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                        upload_date DESC,
+                        creation DESC
+                    LIMIT 1
+                """, (student.student_id, current_school_year), as_dict=True)
+                
                 if sis_photos:
                     student.photo_url = sis_photos[0].photo
             except:

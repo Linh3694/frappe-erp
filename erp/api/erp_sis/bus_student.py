@@ -886,16 +886,29 @@ def get_student_photo_url(student_code: str, campus_id: str, school_year_id: str
 			frappe.logger().warning(f"No CRM Student found for student_code: {student_code}")
 			return ""
 
+		# Lấy năm học hiện tại đang active nếu không có school_year_id
+		if not school_year_id:
+			school_year_id = frappe.db.get_value(
+				"SIS School Year",
+				{"is_enable": 1},
+				"name",
+				order_by="start_date desc"
+			)
+
 		# Get the latest photo for this student using CRM Student ID
+		# Ưu tiên: 1) Năm học hiện tại/được chỉ định trước, 2) Upload date mới nhất, 3) Creation mới nhất
 		photo = frappe.db.sql("""
 			SELECT photo
 			FROM `tabSIS Photo`
 			WHERE type = 'student'
 			AND student_id = %s
 			AND status = 'Active'
-			ORDER BY upload_date DESC, creation DESC
+			ORDER BY 
+				CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+				upload_date DESC, 
+				creation DESC
 			LIMIT 1
-		""", (crm_student,), as_dict=True)
+		""", (crm_student, school_year_id), as_dict=True)
 
 		frappe.logger().info(f"Photo query for student {student_code}: found {len(photo) if photo else 0} photos")
 

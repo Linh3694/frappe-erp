@@ -154,18 +154,31 @@ def get_all_students(include_all_campuses=0):
                 if student_ids_for_photos:
                     frappe.logger().info(f"📸 [get_all_students] Enriching {len(student_ids_for_photos)} students with photos from SIS Photo")
                     
+                    # Lấy năm học hiện tại đang active
+                    current_school_year = frappe.db.get_value(
+                        "SIS School Year",
+                        {"is_enable": 1},
+                        "name",
+                        order_by="start_date desc"
+                    )
+                    
                     # Get all active photos for these students in one query
+                    # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
                     photos = frappe.db.sql("""
                         SELECT 
                             student_id,
                             photo,
-                            upload_date
+                            upload_date,
+                            school_year_id
                         FROM `tabSIS Photo`
                         WHERE student_id IN %(student_ids)s
                             AND type = 'student'
                             AND status = 'Active'
-                        ORDER BY upload_date DESC
-                    """, {"student_ids": student_ids_for_photos}, as_dict=True)
+                        ORDER BY 
+                            CASE WHEN school_year_id = %(current_year)s THEN 0 ELSE 1 END,
+                            upload_date DESC,
+                            creation DESC
+                    """, {"student_ids": student_ids_for_photos, "current_year": current_school_year}, as_dict=True)
                     
                     frappe.logger().info(f"📸 [get_all_students] Found {len(photos)} photos from SIS Photo")
                     
@@ -337,18 +350,28 @@ def get_student_data():
         # Get student photo if exists
         student_photo = None
         try:
-            # Find the most recent active student photo
-            photos = frappe.get_all(
-                "SIS Photo",
-                filters={
-                    "student_id": student.name,
-                    "type": "student",
-                    "status": "Active"
-                },
-                fields=["photo"],
-                order_by="creation desc",
-                limit=1
+            # Lấy năm học hiện tại đang active
+            current_school_year = frappe.db.get_value(
+                "SIS School Year",
+                {"is_enable": 1},
+                "name",
+                order_by="start_date desc"
             )
+            
+            # Find the most recent active student photo
+            # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
+            photos = frappe.db.sql("""
+                SELECT photo
+                FROM `tabSIS Photo`
+                WHERE student_id = %s
+                    AND type = 'student'
+                    AND status = 'Active'
+                ORDER BY 
+                    CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                    upload_date DESC,
+                    creation DESC
+                LIMIT 1
+            """, (student.name, current_school_year), as_dict=True)
 
             if photos and photos[0].get("photo"):
                 student_photo = photos[0]["photo"]
@@ -490,19 +513,32 @@ def batch_get_students():
             try:
                 frappe.logger().info(f"📸 [Backend] Enriching {len(students)} students with photos")
                 
+                # Lấy năm học hiện tại đang active
+                current_school_year = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1},
+                    "name",
+                    order_by="start_date desc"
+                )
+                
                 # Get all active photos for these students in one query
+                # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
                 student_ids_for_photos = [s.get('name') for s in students]
                 photos = frappe.db.sql("""
                     SELECT 
                         student_id,
                         photo,
-                        upload_date
+                        upload_date,
+                        school_year_id
                     FROM `tabSIS Photo`
                     WHERE student_id IN %(student_ids)s
                         AND type = 'student'
                         AND status = 'Active'
-                    ORDER BY upload_date DESC
-                """, {"student_ids": student_ids_for_photos}, as_dict=True)
+                    ORDER BY 
+                        CASE WHEN school_year_id = %(current_year)s THEN 0 ELSE 1 END,
+                        upload_date DESC,
+                        creation DESC
+                """, {"student_ids": student_ids_for_photos, "current_year": current_school_year}, as_dict=True)
                 
                 # Create mapping: student_id -> photo URL
                 photo_map = {}
