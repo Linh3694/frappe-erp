@@ -64,6 +64,25 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 			date = frappe.utils.nowdate()
 			frappe.logger().info(f"📅 Using current date: {date}")
 
+		# Lấy năm học hiện tại đang active (is_enable = 1) trước
+		current_year = frappe.get_all(
+			"SIS School Year",
+			filters={"is_enable": 1},
+			fields=["name"],
+			order_by="creation desc",
+			limit=1
+		)
+		
+		if not current_year:
+			frappe.logger().warning("⚠️ Không tìm thấy năm học đang active (is_enable = 1)")
+			return error_response(
+				message="Không tìm thấy năm học đang active",
+				code="NO_ACTIVE_SCHOOL_YEAR"
+			)
+		
+		school_year_id = current_year[0].name
+		frappe.logger().info(f"📅 Năm học hiện tại: {school_year_id}")
+
 		if not campus_id:
 			try:
 				from erp.utils.campus_utils import get_current_campus_from_context
@@ -78,8 +97,12 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 			campus_id = "CAMPUS-00001"
 			frappe.logger().info(f"🏫 Using default campus: {campus_id}")
 
-		# Get all active classes for the campus (only regular classes)
-		class_filters = {"docstatus": 0, "class_type": "regular"}
+		# Lấy các lớp của năm học hiện tại (chỉ lấy lớp regular)
+		class_filters = {
+			"docstatus": 0,
+			"class_type": "regular",
+			"school_year_id": school_year_id
+		}
 		if campus_id:
 			class_filters["campus_id"] = campus_id
 
@@ -1274,30 +1297,59 @@ def test_homeroom_report_console(date=None):
 		return error_response(f"Test failed: {str(e)}", code="TEST_ERROR")
 
 
+def is_production_server():
+	"""
+	Kiểm tra xem server hiện tại có phải là production không.
+	Đọc từ site_config.json: "is_production": true
+	"""
+	site_config = frappe.get_site_config()
+	return site_config.get("is_production", False)
+
+
 # Scheduled job to remind teachers about homeroom attendance
 @frappe.whitelist()
 def remind_homeroom_attendance():
 	"""
 	Daily scheduled job to send push notification reminding teachers 
 	who haven't done homeroom attendance yet.
-	Called automatically every day at 8:00 AM
+	Called automatically every day at 8:45 AM
+	Chỉ chạy trên server production (is_production = true trong site_config.json)
 	"""
 	try:
+		# Kiểm tra xem có phải production server không
+		if not is_production_server():
+			frappe.logger().info("⏭️ Bỏ qua remind_homeroom_attendance - không phải production server")
+			return {
+				"success": True,
+				"message": "Skipped - not production server",
+				"skipped": True
+			}
+		
 		from datetime import datetime
 		today = datetime.now().strftime('%Y-%m-%d')
 		
 		frappe.logger().info(f"📢 Starting homeroom attendance reminder for {today}")
 		
-		# Get current school year
+		# Lấy năm học hiện tại đang active (is_enable = 1) trước
 		current_year = frappe.get_all(
 			"SIS School Year",
 			filters={"is_enable": 1},
 			fields=["name"],
+			order_by="creation desc",
 			limit=1
 		)
-		school_year_id = current_year[0].name if current_year else None
 		
-		# Get all teachers with homeroom classes
+		if not current_year:
+			frappe.logger().warning("⚠️ Không tìm thấy năm học đang active (is_enable = 1)")
+			return {
+				"success": False,
+				"message": "Không tìm thấy năm học đang active"
+			}
+		
+		school_year_id = current_year[0].name
+		frappe.logger().info(f"📅 Năm học hiện tại: {school_year_id}")
+		
+		# Lấy danh sách giáo viên chủ nhiệm của các lớp trong năm học hiện tại
 		teachers_with_homeroom = frappe.db.sql("""
 			SELECT DISTINCT
 				t.name as teacher_name,
@@ -1308,10 +1360,8 @@ def remind_homeroom_attendance():
 			INNER JOIN `tabSIS Class` c ON (c.homeroom_teacher = t.name OR c.vice_homeroom_teacher = t.name)
 			WHERE t.user_id IS NOT NULL
 				AND t.user_id != ''
-				{school_year_filter}
-		""".format(
-			school_year_filter=f"AND c.school_year_id = '{school_year_id}'" if school_year_id else ""
-		), as_dict=True)
+				AND c.school_year_id = %s
+		""", (school_year_id,), as_dict=True)
 		
 		# Group by teacher
 		teacher_classes = {}
@@ -1399,8 +1449,18 @@ def daily_homeroom_attendance_report():
 	"""
 	Daily scheduled job to send homeroom attendance report
 	Called automatically every day at configured time
+	Chỉ chạy trên server production (is_production = true trong site_config.json)
 	"""
 	try:
+		# Kiểm tra xem có phải production server không
+		if not is_production_server():
+			frappe.logger().info("⏭️ Bỏ qua daily_homeroom_attendance_report - không phải production server")
+			return {
+				"success": True,
+				"message": "Skipped - not production server",
+				"skipped": True
+			}
+		
 		# Get yesterday's date for the report
 		from datetime import datetime, timedelta
 		yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
