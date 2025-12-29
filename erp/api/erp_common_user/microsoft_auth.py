@@ -1375,8 +1375,18 @@ def create_users_subscription():
     """Tạo subscription cho resource `users` để nhận realtime notifications.
 
     Cấu hình cần có `microsoft_webhook_url` trong site_config hoặc frappe.conf.
+    Chỉ chạy trên production server (is_production = true trong site_config.json)
     """
     try:
+        # Kiểm tra xem có phải production server không
+        if not is_production_server():
+            frappe.logger().info("⏭️ Bỏ qua create_users_subscription - không phải production server")
+            return {
+                "status": "skipped",
+                "message": "Not production server - subscription chỉ được tạo trên prod.sis.wellspring.edu.vn",
+                "skipped": True
+            }
+        
         notification_url = (
             frappe.conf.get("microsoft_webhook_url")
             or frappe.get_site_config().get("microsoft_webhook_url")
@@ -1423,14 +1433,33 @@ def _renew_subscription(token: str, sub_id: str, new_expiration_utc_iso: str):
     return resp.status_code in (200, 202)
 
 
+def is_production_server():
+    """
+    Kiểm tra xem server hiện tại có phải là production không.
+    Đọc từ site_config.json: "is_production": true
+    """
+    site_config = frappe.get_site_config()
+    return site_config.get("is_production", False)
+
+
 @frappe.whitelist()
 def ensure_users_subscription():
     """Gia hạn/tạo mới subscription cho resource `users` nếu sắp hết hạn.
 
     - Nếu không có subscription nào → tạo mới
     - Nếu có, nhưng còn < 20 phút → renew
+    - Chỉ chạy trên production server (is_production = true trong site_config.json)
     """
     try:
+        # Kiểm tra xem có phải production server không
+        if not is_production_server():
+            frappe.logger().info("⏭️ Bỏ qua ensure_users_subscription - không phải production server")
+            return {
+                "status": "skipped",
+                "message": "Not production server",
+                "skipped": True
+            }
+        
         token = get_microsoft_app_token()
         subs = _list_users_subscriptions(token)
 

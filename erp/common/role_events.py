@@ -8,12 +8,25 @@ import json
 import frappe
 
 
+def is_production_server() -> bool:
+    """
+    Kiểm tra xem server hiện tại có phải là production không.
+    Đọc từ site_config.json: "is_production": true
+    """
+    site_config = frappe.get_site_config()
+    return site_config.get("is_production", False)
+
+
 def _get_channel() -> str:
     # Allow override via site config; default aligns with ticket-service
     return frappe.conf.get("REDIS_USER_CHANNEL", "user_events")
 
 
 def _publish(payload: dict) -> None:
+    # Chỉ publish events trên production server
+    if not is_production_server():
+        return
+    
     try:
         # Prefer socketio redis; fallback to cache/queue via frappe.cache
         uri = frappe.conf.get("redis_socketio") or frappe.conf.get("redis_cache")

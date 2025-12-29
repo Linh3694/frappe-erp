@@ -75,7 +75,21 @@ def _get_redis_client():
         return None
 
 
+def is_production_server() -> bool:
+    """
+    Kiểm tra xem server hiện tại có phải là production không.
+    Đọc từ site_config.json: "is_production": true
+    """
+    if hasattr(frappe, "get_site_config"):
+        site_config = frappe.get_site_config()
+        return site_config.get("is_production", False)
+    return False
+
+
 def is_user_events_enabled() -> bool:
+    # Chỉ publish events trên production server
+    if not is_production_server():
+        return False
     flag = _get_conf("FRAPPE_USER_EVENTS_ENABLED")
     return _bool(flag, default=True)  # Mặc định enable cho hệ thống nội bộ
 

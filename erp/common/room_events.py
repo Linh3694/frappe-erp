@@ -8,6 +8,15 @@ import json
 import frappe
 
 
+def is_production_server() -> bool:
+    """
+    Kiểm tra xem server hiện tại có phải là production không.
+    Đọc từ site_config.json: "is_production": true
+    """
+    site_config = frappe.get_site_config()
+    return site_config.get("is_production", False)
+
+
 def _get_room_channel() -> str:
     # Allow override via site config; default aligns with inventory-service
     return frappe.conf.get("REDIS_ROOM_CHANNEL", "room_events")
@@ -42,7 +51,13 @@ def _publish_room(payload: dict) -> None:
 
 
 def publish_room_event(event_type: str, room_name: str) -> None:
-    """Publish room event to Redis for microservices"""
+    """Publish room event to Redis for microservices
+    Chỉ publish trên production server (is_production = true trong site_config.json)
+    """
+    # Chỉ publish events trên production server
+    if not is_production_server():
+        return
+    
     if not frappe.conf.get("FRAPPE_ROOM_EVENTS_ENABLED", True):
         frappe.logger().info(f"Room events disabled, skipping {event_type} for {room_name}")
         return
@@ -111,7 +126,12 @@ def ping_room_events(channel: str | None = None) -> dict:
 def publish_all_rooms(batch_size: int = 500, only_active: bool = True, event_type: str = "room_updated") -> dict:
     """
     Send room events for all existing rooms to trigger initial sync in microservices
+    Chỉ chạy trên production server (is_production = true trong site_config.json)
     """
+    # Chỉ publish events trên production server
+    if not is_production_server():
+        return {"published": 0, "skipped": 0, "note": "Not production server - skipped"}
+    
     if not frappe.conf.get("FRAPPE_ROOM_EVENTS_ENABLED", True):
         return {"published": 0, "skipped": 0, "note": "FRAPPE_ROOM_EVENTS_ENABLED is false"}
 
