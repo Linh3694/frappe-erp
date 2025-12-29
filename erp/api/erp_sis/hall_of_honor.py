@@ -1091,7 +1091,12 @@ def bulk_import_classes():
 def get_school_years():
     """Get all school years for dropdown - Allow guest access for public Hall of Honor page"""
     try:
-        campus_id = get_current_campus_from_context()
+        # Cố gắng lấy campus_id từ context, nhưng không bắt buộc (vì allow_guest=True)
+        campus_id = None
+        try:
+            campus_id = get_current_campus_from_context()
+        except:
+            pass  # Guest không có campus context, lấy tất cả school years
         
         filters = {}
         if campus_id:
