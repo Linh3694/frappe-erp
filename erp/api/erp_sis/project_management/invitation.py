@@ -20,14 +20,14 @@ from .project import get_user_project_role, check_project_access, log_project_ch
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def invite_member(project_id: str, invitee_email: str, role: str = "member", message: str = None):
+def invite_member():
     """
     Mời user vào project
     
-    Args:
-        project_id: ID của project
-        invitee_email: Email của người được mời
-        role: Vai trò được mời (manager/member/viewer)
+    Payload (JSON body):
+        project_id: ID của project (required)
+        invitee_email: Email của người được mời (required)
+        role: Vai trò được mời (manager/member/viewer), default: member
         message: Lời nhắn từ người mời
     
     Returns:
@@ -35,6 +35,17 @@ def invite_member(project_id: str, invitee_email: str, role: str = "member", mes
     """
     try:
         user = frappe.session.user
+        
+        # Đọc data từ JSON body
+        data = json.loads(frappe.request.data) if frappe.request.data else {}
+        project_id = data.get("project_id")
+        invitee_email = data.get("invitee_email")
+        role = data.get("role", "member")
+        message = data.get("message")
+        
+        # Validate required fields
+        if not project_id or not invitee_email:
+            return error_response("project_id và invitee_email là bắt buộc", code="MISSING_PARAMETER")
         
         # Validate role
         valid_roles = ["manager", "member", "viewer"]
