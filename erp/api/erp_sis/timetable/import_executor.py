@@ -1372,19 +1372,27 @@ class TimetableImportExecutor:
 	# ============= HELPER METHODS =============
 	
 	def _get_class_id(self, title: str, campus_id: str) -> Optional[str]:
-		"""Get class ID from title"""
-		class_id = frappe.db.get_value(
-			"SIS Class",
-			{"campus_id": campus_id, "short_title": title},
-			"name"
-		)
+		"""
+		Get class ID from title.
 		
+		⚡ FIX: Thêm filter school_year_id để đảm bảo lấy đúng lớp của năm học được chọn.
+		Nếu không có filter này, có thể lấy nhầm lớp cùng tên nhưng thuộc năm học khác.
+		"""
+		school_year_id = self.metadata.get("school_year_id")
+		
+		# Build filters với school_year_id để tránh lấy nhầm lớp năm học khác
+		filters = {"campus_id": campus_id, "short_title": title}
+		if school_year_id:
+			filters["school_year_id"] = school_year_id
+		
+		class_id = frappe.db.get_value("SIS Class", filters, "name")
+		
+		# Fallback: thử tìm bằng title thay vì short_title
 		if not class_id:
-			class_id = frappe.db.get_value(
-				"SIS Class",
-				{"campus_id": campus_id, "title": title},
-				"name"
-			)
+			filters_by_title = {"campus_id": campus_id, "title": title}
+			if school_year_id:
+				filters_by_title["school_year_id"] = school_year_id
+			class_id = frappe.db.get_value("SIS Class", filters_by_title, "name")
 		
 		return class_id
 	
