@@ -18,6 +18,7 @@
  "field_order": [
   "basic_information",
   "project_id",
+  "requirement_id",
   "title",
   "description",
   "column_break_1",
@@ -44,6 +45,14 @@
    "reqd": 1,
    "in_list_view": 1,
    "in_standard_filter": 1
+  },
+  {
+   "fieldname": "requirement_id",
+   "fieldtype": "Link",
+   "label": "Yêu cầu liên quan",
+   "options": "PM Requirement",
+   "in_standard_filter": 1,
+   "description": "Requirement mà task này thực hiện (tùy chọn)"
   },
   {
    "fieldname": "title",

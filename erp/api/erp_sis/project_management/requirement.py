@@ -52,6 +52,20 @@ def enrich_requirement_data(requirement: dict) -> dict:
     )
     requirement["resource_count"] = resource_count
     
+    # Lấy tiến độ task liên quan đến requirement
+    task_count = frappe.db.count(
+        "PM Task",
+        {"requirement_id": requirement["name"]}
+    )
+    requirement["task_count"] = task_count
+    
+    # Đếm số task đã hoàn thành
+    completed_count = frappe.db.count(
+        "PM Task",
+        {"requirement_id": requirement["name"], "status": "done"}
+    )
+    requirement["completed_task_count"] = completed_count
+    
     return requirement
 
 

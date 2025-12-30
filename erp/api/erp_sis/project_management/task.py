@@ -66,6 +66,19 @@ def enrich_task_data(task: dict) -> dict:
             task["created_by_full_name"] = creator_info.get("full_name")
             task["created_by_image"] = creator_info.get("user_image")
     
+    # Enrich requirement info (nếu task có liên kết với requirement)
+    if task.get("requirement_id"):
+        req_info = frappe.db.get_value(
+            "PM Requirement",
+            task["requirement_id"],
+            ["title", "status", "priority"],
+            as_dict=True
+        )
+        if req_info:
+            task["requirement_title"] = req_info.get("title")
+            task["requirement_status"] = req_info.get("status")
+            task["requirement_priority"] = req_info.get("priority")
+    
     # Thêm comment count
     task["comment_count"] = frappe.db.count("PM Task Comment", {"task_id": task["name"]})
     
@@ -132,7 +145,7 @@ def get_board_tasks():
         tasks = frappe.get_all(
             "PM Task",
             filters=filters,
-            fields=["name", "project_id", "title", "description", "status", "priority",
+            fields=["name", "project_id", "requirement_id", "title", "description", "status", "priority",
                    "created_by", "due_date", "tags", "order_index",
                    "creation", "modified"],
             order_by="order_index asc, modified desc"
@@ -280,10 +293,26 @@ def create_task():
         if max_order and max_order[0].max_order is not None:
             order_index = max_order[0].max_order + 1
         
+        # Validate requirement_id nếu có
+        requirement_id = data.get("requirement_id")
+        if requirement_id:
+            # Kiểm tra requirement tồn tại và thuộc cùng project
+            req = frappe.db.get_value(
+                "PM Requirement", requirement_id, ["project_id", "status"], as_dict=True
+            )
+            if not req:
+                return not_found_response(f"Requirement {requirement_id} không tồn tại")
+            if req.project_id != project_id:
+                return validation_error_response(
+                    "Requirement không thuộc project này",
+                    {"requirement_id": ["Requirement phải thuộc cùng project với task"]}
+                )
+        
         # Tạo task
         task = frappe.get_doc({
             "doctype": "PM Task",
             "project_id": project_id,
+            "requirement_id": requirement_id,
             "title": data.get("title"),
             "description": data.get("description"),
             "status": status,
@@ -371,7 +400,8 @@ def update_task():
             "status": task.status,
             "priority": task.priority,
             "due_date": str(task.due_date) if task.due_date else None,
-            "tags": task.tags
+            "tags": task.tags,
+            "requirement_id": task.requirement_id
         }
         
         # Cập nhật fields
@@ -391,6 +421,21 @@ def update_task():
             task.due_date = data["due_date"]
         if "tags" in data:
             task.tags = data["tags"]
+        if "requirement_id" in data:
+            # Validate requirement_id nếu có
+            requirement_id = data["requirement_id"]
+            if requirement_id:
+                req = frappe.db.get_value(
+                    "PM Requirement", requirement_id, ["project_id"], as_dict=True
+                )
+                if not req:
+                    return not_found_response(f"Requirement {requirement_id} không tồn tại")
+                if req.project_id != task.project_id:
+                    return validation_error_response(
+                        "Requirement không thuộc project này",
+                        {"requirement_id": ["Requirement phải thuộc cùng project với task"]}
+                    )
+            task.requirement_id = requirement_id
         
         # Cập nhật assignees nếu có trong payload
         if "assignee_ids" in data:
@@ -832,7 +877,7 @@ def search_tasks():
         
         # Query tasks
         tasks = frappe.db.sql(f"""
-            SELECT name, project_id, title, description, status, priority,
+            SELECT name, project_id, requirement_id, title, description, status, priority,
                    created_by, due_date, tags, order_index,
                    creation, modified
             FROM `tabPM Task`
