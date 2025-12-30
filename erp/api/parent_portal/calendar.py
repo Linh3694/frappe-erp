@@ -111,6 +111,7 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None, stu
             # Set school_year_id if not provided
             if not school_year_id:
                 school_year_id = class_students[0].school_year_id
+                logs.append(f"Auto-detected school_year_id from student's class: {school_year_id}")
             
             class_id = class_students[0].class_id
             logs.append(f"Student class_id: {class_id}")
@@ -143,9 +144,17 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None, stu
             logs.append(f"No class_students found for student_id: {student_id}")
 
         # Build filters
+        # Chỉ filter theo school_year_id nếu KHÔNG có date range được cung cấp
+        # Nếu có date range thì ưu tiên lấy tất cả events trong khoảng thời gian đó
         filters = {}
-        if school_year_id:
+        has_date_range = start_date or end_date
+        
+        if school_year_id and not has_date_range:
+            # Chỉ filter theo school_year khi không có date range
             filters["school_year_id"] = school_year_id
+            logs.append(f"Filtering by school_year_id: {school_year_id} (no date range provided)")
+        elif has_date_range:
+            logs.append(f"Filtering by date range only (ignoring school_year_id to get all events in period)")
 
         # Date range filtering
         conditions = []
@@ -182,6 +191,8 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None, stu
             {where_clause}
             ORDER BY start_date ASC
         """, params, as_dict=True)
+        
+        logs.append(f"SQL query returned {len(events)} total events before education stage filtering")
 
         # Filter events by education_stage if available
         if education_stage_id:
@@ -195,8 +206,13 @@ def get_calendar_events(school_year_id=None, start_date=None, end_date=None, stu
                     pluck="education_stage_id"
                 )
                 
+                # Debug log for first few events
+                if len(filtered_events) < 3:
+                    logs.append(f"Event '{event['title']}' ({event['name']}) has stages: {event_stages}, looking for: {education_stage_id}")
+                
                 # Include event if it has the student's education stage
-                if education_stage_id in event_stages:
+                # Hoặc nếu event không có education_stages (event toàn trường)
+                if not event_stages or education_stage_id in event_stages:
                     event["education_stages"] = event_stages
                     filtered_events.append(event)
             
