@@ -40,12 +40,23 @@ def global_search(search_term: str = None):
         if not campus_id:
             campus_id = "campus-1"
         
+        # Lấy năm học đang active (is_enable = 1) theo campus
+        current_school_year = frappe.get_all(
+            "SIS School Year",
+            filters={"is_enable": 1, "campus_id": campus_id},
+            fields=["name"],
+            order_by="creation desc",
+            limit=1
+        )
+        current_school_year_id = current_school_year[0].name if current_school_year else None
+        
         result = {
             "students": [],
             "classes": [],
             "_debug": {
                 "campus_id": campus_id,
                 "search_term": search_term,
+                "current_school_year_id": current_school_year_id,
                 "logs": []
             }
         }
@@ -95,33 +106,67 @@ def global_search(search_term: str = None):
             students = frappe.db.sql(sql_query, params, as_dict=True)
             result["_debug"]["logs"].append(f"Found {len(students)} students from DB")
             
-            # Lấy ảnh học sinh từ SIS Photo - ưu tiên ảnh mới nhất theo creation
+            # Lấy ảnh học sinh từ SIS Photo - ưu tiên ảnh theo năm học hiện tại
             if students:
                 student_ids_for_photos = [s.get('name') for s in students if s.get('name')]
-                photos = frappe.db.sql("""
-                    SELECT 
-                        student_id,
-                        photo,
-                        creation
-                    FROM `tabSIS Photo`
-                    WHERE student_id IN %(student_ids)s
-                        AND type = 'student'
-                        AND status = 'Active'
-                    ORDER BY creation DESC
-                """, {"student_ids": student_ids_for_photos}, as_dict=True)
-                
                 photo_map = {}
-                for photo in photos:
-                    student_id = photo.get('student_id')
-                    # Chỉ lấy ảnh đầu tiên (mới nhất) cho mỗi học sinh
-                    if student_id and student_id not in photo_map:
-                        photo_url = photo.get('photo')
-                        if photo_url:
-                            if photo_url.startswith('/files/'):
-                                photo_url = frappe.utils.get_url(photo_url)
-                            elif not photo_url.startswith('http'):
-                                photo_url = frappe.utils.get_url('/files/' + photo_url)
-                            photo_map[student_id] = photo_url
+                
+                # Bước 1: Lấy ảnh theo năm học hiện tại (nếu có)
+                if current_school_year_id:
+                    photos_current_year = frappe.db.sql("""
+                        SELECT 
+                            student_id,
+                            photo
+                        FROM `tabSIS Photo`
+                        WHERE student_id IN %(student_ids)s
+                            AND type = 'student'
+                            AND status = 'Active'
+                            AND school_year_id = %(school_year_id)s
+                        ORDER BY creation DESC
+                    """, {
+                        "student_ids": student_ids_for_photos,
+                        "school_year_id": current_school_year_id
+                    }, as_dict=True)
+                    
+                    for photo in photos_current_year:
+                        student_id = photo.get('student_id')
+                        if student_id and student_id not in photo_map:
+                            photo_url = photo.get('photo')
+                            if photo_url:
+                                if photo_url.startswith('/files/'):
+                                    photo_url = frappe.utils.get_url(photo_url)
+                                elif not photo_url.startswith('http'):
+                                    photo_url = frappe.utils.get_url('/files/' + photo_url)
+                                photo_map[student_id] = photo_url
+                    
+                    result["_debug"]["logs"].append(f"Found {len(photo_map)} photos for current school year {current_school_year_id}")
+                
+                # Bước 2: Fallback - lấy ảnh mới nhất cho các học sinh chưa có ảnh năm học hiện tại
+                students_without_photo = [sid for sid in student_ids_for_photos if sid not in photo_map]
+                if students_without_photo:
+                    photos_fallback = frappe.db.sql("""
+                        SELECT 
+                            student_id,
+                            photo
+                        FROM `tabSIS Photo`
+                        WHERE student_id IN %(student_ids)s
+                            AND type = 'student'
+                            AND status = 'Active'
+                        ORDER BY creation DESC
+                    """, {"student_ids": students_without_photo}, as_dict=True)
+                    
+                    for photo in photos_fallback:
+                        student_id = photo.get('student_id')
+                        if student_id and student_id not in photo_map:
+                            photo_url = photo.get('photo')
+                            if photo_url:
+                                if photo_url.startswith('/files/'):
+                                    photo_url = frappe.utils.get_url(photo_url)
+                                elif not photo_url.startswith('http'):
+                                    photo_url = frappe.utils.get_url('/files/' + photo_url)
+                                photo_map[student_id] = photo_url
+                    
+                    result["_debug"]["logs"].append(f"Fallback: found {len(photos_fallback)} additional photos")
                 
                 for student in students:
                     student_id = student.get('name')
