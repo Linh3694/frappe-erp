@@ -95,24 +95,25 @@ def global_search(search_term: str = None):
             students = frappe.db.sql(sql_query, params, as_dict=True)
             result["_debug"]["logs"].append(f"Found {len(students)} students from DB")
             
-            # Enrich with photos from SIS Photo
+            # Lấy ảnh học sinh từ SIS Photo - ưu tiên ảnh mới nhất theo creation
             if students:
                 student_ids_for_photos = [s.get('name') for s in students if s.get('name')]
                 photos = frappe.db.sql("""
                     SELECT 
                         student_id,
                         photo,
-                        upload_date
+                        creation
                     FROM `tabSIS Photo`
                     WHERE student_id IN %(student_ids)s
                         AND type = 'student'
                         AND status = 'Active'
-                    ORDER BY upload_date DESC
+                    ORDER BY creation DESC
                 """, {"student_ids": student_ids_for_photos}, as_dict=True)
                 
                 photo_map = {}
                 for photo in photos:
                     student_id = photo.get('student_id')
+                    # Chỉ lấy ảnh đầu tiên (mới nhất) cho mỗi học sinh
                     if student_id and student_id not in photo_map:
                         photo_url = photo.get('photo')
                         if photo_url:
