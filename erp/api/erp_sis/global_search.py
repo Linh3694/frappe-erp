@@ -8,9 +8,12 @@ from erp.utils.api_response import (
 )
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def global_search(search_term: str = None):
-    """Global search for both students and classes - single unified endpoint"""
+    """Global search for both students and classes - single unified endpoint
+    
+    Yêu cầu đăng nhập để lấy campus_id từ user context
+    """
     try:
         # Normalize parameters
         form = frappe.local.form_dict or {}
