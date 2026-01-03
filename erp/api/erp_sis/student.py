@@ -1274,35 +1274,54 @@ def get_student_profile():
         # Get student basic info
         student = frappe.get_doc("CRM Student", student_id)
         
-        # Get student photo
-        student_photo = None
-        try:
-            photos = frappe.get_all(
-                "SIS Photo",
-                filters={
-                    "student_id": student.name,
-                    "type": "student",
-                    "status": "Active"
-                },
-                fields=["photo"],
-                order_by="creation desc",
-                limit=1
-            )
-            if photos and photos[0].get("photo"):
-                student_photo = photos[0]["photo"]
-        except Exception as photo_err:
-            frappe.logger().warning(f"Error fetching photo for student {student.name}: {str(photo_err)}")
-
-        # Determine school year to use
+        # Determine school year to use (cần xác định trước để lấy ảnh theo năm học)
         if not school_year_id:
             # Get current school year if not provided
             current_school_year = frappe.db.get_value(
                 "SIS School Year",
-                filters={"is_enable": 1},
+                filters={"is_enable": 1, "campus_id": campus_id},
                 fieldname="name"
             )
             if current_school_year:
                 school_year_id = current_school_year
+        
+        # Lấy ảnh học sinh - ưu tiên ảnh theo năm học hiện tại
+        student_photo = None
+        try:
+            # Bước 1: Lấy ảnh theo năm học (nếu có school_year_id)
+            if school_year_id:
+                photos = frappe.get_all(
+                    "SIS Photo",
+                    filters={
+                        "student_id": student.name,
+                        "type": "student",
+                        "status": "Active",
+                        "school_year_id": school_year_id
+                    },
+                    fields=["photo"],
+                    order_by="creation desc",
+                    limit=1
+                )
+                if photos and photos[0].get("photo"):
+                    student_photo = photos[0]["photo"]
+            
+            # Bước 2: Fallback - lấy ảnh mới nhất nếu không có ảnh năm học
+            if not student_photo:
+                photos = frappe.get_all(
+                    "SIS Photo",
+                    filters={
+                        "student_id": student.name,
+                        "type": "student",
+                        "status": "Active"
+                    },
+                    fields=["photo"],
+                    order_by="creation desc",
+                    limit=1
+                )
+                if photos and photos[0].get("photo"):
+                    student_photo = photos[0]["photo"]
+        except Exception as photo_err:
+            frappe.logger().warning(f"Error fetching photo for student {student.name}: {str(photo_err)}")
 
         # Build SQL query parameters
         sql_params = {"student_id": student_id}
