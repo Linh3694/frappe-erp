@@ -536,6 +536,10 @@ class TimetableImportExecutor:
 		# Xóa pattern rows có overlapping date range với range mới
 		self._delete_overlapping_pattern_rows(instance_id)
 		
+		# ⚡ NEW (2026-01-03): Xóa date_overrides trong date range mới
+		# Để tránh date_overrides cũ override pattern rows mới
+		self._delete_overlapping_date_overrides(instance_id)
+		
 		# Tạo pattern rows mới với valid_from/valid_to
 		rows_created = self._create_pattern_rows_with_date_range(instance_id, class_id, class_df)
 		frappe.logger().info(f"✅ Created {rows_created} pattern rows for {class_title}")
@@ -820,6 +824,63 @@ class TimetableImportExecutor:
 		frappe.logger().info(
 			f"✅ Processed overlapping pattern rows for range {start_date_str} → {end_date_str}"
 		)
+	
+	def _delete_overlapping_date_overrides(self, instance_id: str):
+		"""
+		⚡ NEW (2026-01-03): Xóa date_overrides trong date range mới.
+		
+		Khi upload TKB mới với date range mới, cần xóa các date_overrides cũ
+		nằm trong range đó để tránh chúng override pattern rows mới.
+		
+		Date overrides là các rows có:
+		- parentfield = 'date_overrides'
+		- date IS NOT NULL (có ngày cụ thể)
+		
+		Logic:
+		- Xóa tất cả date_overrides có date nằm trong [new_start, new_end]
+		"""
+		start_date_str = self.metadata["start_date"]
+		end_date_str = self.metadata["end_date"]
+		
+		# Đếm số rows sẽ xóa
+		count_result = frappe.db.sql("""
+			SELECT COUNT(*) as cnt
+			FROM `tabSIS Timetable Instance Row`
+			WHERE parent = %s
+			  AND parentfield = 'date_overrides'
+			  AND date BETWEEN %s AND %s
+		""", (instance_id, start_date_str, end_date_str), as_dict=True)
+		
+		override_count = count_result[0].cnt if count_result else 0
+		
+		if override_count == 0:
+			frappe.logger().info(f"ℹ️ No date_overrides to delete for instance {instance_id}")
+			return
+		
+		# Xóa teachers child table trước (foreign key constraint)
+		frappe.db.sql("""
+			DELETE t FROM `tabSIS Timetable Instance Row Teacher` t
+			INNER JOIN `tabSIS Timetable Instance Row` r ON t.parent = r.name
+			WHERE r.parent = %s
+			  AND r.parentfield = 'date_overrides'
+			  AND r.date BETWEEN %s AND %s
+		""", (instance_id, start_date_str, end_date_str))
+		
+		# Xóa date_overrides rows
+		frappe.db.sql("""
+			DELETE FROM `tabSIS Timetable Instance Row`
+			WHERE parent = %s
+			  AND parentfield = 'date_overrides'
+			  AND date BETWEEN %s AND %s
+		""", (instance_id, start_date_str, end_date_str))
+		
+		frappe.logger().info(
+			f"🗑️ Deleted {override_count} date_overrides for instance {instance_id} "
+			f"in range {start_date_str} → {end_date_str}"
+		)
+		
+		# Log để tracking
+		self.logs.append(f"Đã xóa {override_count} date_overrides cũ trong khoảng {start_date_str} → {end_date_str}")
 	
 	def _duplicate_pattern_row(self, source_row_name: str, instance_id: str, 
 	                          valid_from: str, valid_to: str):
