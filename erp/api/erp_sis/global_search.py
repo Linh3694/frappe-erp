@@ -15,10 +15,23 @@ def global_search(search_term: str = None):
     Yêu cầu đăng nhập để lấy campus_id từ user context
     """
     try:
-        # Normalize parameters
+        # Normalize parameters - hỗ trợ cả form-data và JSON body
         form = frappe.local.form_dict or {}
-        if 'search_term' in form and (search_term is None or str(search_term).strip() == ''):
-            search_term = form.get('search_term')
+        
+        # Nếu chưa có search_term từ function args, thử lấy từ form_dict
+        if search_term is None or str(search_term).strip() == '':
+            if 'search_term' in form:
+                search_term = form.get('search_term')
+        
+        # Nếu vẫn chưa có, thử parse từ JSON body (khi gửi Content-Type: application/json)
+        if search_term is None or str(search_term).strip() == '':
+            try:
+                if frappe.request and frappe.request.data:
+                    json_data = json.loads(frappe.request.data)
+                    if isinstance(json_data, dict) and 'search_term' in json_data:
+                        search_term = json_data.get('search_term')
+            except (json.JSONDecodeError, AttributeError):
+                pass  # Không phải JSON hoặc không có data
 
         frappe.logger().info(f"global_search called with search_term: '{search_term}'")
         
