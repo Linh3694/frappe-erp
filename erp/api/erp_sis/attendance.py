@@ -701,7 +701,7 @@ def preview_homeroom_attendance_report(date=None):
 			"formatted_date": formatted_date,
 			"attendance_data": attendance_data,
 			"email_subject": f"[WSHN] Báo cáo điểm danh chủ nhiệm ngày {formatted_date}",
-			"email_recipients": ["linh.nguyenhai@wellspring.edu.vn", "hieu.nguyenduy@wellspring.edu.vn", "le.vuthinhat@wellspring.edu.vn"],
+			"email_recipients": ["linh.nguyenhai@wellspring.edu.vn", "hieu.nguyenduy@wellspring.edu.vn", "le.vuthinhat@wellspring.edu.vn", "son.nguyenvinh@wellspring.edu.vn", "nga.lethuy@wellspring.edu.vn"],
 			"email_content_html": email_content,
 			"email_content_preview": email_content.replace('<br>', '\n').replace('</p>', '\n\n').replace('<li>', '• ').replace('</li>', '\n')[:500] + "..."
 		}, "Preview generated successfully")
@@ -792,7 +792,7 @@ def send_homeroom_attendance_report(date=None):
 			formatted_date = date
 
 		# Send email via email service
-		recipients = ["linh.nguyenhai@wellspring.edu.vn", "hieu.nguyenduy@wellspring.edu.vn", "le.vuthinhat@wellspring.edu.vn"]
+		recipients = ["linh.nguyenhai@wellspring.edu.vn", "hieu.nguyenduy@wellspring.edu.vn", "le.vuthinhat@wellspring.edu.vn", "son.nguyenvinh@wellspring.edu.vn", "nga.lethuy@wellspring.edu.vn"]
 		email_result = send_email_via_service(
 			to=recipients,
 			subject=f"[WSHN] Báo cáo điểm danh chủ nhiệm ngày {formatted_date}",
@@ -1235,7 +1235,7 @@ def test_homeroom_report_console(date=None):
 			formatted_date = date
 
 		print(f"   - Subject: [WSHN] Báo cáo điểm danh chủ nhiệm ngày {formatted_date}")
-		print(f"   - Recipients: linh.nguyenhai@wellspring.edu.vn, hieu.nguyenduy@wellspring.edu.vn, le.vuthinhat@wellspring.edu.vn")
+		print(f"   - Recipients: linh.nguyenhai@wellspring.edu.vn, hieu.nguyenduy@wellspring.edu.vn, le.vuthinhat@wellspring.edu.vn, son.nguyenvinh@wellspring.edu.vn, nga.lethuy@wellspring.edu.vn")
 		print(f"   - Content length: {len(email_content)} characters")
 		print()
 
