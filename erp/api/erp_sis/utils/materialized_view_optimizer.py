@@ -399,11 +399,14 @@ def bulk_upsert_teacher_timetable(entries: List[Dict]):
 		values_with_names = []
 		params_with_names = []
 		for val_idx in range(0, len(params), 8):  # 8 fields per entry
-			# Generate unique name: teacher_date_column
+			# ⚡ FIX (2026-01-05): Thêm instance_id vào name để tránh conflict giữa các classes
+			# Trước: teacher_date_column (conflict khi 2 classes cùng teacher+date+column)
+			# Sau: instance_teacher_date_column (unique per instance)
 			teacher_id = params[val_idx]
 			date_val = params[val_idx + 2]
 			column_id = params[val_idx + 4]
-			name = f"{teacher_id}_{date_val}_{column_id}"
+			instance_id = params[val_idx + 7]  # timetable_instance_id
+			name = f"{instance_id}_{teacher_id}_{date_val}_{column_id}"
 			
 			# Prepend name to the value list
 			params_with_names.extend([
