@@ -116,13 +116,24 @@ def sync_teacher_timetable_for_rows(rows: List[Dict]) -> int:
 	"""
 	Sync SIS Teacher Timetable cho specific rows.
 	
+	⚡ FIX (2026-01-05): Xóa entries cũ trước khi thêm mới
+	
 	Logic:
-	1. For pattern rows (date=NULL): Generate entries for all matching dates
-	2. For override rows (date!=NULL): Generate entry for specific date
+	1. XÓA entries cũ cho các rows đang sync (để remove orphaned entries)
+	2. For pattern rows (date=NULL): Generate entries for all matching dates
+	3. For override rows (date!=NULL): Generate entry for specific date
 	
 	Returns:
 		int: Number of entries processed
 	"""
+	if not rows:
+		return 0
+	
+	# ⚡ STEP 1: Xóa entries cũ cho các rows đang sync
+	# Điều này đảm bảo orphaned entries (teachers đã bị remove) được xóa
+	_delete_old_entries_for_rows(rows)
+	
+	# STEP 2: Tạo entries mới
 	entries_to_upsert = []
 	
 	for row in rows:
@@ -161,6 +172,48 @@ def sync_teacher_timetable_for_rows(rows: List[Dict]) -> int:
 		bulk_upsert_teacher_timetable(entries_to_upsert)
 	
 	return len(entries_to_upsert)
+
+
+def _delete_old_entries_for_rows(rows: List[Dict]):
+	"""
+	⚡ NEW (2026-01-05): Xóa entries cũ trong Teacher Timetable cho các rows đang sync.
+	
+	Điều này đảm bảo:
+	1. Orphaned entries (teachers đã bị remove khỏi row) được xóa
+	2. Entries được recreate fresh từ current teachers
+	
+	Logic:
+	- Pattern rows (date=NULL): Xóa entries cho day_of_week + timetable_column_id trong range
+	- Override rows (date!=NULL): Xóa entries cho specific date + timetable_column_id
+	"""
+	if not rows:
+		return
+	
+	# Group rows by instance for batch delete
+	for row in rows:
+		instance_id = row.parent
+		day_of_week = row.day_of_week
+		column_id = row.timetable_column_id
+		
+		if row.date:
+			# Override row: xóa entries cho specific date
+			frappe.db.sql("""
+				DELETE FROM `tabSIS Teacher Timetable`
+				WHERE timetable_instance_id = %s
+				  AND day_of_week = %s
+				  AND timetable_column_id = %s
+				  AND date = %s
+			""", (instance_id, day_of_week, column_id, row.date))
+		else:
+			# Pattern row: xóa entries cho day_of_week + column trong range
+			# Chỉ xóa entries trong date range của instance
+			frappe.db.sql("""
+				DELETE FROM `tabSIS Teacher Timetable`
+				WHERE timetable_instance_id = %s
+				  AND day_of_week = %s
+				  AND timetable_column_id = %s
+				  AND date BETWEEN %s AND %s
+			""", (instance_id, day_of_week, column_id, row.start_date, row.end_date))
 
 
 def sync_student_timetable_for_rows(rows: List[Dict]) -> int:
