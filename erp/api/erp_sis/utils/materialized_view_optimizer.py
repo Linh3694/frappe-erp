@@ -193,11 +193,16 @@ def _delete_old_entries_for_rows(rows: List[Dict]):
 	- Override rows (date!=NULL): Xóa entries cho specific date + timetable_column_id
 	
 	⚡ FIX (2026-01-05): Dùng valid_from/valid_to nếu có, nếu không thì dùng instance range
+	⚡ FIX (2026-01-05 v2): Deduplicate delete keys để tránh xóa entries của row khác trong cùng batch
 	"""
 	if not rows:
 		return
 	
-	# Group rows by instance for batch delete
+	# ⚡ FIX: Thu thập unique delete keys trước để tránh xóa trùng lặp
+	# Khi có 2 rows cùng (instance, day, column, range) nhưng khác teachers,
+	# chỉ xóa MỘT LẦN thay vì xóa 2 lần (lần 2 sẽ xóa entries của row 1)
+	processed_keys = set()
+	
 	for row in rows:
 		instance_id = row.parent
 		day_of_week = row.day_of_week
@@ -205,6 +210,19 @@ def _delete_old_entries_for_rows(rows: List[Dict]):
 		
 		if row.date:
 			# Override row: xóa entries cho specific date
+			delete_key = (instance_id, day_of_week, column_id, str(row.date), str(row.date))
+		else:
+			# Pattern row: xóa entries cho day_of_week + column trong range
+			effective_start = row.get('valid_from') or row.start_date
+			effective_end = row.get('valid_to') or row.end_date
+			delete_key = (instance_id, day_of_week, column_id, str(effective_start), str(effective_end))
+		
+		# ⚡ FIX: Chỉ xóa nếu chưa xóa key này
+		if delete_key in processed_keys:
+			continue
+		processed_keys.add(delete_key)
+		
+		if row.date:
 			frappe.db.sql("""
 				DELETE FROM `tabSIS Teacher Timetable`
 				WHERE timetable_instance_id = %s
@@ -213,8 +231,6 @@ def _delete_old_entries_for_rows(rows: List[Dict]):
 				  AND date = %s
 			""", (instance_id, day_of_week, column_id, row.date))
 		else:
-			# Pattern row: xóa entries cho day_of_week + column trong range
-			# ⚡ FIX: Dùng valid_from/valid_to nếu có
 			effective_start = row.get('valid_from') or row.start_date
 			effective_end = row.get('valid_to') or row.end_date
 			
