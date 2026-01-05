@@ -1461,14 +1461,14 @@ def daily_homeroom_attendance_report():
 				"skipped": True
 			}
 		
-		# Get yesterday's date for the report
-		from datetime import datetime, timedelta
-		yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+		# Get today's date for the report (gửi báo cáo ngày hiện tại)
+		from datetime import datetime
+		today = datetime.now().strftime('%Y-%m-%d')
 
-		frappe.logger().info(f"🏫 Starting daily homeroom attendance report for {yesterday}")
+		frappe.logger().info(f"🏫 Starting daily homeroom attendance report for {today}")
 
 		# Call the report endpoint
-		result = send_homeroom_attendance_report(date=yesterday)
+		result = send_homeroom_attendance_report(date=today)
 
 		if result.get('success'):
 			frappe.logger().info("✅ Daily homeroom attendance report sent successfully")
