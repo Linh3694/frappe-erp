@@ -361,11 +361,12 @@ def bulk_upsert_teacher_timetable(entries: List[Dict]):
 		return
 	
 	# Group entries by unique key to deduplicate
+	# ⚡ FIX (2026-01-05): Thêm timetable_instance_id vào key để tránh conflict giữa các instances
 	by_key = {}
 	for entry in entries:
 		key = (
+			entry["timetable_instance_id"],
 			entry["teacher_id"],
-			entry["class_id"],
 			entry["date"],
 			entry["timetable_column_id"]
 		)
