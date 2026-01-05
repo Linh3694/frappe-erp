@@ -20,6 +20,31 @@ from erp.utils.api_response import (
 from .project import get_user_project_role, check_project_access, log_project_change
 
 
+def get_request_param(param_name):
+    """Helper function để lấy parameter từ request - hỗ trợ cả JSON body và query params"""
+    # 1. Try JSON payload (POST body)
+    if frappe.request.data:
+        try:
+            json_data = json.loads(frappe.request.data)
+            if json_data and param_name in json_data:
+                return json_data[param_name]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    
+    # 2. Try form_dict
+    value = frappe.local.form_dict.get(param_name)
+    if value:
+        return value
+    
+    # 3. Try query params
+    if hasattr(frappe.local, 'request') and hasattr(frappe.local.request, 'args'):
+        value = frappe.local.request.args.get(param_name)
+        if value:
+            return value
+    
+    return None
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def invite_member():
     """
@@ -268,8 +293,8 @@ def accept_invitation():
     try:
         user = frappe.session.user
         
-        # Lấy invitation_id từ query params
-        invitation_id = frappe.form_dict.get("invitation_id")
+        # Lấy invitation_id từ request
+        invitation_id = get_request_param("invitation_id")
         if not invitation_id:
             return error_response("invitation_id là bắt buộc", code="MISSING_PARAMETER")
         
@@ -355,8 +380,8 @@ def decline_invitation():
     try:
         user = frappe.session.user
         
-        # Lấy invitation_id từ query params
-        invitation_id = frappe.form_dict.get("invitation_id")
+        # Lấy invitation_id từ request
+        invitation_id = get_request_param("invitation_id")
         if not invitation_id:
             return error_response("invitation_id là bắt buộc", code="MISSING_PARAMETER")
         
@@ -403,8 +428,8 @@ def cancel_invitation():
     try:
         user = frappe.session.user
         
-        # Lấy invitation_id từ query params
-        invitation_id = frappe.form_dict.get("invitation_id")
+        # Lấy invitation_id từ request
+        invitation_id = get_request_param("invitation_id")
         if not invitation_id:
             return error_response("invitation_id là bắt buộc", code="MISSING_PARAMETER")
         
@@ -451,8 +476,8 @@ def leave_project():
     try:
         user = frappe.session.user
         
-        # Lấy project_id từ query params
-        project_id = frappe.form_dict.get("project_id")
+        # Lấy project_id từ request
+        project_id = get_request_param("project_id")
         if not project_id:
             return error_response("project_id là bắt buộc", code="MISSING_PARAMETER")
         
@@ -509,9 +534,9 @@ def remove_member():
     try:
         user = frappe.session.user
         
-        # Lấy params từ query params
-        project_id = frappe.form_dict.get("project_id")
-        member_user_id = frappe.form_dict.get("member_user_id")
+        # Lấy params từ request
+        project_id = get_request_param("project_id")
+        member_user_id = get_request_param("member_user_id")
         
         if not project_id or not member_user_id:
             return error_response("project_id và member_user_id là bắt buộc", code="MISSING_PARAMETER")
@@ -569,9 +594,9 @@ def transfer_ownership():
     try:
         user = frappe.session.user
         
-        # Lấy params từ query params
-        project_id = frappe.form_dict.get("project_id")
-        new_owner_id = frappe.form_dict.get("new_owner_id")
+        # Lấy params từ request
+        project_id = get_request_param("project_id")
+        new_owner_id = get_request_param("new_owner_id")
         
         if not project_id or not new_owner_id:
             return error_response("project_id và new_owner_id là bắt buộc", code="MISSING_PARAMETER")
