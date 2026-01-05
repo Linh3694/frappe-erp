@@ -36,11 +36,13 @@ def sync_for_rows(row_ids: List[str]):
 	
 	# Get row details với instance info
 	# ⚡ FIX: Also select teacher_1_id, teacher_2_id for backward compatibility
+	# ⚡ FIX (2026-01-05): Thêm valid_from, valid_to cho pattern rows với date range
 	rows = frappe.db.sql("""
 		SELECT 
 			r.name, r.parent, r.date, r.day_of_week,
 			r.timetable_column_id, r.subject_id, r.room_id,
 			r.teacher_1_id, r.teacher_2_id,
+			r.valid_from, r.valid_to,
 			i.class_id, i.start_date, i.end_date, i.campus_id
 		FROM `tabSIS Timetable Instance Row` r
 		INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
@@ -142,11 +144,15 @@ def sync_teacher_timetable_for_rows(rows: List[Dict]) -> int:
 			# Override row: specific date only
 			dates = [row.date]
 		else:
-			# Pattern row: all dates matching day_of_week in instance range
+			# Pattern row: all dates matching day_of_week
+			# ⚡ FIX (2026-01-05): Dùng valid_from/valid_to nếu có, nếu không thì dùng instance range
+			effective_start = row.get('valid_from') or row.start_date
+			effective_end = row.get('valid_to') or row.end_date
+			
 			dates = calculate_all_dates_for_pattern_row(
 				row.day_of_week,
-				row.start_date,
-				row.end_date
+				effective_start,
+				effective_end
 			)
 		
 		# Create entries for each teacher (from child table)
@@ -185,6 +191,8 @@ def _delete_old_entries_for_rows(rows: List[Dict]):
 	Logic:
 	- Pattern rows (date=NULL): Xóa entries cho day_of_week + timetable_column_id trong range
 	- Override rows (date!=NULL): Xóa entries cho specific date + timetable_column_id
+	
+	⚡ FIX (2026-01-05): Dùng valid_from/valid_to nếu có, nếu không thì dùng instance range
 	"""
 	if not rows:
 		return
@@ -206,14 +214,17 @@ def _delete_old_entries_for_rows(rows: List[Dict]):
 			""", (instance_id, day_of_week, column_id, row.date))
 		else:
 			# Pattern row: xóa entries cho day_of_week + column trong range
-			# Chỉ xóa entries trong date range của instance
+			# ⚡ FIX: Dùng valid_from/valid_to nếu có
+			effective_start = row.get('valid_from') or row.start_date
+			effective_end = row.get('valid_to') or row.end_date
+			
 			frappe.db.sql("""
 				DELETE FROM `tabSIS Teacher Timetable`
 				WHERE timetable_instance_id = %s
 				  AND day_of_week = %s
 				  AND timetable_column_id = %s
 				  AND date BETWEEN %s AND %s
-			""", (instance_id, day_of_week, column_id, row.start_date, row.end_date))
+			""", (instance_id, day_of_week, column_id, effective_start, effective_end))
 
 
 def sync_student_timetable_for_rows(rows: List[Dict]) -> int:
