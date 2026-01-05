@@ -255,11 +255,11 @@ def get_project_invitations():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def accept_invitation(invitation_id: str):
+def accept_invitation():
     """
     Chấp nhận lời mời vào project
     
-    Args:
+    Query params:
         invitation_id: ID của invitation
     
     Returns:
@@ -267,6 +267,11 @@ def accept_invitation(invitation_id: str):
     """
     try:
         user = frappe.session.user
+        
+        # Lấy invitation_id từ query params
+        invitation_id = frappe.form_dict.get("invitation_id")
+        if not invitation_id:
+            return error_response("invitation_id là bắt buộc", code="MISSING_PARAMETER")
         
         # Kiểm tra invitation tồn tại
         if not frappe.db.exists("PM Project Invitation", invitation_id):
@@ -294,6 +299,19 @@ def accept_invitation(invitation_id: str):
                 "Lời mời đã hết hạn",
                 {"expires_at": ["Lời mời này đã hết hạn"]}
             )
+        
+        # Kiểm tra user đã là member chưa (có thể đã được thêm bằng cách khác)
+        existing_member = frappe.db.exists("PM Project Member", {
+            "project_id": invitation.project_id,
+            "user_id": user
+        })
+        
+        if existing_member:
+            # User đã là member rồi, chỉ cập nhật status invitation
+            invitation.status = "accepted"
+            invitation.save()
+            frappe.db.commit()
+            return success_response(message="Bạn đã là thành viên của dự án này")
         
         # Tạo member record
         member = frappe.get_doc({
@@ -324,11 +342,11 @@ def accept_invitation(invitation_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def decline_invitation(invitation_id: str):
+def decline_invitation():
     """
     Từ chối lời mời vào project
     
-    Args:
+    Query params:
         invitation_id: ID của invitation
     
     Returns:
@@ -336,6 +354,11 @@ def decline_invitation(invitation_id: str):
     """
     try:
         user = frappe.session.user
+        
+        # Lấy invitation_id từ query params
+        invitation_id = frappe.form_dict.get("invitation_id")
+        if not invitation_id:
+            return error_response("invitation_id là bắt buộc", code="MISSING_PARAMETER")
         
         # Kiểm tra invitation tồn tại
         if not frappe.db.exists("PM Project Invitation", invitation_id):
@@ -367,11 +390,11 @@ def decline_invitation(invitation_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def cancel_invitation(invitation_id: str):
+def cancel_invitation():
     """
     Hủy lời mời (dành cho inviter hoặc owner/manager)
     
-    Args:
+    Query params:
         invitation_id: ID của invitation
     
     Returns:
@@ -379,6 +402,11 @@ def cancel_invitation(invitation_id: str):
     """
     try:
         user = frappe.session.user
+        
+        # Lấy invitation_id từ query params
+        invitation_id = frappe.form_dict.get("invitation_id")
+        if not invitation_id:
+            return error_response("invitation_id là bắt buộc", code="MISSING_PARAMETER")
         
         # Kiểm tra invitation tồn tại
         if not frappe.db.exists("PM Project Invitation", invitation_id):
@@ -410,11 +438,11 @@ def cancel_invitation(invitation_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def leave_project(project_id: str):
+def leave_project():
     """
     Rời khỏi project
     
-    Args:
+    Query params:
         project_id: ID của project
     
     Returns:
@@ -422,6 +450,11 @@ def leave_project(project_id: str):
     """
     try:
         user = frappe.session.user
+        
+        # Lấy project_id từ query params
+        project_id = frappe.form_dict.get("project_id")
+        if not project_id:
+            return error_response("project_id là bắt buộc", code="MISSING_PARAMETER")
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
@@ -462,11 +495,11 @@ def leave_project(project_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def remove_member(project_id: str, member_user_id: str):
+def remove_member():
     """
     Xóa thành viên khỏi project (chỉ owner có quyền)
     
-    Args:
+    Query params:
         project_id: ID của project
         member_user_id: User ID của member cần xóa
     
@@ -475,6 +508,13 @@ def remove_member(project_id: str, member_user_id: str):
     """
     try:
         user = frappe.session.user
+        
+        # Lấy params từ query params
+        project_id = frappe.form_dict.get("project_id")
+        member_user_id = frappe.form_dict.get("member_user_id")
+        
+        if not project_id or not member_user_id:
+            return error_response("project_id và member_user_id là bắt buộc", code="MISSING_PARAMETER")
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
@@ -515,11 +555,11 @@ def remove_member(project_id: str, member_user_id: str):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def transfer_ownership(project_id: str, new_owner_id: str):
+def transfer_ownership():
     """
     Chuyển quyền sở hữu project cho member khác
     
-    Args:
+    Query params:
         project_id: ID của project
         new_owner_id: User ID của owner mới
     
@@ -528,6 +568,13 @@ def transfer_ownership(project_id: str, new_owner_id: str):
     """
     try:
         user = frappe.session.user
+        
+        # Lấy params từ query params
+        project_id = frappe.form_dict.get("project_id")
+        new_owner_id = frappe.form_dict.get("new_owner_id")
+        
+        if not project_id or not new_owner_id:
+            return error_response("project_id và new_owner_id là bắt buộc", code="MISSING_PARAMETER")
         
         # Kiểm tra project tồn tại
         if not frappe.db.exists("PM Project", project_id):
