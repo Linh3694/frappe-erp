@@ -135,24 +135,27 @@ class TimetableImportExecutor:
 			except Exception as e:
 				raise Exception(f"Failed to sync student subjects: {str(e)}")
 			
-			# Step 3.5: ⚡ CRITICAL: Sync teachers from Subject Assignment vào pattern rows
-			# Điều này phải làm TRƯỚC khi sync materialized views
-			# Nếu không, Teacher Timetable sẽ trống vì pattern rows không có teachers
-			try:
-				self._sync_teachers_from_assignments()
-			except Exception as e:
-				frappe.logger().warning(f"Failed to sync teachers from assignments: {str(e)}")
-				# Don't fail import - teachers can be synced later via resync API
-			
-			# Step 4: Sync Teacher Timetable và Student Timetable
-			# OPTIMIZATION: Skip sync during import, run as background job instead
-			# Teacher timetable will be synced by subject assignment or manual trigger
-			try:
-				# Queue background job for async sync
-				self._queue_async_sync()
-			except Exception as e:
-				frappe.logger().warning(f"Failed to queue async sync: {str(e)}")
-				# Don't fail import if sync queueing fails
+		# Step 3.5: ⚡ CRITICAL: Sync teachers from Subject Assignment vào pattern rows
+		# Điều này sẽ:
+		# 1. Gán teachers vào pattern rows từ Subject Assignment
+		# 2. Sync Teacher Timetable entries (qua materialized_view_optimizer.sync_for_rows)
+		# Nếu không có step này, Teacher Timetable sẽ trống vì pattern rows không có teachers
+		try:
+			self._sync_teachers_from_assignments()
+		except Exception as e:
+			frappe.logger().warning(f"Failed to sync teachers from assignments: {str(e)}")
+			# Don't fail import - teachers can be synced later via resync API
+		
+		# ⚡ FIX (2026-01-05): Bỏ step 4 (_queue_async_sync)
+		# Lý do: Step 3.5 đã sync Teacher Timetable thành công qua sync_for_rows()
+		# Step 4 trước đây gọi _queue_async_sync() → sync_instance_bulk() → delete + recreate
+		# Nhưng sync_instance_bulk() có logic kiểm tra assignment khác với sync_for_rows():
+		# - sync_for_rows(): Tạo entries từ child table teachers, KHÔNG kiểm tra assignment
+		# - sync_instance_bulk(): Kiểm tra _has_assignment() trước khi tạo entry
+		# Điều này gây bug: entries bị xóa ở step 4 nhưng không được tạo lại
+		# vì actual_subject_id có thể NULL hoặc mismatch
+		# 
+		# Solution: Không cần step 4 nữa vì step 3.5 đã sync Teacher Timetable
 			
 			# Commit transaction
 			frappe.db.commit()

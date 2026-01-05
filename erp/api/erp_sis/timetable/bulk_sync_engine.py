@@ -288,14 +288,28 @@ class BulkSyncEngine:
 		return self.day_map.get(day_str, day_str)
 	
 	def _has_assignment(self, teacher_id: str, sis_subject_id: str) -> bool:
-		"""Check if teacher has assignment for subject (O(1) lookup)."""
+		"""
+		⚡ FIX (2026-01-05): Always return True - bỏ kiểm tra assignment.
+		
+		Lý do:
+		1. Teachers đã được gán vào pattern rows từ Subject Assignment thông qua sync_assignment_to_timetable()
+		2. Child table teachers đã được validate khi tạo assignment
+		3. Việc kiểm tra lại ở đây là double validation không cần thiết
+		4. BUG: Nếu SIS Subject không có actual_subject_id, hoặc assignment không match,
+		   thì teacher entries không được tạo - mặc dù teachers đã nằm trong child table
+		
+		OLD LOGIC (gây bug):
 		actual_subject_id = self.subject_map.get(sis_subject_id)
 		if not actual_subject_id:
-			return False
-		
+			return False  # ← Skip teacher nếu không có actual_subject_id
 		key = (self.class_id, actual_subject_id)
 		teachers = self.assignments_cache.get(key, set())
-		return teacher_id in teachers
+		return teacher_id in teachers  # ← Skip nếu không có trong cache
+		
+		NEW LOGIC: Nếu teacher đã nằm trong child table của pattern row, 
+		thì tạo Teacher Timetable entry - không cần kiểm tra assignment.
+		"""
+		return True
 	
 	def _is_pattern_valid_for_date(self, row: Dict, target_date: date) -> bool:
 		"""
