@@ -690,14 +690,22 @@ def get_guardian_comprehensive_data(guardian_name):
                             else:
                                 student_details["sis_photo"] = None
 
-                            # Get current class (only regular type)
+                            # Get current class (only regular type) - filter theo năm học hiện tại
+                            class_filters = {"student_id": student.name}
+                            
+                            # Thêm filter năm học hiện tại nếu có
+                            if current_school_year:
+                                class_filters["school_year_id"] = current_school_year
+                            
                             class_students = frappe.get_all("SIS Class Student",
-                                filters={"student_id": student.name},
+                                filters=class_filters,
                                 fields=["class_id", "school_year_id"],
                                 order_by="modified desc"
                             )
+                            
+                            logs.append(f"📚 Tìm lớp cho {student.name} với filters: {class_filters}, found {len(class_students)} records")
 
-                            # Find the latest regular class
+                            # Find the regular class của năm học hiện tại
                             current_class = None
                             for cs in class_students:
                                 if cs["class_id"]:
@@ -709,7 +717,8 @@ def get_guardian_comprehensive_data(guardian_name):
                                                 'school_year_id': cs["school_year_id"],
                                                 'class_doc': class_doc
                                             }
-                                            break  # Take the most recent regular class
+                                            logs.append(f"✅ Tìm thấy lớp regular: {cs['class_id']} cho năm học {cs['school_year_id']}")
+                                            break  # Lấy lớp regular đầu tiên của năm học hiện tại
                                     except:
                                         continue
 
