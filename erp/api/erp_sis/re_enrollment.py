@@ -9,6 +9,9 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, getdate, now
 import json
+import os
+import requests
+import uuid
 from erp.utils.api_response import (
     validation_error_response, 
     list_response, 
@@ -17,6 +20,9 @@ from erp.utils.api_response import (
     single_item_response,
     not_found_response
 )
+
+# URL pdf-service (có thể cấu hình trong site_config.json)
+PDF_SERVICE_URL = frappe.conf.get("pdf_service_url", "http://172.16.20.113:5020")
 
 
 def _check_admin_permission():
@@ -164,6 +170,7 @@ def get_config(config_id=None):
                 "start_date": str(config.start_date) if config.start_date else None,
                 "end_date": str(config.end_date) if config.end_date else None,
                 "service_document": config.service_document,
+                "service_document_images": json.loads(config.service_document_images) if config.service_document_images else [],
                 "agreement_text": config.agreement_text,
                 "discounts": discounts,
                 "created_by": config.created_by,
@@ -209,6 +216,16 @@ def create_config():
                     {field: [f"Trường {field} là bắt buộc"]}
                 )
         
+        # Xử lý service_document_images
+        service_document_images = data.get('service_document_images')
+        if service_document_images and isinstance(service_document_images, list):
+            service_document_images = json.dumps(service_document_images)
+        elif service_document_images and isinstance(service_document_images, str):
+            # Đã là JSON string rồi
+            pass
+        else:
+            service_document_images = None
+        
         # Tạo document
         config_doc = frappe.get_doc({
             "doctype": "SIS Re-enrollment Config",
@@ -219,6 +236,7 @@ def create_config():
             "start_date": data['start_date'],
             "end_date": data['end_date'],
             "service_document": data.get('service_document'),
+            "service_document_images": service_document_images,
             "agreement_text": data.get('agreement_text')
         })
         
@@ -297,6 +315,16 @@ def update_config():
         for field in update_fields:
             if field in data:
                 config_doc.set(field, data[field])
+        
+        # Xử lý riêng service_document_images vì cần convert từ list sang JSON string
+        if 'service_document_images' in data:
+            service_document_images = data['service_document_images']
+            if isinstance(service_document_images, list):
+                config_doc.service_document_images = json.dumps(service_document_images)
+            elif isinstance(service_document_images, str):
+                config_doc.service_document_images = service_document_images
+            else:
+                config_doc.service_document_images = None
         
         # Update bảng ưu đãi nếu có
         if 'discounts' in data:
@@ -917,6 +945,210 @@ def export_submissions():
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
         frappe.log_error(frappe.get_traceback(), "Admin Export Submissions Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+# ==================== UPLOAD PDF API ====================
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def upload_service_document():
+    """
+    Upload file PDF dịch vụ học sinh và convert sang ảnh.
+    
+    POST body (multipart/form-data):
+    {
+        "config_id": "SIS-REENROLL-CFG-00001" (optional - nếu muốn update config sau khi upload),
+        "file": <PDF file>
+    }
+    
+    Trả về:
+    {
+        "success": true,
+        "data": {
+            "file_url": "/files/...",
+            "custom_name": "re-enrollment-xxxx",
+            "images": ["url1", "url2", ...]
+        }
+    }
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy config_id nếu có
+        data = frappe.request.form
+        config_id = data.get('config_id')
+        
+        logs.append(f"Upload PDF cho config: {config_id or 'new'}")
+        
+        # Kiểm tra có file không
+        if not frappe.request.files:
+            return validation_error_response(
+                "Thiếu file PDF",
+                {"file": ["Vui lòng chọn file PDF để upload"]}
+            )
+        
+        # Lấy file từ request
+        file_obj = None
+        for file_key, f in frappe.request.files.items():
+            if file_key == 'file':
+                file_obj = f
+                break
+        
+        if not file_obj:
+            return validation_error_response(
+                "Thiếu file PDF",
+                {"file": ["Vui lòng chọn file PDF để upload"]}
+            )
+        
+        # Kiểm tra file là PDF
+        filename = file_obj.filename
+        if not filename.lower().endswith('.pdf'):
+            return validation_error_response(
+                "Chỉ chấp nhận file PDF",
+                {"file": ["Vui lòng upload file có định dạng PDF"]}
+            )
+        
+        logs.append(f"File: {filename}")
+        
+        # Đọc nội dung file
+        file_content = file_obj.stream.read()
+        file_obj.stream.seek(0)  # Reset để có thể đọc lại
+        
+        # Tạo custom name unique
+        custom_name = f"re-enrollment-{uuid.uuid4().hex[:8]}"
+        
+        logs.append(f"Custom name: {custom_name}")
+        
+        # 1. Lưu file vào Frappe
+        file_doc = frappe.get_doc({
+            "doctype": "File",
+            "file_name": filename,
+            "folder": "Home/Attachments",
+            "content": file_content,
+            "is_private": 0  # Public để dễ truy cập
+        })
+        file_doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        file_url = file_doc.file_url
+        logs.append(f"Saved file: {file_url}")
+        
+        # 2. Gọi PDF Service để convert sang ảnh
+        images = []
+        try:
+            # Upload file đến pdf-service
+            pdf_service_url = frappe.conf.get("pdf_service_url", "http://172.16.20.113:5020")
+            
+            # Reset stream để upload
+            file_obj.stream.seek(0)
+            
+            upload_response = requests.post(
+                f"{pdf_service_url}/api/pdfs/upload-pdf",
+                files={"pdfFile": (filename, file_obj.stream, "application/pdf")},
+                data={"customName": custom_name, "uploader": frappe.session.user},
+                timeout=120  # 2 phút cho convert
+            )
+            
+            if upload_response.status_code == 200:
+                upload_result = upload_response.json()
+                logs.append(f"PDF Service upload: {json.dumps(upload_result)}")
+                
+                # Lấy danh sách ảnh
+                images_response = requests.get(
+                    f"{pdf_service_url}/api/pdfs/get-images/{custom_name}",
+                    timeout=30
+                )
+                
+                if images_response.status_code == 200:
+                    images_result = images_response.json()
+                    images = images_result.get("images", [])
+                    logs.append(f"Got {len(images)} images from PDF")
+                else:
+                    logs.append(f"Failed to get images: {images_response.status_code}")
+            else:
+                logs.append(f"PDF Service error: {upload_response.status_code} - {upload_response.text}")
+                
+        except requests.exceptions.RequestException as e:
+            # PDF service không chạy hoặc lỗi mạng
+            logs.append(f"PDF Service unavailable: {str(e)}")
+            # Không throw lỗi, vẫn lưu file nhưng không có ảnh
+        
+        # 3. Nếu có config_id, update config
+        if config_id and frappe.db.exists("SIS Re-enrollment Config", config_id):
+            config_doc = frappe.get_doc("SIS Re-enrollment Config", config_id)
+            config_doc.service_document = file_url
+            config_doc.service_document_images = json.dumps(images) if images else None
+            config_doc.save()
+            frappe.db.commit()
+            logs.append(f"Updated config {config_id}")
+        
+        return success_response(
+            data={
+                "file_url": file_url,
+                "custom_name": custom_name,
+                "images": images,
+                "image_count": len(images)
+            },
+            message=f"Upload thành công, đã convert thành {len(images)} ảnh" if images else "Upload thành công (chưa convert ảnh)",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Upload Service Document Error")
+        return error_response(
+            message=f"Lỗi khi upload file: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def get_service_document_images(config_id=None):
+    """
+    Lấy danh sách ảnh từ service document của một config.
+    """
+    logs = []
+    
+    try:
+        if not config_id:
+            config_id = frappe.request.args.get('config_id')
+        
+        if not config_id:
+            return validation_error_response(
+                "Thiếu config_id",
+                {"config_id": ["Config ID là bắt buộc"]}
+            )
+        
+        if not frappe.db.exists("SIS Re-enrollment Config", config_id):
+            return not_found_response("Không tìm thấy cấu hình")
+        
+        config = frappe.get_doc("SIS Re-enrollment Config", config_id)
+        
+        images = []
+        if config.service_document_images:
+            try:
+                images = json.loads(config.service_document_images)
+            except:
+                images = []
+        
+        return success_response(
+            data={
+                "service_document": config.service_document,
+                "images": images,
+                "image_count": len(images)
+            },
+            message="Lấy danh sách ảnh thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
         return error_response(
             message=f"Lỗi: {str(e)}",
             logs=logs
