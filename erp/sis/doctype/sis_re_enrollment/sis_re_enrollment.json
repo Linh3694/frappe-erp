@@ -32,6 +32,7 @@
   "selected_discount_id",
   "selected_discount_name",
   "selected_discount_deadline",
+  "selected_discount_percent",
   "column_break_decision",
   "not_re_enroll_reason",
   "agreement_section",
@@ -161,6 +162,14 @@
    "read_only": 1,
    "depends_on": "eval:doc.decision=='re_enroll'",
    "description": "Hạn ưu đãi tại thời điểm nộp đơn"
+  },
+  {
+   "fieldname": "selected_discount_percent",
+   "fieldtype": "Float",
+   "label": "% giảm giá",
+   "read_only": 1,
+   "depends_on": "eval:doc.decision=='re_enroll'",
+   "description": "Phần trăm giảm giá dựa trên phương thức thanh toán"
   },
   {
    "fieldname": "column_break_decision",

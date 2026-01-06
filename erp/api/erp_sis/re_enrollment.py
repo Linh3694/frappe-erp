@@ -684,7 +684,7 @@ def get_submissions():
                 re.name, re.config_id, re.student_id, re.student_name, re.student_code,
                 re.guardian_id, re.guardian_name, re.current_class, re.campus_id,
                 re.decision, re.payment_type, re.not_re_enroll_reason,
-                re.payment_status, re.selected_discount_id, re.selected_discount_name,
+                re.payment_status, re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
                 re.submitted_at, re.modified_by_admin, re.admin_modified_at
             FROM `tabSIS Re-enrollment` re
             WHERE {where_clause}
@@ -863,10 +863,16 @@ def update_submission():
         if data.get('selected_discount_id') and data.get('decision') == 're_enroll':
             # Lấy config để tìm thông tin discount
             config = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
+            payment_type = data.get('payment_type') or submission.payment_type
             for discount in config.discounts:
                 if discount.name == data.get('selected_discount_id'):
                     submission.selected_discount_name = discount.description
                     submission.selected_discount_deadline = discount.deadline
+                    # Lưu % giảm dựa trên payment_type
+                    if payment_type == 'annual':
+                        submission.selected_discount_percent = discount.annual_discount
+                    else:
+                        submission.selected_discount_percent = discount.semester_discount
                     break
         
         # Xử lý notes - clear và thêm mới
@@ -881,11 +887,25 @@ def update_submission():
             
             # Add new notes
             for note in notes_data:
+                # Convert ISO datetime to MySQL format nếu cần
+                created_at = note.get('created_at')
+                if created_at:
+                    try:
+                        # Parse ISO format và convert sang MySQL format
+                        from datetime import datetime
+                        if 'T' in str(created_at):
+                            dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            created_at = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        created_at = now()
+                else:
+                    created_at = now()
+                
                 submission.append("notes", {
                     "note": note.get('note'),
                     "created_by_user": note.get('created_by_user') or current_user,
                     "created_by_name": note.get('created_by_name') or current_user_name,
-                    "created_at": note.get('created_at') or now()
+                    "created_at": created_at
                 })
         
         # Clear các field không cần thiết dựa trên decision
