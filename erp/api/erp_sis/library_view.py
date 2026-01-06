@@ -123,14 +123,15 @@ def list_public_titles(limit: int = 20, page: int = 1):
     """
     Lấy danh sách tất cả đầu sách (public).
     URL: /api/method/erp.api.erp_sis.library_view.list_public_titles
+    Nếu limit = 0 hoặc < 0, sẽ lấy tất cả sách (không giới hạn)
     """
     try:
         limit = int(limit)
         page = int(page)
         
-        titles = frappe.get_all(
-            TITLE_DTYPE,
-            fields=[
+        # Nếu limit = 0 hoặc < 0, lấy tất cả sách (không set limit)
+        query_params = {
+            "fields": [
                 "name",
                 "title",
                 "library_code",
@@ -146,10 +147,15 @@ def list_public_titles(limit: int = 20, page: int = 1):
                 "description",
                 "introduction",
             ],
-            limit_start=(page - 1) * limit,
-            limit=limit,
-            order_by="modified desc",
-        )
+            "order_by": "modified desc",
+        }
+        
+        # Chỉ thêm pagination nếu limit > 0
+        if limit > 0:
+            query_params["limit_start"] = (page - 1) * limit
+            query_params["limit"] = limit
+        
+        titles = frappe.get_all(TITLE_DTYPE, **query_params)
         
         # Transform data
         result = []
