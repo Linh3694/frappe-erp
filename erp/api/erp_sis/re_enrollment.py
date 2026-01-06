@@ -684,7 +684,8 @@ def get_submissions():
                 re.name, re.config_id, re.student_id, re.student_name, re.student_code,
                 re.guardian_id, re.guardian_name, re.current_class, re.campus_id,
                 re.decision, re.payment_type, re.not_re_enroll_reason,
-                re.status, re.submitted_at, re.modified_by_admin, re.admin_modified_at
+                re.payment_status, re.selected_discount_id, re.selected_discount_name,
+                re.submitted_at, re.modified_by_admin, re.admin_modified_at
             FROM `tabSIS Re-enrollment` re
             WHERE {where_clause}
             ORDER BY re.submitted_at DESC
@@ -695,16 +696,25 @@ def get_submissions():
         
         # Thêm display values
         for sub in submissions:
-            sub["decision_display"] = "Tái ghi danh" if sub.decision == 're_enroll' else "Không tái ghi danh"
+            # Decision display
+            decision_map = {
+                "re_enroll": "Tái ghi danh",
+                "considering": "Cân nhắc",
+                "not_re_enroll": "Không tái ghi danh"
+            }
+            sub["decision_display"] = decision_map.get(sub.decision, "Chưa làm đơn")
+            
+            # Payment type display
             if sub.payment_type:
                 sub["payment_display"] = "Đóng theo năm" if sub.payment_type == 'annual' else "Đóng theo kỳ"
             
-            status_map = {
-                "pending": "Chờ xử lý",
-                "approved": "Đã duyệt", 
-                "rejected": "Từ chối"
+            # Payment status display
+            payment_status_map = {
+                "unpaid": "Chưa đóng",
+                "paid": "Đã đóng",
+                "refunded": "Hoàn tiền"
             }
-            sub["status_display"] = status_map.get(sub.status, sub.status)
+            sub["payment_status_display"] = payment_status_map.get(sub.payment_status, "-")
         
         logs.append(f"Tìm thấy {len(submissions)} / {total} đơn")
         
