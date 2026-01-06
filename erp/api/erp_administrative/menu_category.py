@@ -298,7 +298,20 @@ def update_menu_category():
         title_vn = data.get('title_vn')
         title_en = data.get('title_en')
         code = data.get('code')
-        image_url = data.get('image_url') or None
+        
+        # Xử lý image_url: phân biệt giữa "không gửi field" và "gửi empty string để xóa"
+        if 'image_url' in data:
+            # Nếu frontend gửi field image_url (dù là empty string hay URL)
+            image_url = data.get('image_url')
+            frappe.logger().info(f"[update_menu_category] Received image_url field: '{image_url}'")
+            # Convert empty string thành None để xóa ảnh trong Frappe
+            if image_url == "":
+                frappe.logger().info(f"[update_menu_category] Converting empty string to None to remove image")
+                image_url = None
+        else:
+            # Nếu frontend không gửi field image_url, giữ nguyên (không update)
+            frappe.logger().info(f"[update_menu_category] No image_url field in request, keeping existing: '{menu_category_doc.image_url}'")
+            image_url = menu_category_doc.image_url
 
         if title_vn and title_vn != menu_category_doc.title_vn:
             menu_category_doc.title_vn = title_vn
@@ -309,7 +322,8 @@ def update_menu_category():
         if code and code != menu_category_doc.code:
             menu_category_doc.code = code
 
-        if image_url is not None and image_url != menu_category_doc.image_url:
+        # Luôn update image_url nếu frontend gửi field này
+        if 'image_url' in data and image_url != menu_category_doc.image_url:
             menu_category_doc.image_url = image_url
 
         menu_category_doc.save()
