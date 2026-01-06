@@ -97,7 +97,7 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                 s.student_name,
                 s.student_code,
                 c.name as class_name,
-                c.title_vn as class_title
+                c.title as class_title
             FROM `tabSIS Class Student` cs
             INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
             INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
