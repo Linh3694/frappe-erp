@@ -69,12 +69,18 @@ def _resolve_campus_id(campus_id):
     return None
 
 
-def _auto_create_student_records(config_id, school_year_id, campus_id, logs=None):
+def _auto_create_student_records(config_id, source_school_year_id, campus_id, logs=None):
     """
     Tự động tạo re-enrollment records cho tất cả học sinh thuộc SIS Class Student
-    với school_year là năm học cấu hình nhắm tới (tức học sinh của năm học hiện tại đã được xếp lớp).
+    với school_year là năm học nguồn (năm học hiện tại mà học sinh đang học).
     
-    Điều kiện: student phải thuộc SIS Class Student với school_year tương ứng
+    Args:
+        config_id: ID của config tái ghi danh
+        source_school_year_id: Năm học nguồn (năm học hiện tại của học sinh)
+        campus_id: Campus ID
+        logs: List để ghi log
+    
+    Điều kiện: student phải thuộc SIS Class Student với school_year = source_school_year_id
     """
     if logs is None:
         logs = []
@@ -82,34 +88,9 @@ def _auto_create_student_records(config_id, school_year_id, campus_id, logs=None
     created_count = 0
     
     try:
-        # Lấy danh sách học sinh đã xếp lớp trong năm học hiện tại tại campus này
-        # Giả sử năm học hiện tại là năm học trước năm học mục tiêu
-        # Ví dụ: Config cho năm 2026-2027 thì lấy học sinh của năm 2025-2026
+        logs.append(f"Lấy học sinh từ năm học nguồn: {source_school_year_id}, Campus: {campus_id}")
         
-        # Tìm năm học hiện tại (năm học trước năm học mục tiêu)
-        target_school_year = frappe.db.get_value("SIS School Year", school_year_id, ["start_date", "end_date"], as_dict=True)
-        
-        if not target_school_year:
-            logs.append(f"Không tìm thấy năm học mục tiêu: {school_year_id}")
-            return 0
-        
-        # Tìm năm học có end_date trước start_date của năm học mục tiêu
-        current_school_year = frappe.db.sql("""
-            SELECT name FROM `tabSIS School Year`
-            WHERE end_date <= %(target_start)s
-            ORDER BY end_date DESC
-            LIMIT 1
-        """, {"target_start": target_school_year.start_date}, as_dict=True)
-        
-        if not current_school_year:
-            # Nếu không tìm thấy, dùng chính năm học mục tiêu
-            current_school_year_id = school_year_id
-            logs.append(f"Sử dụng năm học mục tiêu làm năm học hiện tại: {school_year_id}")
-        else:
-            current_school_year_id = current_school_year[0].name
-            logs.append(f"Năm học hiện tại: {current_school_year_id}")
-        
-        # Lấy danh sách học sinh đã xếp lớp
+        # Lấy danh sách học sinh đã xếp lớp trong năm học nguồn tại campus này
         students = frappe.db.sql("""
             SELECT DISTINCT 
                 cs.student_id,
@@ -123,7 +104,7 @@ def _auto_create_student_records(config_id, school_year_id, campus_id, logs=None
             WHERE c.school_year_id = %(school_year_id)s
               AND c.campus_id = %(campus_id)s
         """, {
-            "school_year_id": current_school_year_id,
+            "school_year_id": source_school_year_id,
             "campus_id": campus_id
         }, as_dict=True)
         
@@ -345,7 +326,7 @@ def create_config():
         logs.append(f"Tạo config mới: {json.dumps(data, default=str)}")
         
         # Validate required fields
-        required_fields = ['title', 'school_year_id', 'campus_id', 'start_date', 'end_date']
+        required_fields = ['title', 'source_school_year_id', 'school_year_id', 'campus_id', 'start_date', 'end_date']
         for field in required_fields:
             if field not in data or not data[field]:
                 return validation_error_response(
@@ -377,6 +358,7 @@ def create_config():
         config_doc = frappe.get_doc({
             "doctype": "SIS Re-enrollment Config",
             "title": data['title'],
+            "source_school_year_id": data['source_school_year_id'],
             "school_year_id": data['school_year_id'],
             "campus_id": data['campus_id'],
             "is_active": data.get('is_active', 0),
@@ -405,10 +387,10 @@ def create_config():
         
         logs.append(f"Đã tạo config: {config_doc.name}")
         
-        # Auto-create re-enrollment records cho tất cả học sinh trong năm học hiện tại
+        # Auto-create re-enrollment records cho tất cả học sinh trong năm học nguồn
         created_count = _auto_create_student_records(
             config_doc.name, 
-            data['school_year_id'], 
+            data['source_school_year_id'],  # Dùng năm học nguồn để lấy danh sách học sinh
             resolved_campus_id,
             logs
         )
@@ -1371,12 +1353,12 @@ def sync_students():
         config = frappe.get_doc("SIS Re-enrollment Config", config_id)
         
         logs.append(f"Sync students cho config: {config_id}")
-        logs.append(f"School year: {config.school_year_id}, Campus: {config.campus_id}")
+        logs.append(f"Source school year: {config.source_school_year_id}, Campus: {config.campus_id}")
         
-        # Gọi hàm auto-create
+        # Gọi hàm auto-create với năm học nguồn
         created_count = _auto_create_student_records(
             config_id,
-            config.school_year_id,
+            config.source_school_year_id,  # Dùng năm học nguồn để lấy danh sách học sinh
             config.campus_id,
             logs
         )

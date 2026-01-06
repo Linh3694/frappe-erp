@@ -18,6 +18,7 @@
  "field_order": [
   "basic_information",
   "title",
+  "source_school_year_id",
   "school_year_id",
   "campus_id",
   "column_break_basic",
@@ -50,13 +51,22 @@
    "description": "VD: Tái ghi danh năm học 2026-2027"
   },
   {
+   "fieldname": "source_school_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học nguồn",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Năm học hiện tại mà học sinh đang theo học (để lấy danh sách học sinh)"
+  },
+  {
    "fieldname": "school_year_id",
    "fieldtype": "Link",
    "label": "Năm học mục tiêu",
    "options": "SIS School Year",
    "reqd": 1,
    "in_list_view": 1,
-   "description": "Năm học mà học sinh sẽ đăng ký"
+   "description": "Năm học mà học sinh sẽ đăng ký (năm tiếp theo)"
   },
   {
    "fieldname": "campus_id",
