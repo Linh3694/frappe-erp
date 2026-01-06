@@ -184,6 +184,149 @@ def get_board_tasks():
 
 
 @frappe.whitelist(allow_guest=False)
+def get_my_tasks():
+    """
+    Lấy tất cả tasks được gán cho user hiện tại từ tất cả projects
+    (Personal Kanban Board)
+    
+    Query params:
+        project_id: Filter theo project (optional)
+        priority: Filter theo priority (optional)
+        due_date_filter: Filter theo due date (optional: overdue, today, this_week, no_deadline)
+    
+    Returns:
+        Tasks grouped by status với project_title để phân biệt nguồn
+        - Done tasks chỉ hiển thị trong 7 ngày gần nhất
+    """
+    try:
+        user = frappe.session.user
+        
+        # Lấy params từ GET query params
+        project_id = frappe.request.args.get("project_id") or frappe.form_dict.get("project_id")
+        priority = frappe.request.args.get("priority") or frappe.form_dict.get("priority")
+        due_date_filter = frappe.request.args.get("due_date_filter") or frappe.form_dict.get("due_date_filter")
+        
+        # Lấy danh sách task_ids mà user được assign
+        assigned_task_ids = frappe.get_all(
+            "PM Task Assignee",
+            filters={"user_id": user},
+            pluck="task_id"
+        )
+        
+        if not assigned_task_ids:
+            # Không có task nào được gán
+            return success_response(
+                data={
+                    "tasks": [],
+                    "grouped": {
+                        "backlog": [],
+                        "todo": [],
+                        "in_progress": [],
+                        "review": [],
+                        "done": []
+                    },
+                    "total": 0,
+                    "projects": []
+                },
+                message="Bạn chưa được gán task nào"
+            )
+        
+        # Build SQL query
+        # Done tasks chỉ hiển thị trong 7 ngày gần nhất
+        conditions = [
+            "t.name IN %s",
+            "(t.status != 'done' OR (t.status = 'done' AND t.modified >= DATE_SUB(NOW(), INTERVAL 7 DAY)))"
+        ]
+        values = [tuple(assigned_task_ids)]
+        
+        # Filter theo project
+        if project_id:
+            conditions.append("t.project_id = %s")
+            values.append(project_id)
+        
+        # Filter theo priority
+        if priority:
+            conditions.append("t.priority = %s")
+            values.append(priority)
+        
+        # Filter theo due date
+        if due_date_filter == "overdue":
+            conditions.append("t.due_date < CURDATE() AND t.status != 'done'")
+        elif due_date_filter == "today":
+            conditions.append("t.due_date = CURDATE()")
+        elif due_date_filter == "this_week":
+            conditions.append("t.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")
+        elif due_date_filter == "no_deadline":
+            conditions.append("t.due_date IS NULL")
+        
+        where_clause = " AND ".join(conditions)
+        
+        # Query tasks với project_title
+        tasks = frappe.db.sql(f"""
+            SELECT 
+                t.name, t.project_id, t.requirement_id, t.title, t.description, 
+                t.status, t.priority, t.created_by, t.due_date, t.tags, 
+                t.order_index, t.creation, t.modified,
+                p.title as project_title
+            FROM `tabPM Task` t
+            LEFT JOIN `tabPM Project` p ON t.project_id = p.name
+            WHERE {where_clause}
+            ORDER BY 
+                CASE t.priority
+                    WHEN 'critical' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'medium' THEN 3
+                    WHEN 'low' THEN 4
+                END,
+                t.due_date ASC,
+                t.modified DESC
+        """, values, as_dict=True)
+        
+        # Enrich data
+        for task in tasks:
+            enrich_task_data(task)
+        
+        # Group by status
+        grouped = {
+            "backlog": [],
+            "todo": [],
+            "in_progress": [],
+            "review": [],
+            "done": []
+        }
+        
+        for task in tasks:
+            task_status = task.get("status", "backlog")
+            if task_status in grouped:
+                grouped[task_status].append(task)
+        
+        # Lấy danh sách projects để filter
+        project_ids = list(set(t["project_id"] for t in tasks))
+        projects = []
+        if project_ids:
+            projects = frappe.db.sql("""
+                SELECT name, title
+                FROM `tabPM Project`
+                WHERE name IN %s
+                ORDER BY title
+            """, [tuple(project_ids)], as_dict=True)
+        
+        return success_response(
+            data={
+                "tasks": tasks,
+                "grouped": grouped,
+                "total": len(tasks),
+                "projects": projects
+            },
+            message=f"Tìm thấy {len(tasks)} task được gán cho bạn"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"Error getting my tasks: {str(e)}")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
 def get_task(task_id: str):
     """
     Lấy chi tiết một task

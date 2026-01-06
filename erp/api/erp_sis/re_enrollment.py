@@ -69,6 +69,106 @@ def _resolve_campus_id(campus_id):
     return None
 
 
+def _auto_create_student_records(config_id, school_year_id, campus_id, logs=None):
+    """
+    Tự động tạo re-enrollment records cho tất cả học sinh thuộc SIS Class Student
+    với school_year là năm học cấu hình nhắm tới (tức học sinh của năm học hiện tại đã được xếp lớp).
+    
+    Điều kiện: student phải thuộc SIS Class Student với school_year tương ứng
+    """
+    if logs is None:
+        logs = []
+    
+    created_count = 0
+    
+    try:
+        # Lấy danh sách học sinh đã xếp lớp trong năm học hiện tại tại campus này
+        # Giả sử năm học hiện tại là năm học trước năm học mục tiêu
+        # Ví dụ: Config cho năm 2026-2027 thì lấy học sinh của năm 2025-2026
+        
+        # Tìm năm học hiện tại (năm học trước năm học mục tiêu)
+        target_school_year = frappe.db.get_value("SIS School Year", school_year_id, ["start_date", "end_date"], as_dict=True)
+        
+        if not target_school_year:
+            logs.append(f"Không tìm thấy năm học mục tiêu: {school_year_id}")
+            return 0
+        
+        # Tìm năm học có end_date trước start_date của năm học mục tiêu
+        current_school_year = frappe.db.sql("""
+            SELECT name FROM `tabSIS School Year`
+            WHERE end_date <= %(target_start)s
+            ORDER BY end_date DESC
+            LIMIT 1
+        """, {"target_start": target_school_year.start_date}, as_dict=True)
+        
+        if not current_school_year:
+            # Nếu không tìm thấy, dùng chính năm học mục tiêu
+            current_school_year_id = school_year_id
+            logs.append(f"Sử dụng năm học mục tiêu làm năm học hiện tại: {school_year_id}")
+        else:
+            current_school_year_id = current_school_year[0].name
+            logs.append(f"Năm học hiện tại: {current_school_year_id}")
+        
+        # Lấy danh sách học sinh đã xếp lớp
+        students = frappe.db.sql("""
+            SELECT DISTINCT 
+                cs.student_id,
+                s.student_name,
+                s.student_code,
+                c.name as class_name,
+                c.title_vn as class_title
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+            WHERE c.school_year_id = %(school_year_id)s
+              AND c.campus_id = %(campus_id)s
+        """, {
+            "school_year_id": current_school_year_id,
+            "campus_id": campus_id
+        }, as_dict=True)
+        
+        logs.append(f"Tìm thấy {len(students)} học sinh đã xếp lớp")
+        
+        # Tạo records cho từng học sinh
+        for student in students:
+            try:
+                # Kiểm tra đã có record chưa
+                existing = frappe.db.exists("SIS Re-enrollment", {
+                    "config_id": config_id,
+                    "student_id": student.student_id
+                })
+                
+                if existing:
+                    continue
+                
+                # Tạo record mới (chưa có decision, chưa submit)
+                re_doc = frappe.get_doc({
+                    "doctype": "SIS Re-enrollment",
+                    "config_id": config_id,
+                    "student_id": student.student_id,
+                    "student_name": student.student_name,
+                    "student_code": student.student_code,
+                    "current_class": student.class_title or student.class_name,
+                    "campus_id": campus_id,
+                    "status": "pending"
+                    # decision và submitted_at để trống = chưa làm đơn
+                })
+                re_doc.insert(ignore_permissions=True)
+                created_count += 1
+                
+            except Exception as e:
+                logs.append(f"Lỗi tạo record cho {student.student_code}: {str(e)}")
+                continue
+        
+        frappe.db.commit()
+        
+    except Exception as e:
+        logs.append(f"Lỗi auto-create records: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Auto Create Re-enrollment Records Error")
+    
+    return created_count
+
+
 # ==================== CONFIG APIs ====================
 
 @frappe.whitelist()
@@ -305,12 +405,23 @@ def create_config():
         
         logs.append(f"Đã tạo config: {config_doc.name}")
         
+        # Auto-create re-enrollment records cho tất cả học sinh trong năm học hiện tại
+        created_count = _auto_create_student_records(
+            config_doc.name, 
+            data['school_year_id'], 
+            resolved_campus_id,
+            logs
+        )
+        
+        logs.append(f"Đã tạo {created_count} records cho học sinh")
+        
         return success_response(
             data={
                 "name": config_doc.name,
-                "title": config_doc.title
+                "title": config_doc.title,
+                "student_records_created": created_count
             },
-            message="Tạo cấu hình tái ghi danh thành công",
+            message=f"Tạo cấu hình tái ghi danh thành công. Đã tạo {created_count} đơn cho học sinh.",
             logs=logs
         )
         
@@ -548,21 +659,24 @@ def get_submissions():
         page = int(frappe.request.args.get('page', 1))
         page_size = int(frappe.request.args.get('page_size', 50))
         
-        filters = {}
-        if config_id:
-            filters["config_id"] = config_id
-        if status:
-            filters["status"] = status
-        if decision:
-            filters["decision"] = decision
-        
         # Build query
         conditions = []
         values = {}
         
-        for key, value in filters.items():
-            conditions.append(f"re.{key} = %({key})s")
-            values[key] = value
+        if config_id:
+            conditions.append("re.config_id = %(config_id)s")
+            values["config_id"] = config_id
+        
+        # Xử lý status đặc biệt: not_submitted = decision IS NULL hoặc rỗng
+        if status == 'not_submitted':
+            conditions.append("(re.decision IS NULL OR re.decision = '')")
+        elif status:
+            conditions.append("re.status = %(status)s")
+            values["status"] = status
+        
+        if decision:
+            conditions.append("re.decision = %(decision)s")
+            values["decision"] = decision
         
         # Search by student name or code
         if search:
@@ -904,9 +1018,16 @@ def get_statistics():
             total_students = 0
         
         # Chuyển đổi thành dict dễ sử dụng
-        decision_dict = {item.decision: item.count for item in decision_stats}
+        decision_dict = {item.decision: item.count for item in decision_stats if item.decision}
         status_dict = {item.status: item.count for item in status_stats}
         payment_dict = {item.payment_type: item.count for item in payment_stats if item.payment_type}
+        
+        # Đếm số chưa làm đơn (decision = NULL hoặc rỗng)
+        not_submitted_count = frappe.db.sql("""
+            SELECT COUNT(*) as count
+            FROM `tabSIS Re-enrollment`
+            WHERE config_id = %s AND (decision IS NULL OR decision = '')
+        """, config_id, as_dict=True)[0].count
         
         logs.append(f"Thống kê cho config {config_id}")
         
@@ -914,9 +1035,10 @@ def get_statistics():
             data={
                 "total_submissions": total,
                 "total_students_in_campus": total_students,
-                "not_submitted": total_students - total,
+                "not_submitted": not_submitted_count,
                 "by_decision": {
                     "re_enroll": decision_dict.get("re_enroll", 0),
+                    "considering": decision_dict.get("considering", 0),
                     "not_re_enroll": decision_dict.get("not_re_enroll", 0)
                 },
                 "by_status": {
@@ -1203,6 +1325,184 @@ def get_service_document_images(config_id=None):
         
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+# ==================== SYNC STUDENTS API ====================
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def sync_students():
+    """
+    Đồng bộ danh sách học sinh cho một config tái ghi danh.
+    Tạo records cho học sinh mới chưa có trong danh sách.
+    
+    POST body:
+    {
+        "config_id": "SIS-REENROLL-CFG-00001"
+    }
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        config_id = data.get('config_id')
+        
+        if not config_id:
+            return validation_error_response(
+                "Thiếu config_id",
+                {"config_id": ["Config ID là bắt buộc"]}
+            )
+        
+        # Lấy thông tin config
+        if not frappe.db.exists("SIS Re-enrollment Config", config_id):
+            return not_found_response("Không tìm thấy cấu hình")
+        
+        config = frappe.get_doc("SIS Re-enrollment Config", config_id)
+        
+        logs.append(f"Sync students cho config: {config_id}")
+        logs.append(f"School year: {config.school_year_id}, Campus: {config.campus_id}")
+        
+        # Gọi hàm auto-create
+        created_count = _auto_create_student_records(
+            config_id,
+            config.school_year_id,
+            config.campus_id,
+            logs
+        )
+        
+        return success_response(
+            data={
+                "created_count": created_count,
+                "config_id": config_id
+            },
+            message=f"Đã đồng bộ thành công. Tạo thêm {created_count} đơn mới.",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Sync Students Error")
+        return error_response(
+            message=f"Lỗi khi đồng bộ: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def update_submission_decision():
+    """
+    Cập nhật quyết định cho một đơn tái ghi danh.
+    Cho phép switch giữa các trạng thái: re_enroll, considering, not_re_enroll
+    
+    POST body:
+    {
+        "submission_id": "SIS-REENROLL-00001",
+        "decision": "re_enroll" | "considering" | "not_re_enroll",
+        "payment_type": "annual" | "semester" (required nếu decision = re_enroll),
+        "selected_discount_id": "...", (optional - ID ưu đãi đã chọn nếu re_enroll),
+        "reason": "..." (required nếu decision = considering hoặc not_re_enroll)
+    }
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        submission_id = data.get('submission_id') or data.get('name')
+        decision = data.get('decision')
+        
+        if not submission_id:
+            return validation_error_response(
+                "Thiếu submission_id",
+                {"submission_id": ["Submission ID là bắt buộc"]}
+            )
+        
+        if not decision or decision not in ['re_enroll', 'considering', 'not_re_enroll']:
+            return validation_error_response(
+                "Decision không hợp lệ",
+                {"decision": ["Phải là re_enroll, considering hoặc not_re_enroll"]}
+            )
+        
+        # Lấy submission
+        if not frappe.db.exists("SIS Re-enrollment", submission_id):
+            return not_found_response("Không tìm thấy đơn tái ghi danh")
+        
+        submission = frappe.get_doc("SIS Re-enrollment", submission_id)
+        
+        logs.append(f"Update decision cho {submission_id}: {submission.decision} -> {decision}")
+        
+        # Validate theo loại decision
+        if decision == 're_enroll':
+            payment_type = data.get('payment_type')
+            if not payment_type or payment_type not in ['annual', 'semester']:
+                return validation_error_response(
+                    "Thiếu phương thức thanh toán",
+                    {"payment_type": ["Vui lòng chọn đóng theo năm hoặc theo kỳ"]}
+                )
+            
+            submission.decision = decision
+            submission.payment_type = payment_type
+            submission.selected_discount_deadline = data.get('selected_discount_deadline')
+            submission.not_re_enroll_reason = None  # Clear reason nếu đổi sang re_enroll
+            
+        else:  # considering hoặc not_re_enroll
+            reason = data.get('reason') or data.get('not_re_enroll_reason')
+            if not reason:
+                return validation_error_response(
+                    "Thiếu lý do",
+                    {"reason": ["Vui lòng nhập lý do"]}
+                )
+            
+            submission.decision = decision
+            submission.not_re_enroll_reason = reason
+            submission.payment_type = None  # Clear payment nếu không re_enroll
+            submission.selected_discount_deadline = None
+        
+        # Ghi nhận thời gian submit nếu lần đầu có decision
+        if not submission.submitted_at:
+            submission.submitted_at = now()
+        
+        # Ghi nhận admin sửa
+        submission.modified_by_admin = frappe.session.user
+        submission.admin_modified_at = now()
+        
+        submission.save()
+        frappe.db.commit()
+        
+        logs.append(f"Đã cập nhật decision thành công")
+        
+        return success_response(
+            data={
+                "name": submission.name,
+                "decision": submission.decision,
+                "payment_type": submission.payment_type,
+                "reason": submission.not_re_enroll_reason
+            },
+            message="Cập nhật quyết định thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Update Submission Decision Error")
         return error_response(
             message=f"Lỗi: {str(e)}",
             logs=logs

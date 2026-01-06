@@ -29,6 +29,8 @@
   "decision_section",
   "decision",
   "payment_type",
+  "selected_discount_id",
+  "selected_discount_name",
   "selected_discount_deadline",
   "column_break_decision",
   "not_re_enroll_reason",
@@ -88,7 +90,7 @@
    "fieldtype": "Link",
    "label": "Phụ huynh nộp đơn",
    "options": "CRM Guardian",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "guardian_name",
@@ -121,10 +123,10 @@
    "fieldname": "decision",
    "fieldtype": "Select",
    "label": "Quyết định",
-   "options": "\nre_enroll\nnot_re_enroll",
-   "reqd": 1,
+   "options": "\nre_enroll\nconsidering\nnot_re_enroll",
+   "reqd": 0,
    "in_list_view": 1,
-   "description": "re_enroll: Tái ghi danh, not_re_enroll: Không tái ghi danh"
+   "description": "re_enroll: Tái ghi danh, considering: Cân nhắc, not_re_enroll: Không tái ghi danh"
   },
   {
    "fieldname": "payment_type",
@@ -134,6 +136,21 @@
    "depends_on": "eval:doc.decision=='re_enroll'",
    "mandatory_depends_on": "eval:doc.decision=='re_enroll'",
    "description": "annual: Đóng theo năm, semester: Đóng theo kỳ"
+  },
+  {
+   "fieldname": "selected_discount_id",
+   "fieldtype": "Data",
+   "label": "ID ưu đãi đã chọn",
+   "depends_on": "eval:doc.decision=='re_enroll'",
+   "description": "ID của loại ưu đãi học sinh đã chọn"
+  },
+  {
+   "fieldname": "selected_discount_name",
+   "fieldtype": "Data",
+   "label": "Tên ưu đãi đã chọn",
+   "read_only": 1,
+   "depends_on": "eval:doc.decision=='re_enroll'",
+   "description": "Tên loại ưu đãi học sinh đã chọn"
   },
   {
    "fieldname": "selected_discount_deadline",
@@ -150,9 +167,10 @@
   {
    "fieldname": "not_re_enroll_reason",
    "fieldtype": "Small Text",
-   "label": "Lý do không tái ghi danh",
-   "depends_on": "eval:doc.decision=='not_re_enroll'",
-   "mandatory_depends_on": "eval:doc.decision=='not_re_enroll'"
+   "label": "Lý do",
+   "depends_on": "eval:doc.decision=='not_re_enroll' || doc.decision=='considering'",
+   "mandatory_depends_on": "eval:doc.decision=='not_re_enroll' || doc.decision=='considering'",
+   "description": "Lý do không tái ghi danh hoặc đang cân nhắc"
   },
   {
    "fieldname": "agreement_section",
@@ -214,7 +232,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-12-24 00:00:00.000000",
+ "modified": "2026-01-06 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Re-enrollment",
