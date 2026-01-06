@@ -93,11 +93,7 @@ def get_configs():
         configs = frappe.get_all(
             "SIS Re-enrollment Config",
             filters=filters,
-            fields=[
-                "name", "title", "school_year_id", "campus_id",
-                "is_active", "start_date", "end_date",
-                "created_by", "created_at", "modified"
-            ],
+            fields=["*"],  # Lấy tất cả fields để tránh lỗi khi chưa migrate
             order_by="modified desc"
         )
         
@@ -106,15 +102,20 @@ def get_configs():
             # Tên năm học
             school_year = frappe.db.get_value(
                 "SIS School Year",
-                config.school_year_id,
+                config.get("school_year_id"),
                 ["title_vn", "title_en"],
                 as_dict=True
             )
             config["school_year_name"] = school_year.title_vn if school_year else None
             
-            # Tên campus
-            campus_name = frappe.db.get_value("SIS Campus", config.campus_id, "title")
-            config["campus_name"] = campus_name
+            # Tên campus (SIS Campus dùng title_vn, không phải title)
+            campus_info = frappe.db.get_value(
+                "SIS Campus", 
+                config.get("campus_id"), 
+                ["title_vn", "title_en"],
+                as_dict=True
+            )
+            config["campus_name"] = campus_info.title_vn if campus_info else None
             
             # Đếm số đơn
             submission_count = frappe.db.count(
@@ -187,7 +188,9 @@ def get_config(config_id=None):
         )
         
         # Tên campus
-        campus_name = frappe.db.get_value("SIS Campus", config.campus_id, "title")
+        # SIS Campus dùng title_vn thay vì title
+        campus_info = frappe.db.get_value("SIS Campus", config.campus_id, ["title_vn", "title_en"], as_dict=True)
+        campus_name = campus_info.title_vn if campus_info else None
         
         logs.append(f"Lấy config: {config_id}")
         
