@@ -803,6 +803,17 @@ def update_submission():
     """
     Admin sửa đơn tái ghi danh cho phụ huynh.
     Ghi nhận admin đã sửa.
+    
+    POST body:
+    {
+        "submission_id": "SIS-REENROLL-00001",
+        "decision": "re_enroll" | "considering" | "not_re_enroll",
+        "payment_type": "annual" | "semester",
+        "selected_discount_id": "...",
+        "not_re_enroll_reason": "...",
+        "payment_status": "unpaid" | "paid" | "refunded",
+        "notes": [{"note": "...", "created_by_name": "..."}]
+    }
     """
     logs = []
     
@@ -831,15 +842,59 @@ def update_submission():
         submission = frappe.get_doc("SIS Re-enrollment", submission_id)
         
         # Các trường admin có thể sửa
-        updatable_fields = ['decision', 'payment_type', 'not_re_enroll_reason', 'status', 'admin_notes']
+        updatable_fields = ['decision', 'payment_type', 'selected_discount_id', 
+                          'not_re_enroll_reason', 'payment_status']
         
         for field in updatable_fields:
             if field in data:
                 submission.set(field, data[field])
         
+        # Xử lý discount info nếu chọn
+        if data.get('selected_discount_id') and data.get('decision') == 're_enroll':
+            # Lấy config để tìm thông tin discount
+            config = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
+            for discount in config.discounts:
+                if discount.name == data.get('selected_discount_id'):
+                    submission.selected_discount_name = discount.description
+                    submission.selected_discount_deadline = discount.deadline
+                    break
+        
+        # Xử lý notes - clear và thêm mới
+        notes_data = data.get('notes', [])
+        if notes_data:
+            # Clear existing notes
+            submission.notes = []
+            
+            # Lấy full name của user hiện tại
+            current_user = frappe.session.user
+            current_user_name = frappe.db.get_value("User", current_user, "full_name") or current_user
+            
+            # Add new notes
+            for note in notes_data:
+                submission.append("notes", {
+                    "note": note.get('note'),
+                    "created_by_user": note.get('created_by_user') or current_user,
+                    "created_by_name": note.get('created_by_name') or current_user_name,
+                    "created_at": note.get('created_at') or now()
+                })
+        
+        # Clear các field không cần thiết dựa trên decision
+        decision = data.get('decision')
+        if decision == 're_enroll':
+            submission.not_re_enroll_reason = None
+        elif decision in ['considering', 'not_re_enroll']:
+            submission.payment_type = None
+            submission.selected_discount_id = None
+            submission.selected_discount_name = None
+            submission.selected_discount_deadline = None
+        
         # Ghi nhận admin sửa
         submission.modified_by_admin = frappe.session.user
         submission.admin_modified_at = now()
+        
+        # Cập nhật submitted_at nếu chưa có
+        if not submission.submitted_at:
+            submission.submitted_at = now()
         
         submission.save()
         frappe.db.commit()

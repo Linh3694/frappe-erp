@@ -36,13 +36,15 @@
   "not_re_enroll_reason",
   "agreement_section",
   "agreement_accepted",
+  "payment_section",
+  "payment_status",
   "status_section",
-  "status",
   "submitted_at",
   "column_break_status",
   "modified_by_admin",
   "admin_modified_at",
-  "admin_notes"
+  "notes_section",
+  "notes"
  ],
  "fields": [
   {
@@ -185,23 +187,29 @@
    "default": 0
   },
   {
-   "fieldname": "status_section",
+   "fieldname": "payment_section",
    "fieldtype": "Section Break",
-   "label": "Trạng thái"
+   "label": "Thanh toán"
   },
   {
-   "fieldname": "status",
+   "fieldname": "payment_status",
    "fieldtype": "Select",
-   "label": "Trạng thái",
-   "options": "pending\napproved\nrejected",
-   "default": "pending",
+   "label": "Trạng thái thanh toán",
+   "options": "\nunpaid\npaid\nrefunded",
+   "default": "unpaid",
    "in_list_view": 1,
-   "read_only": 1
+   "description": "unpaid: Chưa đóng, paid: Đã đóng, refunded: Hoàn tiền"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
   },
   {
    "fieldname": "submitted_at",
    "fieldtype": "Datetime",
-   "label": "Thời gian nộp đơn",
+   "label": "Thời gian cập nhật",
    "read_only": 1
   },
   {
@@ -223,10 +231,16 @@
    "read_only": 1
   },
   {
-   "fieldname": "admin_notes",
-   "fieldtype": "Small Text",
-   "label": "Ghi chú của admin",
-   "description": "Ghi chú khi admin chỉnh sửa đơn"
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Lịch sử ghi chú"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Table",
+   "label": "Ghi chú",
+   "options": "SIS Re-enrollment Note",
+   "description": "Lịch sử ghi chú của admin"
   }
  ],
  "index_web_pages_for_search": 1,
