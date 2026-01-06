@@ -35,6 +35,8 @@
   "selected_discount_percent",
   "column_break_decision",
   "not_re_enroll_reason",
+  "answers_section",
+  "answers",
   "agreement_section",
   "agreement_accepted",
   "payment_section",
@@ -182,6 +184,18 @@
    "depends_on": "eval:doc.decision=='not_re_enroll' || doc.decision=='considering'",
    "mandatory_depends_on": "eval:doc.decision=='not_re_enroll' || doc.decision=='considering'",
    "description": "Lý do không tái ghi danh hoặc đang cân nhắc"
+  },
+  {
+   "fieldname": "answers_section",
+   "fieldtype": "Section Break",
+   "label": "Câu trả lời khảo sát"
+  },
+  {
+   "fieldname": "answers",
+   "fieldtype": "Table",
+   "label": "Câu trả lời",
+   "options": "SIS Re-enrollment Answer",
+   "description": "Câu trả lời cho các câu hỏi khảo sát"
   },
   {
    "fieldname": "agreement_section",

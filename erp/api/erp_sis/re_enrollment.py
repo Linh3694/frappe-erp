@@ -262,6 +262,32 @@ def get_config(config_id=None):
             order_by="deadline asc"
         )
         
+        # Lấy câu hỏi khảo sát
+        questions = []
+        question_rows = frappe.get_all(
+            "SIS Re-enrollment Question",
+            filters={"parent": config_id},
+            fields=["name", "question_vn", "question_en", "question_type", "is_required", "sort_order"],
+            order_by="sort_order asc"
+        )
+        for q in question_rows:
+            # Lấy options cho mỗi câu hỏi
+            options = frappe.get_all(
+                "SIS Re-enrollment Question Option",
+                filters={"parent": q.name},
+                fields=["name", "option_vn", "option_en", "sort_order"],
+                order_by="sort_order asc"
+            )
+            questions.append({
+                "name": q.name,
+                "question_vn": q.question_vn,
+                "question_en": q.question_en,
+                "question_type": q.question_type,
+                "is_required": q.is_required,
+                "sort_order": q.sort_order,
+                "options": options
+            })
+        
         # Tên năm học
         school_year = frappe.db.get_value(
             "SIS School Year",
@@ -293,6 +319,7 @@ def get_config(config_id=None):
                 "service_document_images": json.loads(config.service_document_images) if config.service_document_images else [],
                 "agreement_text": config.agreement_text,
                 "discounts": discounts,
+                "questions": questions,
                 "created_by": config.created_by,
                 "created_at": str(config.created_at) if config.created_at else None
             },
@@ -383,6 +410,28 @@ def create_config():
                 "annual_discount": discount.get('annual_discount', 0),
                 "semester_discount": discount.get('semester_discount', 0)
             })
+        
+        # Thêm câu hỏi khảo sát nếu có
+        questions = data.get('questions', [])
+        if isinstance(questions, str):
+            questions = json.loads(questions)
+        
+        for idx, question in enumerate(questions):
+            q_row = config_doc.append("questions", {
+                "question_vn": question.get('question_vn'),
+                "question_en": question.get('question_en'),
+                "question_type": question.get('question_type', 'single_choice'),
+                "is_required": question.get('is_required', 1),
+                "sort_order": question.get('sort_order', idx)
+            })
+            # Thêm options cho câu hỏi
+            options = question.get('options', [])
+            for opt_idx, option in enumerate(options):
+                q_row.append("options", {
+                    "option_vn": option.get('option_vn'),
+                    "option_en": option.get('option_en'),
+                    "sort_order": option.get('sort_order', opt_idx)
+                })
         
         config_doc.insert()
         frappe.db.commit()
@@ -492,6 +541,33 @@ def update_config():
                     "annual_discount": discount.get('annual_discount', 0),
                     "semester_discount": discount.get('semester_discount', 0)
                 })
+        
+        # Update câu hỏi khảo sát nếu có
+        if 'questions' in data:
+            questions = data['questions']
+            if isinstance(questions, str):
+                questions = json.loads(questions)
+            
+            # Xóa questions cũ
+            config_doc.questions = []
+            
+            # Thêm questions mới
+            for idx, question in enumerate(questions):
+                q_row = config_doc.append("questions", {
+                    "question_vn": question.get('question_vn'),
+                    "question_en": question.get('question_en'),
+                    "question_type": question.get('question_type', 'single_choice'),
+                    "is_required": question.get('is_required', 1),
+                    "sort_order": question.get('sort_order', idx)
+                })
+                # Thêm options cho câu hỏi
+                options = question.get('options', [])
+                for opt_idx, option in enumerate(options):
+                    q_row.append("options", {
+                        "option_vn": option.get('option_vn'),
+                        "option_en": option.get('option_en'),
+                        "sort_order": option.get('sort_order', opt_idx)
+                    })
         
         config_doc.save()
         frappe.db.commit()
@@ -694,7 +770,7 @@ def get_submissions():
         
         submissions = frappe.db.sql(query, values, as_dict=True)
         
-        # Thêm display values
+        # Thêm display values và answers
         for sub in submissions:
             # Decision display
             decision_map = {
@@ -715,6 +791,15 @@ def get_submissions():
                 "refunded": "Hoàn tiền"
             }
             sub["payment_status_display"] = payment_status_map.get(sub.payment_status, "-")
+            
+            # Lấy answers (câu trả lời khảo sát)
+            answers = frappe.get_all(
+                "SIS Re-enrollment Answer",
+                filters={"parent": sub.name},
+                fields=["question_id", "question_text_vn", "question_text_en", 
+                        "selected_options", "selected_options_text_vn", "selected_options_text_en"]
+            )
+            sub["answers"] = answers
         
         logs.append(f"Tìm thấy {len(submissions)} / {total} đơn")
         
@@ -917,6 +1002,29 @@ def update_submission():
             submission.selected_discount_id = None
             submission.selected_discount_name = None
             submission.selected_discount_deadline = None
+        
+        # Xử lý answers (câu trả lời khảo sát)
+        answers_data = data.get('answers', [])
+        if answers_data:
+            # Clear existing answers
+            submission.answers = []
+            
+            # Add new answers
+            for answer in answers_data:
+                selected_options = answer.get('selected_options', [])
+                if isinstance(selected_options, list):
+                    selected_options_json = json.dumps(selected_options)
+                else:
+                    selected_options_json = selected_options
+                
+                submission.append("answers", {
+                    "question_id": answer.get('question_id'),
+                    "question_text_vn": answer.get('question_text_vn'),
+                    "question_text_en": answer.get('question_text_en'),
+                    "selected_options": selected_options_json,
+                    "selected_options_text_vn": answer.get('selected_options_text_vn'),
+                    "selected_options_text_en": answer.get('selected_options_text_en')
+                })
         
         # Ghi nhận admin sửa
         submission.modified_by_admin = frappe.session.user

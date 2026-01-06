@@ -1,0 +1,88 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2024-01-06 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "question_vn",
+  "question_en",
+  "column_break_1",
+  "question_type",
+  "is_required",
+  "sort_order",
+  "section_break_options",
+  "options"
+ ],
+ "fields": [
+  {
+   "fieldname": "question_vn",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Câu hỏi (Tiếng Việt)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "question_en",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Câu hỏi (Tiếng Anh)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "single_choice",
+   "fieldname": "question_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Loại câu hỏi",
+   "options": "single_choice\nmultiple_choice",
+   "reqd": 1,
+   "description": "single_choice: Chọn một, multiple_choice: Chọn nhiều"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Bắt buộc trả lời"
+  },
+  {
+   "default": "0",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Thứ tự hiển thị"
+  },
+  {
+   "fieldname": "section_break_options",
+   "fieldtype": "Section Break",
+   "label": "Phương án trả lời"
+  },
+  {
+   "fieldname": "options",
+   "fieldtype": "Table",
+   "label": "Phương án",
+   "options": "SIS Re-enrollment Question Option",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-01-06 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SIS",
+ "name": "SIS Re-enrollment Question",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}
+

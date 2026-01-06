@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2024-01-06 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "option_vn",
+  "option_en",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "option_vn",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Nội dung (Tiếng Việt)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "option_en",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Nội dung (Tiếng Anh)",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Thứ tự"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-01-06 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SIS",
+ "name": "SIS Re-enrollment Question Option",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}
+

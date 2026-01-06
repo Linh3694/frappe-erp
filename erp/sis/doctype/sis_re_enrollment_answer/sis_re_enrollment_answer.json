@@ -1,0 +1,80 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2024-01-06 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "question_id",
+  "question_text_vn",
+  "question_text_en",
+  "column_break_1",
+  "selected_options",
+  "selected_options_text_vn",
+  "selected_options_text_en"
+ ],
+ "fields": [
+  {
+   "fieldname": "question_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "ID Câu hỏi",
+   "reqd": 1,
+   "description": "ID của câu hỏi trong config tại thời điểm trả lời"
+  },
+  {
+   "fieldname": "question_text_vn",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Nội dung câu hỏi (VN)",
+   "read_only": 1,
+   "description": "Lưu nội dung câu hỏi tại thời điểm trả lời"
+  },
+  {
+   "fieldname": "question_text_en",
+   "fieldtype": "Small Text",
+   "label": "Nội dung câu hỏi (EN)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "selected_options",
+   "fieldtype": "JSON",
+   "label": "Phương án đã chọn (JSON)",
+   "description": "Danh sách ID phương án đã chọn"
+  },
+  {
+   "fieldname": "selected_options_text_vn",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Nội dung phương án (VN)",
+   "read_only": 1,
+   "description": "Lưu nội dung phương án đã chọn"
+  },
+  {
+   "fieldname": "selected_options_text_en",
+   "fieldtype": "Small Text",
+   "label": "Nội dung phương án (EN)",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-01-06 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SIS",
+ "name": "SIS Re-enrollment Answer",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
+

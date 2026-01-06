@@ -31,6 +31,8 @@
   "agreement_text",
   "discounts_section",
   "discounts",
+  "questions_section",
+  "questions",
   "system_information",
   "created_by",
   "created_at",
@@ -138,6 +140,18 @@
    "label": "Bảng ưu đãi",
    "options": "SIS Re-enrollment Discount",
    "description": "Các mức ưu đãi theo thời hạn đóng phí"
+  },
+  {
+   "fieldname": "questions_section",
+   "fieldtype": "Section Break",
+   "label": "Câu hỏi khảo sát"
+  },
+  {
+   "fieldname": "questions",
+   "fieldtype": "Table",
+   "label": "Danh sách câu hỏi",
+   "options": "SIS Re-enrollment Question",
+   "description": "Các câu hỏi khảo sát phụ huynh sẽ trả lời khi làm đơn tái ghi danh"
   },
   {
    "fieldname": "system_information",
