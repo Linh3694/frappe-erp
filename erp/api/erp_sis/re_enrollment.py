@@ -456,7 +456,7 @@ def update_config():
                 logs.append(f"Resolved campus_id: {resolved_campus_id}")
         
         # Update các trường
-        update_fields = ['title', 'school_year_id', 'campus_id', 'is_active', 
+        update_fields = ['title', 'source_school_year_id', 'school_year_id', 'campus_id', 'is_active', 
                         'start_date', 'end_date', 'service_document', 'agreement_text']
         
         for field in update_fields:
