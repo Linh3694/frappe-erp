@@ -22,6 +22,10 @@ class SISReenrollment(Document):
 	
 	def validate_config_active(self):
 		"""Kiểm tra config có đang mở không"""
+		# Skip validation nếu admin đang tạo records (qua sync)
+		if self.flags.get("skip_config_validation"):
+			return
+		
 		if self.config_id:
 			config = frappe.get_doc("SIS Re-enrollment Config", self.config_id)
 			

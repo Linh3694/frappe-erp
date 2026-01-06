@@ -134,6 +134,8 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                     "status": "pending"
                     # decision và submitted_at để trống = chưa làm đơn
                 })
+                # Skip validation thời gian khi admin tạo records
+                re_doc.flags.skip_config_validation = True
                 re_doc.insert(ignore_permissions=True)
                 created_count += 1
                 
