@@ -35,6 +35,40 @@ def _check_admin_permission():
     return True
 
 
+def _resolve_campus_id(campus_id):
+    """
+    Chuyển đổi campus_id từ format frontend (campus-1) sang format database (CAMPUS-00001)
+    """
+    if not campus_id:
+        return None
+    
+    # Nếu đã đúng format CAMPUS-xxxxx thì return luôn
+    if campus_id.startswith("CAMPUS-"):
+        if frappe.db.exists("SIS Campus", campus_id):
+            return campus_id
+    
+    # Nếu là format campus-1, campus-2, etc.
+    if campus_id.startswith("campus-"):
+        try:
+            campus_index = int(campus_id.split("-")[1])
+            mapped_campus = f"CAMPUS-{campus_index:05d}"
+            if frappe.db.exists("SIS Campus", mapped_campus):
+                return mapped_campus
+        except (ValueError, IndexError):
+            pass
+    
+    # Thử tìm theo name trực tiếp
+    if frappe.db.exists("SIS Campus", campus_id):
+        return campus_id
+    
+    # Thử tìm campus đầu tiên
+    first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+    if first_campus:
+        return first_campus
+    
+    return None
+
+
 # ==================== CONFIG APIs ====================
 
 @frappe.whitelist()
@@ -216,6 +250,16 @@ def create_config():
                     {field: [f"Trường {field} là bắt buộc"]}
                 )
         
+        # Resolve campus_id từ format frontend sang format database
+        resolved_campus_id = _resolve_campus_id(data['campus_id'])
+        if not resolved_campus_id:
+            return validation_error_response(
+                f"Không tìm thấy Campus: {data['campus_id']}",
+                {"campus_id": ["Campus không tồn tại trong hệ thống"]}
+            )
+        data['campus_id'] = resolved_campus_id
+        logs.append(f"Resolved campus_id: {resolved_campus_id}")
+        
         # Xử lý service_document_images
         service_document_images = data.get('service_document_images')
         if service_document_images and isinstance(service_document_images, list):
@@ -307,6 +351,13 @@ def update_config():
             return not_found_response("Không tìm thấy cấu hình")
         
         config_doc = frappe.get_doc("SIS Re-enrollment Config", config_id)
+        
+        # Resolve campus_id nếu có
+        if 'campus_id' in data and data['campus_id']:
+            resolved_campus_id = _resolve_campus_id(data['campus_id'])
+            if resolved_campus_id:
+                data['campus_id'] = resolved_campus_id
+                logs.append(f"Resolved campus_id: {resolved_campus_id}")
         
         # Update các trường
         update_fields = ['title', 'school_year_id', 'campus_id', 'is_active', 
