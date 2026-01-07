@@ -18,6 +18,9 @@ from erp.utils.api_response import (
     not_found_response
 )
 
+# Decision types cho tái ghi danh
+DECISION_TYPES = ['re_enroll', 'considering', 'not_re_enroll']
+
 
 def _get_current_parent():
     """Lấy thông tin phụ huynh đang đăng nhập"""
@@ -158,7 +161,7 @@ def get_active_config():
                 "campus_id": campus_id
             },
             ["name", "title", "school_year_id", "campus_id", "start_date", "end_date",
-             "service_document", "agreement_text", "agreement_text_en"],
+             "service_document", "service_document_images", "agreement_text", "agreement_text_en"],
             as_dict=True
         )
         
@@ -203,9 +206,45 @@ def get_active_config():
         discounts = frappe.get_all(
             "SIS Re-enrollment Discount",
             filters={"parent": config.name},
-            fields=["deadline", "description", "annual_discount", "semester_discount"],
+            fields=["name", "deadline", "description", "annual_discount", "semester_discount"],
             order_by="deadline asc"
         )
+        
+        # Lấy câu hỏi khảo sát
+        questions = []
+        question_rows = frappe.get_all(
+            "SIS Re-enrollment Question",
+            filters={"parent": config.name},
+            fields=["name", "question_vn", "question_en", "question_type", "is_required", "sort_order", "options_json"],
+            order_by="sort_order asc"
+        )
+        
+        for q in question_rows:
+            # Parse options từ JSON
+            options = []
+            if q.options_json:
+                try:
+                    options = json.loads(q.options_json)
+                except json.JSONDecodeError:
+                    options = []
+            
+            questions.append({
+                "name": q.name,
+                "question_vn": q.question_vn,
+                "question_en": q.question_en,
+                "question_type": q.question_type,
+                "is_required": q.is_required,
+                "sort_order": q.sort_order,
+                "options": options
+            })
+        
+        # Parse service_document_images từ JSON
+        service_document_images = []
+        if config.service_document_images:
+            try:
+                service_document_images = json.loads(config.service_document_images)
+            except json.JSONDecodeError:
+                service_document_images = []
         
         # Lấy tên năm học
         school_year_name = frappe.db.get_value(
@@ -255,11 +294,13 @@ def get_active_config():
                     "start_date": str(config.start_date),
                     "end_date": str(config.end_date),
                     "service_document": config.service_document,
+                    "service_document_images": service_document_images,
                     "agreement_text": config.agreement_text,
                     "agreement_text_en": config.agreement_text_en
                 },
                 "discounts": discounts,
                 "current_discount": current_discount,
+                "questions": questions,
                 "students": students,
                 "status": "open"
             },
@@ -376,7 +417,7 @@ def submit_re_enrollment():
         logs.append(f"Nhận request submit tái ghi danh: {json.dumps(data, default=str)}")
         
         # Validate required fields
-        required_fields = ['student_id', 'decision', 'agreement_accepted']
+        required_fields = ['student_id', 'decision']
         for field in required_fields:
             if field not in data or data[field] is None:
                 return validation_error_response(
@@ -386,17 +427,17 @@ def submit_re_enrollment():
         
         student_id = data['student_id']
         decision = data['decision']
-        agreement_accepted = data['agreement_accepted']
+        agreement_accepted = data.get('agreement_accepted', False)
         
         # Validate decision
-        if decision not in ['re_enroll', 'not_re_enroll']:
+        if decision not in DECISION_TYPES:
             return validation_error_response(
                 "Quyết định không hợp lệ",
-                {"decision": ["Quyết định phải là 're_enroll' hoặc 'not_re_enroll'"]}
+                {"decision": [f"Quyết định phải là một trong: {', '.join(DECISION_TYPES)}"]}
             )
         
-        # Validate agreement
-        if not agreement_accepted:
+        # Validate agreement chỉ bắt buộc cho re_enroll
+        if decision == 're_enroll' and not agreement_accepted:
             return validation_error_response(
                 "Bạn cần đồng ý với điều khoản",
                 {"agreement_accepted": ["Vui lòng đọc và đồng ý với điều khoản"]}
@@ -415,11 +456,13 @@ def submit_re_enrollment():
                     {"payment_type": ["Phương thức phải là 'annual' hoặc 'semester'"]}
                 )
         
-        if decision == 'not_re_enroll':
-            if 'not_re_enroll_reason' not in data or not data.get('not_re_enroll_reason', '').strip():
+        # Validate reason cho considering và not_re_enroll
+        if decision in ['considering', 'not_re_enroll']:
+            reason = data.get('reason') or data.get('not_re_enroll_reason') or ''
+            if not reason.strip():
                 return validation_error_response(
-                    "Vui lòng nhập lý do không tái ghi danh",
-                    {"not_re_enroll_reason": ["Lý do là bắt buộc khi không tái ghi danh"]}
+                    "Vui lòng nhập lý do",
+                    {"reason": ["Lý do là bắt buộc"]}
                 )
         
         # Get current parent
@@ -491,6 +534,18 @@ def submit_re_enrollment():
         current_class_info = _get_student_current_class(student_id, campus_id)
         current_class = current_class_info.get("class_title") if current_class_info else None
         
+        # Xử lý answers nếu có
+        answers_json = None
+        if decision == 're_enroll' and 'answers' in data:
+            answers_data = data['answers']
+            if isinstance(answers_data, str):
+                answers_json = answers_data
+            else:
+                answers_json = json.dumps(answers_data)
+        
+        # Lấy lý do từ request
+        reason_value = data.get('reason') or data.get('not_re_enroll_reason') or None
+        
         # Tạo đơn tái ghi danh
         re_enrollment_doc = frappe.get_doc({
             "doctype": "SIS Re-enrollment",
@@ -501,9 +556,9 @@ def submit_re_enrollment():
             "campus_id": campus_id,
             "decision": decision,
             "payment_type": data.get('payment_type') if decision == 're_enroll' else None,
-            "not_re_enroll_reason": data.get('not_re_enroll_reason') if decision == 'not_re_enroll' else None,
-            "agreement_accepted": 1,
-            "status": "pending",
+            "selected_discount_id": data.get('selected_discount_id') if decision == 're_enroll' else None,
+            "not_re_enroll_reason": reason_value if decision in ['considering', 'not_re_enroll'] else None,
+            "agreement_accepted": 1 if agreement_accepted else 0,
             "submitted_at": now()
         })
         
@@ -516,7 +571,12 @@ def submit_re_enrollment():
         logs.append(f"Đã tạo đơn: {re_enrollment_doc.name}")
         
         # Chuẩn bị response
-        decision_display = "Tái ghi danh" if decision == 're_enroll' else "Không tái ghi danh"
+        decision_display_map = {
+            're_enroll': 'Tái ghi danh',
+            'considering': 'Đang cân nhắc',
+            'not_re_enroll': 'Không tái ghi danh'
+        }
+        decision_display = decision_display_map.get(decision, decision)
         payment_display = ""
         if decision == 're_enroll':
             payment_display = "Đóng theo năm" if data.get('payment_type') == 'annual' else "Đóng theo kỳ"
@@ -599,7 +659,12 @@ def get_my_re_enrollments():
             submission["config_title"] = config_info.title if config_info else None
             
             # Display values
-            submission["decision_display"] = "Tái ghi danh" if submission.decision == 're_enroll' else "Không tái ghi danh"
+            decision_display_map = {
+                're_enroll': 'Tái ghi danh',
+                'considering': 'Đang cân nhắc',
+                'not_re_enroll': 'Không tái ghi danh'
+            }
+            submission["decision_display"] = decision_display_map.get(submission.decision, submission.decision)
             if submission.payment_type:
                 submission["payment_display"] = "Đóng theo năm" if submission.payment_type == 'annual' else "Đóng theo kỳ"
             
