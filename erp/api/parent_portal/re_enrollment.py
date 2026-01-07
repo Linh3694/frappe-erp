@@ -268,28 +268,32 @@ def get_active_config():
                 break
         
         # Kiểm tra xem các học sinh đã nộp đơn chưa
+        # Lưu ý: Bản ghi SIS Re-enrollment được tạo sẵn khi admin tạo đợt
+        # PHHS "đã nộp" khi họ điền form và submit -> có submitted_at
         logs.append(f"Checking submissions for {len(students)} students, config: {config.name}")
         for student in students:
-            existing = frappe.db.exists(
+            # Tìm bản ghi của học sinh
+            existing = frappe.db.get_value(
                 "SIS Re-enrollment",
                 {
                     "student_id": student["name"],
                     "config_id": config.name
-                }
+                },
+                ["name", "decision", "payment_type", "status", "submitted_at"],
+                as_dict=True
             )
-            logs.append(f"Student {student['name']} - existing: {existing}")
-            student["has_submitted"] = bool(existing)
+            
             if existing:
-                # Lấy thông tin đơn đã nộp
-                submission = frappe.db.get_value(
-                    "SIS Re-enrollment",
-                    existing,
-                    ["name", "decision", "payment_type", "status", "submitted_at"],
-                    as_dict=True
-                )
-                student["submission"] = submission
+                # Đã nộp = có submitted_at (PHHS đã điền form)
+                student["has_submitted"] = bool(existing.submitted_at)
+                student["submission"] = existing if existing.submitted_at else None
+                student["re_enrollment_id"] = existing.name  # ID để update khi submit
+                logs.append(f"Student {student['name']} - record: {existing.name}, submitted_at: {existing.submitted_at}")
             else:
+                student["has_submitted"] = False
                 student["submission"] = None
+                student["re_enrollment_id"] = None
+                logs.append(f"Student {student['name']} - no record found")
         
         logs.append(f"Tìm thấy config: {config.name}")
         
@@ -526,19 +530,30 @@ def submit_re_enrollment():
                 logs=logs
             )
         
-        # Kiểm tra đã nộp đơn chưa
-        existing = frappe.db.exists(
+        logs.append(f"Config: {config.name}")
+        
+        # Tìm bản ghi tái ghi danh đã được tạo sẵn cho học sinh
+        existing_record = frappe.db.get_value(
             "SIS Re-enrollment",
-            {"student_id": student_id, "config_id": config.name}
+            {"student_id": student_id, "config_id": config.name},
+            ["name", "submitted_at"],
+            as_dict=True
         )
         
-        if existing:
+        if not existing_record:
             return error_response(
-                f"Học sinh đã nộp đơn tái ghi danh. Mã đơn: {existing}",
+                "Không tìm thấy bản ghi tái ghi danh cho học sinh này. Vui lòng liên hệ nhà trường.",
                 logs=logs
             )
         
-        logs.append(f"Config: {config.name}")
+        # Kiểm tra đã nộp chưa (submitted_at có giá trị = đã nộp)
+        if existing_record.submitted_at:
+            return error_response(
+                f"Học sinh đã nộp đơn tái ghi danh. Mã đơn: {existing_record.name}",
+                logs=logs
+            )
+        
+        logs.append(f"Found existing record: {existing_record.name}")
         
         # Lấy lớp hiện tại
         current_class_info = _get_student_current_class(student_id, campus_id)
@@ -556,29 +571,24 @@ def submit_re_enrollment():
         # Lấy lý do từ request
         reason_value = data.get('reason') or data.get('not_re_enroll_reason') or None
         
-        # Tạo đơn tái ghi danh
-        re_enrollment_doc = frappe.get_doc({
-            "doctype": "SIS Re-enrollment",
-            "config_id": config.name,
-            "student_id": student_id,
-            "guardian_id": parent_id,
-            "current_class": current_class,
-            "campus_id": campus_id,
-            "decision": decision,
-            "payment_type": data.get('payment_type') if decision == 're_enroll' else None,
-            "selected_discount_id": data.get('selected_discount_id') if decision == 're_enroll' else None,
-            "not_re_enroll_reason": reason_value if decision in ['considering', 'not_re_enroll'] else None,
-            "agreement_accepted": 1 if agreement_accepted else 0,
-            "submitted_at": now()
-        })
+        # Cập nhật bản ghi hiện có (không tạo mới)
+        re_enrollment_doc = frappe.get_doc("SIS Re-enrollment", existing_record.name)
+        re_enrollment_doc.guardian_id = parent_id
+        re_enrollment_doc.current_class = current_class
+        re_enrollment_doc.decision = decision
+        re_enrollment_doc.payment_type = data.get('payment_type') if decision == 're_enroll' else None
+        re_enrollment_doc.selected_discount_id = data.get('selected_discount_id') if decision == 're_enroll' else None
+        re_enrollment_doc.not_re_enroll_reason = reason_value if decision in ['considering', 'not_re_enroll'] else None
+        re_enrollment_doc.agreement_accepted = 1 if agreement_accepted else 0
+        re_enrollment_doc.submitted_at = now()  # Đánh dấu đã nộp
         
-        # Insert với bypass permission
+        # Save với bypass permission
         re_enrollment_doc.flags.ignore_permissions = True
-        re_enrollment_doc.insert()
+        re_enrollment_doc.save()
         
         frappe.db.commit()
         
-        logs.append(f"Đã tạo đơn: {re_enrollment_doc.name}")
+        logs.append(f"Đã cập nhật đơn: {re_enrollment_doc.name}")
         
         # Chuẩn bị response
         decision_display_map = {
@@ -602,13 +612,7 @@ def submit_re_enrollment():
                 "payment_display": payment_display,
                 "submitted_at": str(re_enrollment_doc.submitted_at)
             },
-            message=f"Đã nộp đơn tái ghi danh thành công cho {student.student_name}",
-            logs=logs
-        )
-        
-    except frappe.exceptions.DuplicateEntryError:
-        return error_response(
-            "Học sinh đã nộp đơn tái ghi danh cho đợt này",
+            message=f"Đã gửi đăng ký tái ghi danh thành công cho {student.student_name}",
             logs=logs
         )
     except Exception as e:
