@@ -262,22 +262,19 @@ def get_config(config_id=None):
             order_by="deadline asc"
         )
         
-        # Lấy câu hỏi khảo sát
+        # Lấy câu hỏi khảo sát từ config document (để lấy nested child tables đúng cách)
         questions = []
-        question_rows = frappe.get_all(
-            "SIS Re-enrollment Question",
-            filters={"parent": config_id},
-            fields=["name", "question_vn", "question_en", "question_type", "is_required", "sort_order"],
-            order_by="sort_order asc"
-        )
-        for q in question_rows:
-            # Lấy options cho mỗi câu hỏi
-            options = frappe.get_all(
-                "SIS Re-enrollment Question Option",
-                filters={"parent": q.name},
-                fields=["name", "option_vn", "option_en", "sort_order"],
-                order_by="sort_order asc"
-            )
+        for q in config.questions:
+            # Lấy options từ question row
+            options = []
+            for opt in q.options:
+                options.append({
+                    "name": opt.name,
+                    "option_vn": opt.option_vn,
+                    "option_en": opt.option_en,
+                    "sort_order": opt.sort_order
+                })
+            
             questions.append({
                 "name": q.name,
                 "question_vn": q.question_vn,
@@ -307,6 +304,7 @@ def get_config(config_id=None):
             data={
                 "name": config.name,
                 "title": config.title,
+                "source_school_year_id": config.source_school_year_id,
                 "school_year_id": config.school_year_id,
                 "school_year_name_vn": school_year.title_vn if school_year else None,
                 "school_year_name_en": school_year.title_en if school_year else None,
