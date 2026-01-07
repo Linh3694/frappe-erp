@@ -522,6 +522,9 @@ def should_skip_due_to_debounce(employee_code, current_timestamp, check_in_time=
 	Check if notification should be skipped due to debounce
 	Enhanced logic that considers attendance context, not just time window
 	Returns True if notification should be skipped
+	
+	FIX: Debounce phải check theo từng học sinh (employee_code), không phải theo guardian
+	Vì 1 guardian có thể có nhiều con, mỗi con check-in riêng cần notification riêng
 	"""
 	try:
 		# Get guardians for this student first
@@ -535,16 +538,27 @@ def should_skip_due_to_debounce(employee_code, current_timestamp, check_in_time=
 		# Get guardian emails
 		guardian_emails = [g['email'] for g in guardians]
 
-		# Query database for recent notifications to any of these guardians
+		# FIX: Query notification theo CẢ guardian VÀ student_id trong data
+		# Chỉ skip nếu đã có notification cho CÙNG học sinh này gần đây
 		recent_notifications = frappe.db.sql("""
 			SELECT creation, data, recipient_user
 			FROM `tabERP Notification`
 			WHERE recipient_user IN %(guardian_emails)s
 			AND notification_type = 'attendance'
 			AND creation >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+			AND (
+				data LIKE %(student_pattern1)s 
+				OR data LIKE %(student_pattern2)s
+				OR data LIKE %(student_pattern3)s
+			)
 			ORDER BY creation DESC
-			LIMIT 5  -- Check last 5 notifications for context
-		""", {"guardian_emails": guardian_emails}, as_dict=True)
+			LIMIT 5
+		""", {
+			"guardian_emails": guardian_emails,
+			"student_pattern1": f'%"student_id": "{employee_code}"%',
+			"student_pattern2": f'%"studentId": "{employee_code}"%',
+			"student_pattern3": f'%"employeeCode": "{employee_code}"%'
+		}, as_dict=True)
 
 		if recent_notifications:
 			last_notif_time = recent_notifications[0].creation
@@ -580,7 +594,7 @@ def should_skip_due_to_debounce(employee_code, current_timestamp, check_in_time=
 			frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - significant attendance change")
 			return False
 
-		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - no recent notification")
+		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - no recent notification for this student")
 		return False
 
 	except Exception as e:
