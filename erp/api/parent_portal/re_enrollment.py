@@ -113,13 +113,13 @@ def _create_re_enrollment_announcement(
                 a_en = answer.get('selected_options_text_en', a_vn)
                 
                 if q_vn and a_vn:
-                    # Mỗi câu hỏi trên 1 dòng, câu trả lời trên dòng tiếp theo
+                    # Mỗi câu hỏi trên 1 dòng, câu trả lời trên dòng tiếp theo (in đậm)
                     survey_lines_vn.append(f"{idx}. {q_vn}")
-                    survey_lines_vn.append(f"   → {a_vn}")
+                    survey_lines_vn.append(f"   → **{a_vn}**")
                     survey_lines_vn.append("")  # Dòng trống giữa các câu
                     
                     survey_lines_en.append(f"{idx}. {q_en}")
-                    survey_lines_en.append(f"   → {a_en}")
+                    survey_lines_en.append(f"   → **{a_en}**")
                     survey_lines_en.append("")
             
             if survey_lines_vn:
@@ -159,7 +159,7 @@ Thông tin cập nhật:
 Nếu có thắc mắc, vui lòng liên hệ Phòng Tuyển sinh.
 
 Trân trọng,
-Hệ thống trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi"""
+**Hệ thống trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
 
             content_en = f"""Dear Parents,
 
@@ -171,7 +171,7 @@ Update Details:
 If you have any questions, please contact the Admissions Office.
 
 Best regards,
-Hệ thống trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi"""
+**Wellspring International Bilingual School Hanoi**"""
             
             push_body_vi = f"Đơn tái ghi danh của {student_name} đã được cập nhật"
             push_body_en = f"Re-enrollment application for {student_name} has been updated"
@@ -210,7 +210,7 @@ Thông tin đơn:
 Nếu cần thay đổi thông tin, vui lòng liên hệ Phòng Tuyển sinh.
 
 Trân trọng,
-Hệ thống trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi"""
+**Hệ thống trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
 
             content_en = f"""Dear Parents,
 
@@ -222,7 +222,7 @@ Application Details:
 If you need to make changes, please contact the Admissions Office.
 
 Best regards,
-Hệ thống trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi"""
+**Wellspring International Bilingual School Hanoi**"""
 
             push_body_vi = f"Nộp đơn tái ghi danh cho {student_name} thành công"
             push_body_en = f"Re-enrollment application for {student_name} submitted successfully"
