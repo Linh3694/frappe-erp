@@ -212,6 +212,21 @@ def get_announcements():
 
             # Process recipients to get relevant tags for current student
             relevant_tags = []
+            
+            # ⭐ QUAN TRỌNG: Check recipient_type ở level announcement trước
+            # Nếu là announcement toàn trường (recipient_type == 'school'), luôn hiển thị
+            announcement_is_school_wide = announcement.recipient_type == 'school'
+            
+            if announcement_is_school_wide:
+                # Announcement toàn trường - luôn relevant với tất cả students
+                relevant_tags.append({
+                    "type": "school",
+                    "name": "school",
+                    "display_name": "Toàn trường",
+                    "display_name_en": "All School"
+                })
+            
+            # Xử lý recipients JSON (cho các loại khác hoặc bổ sung tags)
             if announcement.recipients:
                 try:
                     if isinstance(announcement.recipients, str):
@@ -223,13 +238,30 @@ def get_announcements():
                         for recipient in recipients:
                             if isinstance(recipient, dict):
                                 recipient_type = recipient.get('type')
-                                recipient_id = recipient.get('id', '')  # ← FIX: Use 'id' field
+                                # Support cả 'id' và 'name' field (backward compatibility)
+                                recipient_id = recipient.get('id') or recipient.get('name', '')
                                 recipient_display_name = recipient.get('display_name', recipient_id)
 
                                 # Check if this recipient is relevant to current student
                                 is_relevant = False
+                                
+                                # Kiểm tra nếu là announcement toàn trường (nhiều cách lưu trong JSON)
+                                is_school_wide = (
+                                    recipient_type == 'school' or 
+                                    recipient_id == 'school' or
+                                    (recipient_display_name and 'toàn trường' in recipient_display_name.lower()) or
+                                    (recipient_display_name and 'all school' in recipient_display_name.lower())
+                                )
 
-                                if recipient_type == 'grade' and student_grade_name:
+                                # Nếu đã add tag school ở trên rồi, skip để tránh duplicate
+                                if is_school_wide and announcement_is_school_wide:
+                                    continue
+
+                                if is_school_wide:
+                                    # School-wide announcements are relevant to all students
+                                    is_relevant = True
+                                    recipient_type = 'school'  # Normalize type
+                                elif recipient_type == 'grade' and student_grade_name:
                                     # For grade, resolve the grade name from the ID
                                     grade_name_from_db = recipient_id
                                     try:
@@ -253,9 +285,6 @@ def get_announcements():
                                     # Check if student's class matches this recipient
                                     is_relevant = class_name_from_db == student_class_name or recipient_display_name == student_class_name
                                     
-                                elif recipient_type == 'school':
-                                    # School-wide announcements are relevant to all students
-                                    is_relevant = True
                                 elif recipient_type == 'student':
                                     # Check if student is specifically targeted
                                     is_relevant = recipient_id == student_id
@@ -438,6 +467,18 @@ def get_announcement_detail(announcement_id):
 
         # Process recipients for detail view (same logic as list view)
         relevant_tags = []
+        
+        # ⭐ QUAN TRỌNG: Check recipient_type ở level announcement trước
+        announcement_is_school_wide = announcement.recipient_type == 'school'
+        
+        if announcement_is_school_wide:
+            relevant_tags.append({
+                "type": "school",
+                "name": "school",
+                "display_name": "Toàn trường",
+                "display_name_en": "All School"
+            })
+        
         if announcement.recipients:
             try:
                 if isinstance(announcement.recipients, str):
@@ -450,13 +491,24 @@ def get_announcement_detail(announcement_id):
                     for recipient in recipients:
                         if isinstance(recipient, dict):
                             recipient_type = recipient.get('type')
-                            recipient_name = recipient.get('name', '')
+                            # Support cả 'id' và 'name' field (backward compatibility)
+                            recipient_name = recipient.get('id') or recipient.get('name', '')
                             recipient_display_name = recipient.get('display_name', recipient_name)
 
+                            # Skip nếu đã có tag school ở trên
+                            is_school_wide = (
+                                recipient_type == 'school' or 
+                                recipient_name == 'school' or
+                                (recipient_display_name and 'toàn trường' in recipient_display_name.lower())
+                            )
+                            if is_school_wide and announcement_is_school_wide:
+                                continue
+
                             # Handle special case for school-wide announcements
-                            if recipient_type == 'school':
+                            if recipient_type == 'school' or is_school_wide:
                                 display_name_vn = "Toàn trường"
                                 display_name_en = "All School"
+                                recipient_type = 'school'
                             else:
                                 display_name_vn = recipient_display_name
                                 display_name_en = recipient_display_name
