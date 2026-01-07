@@ -13,7 +13,7 @@
   "is_required",
   "sort_order",
   "section_break_options",
-  "options"
+  "options_json"
  ],
  "fields": [
   {
@@ -63,17 +63,17 @@
    "label": "Phương án trả lời"
   },
   {
-   "fieldname": "options",
-   "fieldtype": "Table",
-   "label": "Phương án",
-   "options": "SIS Re-enrollment Question Option",
-   "reqd": 1
+   "fieldname": "options_json",
+   "fieldtype": "Long Text",
+   "label": "Phương án (JSON)",
+   "description": "JSON array chứa các phương án trả lời",
+   "hidden": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2024-01-06 10:00:00.000000",
+ "modified": "2026-01-07 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "SIS",
  "name": "SIS Re-enrollment Question",
