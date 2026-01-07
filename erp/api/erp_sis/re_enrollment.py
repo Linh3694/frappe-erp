@@ -949,6 +949,14 @@ def update_submission():
             'payment_status': submission.payment_status
         }
         
+        # Lưu lại answers cũ để so sánh
+        old_answers = []
+        for ans in submission.answers:
+            old_answers.append({
+                'question_id': ans.question_id,
+                'selected_options_text_vn': ans.selected_options_text_vn
+            })
+        
         # Lưu lại các system_log cũ (để không bị mất khi clear notes)
         old_system_logs = []
         for note in submission.notes:
@@ -1109,9 +1117,33 @@ def update_submission():
             important_changes.append('reason')
         
         # So sánh answers (QUAN TRỌNG - gửi notification)
-        old_answers_count = len(submission.answers) if submission.answers else 0
         new_answers_data = data.get('answers', [])
-        if new_answers_data and len(new_answers_data) != old_answers_count:
+        answers_changed = False
+        
+        if new_answers_data:
+            # So sánh số lượng
+            if len(new_answers_data) != len(old_answers):
+                answers_changed = True
+            else:
+                # So sánh nội dung từng câu trả lời
+                for new_ans in new_answers_data:
+                    q_id = new_ans.get('question_id')
+                    new_text = new_ans.get('selected_options_text_vn', '')
+                    
+                    # Tìm câu trả lời cũ tương ứng
+                    old_ans = next((a for a in old_answers if a['question_id'] == q_id), None)
+                    
+                    if not old_ans:
+                        # Câu hỏi mới
+                        answers_changed = True
+                        break
+                    elif old_ans['selected_options_text_vn'] != new_text:
+                        # Nội dung khác
+                        answers_changed = True
+                        break
+        
+        if answers_changed:
+            changes.append(f"• Khảo sát: Đã cập nhật câu trả lời")
             important_changes.append('answers')
         
         # Nếu có thay đổi thì tạo log
