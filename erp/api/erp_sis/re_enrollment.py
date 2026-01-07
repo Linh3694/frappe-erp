@@ -750,7 +750,7 @@ def get_submissions():
         query = f"""
             SELECT 
                 re.name, re.config_id, re.student_id, re.student_name, re.student_code,
-                re.guardian_id, re.guardian_name, re.current_class, re.campus_id,
+                re.guardian_id, re.guardian_name, re.guardian_phone, re.guardian_email, re.current_class, re.campus_id,
                 re.decision, re.payment_type, re.not_re_enroll_reason,
                 re.payment_status, re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
                 re.submitted_at, re.modified_by_admin, re.admin_modified_at
@@ -859,6 +859,8 @@ def get_submission(submission_id=None):
                 "student_code": submission.student_code,
                 "guardian_id": submission.guardian_id,
                 "guardian_name": submission.guardian_name,
+                "guardian_phone": submission.guardian_phone if hasattr(submission, 'guardian_phone') else None,
+                "guardian_email": submission.guardian_email if hasattr(submission, 'guardian_email') else None,
                 "current_class": submission.current_class,
                 "decision": submission.decision,
                 "decision_display": "Tái ghi danh" if submission.decision == 're_enroll' else "Không tái ghi danh",

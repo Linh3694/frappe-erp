@@ -602,9 +602,16 @@ def submit_re_enrollment():
         # Lấy lý do từ request
         reason_value = data.get('reason') or data.get('not_re_enroll_reason') or None
         
+        # Lấy thông tin phụ huynh để lưu phone và email
+        guardian_doc = frappe.get_doc("CRM Guardian", parent_id)
+        guardian_phone = guardian_doc.phone if hasattr(guardian_doc, 'phone') else None
+        guardian_email = guardian_doc.email if hasattr(guardian_doc, 'email') else None
+        
         # Cập nhật bản ghi hiện có (không tạo mới)
         re_enrollment_doc = frappe.get_doc("SIS Re-enrollment", existing_record.name)
         re_enrollment_doc.guardian_id = parent_id
+        re_enrollment_doc.guardian_phone = guardian_phone
+        re_enrollment_doc.guardian_email = guardian_email
         re_enrollment_doc.current_class = current_class
         re_enrollment_doc.decision = decision
         re_enrollment_doc.payment_type = data.get('payment_type') if decision == 're_enroll' else None
