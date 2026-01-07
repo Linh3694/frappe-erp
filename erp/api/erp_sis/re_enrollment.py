@@ -750,7 +750,7 @@ def get_submissions():
         query = f"""
             SELECT 
                 re.name, re.config_id, re.student_id, re.student_name, re.student_code,
-                re.guardian_id, re.guardian_name, g.phone as guardian_phone, g.email as guardian_email, 
+                re.guardian_id, re.guardian_name, g.phone_number as guardian_phone, g.email as guardian_email, 
                 re.current_class, re.campus_id,
                 re.decision, re.payment_type, re.not_re_enroll_reason,
                 re.payment_status, re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
@@ -855,7 +855,7 @@ def get_submission(submission_id=None):
         guardian_info = frappe.db.get_value(
             "CRM Guardian",
             submission.guardian_id,
-            ["phone", "email"],
+            ["phone_number", "email"],
             as_dict=True
         ) if submission.guardian_id else None
         
@@ -869,7 +869,7 @@ def get_submission(submission_id=None):
                 "student_code": submission.student_code,
                 "guardian_id": submission.guardian_id,
                 "guardian_name": submission.guardian_name,
-                "guardian_phone": guardian_info.phone if guardian_info else None,
+                "guardian_phone": guardian_info.phone_number if guardian_info else None,
                 "guardian_email": guardian_info.email if guardian_info else None,
                 "current_class": submission.current_class,
                 "decision": submission.decision,
