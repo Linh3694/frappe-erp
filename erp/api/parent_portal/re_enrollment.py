@@ -43,6 +43,7 @@ def _get_parent_students(parent_id):
     """
     Lấy danh sách học sinh của phụ huynh.
     Trả về list các student với thông tin lớp hiện tại.
+    Loại bỏ duplicate students.
     """
     if not parent_id:
         return []
@@ -54,15 +55,20 @@ def _get_parent_students(parent_id):
         fields=["student", "relationship_type", "key_person"]
     )
     
-    students = []
+    # Dùng dict để loại bỏ duplicate theo student ID
+    students_dict = {}
     for rel in relationships:
+        # Bỏ qua nếu đã có student này
+        if rel.student in students_dict:
+            continue
+            
         try:
             student = frappe.get_doc("CRM Student", rel.student)
             
             # Lấy lớp hiện tại
             current_class = _get_student_current_class(student.name, student.campus_id)
             
-            students.append({
+            students_dict[student.name] = {
                 "name": student.name,
                 "student_name": student.student_name,
                 "student_code": student.student_code,
@@ -71,12 +77,12 @@ def _get_parent_students(parent_id):
                 "current_class_id": current_class.get("class_id") if current_class else None,
                 "relationship_type": rel.relationship_type,
                 "is_key_person": rel.key_person
-            })
+            }
         except Exception as e:
             frappe.logger().error(f"Error getting student {rel.student}: {str(e)}")
             continue
     
-    return students
+    return list(students_dict.values())
 
 
 def _get_student_current_class(student_id, campus_id=None):
@@ -262,6 +268,7 @@ def get_active_config():
                 break
         
         # Kiểm tra xem các học sinh đã nộp đơn chưa
+        logs.append(f"Checking submissions for {len(students)} students, config: {config.name}")
         for student in students:
             existing = frappe.db.exists(
                 "SIS Re-enrollment",
@@ -270,6 +277,7 @@ def get_active_config():
                     "config_id": config.name
                 }
             )
+            logs.append(f"Student {student['name']} - existing: {existing}")
             student["has_submitted"] = bool(existing)
             if existing:
                 # Lấy thông tin đơn đã nộp
@@ -280,6 +288,8 @@ def get_active_config():
                     as_dict=True
                 )
                 student["submission"] = submission
+            else:
+                student["submission"] = None
         
         logs.append(f"Tìm thấy config: {config.name}")
         
