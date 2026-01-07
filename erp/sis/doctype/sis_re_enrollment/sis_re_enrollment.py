@@ -106,8 +106,17 @@ class SISReenrollment(Document):
 		return None
 	
 	def set_submission_time(self):
-		"""Đặt thời gian nộp đơn"""
-		if self.is_new() and not self.submitted_at:
+		"""Đặt thời gian nộp đơn
+		
+		Chỉ set submitted_at khi:
+		1. Phụ huynh thực sự nộp đơn (có decision)
+		2. KHÔNG set khi admin tạo record trắng tự động
+		
+		Điều này đảm bảo record trắng có submitted_at = None -> hiển thị "Chưa nộp"
+		"""
+		# Chỉ set submitted_at khi có decision (phụ huynh đã chọn quyết định)
+		# Record trắng (không có decision) sẽ có submitted_at = None
+		if self.is_new() and not self.submitted_at and self.decision:
 			self.submitted_at = now()
 		
 		# Đặt thông tin ưu đãi nếu chọn tái ghi danh
