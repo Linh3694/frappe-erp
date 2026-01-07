@@ -412,34 +412,42 @@ def create_config():
             })
         
         # Thêm câu hỏi khảo sát nếu có
-        questions = data.get('questions', [])
-        if isinstance(questions, str):
-            questions = json.loads(questions)
+        questions_data = data.get('questions', [])
+        if isinstance(questions_data, str):
+            questions_data = json.loads(questions_data)
         
-        for idx, question in enumerate(questions):
-            options_data = question.get('options', [])
-            
-            # Tạo options list cho question
-            options_list = []
-            for opt_idx, option in enumerate(options_data):
-                options_list.append({
-                    "option_vn": option.get('option_vn'),
-                    "option_en": option.get('option_en'),
-                    "sort_order": option.get('sort_order', opt_idx)
-                })
-            
-            # Append question với options đã include
+        # Thêm questions (chưa có options)
+        for idx, question in enumerate(questions_data):
             config_doc.append("questions", {
                 "question_vn": question.get('question_vn'),
                 "question_en": question.get('question_en'),
                 "question_type": question.get('question_type', 'single_choice'),
                 "is_required": question.get('is_required', 1),
-                "sort_order": question.get('sort_order', idx),
-                "options": options_list
+                "sort_order": question.get('sort_order', idx)
             })
         
         config_doc.insert()
         frappe.db.commit()
+        
+        # Nếu có questions với options, reload và thêm options
+        has_options = any(q.get('options') for q in questions_data)
+        if has_options:
+            config_doc = frappe.get_doc("SIS Re-enrollment Config", config_doc.name)
+            
+            for idx, question in enumerate(questions_data):
+                options_data = question.get('options', [])
+                if options_data and idx < len(config_doc.questions):
+                    q_row = config_doc.questions[idx]
+                    q_row.options = []
+                    for opt_idx, option in enumerate(options_data):
+                        q_row.append("options", {
+                            "option_vn": option.get('option_vn'),
+                            "option_en": option.get('option_en'),
+                            "sort_order": option.get('sort_order', opt_idx)
+                        })
+            
+            config_doc.save()
+            frappe.db.commit()
         
         logs.append(f"Đã tạo config: {config_doc.name}")
         
@@ -549,38 +557,46 @@ def update_config():
         
         # Update câu hỏi khảo sát nếu có
         if 'questions' in data:
-            questions = data['questions']
-            if isinstance(questions, str):
-                questions = json.loads(questions)
+            questions_data = data['questions']
+            if isinstance(questions_data, str):
+                questions_data = json.loads(questions_data)
             
-            logs.append(f"Updating {len(questions)} questions")
+            logs.append(f"Updating {len(questions_data)} questions")
             
             # Xóa questions cũ (và options sẽ bị cascade delete)
             config_doc.questions = []
             
-            # Thêm questions mới
-            for idx, question in enumerate(questions):
-                options_data = question.get('options', [])
-                logs.append(f"Question {idx}: {len(options_data)} options")
-                
-                # Tạo options list cho question
-                options_list = []
-                for opt_idx, option in enumerate(options_data):
-                    options_list.append({
-                        "option_vn": option.get('option_vn'),
-                        "option_en": option.get('option_en'),
-                        "sort_order": option.get('sort_order', opt_idx)
-                    })
-                
-                # Append question với options đã include
+            # Thêm questions mới (chưa có options)
+            for idx, question in enumerate(questions_data):
                 config_doc.append("questions", {
                     "question_vn": question.get('question_vn'),
                     "question_en": question.get('question_en'),
                     "question_type": question.get('question_type', 'single_choice'),
                     "is_required": question.get('is_required', 1),
-                    "sort_order": question.get('sort_order', idx),
-                    "options": options_list
+                    "sort_order": question.get('sort_order', idx)
                 })
+            
+            # Save để tạo questions trong DB trước
+            config_doc.save()
+            frappe.db.commit()
+            
+            # Reload document để có question names
+            config_doc = frappe.get_doc("SIS Re-enrollment Config", config_id)
+            
+            # Thêm options cho từng question
+            for idx, question in enumerate(questions_data):
+                options_data = question.get('options', [])
+                logs.append(f"Question {idx}: {len(options_data)} options")
+                
+                if options_data and idx < len(config_doc.questions):
+                    q_row = config_doc.questions[idx]
+                    q_row.options = []
+                    for opt_idx, option in enumerate(options_data):
+                        q_row.append("options", {
+                            "option_vn": option.get('option_vn'),
+                            "option_en": option.get('option_en'),
+                            "sort_order": option.get('sort_order', opt_idx)
+                        })
         
         config_doc.save()
         frappe.db.commit()
