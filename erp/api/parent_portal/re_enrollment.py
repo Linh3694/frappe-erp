@@ -21,6 +21,218 @@ from erp.utils.api_response import (
 # Decision types cho tái ghi danh
 DECISION_TYPES = ['re_enroll', 'considering', 'not_re_enroll']
 
+# Decision display mapping
+DECISION_DISPLAY_MAP_VI = {
+    're_enroll': 'Tái ghi danh',
+    'considering': 'Đang cân nhắc',
+    'not_re_enroll': 'Không tái ghi danh'
+}
+DECISION_DISPLAY_MAP_EN = {
+    're_enroll': 'Re-enroll',
+    'considering': 'Considering',
+    'not_re_enroll': 'Not Re-enrolling'
+}
+
+
+def _create_re_enrollment_announcement(
+    student_id: str,
+    student_name: str,
+    student_code: str,
+    submission_data: dict,
+    is_update: bool = False
+):
+    """
+    Tạo Announcement (Tin tức) cho đơn tái ghi danh.
+    Gửi cả push notification.
+    
+    Args:
+        student_id: ID học sinh (CRM Student)
+        student_name: Tên học sinh
+        student_code: Mã học sinh
+        submission_data: Dict chứa thông tin đơn:
+            - decision: re_enroll | considering | not_re_enroll
+            - payment_type: annual | semester (nếu re_enroll)
+            - discount_name: Tên ưu đãi (nếu có)
+            - discount_percent: % giảm (nếu có)
+            - school_year: Năm học (VD: "2026-2027")
+            - submitted_at: Thời gian nộp/cập nhật
+            - status: Trạng thái (nếu update)
+        is_update: True nếu là cập nhật từ admin
+    """
+    try:
+        decision = submission_data.get('decision')
+        payment_type = submission_data.get('payment_type')
+        discount_name = submission_data.get('discount_name')
+        discount_percent = submission_data.get('discount_percent')
+        school_year = submission_data.get('school_year', '')
+        submitted_at = submission_data.get('submitted_at', now())
+        status = submission_data.get('status', 'pending')
+        
+        # Format datetime
+        from datetime import datetime
+        if isinstance(submitted_at, str):
+            try:
+                dt = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
+                time_display_vi = dt.strftime('%d/%m/%Y %H:%M')
+                time_display_en = dt.strftime('%b %d, %Y %H:%M')
+            except:
+                time_display_vi = submitted_at
+                time_display_en = submitted_at
+        else:
+            time_display_vi = str(submitted_at)
+            time_display_en = str(submitted_at)
+        
+        # Get display names
+        decision_vi = DECISION_DISPLAY_MAP_VI.get(decision, decision)
+        decision_en = DECISION_DISPLAY_MAP_EN.get(decision, decision)
+        
+        payment_vi = ""
+        payment_en = ""
+        if payment_type:
+            payment_vi = "Đóng theo năm" if payment_type == 'annual' else "Đóng theo kỳ"
+            payment_en = "Annual" if payment_type == 'annual' else "Semester"
+        
+        status_vi = {"pending": "Chờ xử lý", "approved": "Đã duyệt", "rejected": "Từ chối"}.get(status, status)
+        status_en = {"pending": "Pending", "approved": "Approved", "rejected": "Rejected"}.get(status, status)
+        
+        # Build content based on action type
+        if is_update:
+            # Admin update notification
+            title_vn = f"Cập nhật đơn tái ghi danh - {student_name}"
+            title_en = f"Re-enrollment Update - {student_name}"
+            
+            content_vn = f"""Kính gửi Quý Phụ huynh,
+
+Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được cập nhật.
+
+**Thông tin cập nhật:**
+- Quyết định: {decision_vi}
+- Trạng thái: {status_vi}
+- Thời gian cập nhật: {time_display_vi}
+
+Nếu có thắc mắc, vui lòng liên hệ Phòng Tuyển sinh.
+
+Trân trọng,
+Wellspring International School"""
+
+            content_en = f"""Dear Parents,
+
+The re-enrollment application for student **{student_name}** ({student_code}) has been updated.
+
+**Update Details:**
+- Decision: {decision_en}
+- Status: {status_en}
+- Updated at: {time_display_en}
+
+If you have any questions, please contact the Admissions Office.
+
+Best regards,
+Wellspring International School"""
+            
+            push_body_vi = "Đơn tái ghi danh đã được cập nhật"
+            push_body_en = "Re-enrollment application has been updated"
+        else:
+            # Parent submission notification
+            title_vn = f"Đơn tái ghi danh - {student_name}"
+            title_en = f"Re-enrollment Application - {student_name}"
+            
+            # Build details based on decision
+            details_vn = f"- Năm học đăng ký: {school_year}\n- Quyết định: {decision_vi}"
+            details_en = f"- School Year: {school_year}\n- Decision: {decision_en}"
+            
+            if decision == 're_enroll' and payment_vi:
+                details_vn += f"\n- Phương thức thanh toán: {payment_vi}"
+                details_en += f"\n- Payment Method: {payment_en}"
+                
+                if discount_name and discount_percent:
+                    details_vn += f"\n- Ưu đãi áp dụng: Giảm {discount_percent}% ({discount_name})"
+                    details_en += f"\n- Discount Applied: {discount_percent}% off ({discount_name})"
+            
+            details_vn += f"\n- Thời gian nộp: {time_display_vi}"
+            details_en += f"\n- Submitted at: {time_display_en}"
+            
+            content_vn = f"""Kính gửi Quý Phụ huynh,
+
+Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được gửi thành công.
+
+**Thông tin đơn:**
+{details_vn}
+
+Đơn của Quý Phụ huynh đang được xử lý. Nếu cần thay đổi thông tin, vui lòng liên hệ Phòng Tuyển sinh.
+
+Trân trọng,
+Wellspring International School"""
+
+            content_en = f"""Dear Parents,
+
+The re-enrollment application for student **{student_name}** ({student_code}) has been submitted successfully.
+
+**Application Details:**
+{details_en}
+
+Your application is being processed. If you need to make changes, please contact the Admissions Office.
+
+Best regards,
+Wellspring International School"""
+
+            push_body_vi = "Nộp đơn tái ghi danh thành công"
+            push_body_en = "Re-enrollment application submitted successfully"
+        
+        # Lấy campus_id để filter announcement
+        campus_id = frappe.db.get_value("CRM Student", student_id, "campus_id")
+        
+        # Tạo SIS Announcement
+        announcement = frappe.get_doc({
+            "doctype": "SIS Announcement",
+            "title_vn": title_vn,
+            "title_en": title_en,
+            "content_vn": content_vn,
+            "content_en": content_en,
+            "campus_id": campus_id,
+            "status": "sent",
+            "sent_at": now(),
+            "recipients": json.dumps([{"id": student_id, "type": "student"}]),
+            "recipient_type": "specific"
+        })
+        announcement.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        frappe.logger().info(f"✅ Created re-enrollment announcement: {announcement.name} for student {student_id}")
+        
+        # Gửi push notification
+        try:
+            from erp.utils.notification_handler import send_bulk_parent_notifications
+            
+            notification_result = send_bulk_parent_notifications(
+                recipient_type="announcement",
+                recipients_data={
+                    "student_ids": [student_id],
+                    "announcement_id": announcement.name
+                },
+                title="Đơn tái ghi danh",
+                body=push_body_vi,
+                icon="/icon.png",
+                data={
+                    "type": "announcement",
+                    "announcement_id": announcement.name,
+                    "title_en": title_en,
+                    "title_vn": title_vn,
+                    "url": f"/announcement?id={announcement.name}"
+                }
+            )
+            
+            frappe.logger().info(f"📢 Re-enrollment push notification result: {notification_result}")
+            
+        except Exception as push_err:
+            frappe.logger().error(f"❌ Error sending re-enrollment push notification: {str(push_err)}")
+        
+        return announcement.name
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ Error creating re-enrollment announcement: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Create Re-enrollment Announcement Error")
+        return None
+
 
 def _get_current_parent():
     """Lấy thông tin phụ huynh đang đăng nhập"""
@@ -261,7 +473,12 @@ def get_active_config():
             options = []
             if q.options_json:
                 try:
-                    options = json.loads(q.options_json)
+                    parsed_options = json.loads(q.options_json)
+                    # Lọc bỏ options rỗng hoặc có text là "0"
+                    options = [
+                        opt for opt in parsed_options 
+                        if opt.get('option_vn', '').strip() or opt.get('option_en', '').strip()
+                    ]
                 except json.JSONDecodeError:
                     options = []
             
@@ -620,6 +837,54 @@ def submit_re_enrollment():
         frappe.db.commit()
         
         logs.append(f"Đã cập nhật đơn: {re_enrollment_doc.name}")
+        
+        # Lấy thông tin discount nếu có
+        discount_name = None
+        discount_percent = None
+        if decision == 're_enroll' and data.get('selected_discount_id'):
+            config_doc = frappe.get_doc("SIS Re-enrollment Config", config.name)
+            for discount in config_doc.discounts:
+                if discount.name == data.get('selected_discount_id'):
+                    discount_name = discount.description
+                    discount_percent = discount.annual_discount if data.get('payment_type') == 'annual' else discount.semester_discount
+                    break
+        
+        # Lấy năm học
+        school_year = ""
+        try:
+            config_doc = frappe.get_doc("SIS Re-enrollment Config", config.name) if not 'config_doc' in dir() else config_doc
+            school_year_info = frappe.db.get_value(
+                "SIS School Year", 
+                config_doc.school_year_id, 
+                ["name_vn", "name_en"],
+                as_dict=True
+            )
+            if school_year_info:
+                school_year = school_year_info.name_vn or school_year_info.name_en or ""
+        except:
+            pass
+        
+        # Tạo announcement và gửi push notification
+        try:
+            _create_re_enrollment_announcement(
+                student_id=student_id,
+                student_name=student.student_name,
+                student_code=student.student_code,
+                submission_data={
+                    'decision': decision,
+                    'payment_type': data.get('payment_type'),
+                    'discount_name': discount_name,
+                    'discount_percent': discount_percent,
+                    'school_year': school_year,
+                    'submitted_at': str(re_enrollment_doc.submitted_at),
+                    'status': 'pending'
+                },
+                is_update=False
+            )
+            logs.append("Đã tạo thông báo cho phụ huynh")
+        except Exception as notif_err:
+            logs.append(f"Lỗi tạo thông báo: {str(notif_err)}")
+            frappe.logger().error(f"Error creating re-enrollment notification: {str(notif_err)}")
         
         # Chuẩn bị response
         decision_display_map = {

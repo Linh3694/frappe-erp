@@ -1043,6 +1043,43 @@ def update_submission():
         
         logs.append(f"Đã cập nhật đơn: {submission_id}")
         
+        # Gửi thông báo cho phụ huynh về việc cập nhật đơn
+        try:
+            from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
+            
+            # Lấy thông tin năm học
+            school_year = ""
+            try:
+                config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
+                school_year_info = frappe.db.get_value(
+                    "SIS School Year",
+                    config_doc.school_year_id,
+                    ["name_vn", "name_en"],
+                    as_dict=True
+                )
+                if school_year_info:
+                    school_year = school_year_info.name_vn or school_year_info.name_en or ""
+            except:
+                pass
+            
+            _create_re_enrollment_announcement(
+                student_id=submission.student_id,
+                student_name=submission.student_name,
+                student_code=submission.student_code,
+                submission_data={
+                    'decision': submission.decision,
+                    'payment_type': submission.payment_type,
+                    'school_year': school_year,
+                    'submitted_at': str(now()),
+                    'status': submission.status or 'pending'
+                },
+                is_update=True
+            )
+            logs.append("Đã gửi thông báo cập nhật cho phụ huynh")
+        except Exception as notif_err:
+            logs.append(f"Lỗi gửi thông báo: {str(notif_err)}")
+            frappe.logger().error(f"Error sending admin update notification: {str(notif_err)}")
+        
         return success_response(
             data={"name": submission.name},
             message="Cập nhật đơn thành công",
@@ -1669,6 +1706,43 @@ def update_submission_decision():
         frappe.db.commit()
         
         logs.append(f"Đã cập nhật decision thành công")
+        
+        # Gửi thông báo cho phụ huynh về việc cập nhật quyết định
+        try:
+            from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
+            
+            # Lấy thông tin năm học
+            school_year = ""
+            try:
+                config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
+                school_year_info = frappe.db.get_value(
+                    "SIS School Year",
+                    config_doc.school_year_id,
+                    ["name_vn", "name_en"],
+                    as_dict=True
+                )
+                if school_year_info:
+                    school_year = school_year_info.name_vn or school_year_info.name_en or ""
+            except:
+                pass
+            
+            _create_re_enrollment_announcement(
+                student_id=submission.student_id,
+                student_name=submission.student_name,
+                student_code=submission.student_code,
+                submission_data={
+                    'decision': submission.decision,
+                    'payment_type': submission.payment_type,
+                    'school_year': school_year,
+                    'submitted_at': str(now()),
+                    'status': submission.status or 'pending'
+                },
+                is_update=True
+            )
+            logs.append("Đã gửi thông báo cập nhật quyết định cho phụ huynh")
+        except Exception as notif_err:
+            logs.append(f"Lỗi gửi thông báo: {str(notif_err)}")
+            frappe.logger().error(f"Error sending decision update notification: {str(notif_err)}")
         
         return success_response(
             data={
