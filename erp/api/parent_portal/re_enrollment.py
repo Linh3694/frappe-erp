@@ -832,6 +832,25 @@ def submit_re_enrollment():
         re_enrollment_doc.agreement_accepted = 1 if agreement_accepted else 0
         re_enrollment_doc.submitted_at = now()  # Đánh dấu đã nộp
         
+        # Lấy tên phụ huynh để ghi log
+        guardian_name = frappe.db.get_value("CRM Guardian", parent_id, "guardian_name") or "Phụ huynh"
+        
+        # Tạo log hệ thống - Phụ huynh nộp đơn
+        decision_display = DECISION_DISPLAY_MAP_VI.get(decision, decision)
+        log_content = f"Phụ huynh {guardian_name} đã nộp đơn tái ghi danh.\n• Quyết định: {decision_display}"
+        if decision == 're_enroll':
+            payment_display = "Đóng theo năm" if data.get('payment_type') == 'annual' else "Đóng theo kỳ"
+            log_content += f"\n• Phương thức thanh toán: {payment_display}"
+        elif decision in ['considering', 'not_re_enroll'] and reason_value:
+            log_content += f"\n• Lý do: {reason_value}"
+        
+        re_enrollment_doc.append("notes", {
+            "note_type": "system_log",
+            "note": log_content,
+            "created_by_name": guardian_name,
+            "created_at": now()
+        })
+        
         # Save với bypass permission
         re_enrollment_doc.flags.ignore_permissions = True
         re_enrollment_doc.save()

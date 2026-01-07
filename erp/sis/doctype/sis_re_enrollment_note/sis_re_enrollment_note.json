@@ -6,6 +6,7 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "note_type",
   "note",
   "column_break_1",
   "created_by_user",
@@ -14,9 +15,18 @@
  ],
  "fields": [
   {
+   "fieldname": "note_type",
+   "fieldtype": "Select",
+   "label": "Loại",
+   "options": "system_log\nmanual_note",
+   "default": "manual_note",
+   "in_list_view": 1,
+   "description": "system_log: Log hệ thống tự động, manual_note: Ghi chú tay"
+  },
+  {
    "fieldname": "note",
    "fieldtype": "Small Text",
-   "label": "Ghi chú",
+   "label": "Nội dung",
    "reqd": 1,
    "in_list_view": 1
   },

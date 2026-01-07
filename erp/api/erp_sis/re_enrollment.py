@@ -940,6 +940,27 @@ def update_submission():
         
         submission = frappe.get_doc("SIS Re-enrollment", submission_id)
         
+        # Lưu lại giá trị cũ để so sánh và tạo log
+        old_values = {
+            'decision': submission.decision,
+            'payment_type': submission.payment_type,
+            'selected_discount_id': submission.selected_discount_id,
+            'not_re_enroll_reason': submission.not_re_enroll_reason,
+            'payment_status': submission.payment_status
+        }
+        
+        # Lưu lại các system_log cũ (để không bị mất khi clear notes)
+        old_system_logs = []
+        for note in submission.notes:
+            if note.note_type == 'system_log':
+                old_system_logs.append({
+                    'note_type': note.note_type,
+                    'note': note.note,
+                    'created_by_user': note.created_by_user,
+                    'created_by_name': note.created_by_name,
+                    'created_at': note.created_at
+                })
+        
         # Các trường admin có thể sửa
         updatable_fields = ['decision', 'payment_type', 'selected_discount_id', 
                           'not_re_enroll_reason', 'payment_status']
@@ -966,16 +987,25 @@ def update_submission():
         
         # Xử lý notes - clear và thêm mới
         notes_data = data.get('notes', [])
+        
+        # Clear existing notes
+        submission.notes = []
+        
+        # Lấy full name của user hiện tại
+        current_user = frappe.session.user
+        current_user_name = frappe.db.get_value("User", current_user, "full_name") or current_user
+        
+        # Thêm lại các system_log cũ trước
+        for old_log in old_system_logs:
+            submission.append("notes", old_log)
+        
+        # Add manual notes từ frontend (chỉ lấy manual_note, bỏ qua system_log vì đã thêm ở trên)
         if notes_data:
-            # Clear existing notes
-            submission.notes = []
-            
-            # Lấy full name của user hiện tại
-            current_user = frappe.session.user
-            current_user_name = frappe.db.get_value("User", current_user, "full_name") or current_user
-            
-            # Add new notes
             for note in notes_data:
+                # Bỏ qua system_log từ frontend (đã có từ old_system_logs)
+                if note.get('note_type') == 'system_log':
+                    continue
+                    
                 # Convert ISO datetime to MySQL format nếu cần
                 created_at = note.get('created_at')
                 if created_at:
@@ -991,6 +1021,7 @@ def update_submission():
                     created_at = now()
                 
                 submission.append("notes", {
+                    "note_type": "manual_note",
                     "note": note.get('note'),
                     "created_by_user": note.get('created_by_user') or current_user,
                     "created_by_name": note.get('created_by_name') or current_user_name,
@@ -1029,6 +1060,58 @@ def update_submission():
                     "selected_options_text_vn": answer.get('selected_options_text_vn'),
                     "selected_options_text_en": answer.get('selected_options_text_en')
                 })
+        
+        # Tạo log hệ thống về thay đổi của admin
+        changes = []
+        decision_map = {
+            're_enroll': 'Tái ghi danh',
+            'considering': 'Cân nhắc', 
+            'not_re_enroll': 'Không tái ghi danh'
+        }
+        payment_type_map = {'annual': 'Đóng theo năm', 'semester': 'Đóng theo kỳ'}
+        payment_status_map = {'unpaid': 'Chưa đóng', 'paid': 'Đã đóng', 'refunded': 'Hoàn tiền'}
+        
+        # So sánh decision
+        new_decision = data.get('decision') or submission.decision
+        if old_values['decision'] != new_decision:
+            old_display = decision_map.get(old_values['decision'], old_values['decision'] or 'Chưa có')
+            new_display = decision_map.get(new_decision, new_decision)
+            changes.append(f"• Quyết định: {old_display} → {new_display}")
+        
+        # So sánh payment_type
+        new_payment_type = data.get('payment_type') or submission.payment_type
+        if old_values['payment_type'] != new_payment_type and new_decision == 're_enroll':
+            old_display = payment_type_map.get(old_values['payment_type'], old_values['payment_type'] or 'Chưa có')
+            new_display = payment_type_map.get(new_payment_type, new_payment_type)
+            changes.append(f"• Phương thức: {old_display} → {new_display}")
+        
+        # So sánh payment_status
+        new_payment_status = data.get('payment_status') or submission.payment_status
+        if old_values['payment_status'] != new_payment_status:
+            old_display = payment_status_map.get(old_values['payment_status'], old_values['payment_status'] or 'Chưa có')
+            new_display = payment_status_map.get(new_payment_status, new_payment_status)
+            changes.append(f"• Thanh toán: {old_display} → {new_display}")
+        
+        # So sánh discount
+        new_discount_id = data.get('selected_discount_id') or submission.selected_discount_id
+        if old_values['selected_discount_id'] != new_discount_id:
+            changes.append(f"• Ưu đãi: Đã cập nhật")
+        
+        # So sánh lý do
+        new_reason = data.get('not_re_enroll_reason') or submission.not_re_enroll_reason
+        if old_values['not_re_enroll_reason'] != new_reason and new_decision in ['considering', 'not_re_enroll']:
+            changes.append(f"• Lý do: Đã cập nhật")
+        
+        # Nếu có thay đổi thì tạo log
+        if changes:
+            log_content = f"Admin {current_user_name} đã cập nhật đơn:\n" + "\n".join(changes)
+            submission.append("notes", {
+                "note_type": "system_log",
+                "note": log_content,
+                "created_by_user": current_user,
+                "created_by_name": current_user_name,
+                "created_at": now()
+            })
         
         # Ghi nhận admin sửa
         submission.modified_by_admin = frappe.session.user
@@ -1665,6 +1748,9 @@ def update_submission_decision():
         
         submission = frappe.get_doc("SIS Re-enrollment", submission_id)
         
+        # Lưu decision cũ để tạo log
+        old_decision = submission.decision
+        
         logs.append(f"Update decision cho {submission_id}: {submission.decision} -> {decision}")
         
         # Validate theo loại decision
@@ -1697,6 +1783,28 @@ def update_submission_decision():
         # Ghi nhận thời gian submit nếu lần đầu có decision
         if not submission.submitted_at:
             submission.submitted_at = now()
+        
+        # Tạo log hệ thống về thay đổi decision
+        decision_map = {
+            're_enroll': 'Tái ghi danh',
+            'considering': 'Cân nhắc', 
+            'not_re_enroll': 'Không tái ghi danh'
+        }
+        current_user = frappe.session.user
+        current_user_name = frappe.db.get_value("User", current_user, "full_name") or current_user
+        
+        old_display = decision_map.get(old_decision, old_decision or 'Chưa có')
+        new_display = decision_map.get(decision, decision)
+        
+        log_content = f"Admin {current_user_name} đã cập nhật quyết định:\n• Quyết định: {old_display} → {new_display}"
+        
+        submission.append("notes", {
+            "note_type": "system_log",
+            "note": log_content,
+            "created_by_user": current_user,
+            "created_by_name": current_user_name,
+            "created_at": now()
+        })
         
         # Ghi nhận admin sửa
         submission.modified_by_admin = frappe.session.user
