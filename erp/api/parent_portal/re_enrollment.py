@@ -57,6 +57,7 @@ def _create_re_enrollment_announcement(
             - school_year: Năm học (VD: "2026-2027")
             - submitted_at: Thời gian nộp/cập nhật
             - status: Trạng thái (nếu update)
+            - answers: Danh sách câu trả lời khảo sát (list of dict)
         is_update: True nếu là cập nhật từ admin
     """
     try:
@@ -67,6 +68,7 @@ def _create_re_enrollment_announcement(
         school_year = submission_data.get('school_year', '')
         submitted_at = submission_data.get('submitted_at', now())
         status = submission_data.get('status', 'pending')
+        answers = submission_data.get('answers', [])  # Câu trả lời khảo sát
         
         # Format datetime
         from datetime import datetime
@@ -98,6 +100,26 @@ def _create_re_enrollment_announcement(
         # Lấy thêm thông tin reason từ submission_data
         reason = submission_data.get('reason', '')
         
+        # Build survey answers section nếu có
+        survey_section_vn = ""
+        survey_section_en = ""
+        if answers and len(answers) > 0 and decision == 're_enroll':
+            survey_lines_vn = []
+            survey_lines_en = []
+            for idx, answer in enumerate(answers, 1):
+                q_vn = answer.get('question_text_vn', '')
+                q_en = answer.get('question_text_en', q_vn)
+                a_vn = answer.get('selected_options_text_vn', '')
+                a_en = answer.get('selected_options_text_en', a_vn)
+                
+                if q_vn and a_vn:
+                    survey_lines_vn.append(f"  {idx}. {q_vn}\n     → **{a_vn}**")
+                    survey_lines_en.append(f"  {idx}. {q_en}\n     → **{a_en}**")
+            
+            if survey_lines_vn:
+                survey_section_vn = "\n\n**Khảo sát dịch vụ:**\n" + "\n".join(survey_lines_vn)
+                survey_section_en = "\n\n**Service Survey:**\n" + "\n".join(survey_lines_en)
+        
         # Build content based on action type
         if is_update:
             # Admin update notification
@@ -126,7 +148,7 @@ def _create_re_enrollment_announcement(
 Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được cập nhật.
 
 Thông tin cập nhật:
-{update_details_vn}
+{update_details_vn}{survey_section_vn}
 
 Nếu có thắc mắc, vui lòng liên hệ Phòng Tuyển sinh.
 
@@ -138,7 +160,7 @@ Wellspring International School"""
 The re-enrollment application for student **{student_name}** ({student_code}) has been updated.
 
 Update Details:
-{update_details_en}
+{update_details_en}{survey_section_en}
 
 If you have any questions, please contact the Admissions Office.
 
@@ -177,7 +199,7 @@ Wellspring International School"""
 Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được gửi thành công.
 
 Thông tin đơn:
-{details_vn}
+{details_vn}{survey_section_vn}
 
 Nếu cần thay đổi thông tin, vui lòng liên hệ Phòng Tuyển sinh.
 
@@ -189,7 +211,7 @@ Wellspring International School"""
 The re-enrollment application for student **{student_name}** ({student_code}) has been submitted successfully.
 
 Application Details:
-{details_en}
+{details_en}{survey_section_en}
 
 If you need to make changes, please contact the Admissions Office.
 
@@ -963,6 +985,16 @@ def submit_re_enrollment():
         
         # Tạo announcement và gửi push notification
         try:
+            # Lấy answers từ document để gửi vào announcement
+            answers_for_announcement = []
+            for answer in re_enrollment_doc.answers:
+                answers_for_announcement.append({
+                    'question_text_vn': answer.question_text_vn,
+                    'question_text_en': answer.question_text_en,
+                    'selected_options_text_vn': answer.selected_options_text_vn,
+                    'selected_options_text_en': answer.selected_options_text_en
+                })
+            
             _create_re_enrollment_announcement(
                 student_id=student_id,
                 student_name=student.student_name,
@@ -975,7 +1007,8 @@ def submit_re_enrollment():
                     'reason': reason_value,  # Lý do (cho considering/not_re_enroll)
                     'school_year': school_year,
                     'submitted_at': str(re_enrollment_doc.submitted_at),
-                    'status': 'pending'
+                    'status': 'pending',
+                    'answers': answers_for_announcement  # Câu trả lời khảo sát
                 },
                 is_update=False
             )

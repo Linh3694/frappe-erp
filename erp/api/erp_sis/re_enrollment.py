@@ -1159,6 +1159,16 @@ def update_submission():
                 except:
                     pass
                 
+                # Lấy answers từ submission để gửi vào announcement
+                answers_for_announcement = []
+                for answer in submission.answers:
+                    answers_for_announcement.append({
+                        'question_text_vn': answer.question_text_vn,
+                        'question_text_en': answer.question_text_en,
+                        'selected_options_text_vn': answer.selected_options_text_vn,
+                        'selected_options_text_en': answer.selected_options_text_en
+                    })
+                
                 _create_re_enrollment_announcement(
                     student_id=submission.student_id,
                     student_name=submission.student_name,
@@ -1171,7 +1181,8 @@ def update_submission():
                         'reason': submission.not_re_enroll_reason,
                         'school_year': school_year,
                         'submitted_at': str(now()),
-                        'status': submission.status or 'pending'
+                        'status': submission.status or 'pending',
+                        'answers': answers_for_announcement  # Câu trả lời khảo sát
                     },
                     is_update=True
                 )
@@ -1853,6 +1864,16 @@ def update_submission_decision():
             except:
                 pass
             
+            # Lấy answers từ submission để gửi vào announcement
+            answers_for_announcement = []
+            for answer in submission.answers:
+                answers_for_announcement.append({
+                    'question_text_vn': answer.question_text_vn,
+                    'question_text_en': answer.question_text_en,
+                    'selected_options_text_vn': answer.selected_options_text_vn,
+                    'selected_options_text_en': answer.selected_options_text_en
+                })
+            
             _create_re_enrollment_announcement(
                 student_id=submission.student_id,
                 student_name=submission.student_name,
@@ -1865,7 +1886,8 @@ def update_submission_decision():
                     'reason': submission.not_re_enroll_reason,
                     'school_year': school_year,
                     'submitted_at': str(now()),
-                    'status': submission.status or 'pending'
+                    'status': submission.status or 'pending',
+                    'answers': answers_for_announcement  # Câu trả lời khảo sát
                 },
                 is_update=True
             )
