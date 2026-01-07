@@ -103,12 +103,11 @@ def _create_re_enrollment_announcement(
             
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
-Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được cập nhật.
+Đơn tái ghi danh của học sinh {student_name} ({student_code}) đã được cập nhật.
 
-**Thông tin cập nhật:**
-- Quyết định: {decision_vi}
-- Trạng thái: {status_vi}
-- Thời gian cập nhật: {time_display_vi}
+Thông tin cập nhật:
+• Quyết định: {decision_vi}
+• Thời gian cập nhật: {time_display_vi}
 
 Nếu có thắc mắc, vui lòng liên hệ Phòng Tuyển sinh.
 
@@ -117,66 +116,65 @@ Wellspring International School"""
 
             content_en = f"""Dear Parents,
 
-The re-enrollment application for student **{student_name}** ({student_code}) has been updated.
+The re-enrollment application for student {student_name} ({student_code}) has been updated.
 
-**Update Details:**
-- Decision: {decision_en}
-- Status: {status_en}
-- Updated at: {time_display_en}
+Update Details:
+• Decision: {decision_en}
+• Updated at: {time_display_en}
 
 If you have any questions, please contact the Admissions Office.
 
 Best regards,
 Wellspring International School"""
             
-            push_body_vi = "Đơn tái ghi danh đã được cập nhật"
-            push_body_en = "Re-enrollment application has been updated"
+            push_body_vi = f"Đơn tái ghi danh của {student_name} đã được cập nhật"
+            push_body_en = f"Re-enrollment application for {student_name} has been updated"
         else:
             # Parent submission notification
             title_vn = f"Đơn tái ghi danh - {student_name}"
             title_en = f"Re-enrollment Application - {student_name}"
             
             # Build details based on decision
-            details_vn = f"- Năm học đăng ký: {school_year}\n- Quyết định: {decision_vi}"
-            details_en = f"- School Year: {school_year}\n- Decision: {decision_en}"
+            details_vn = f"• Năm học đăng ký: {school_year}\n• Quyết định: {decision_vi}"
+            details_en = f"• School Year: {school_year}\n• Decision: {decision_en}"
             
             if decision == 're_enroll' and payment_vi:
-                details_vn += f"\n- Phương thức thanh toán: {payment_vi}"
-                details_en += f"\n- Payment Method: {payment_en}"
+                details_vn += f"\n• Phương thức thanh toán: {payment_vi}"
+                details_en += f"\n• Payment Method: {payment_en}"
                 
                 if discount_name and discount_percent:
-                    details_vn += f"\n- Ưu đãi áp dụng: Giảm {discount_percent}% ({discount_name})"
-                    details_en += f"\n- Discount Applied: {discount_percent}% off ({discount_name})"
+                    details_vn += f"\n• Ưu đãi áp dụng: Giảm {discount_percent}% ({discount_name})"
+                    details_en += f"\n• Discount Applied: {discount_percent}% off ({discount_name})"
             
-            details_vn += f"\n- Thời gian nộp: {time_display_vi}"
-            details_en += f"\n- Submitted at: {time_display_en}"
+            details_vn += f"\n• Thời gian nộp: {time_display_vi}"
+            details_en += f"\n• Submitted at: {time_display_en}"
             
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
-Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được gửi thành công.
+Đơn tái ghi danh của học sinh {student_name} ({student_code}) đã được gửi thành công.
 
-**Thông tin đơn:**
+Thông tin đơn:
 {details_vn}
 
-Đơn của Quý Phụ huynh đang được xử lý. Nếu cần thay đổi thông tin, vui lòng liên hệ Phòng Tuyển sinh.
+Nếu cần thay đổi thông tin, vui lòng liên hệ Phòng Tuyển sinh.
 
 Trân trọng,
 Wellspring International School"""
 
             content_en = f"""Dear Parents,
 
-The re-enrollment application for student **{student_name}** ({student_code}) has been submitted successfully.
+The re-enrollment application for student {student_name} ({student_code}) has been submitted successfully.
 
-**Application Details:**
+Application Details:
 {details_en}
 
-Your application is being processed. If you need to make changes, please contact the Admissions Office.
+If you need to make changes, please contact the Admissions Office.
 
 Best regards,
 Wellspring International School"""
 
-            push_body_vi = "Nộp đơn tái ghi danh thành công"
-            push_body_en = "Re-enrollment application submitted successfully"
+            push_body_vi = f"Nộp đơn tái ghi danh cho {student_name} thành công"
+            push_body_en = f"Re-enrollment application for {student_name} submitted successfully"
         
         # Lấy campus_id để filter announcement
         campus_id = frappe.db.get_value("CRM Student", student_id, "campus_id")
@@ -191,7 +189,11 @@ Wellspring International School"""
             "campus_id": campus_id,
             "status": "sent",
             "sent_at": now(),
-            "recipients": json.dumps([{"id": student_id, "type": "student"}]),
+            "recipients": json.dumps([{
+                "id": student_id, 
+                "type": "student",
+                "display_name": student_name  # Hiển thị tên học sinh thay vì ID
+            }]),
             "recipient_type": "specific"
         })
         announcement.insert(ignore_permissions=True)
