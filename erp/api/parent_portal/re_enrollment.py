@@ -68,6 +68,36 @@ def _get_parent_students(parent_id):
             # Lấy lớp hiện tại
             current_class = _get_student_current_class(student.name, student.campus_id)
             
+            # Lấy ảnh học sinh từ SIS Photo (giống logic trong otp_auth.py)
+            sis_photo = None
+            try:
+                # Lấy năm học hiện tại đang active
+                current_school_year = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1},
+                    "name",
+                    order_by="start_date desc"
+                )
+                
+                # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
+                sis_photos = frappe.db.sql("""
+                    SELECT photo, title, upload_date, school_year_id
+                    FROM `tabSIS Photo`
+                    WHERE student_id = %s
+                        AND type = 'student'
+                        AND status = 'Active'
+                    ORDER BY 
+                        CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                        upload_date DESC,
+                        creation DESC
+                    LIMIT 1
+                """, (student.name, current_school_year), as_dict=True)
+
+                if sis_photos:
+                    sis_photo = sis_photos[0]["photo"]
+            except Exception as photo_err:
+                frappe.logger().error(f"Error getting sis_photo for {student.name}: {str(photo_err)}")
+            
             students_dict[student.name] = {
                 "name": student.name,
                 "student_name": student.student_name,
@@ -77,7 +107,7 @@ def _get_parent_students(parent_id):
                 "current_class_id": current_class.get("class_id") if current_class else None,
                 "relationship_type": rel.relationship_type,
                 "is_key_person": rel.key_person,
-                "sis_photo": student.sis_photo if hasattr(student, 'sis_photo') else None
+                "sis_photo": sis_photo
             }
         except Exception as e:
             frappe.logger().error(f"Error getting student {rel.student}: {str(e)}")
