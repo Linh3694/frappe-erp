@@ -832,15 +832,6 @@ def submit_re_enrollment():
         current_class_info = _get_student_current_class(student_id, campus_id)
         current_class = current_class_info.get("class_title") if current_class_info else None
         
-        # Xử lý answers nếu có
-        answers_json = None
-        if decision == 're_enroll' and 'answers' in data:
-            answers_data = data['answers']
-            if isinstance(answers_data, str):
-                answers_json = answers_data
-            else:
-                answers_json = json.dumps(answers_data)
-        
         # Lấy lý do từ request
         reason_value = data.get('reason') or data.get('not_re_enroll_reason') or None
         
@@ -873,6 +864,50 @@ def submit_re_enrollment():
             "created_by_name": guardian_name,
             "created_at": now()
         })
+        
+        # Xử lý answers (câu trả lời khảo sát) nếu có
+        if decision == 're_enroll' and 'answers' in data:
+            answers_data = data['answers']
+            if isinstance(answers_data, str):
+                answers_data = json.loads(answers_data)
+            
+            # Lấy config để map question info
+            config_doc = frappe.get_doc("SIS Re-enrollment Config", config.name)
+            questions_map = {q.name: q for q in config_doc.questions}
+            
+            # Clear existing answers
+            re_enrollment_doc.answers = []
+            
+            # Add new answers
+            for answer_item in answers_data:
+                question_id = answer_item.get('question_id')
+                answer_value = answer_item.get('answer')  # Có thể là string hoặc array
+                
+                # Lấy thông tin question
+                question = questions_map.get(question_id)
+                question_vn = question.question_vn if question else ''
+                question_en = question.question_en if question else ''
+                
+                # Xử lý selected_options (có thể là string hoặc array)
+                if isinstance(answer_value, list):
+                    selected_options = answer_value
+                    selected_text_vn = ', '.join(answer_value)
+                    selected_text_en = ', '.join(answer_value)
+                else:
+                    selected_options = [answer_value] if answer_value else []
+                    selected_text_vn = answer_value or ''
+                    selected_text_en = answer_value or ''
+                
+                re_enrollment_doc.append("answers", {
+                    "question_id": question_id,
+                    "question_text_vn": question_vn,
+                    "question_text_en": question_en,
+                    "selected_options": json.dumps(selected_options),
+                    "selected_options_text_vn": selected_text_vn,
+                    "selected_options_text_en": selected_text_en
+                })
+            
+            logs.append(f"Đã lưu {len(answers_data)} câu trả lời khảo sát")
         
         # Save với bypass permission
         re_enrollment_doc.flags.ignore_permissions = True
