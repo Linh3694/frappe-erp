@@ -95,19 +95,38 @@ def _create_re_enrollment_announcement(
         status_vi = {"pending": "Chờ xử lý", "approved": "Đã duyệt", "rejected": "Từ chối"}.get(status, status)
         status_en = {"pending": "Pending", "approved": "Approved", "rejected": "Rejected"}.get(status, status)
         
+        # Lấy thêm thông tin reason từ submission_data
+        reason = submission_data.get('reason', '')
+        
         # Build content based on action type
         if is_update:
             # Admin update notification
             title_vn = f"Cập nhật đơn tái ghi danh - {student_name}"
             title_en = f"Re-enrollment Update - {student_name}"
             
+            # Build update details
+            update_details_vn = f"• Quyết định: {decision_vi}"
+            update_details_en = f"• Decision: {decision_en}"
+            
+            # Thêm ưu đãi nếu là tái ghi danh
+            if decision == 're_enroll' and discount_name and discount_percent:
+                update_details_vn += f"\n• Ưu đãi áp dụng: Giảm {discount_percent}% ({discount_name})"
+                update_details_en += f"\n• Discount Applied: {discount_percent}% off ({discount_name})"
+            
+            # Thêm lý do nếu là cân nhắc hoặc không tái ghi danh
+            if decision in ['considering', 'not_re_enroll'] and reason:
+                update_details_vn += f"\n• Lý do: {reason}"
+                update_details_en += f"\n• Reason: {reason}"
+            
+            update_details_vn += f"\n• Thời gian cập nhật: {time_display_vi}"
+            update_details_en += f"\n• Updated at: {time_display_en}"
+            
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
 Đơn tái ghi danh của học sinh {student_name} ({student_code}) đã được cập nhật.
 
 Thông tin cập nhật:
-• Quyết định: {decision_vi}
-• Thời gian cập nhật: {time_display_vi}
+{update_details_vn}
 
 Nếu có thắc mắc, vui lòng liên hệ Phòng Tuyển sinh.
 
@@ -119,8 +138,7 @@ Wellspring International School"""
 The re-enrollment application for student {student_name} ({student_code}) has been updated.
 
 Update Details:
-• Decision: {decision_en}
-• Updated at: {time_display_en}
+{update_details_en}
 
 If you have any questions, please contact the Admissions Office.
 
@@ -145,6 +163,11 @@ Wellspring International School"""
                 if discount_name and discount_percent:
                     details_vn += f"\n• Ưu đãi áp dụng: Giảm {discount_percent}% ({discount_name})"
                     details_en += f"\n• Discount Applied: {discount_percent}% off ({discount_name})"
+            
+            # Thêm lý do nếu là cân nhắc hoặc không tái ghi danh
+            if decision in ['considering', 'not_re_enroll'] and reason:
+                details_vn += f"\n• Lý do: {reason}"
+                details_en += f"\n• Reason: {reason}"
             
             details_vn += f"\n• Thời gian nộp: {time_display_vi}"
             details_en += f"\n• Submitted at: {time_display_en}"
@@ -896,6 +919,7 @@ def submit_re_enrollment():
                     'payment_type': data.get('payment_type'),
                     'discount_name': discount_name,
                     'discount_percent': discount_percent,
+                    'reason': reason_value,  # Lý do (cho considering/not_re_enroll)
                     'school_year': school_year,
                     'submitted_at': str(re_enrollment_doc.submitted_at),
                     'status': 'pending'

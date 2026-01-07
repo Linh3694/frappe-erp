@@ -1166,6 +1166,9 @@ def update_submission():
                     submission_data={
                         'decision': submission.decision,
                         'payment_type': submission.payment_type,
+                        'discount_name': submission.selected_discount_name,
+                        'discount_percent': submission.selected_discount_percent,
+                        'reason': submission.not_re_enroll_reason,
                         'school_year': school_year,
                         'submitted_at': str(now()),
                         'status': submission.status or 'pending'
@@ -1857,6 +1860,9 @@ def update_submission_decision():
                 submission_data={
                     'decision': submission.decision,
                     'payment_type': submission.payment_type,
+                    'discount_name': submission.selected_discount_name,
+                    'discount_percent': submission.selected_discount_percent,
+                    'reason': submission.not_re_enroll_reason,
                     'school_year': school_year,
                     'submitted_at': str(now()),
                     'status': submission.status or 'pending'
