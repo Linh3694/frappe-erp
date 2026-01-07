@@ -76,7 +76,8 @@ def _get_parent_students(parent_id):
                 "current_class": current_class.get("class_title") if current_class else None,
                 "current_class_id": current_class.get("class_id") if current_class else None,
                 "relationship_type": rel.relationship_type,
-                "is_key_person": rel.key_person
+                "is_key_person": rel.key_person,
+                "sis_photo": student.sis_photo if hasattr(student, 'sis_photo') else None
             }
         except Exception as e:
             frappe.logger().error(f"Error getting student {rel.student}: {str(e)}")
