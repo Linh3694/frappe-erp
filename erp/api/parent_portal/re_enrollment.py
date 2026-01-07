@@ -104,26 +104,26 @@ def _create_re_enrollment_announcement(
             title_vn = f"Cập nhật đơn tái ghi danh - {student_name}"
             title_en = f"Re-enrollment Update - {student_name}"
             
-            # Build update details
-            update_details_vn = f"• Quyết định: {decision_vi}"
-            update_details_en = f"• Decision: {decision_en}"
+            # Build update details (bold các giá trị quan trọng)
+            update_details_vn = f"• Quyết định: **{decision_vi}**"
+            update_details_en = f"• Decision: **{decision_en}**"
             
             # Thêm ưu đãi nếu là tái ghi danh
             if decision == 're_enroll' and discount_name and discount_percent:
-                update_details_vn += f"\n• Ưu đãi áp dụng: Giảm {discount_percent}% ({discount_name})"
-                update_details_en += f"\n• Discount Applied: {discount_percent}% off ({discount_name})"
+                update_details_vn += f"\n• Ưu đãi áp dụng: **Giảm {discount_percent}%** ({discount_name})"
+                update_details_en += f"\n• Discount Applied: **{discount_percent}% off** ({discount_name})"
             
             # Thêm lý do nếu là cân nhắc hoặc không tái ghi danh
             if decision in ['considering', 'not_re_enroll'] and reason:
                 update_details_vn += f"\n• Lý do: {reason}"
                 update_details_en += f"\n• Reason: {reason}"
             
-            update_details_vn += f"\n• Thời gian cập nhật: {time_display_vi}"
-            update_details_en += f"\n• Updated at: {time_display_en}"
+            update_details_vn += f"\n• Thời gian cập nhật: **{time_display_vi}**"
+            update_details_en += f"\n• Updated at: **{time_display_en}**"
             
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
-Đơn tái ghi danh của học sinh {student_name} ({student_code}) đã được cập nhật.
+Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được cập nhật.
 
 Thông tin cập nhật:
 {update_details_vn}
@@ -135,7 +135,7 @@ Wellspring International School"""
 
             content_en = f"""Dear Parents,
 
-The re-enrollment application for student {student_name} ({student_code}) has been updated.
+The re-enrollment application for student **{student_name}** ({student_code}) has been updated.
 
 Update Details:
 {update_details_en}
@@ -152,29 +152,29 @@ Wellspring International School"""
             title_vn = f"Đơn tái ghi danh - {student_name}"
             title_en = f"Re-enrollment Application - {student_name}"
             
-            # Build details based on decision
-            details_vn = f"• Năm học đăng ký: {school_year}\n• Quyết định: {decision_vi}"
-            details_en = f"• School Year: {school_year}\n• Decision: {decision_en}"
+            # Build details based on decision (bold các giá trị quan trọng)
+            details_vn = f"• Năm học đăng ký: **{school_year}**\n• Quyết định: **{decision_vi}**"
+            details_en = f"• School Year: **{school_year}**\n• Decision: **{decision_en}**"
             
             if decision == 're_enroll' and payment_vi:
-                details_vn += f"\n• Phương thức thanh toán: {payment_vi}"
-                details_en += f"\n• Payment Method: {payment_en}"
+                details_vn += f"\n• Phương thức thanh toán: **{payment_vi}**"
+                details_en += f"\n• Payment Method: **{payment_en}**"
                 
                 if discount_name and discount_percent:
-                    details_vn += f"\n• Ưu đãi áp dụng: Giảm {discount_percent}% ({discount_name})"
-                    details_en += f"\n• Discount Applied: {discount_percent}% off ({discount_name})"
+                    details_vn += f"\n• Ưu đãi áp dụng: **Giảm {discount_percent}%** ({discount_name})"
+                    details_en += f"\n• Discount Applied: **{discount_percent}% off** ({discount_name})"
             
             # Thêm lý do nếu là cân nhắc hoặc không tái ghi danh
             if decision in ['considering', 'not_re_enroll'] and reason:
                 details_vn += f"\n• Lý do: {reason}"
                 details_en += f"\n• Reason: {reason}"
             
-            details_vn += f"\n• Thời gian nộp: {time_display_vi}"
-            details_en += f"\n• Submitted at: {time_display_en}"
+            details_vn += f"\n• Thời gian nộp: **{time_display_vi}**"
+            details_en += f"\n• Submitted at: **{time_display_en}**"
             
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
-Đơn tái ghi danh của học sinh {student_name} ({student_code}) đã được gửi thành công.
+Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được gửi thành công.
 
 Thông tin đơn:
 {details_vn}
@@ -186,7 +186,7 @@ Wellspring International School"""
 
             content_en = f"""Dear Parents,
 
-The re-enrollment application for student {student_name} ({student_code}) has been submitted successfully.
+The re-enrollment application for student **{student_name}** ({student_code}) has been submitted successfully.
 
 Application Details:
 {details_en}
