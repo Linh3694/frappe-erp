@@ -846,6 +846,24 @@ def submit_re_enrollment():
         re_enrollment_doc.agreement_accepted = 1 if agreement_accepted else 0
         re_enrollment_doc.submitted_at = now()  # Đánh dấu đã nộp
         
+        # Lưu thông tin chi tiết của discount (name, percent) nếu có
+        if decision == 're_enroll' and data.get('selected_discount_id'):
+            try:
+                config_doc = frappe.get_doc("SIS Re-enrollment Config", config.name)
+                payment_type = data.get('payment_type')
+                for discount in config_doc.discounts:
+                    if discount.name == data.get('selected_discount_id'):
+                        re_enrollment_doc.selected_discount_name = discount.description
+                        re_enrollment_doc.selected_discount_deadline = discount.deadline
+                        # Lấy % giảm dựa trên payment_type
+                        if payment_type == 'annual':
+                            re_enrollment_doc.selected_discount_percent = discount.annual_discount
+                        else:
+                            re_enrollment_doc.selected_discount_percent = discount.semester_discount
+                        break
+            except Exception as e:
+                logs.append(f"Lỗi khi lấy thông tin ưu đãi: {str(e)}")
+        
         # Lấy tên phụ huynh để ghi log
         guardian_name = frappe.db.get_value("CRM Guardian", parent_id, "guardian_name") or "Phụ huynh"
         
