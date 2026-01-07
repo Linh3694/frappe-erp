@@ -9,3 +9,4 @@ class SISReenrollmentNote(Document):
 	"""Child table for re-enrollment notes"""
 	pass
 
+

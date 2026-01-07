@@ -29,6 +29,7 @@
   "service_document",
   "service_document_images",
   "agreement_text",
+  "agreement_text_en",
   "discounts_section",
   "discounts",
   "questions_section",
@@ -126,8 +127,14 @@
   {
    "fieldname": "agreement_text",
    "fieldtype": "Text Editor",
-   "label": "Nội dung cam kết",
-   "description": "Nội dung điều khoản phụ huynh cần đọc và đồng ý"
+   "label": "Nội dung cam kết (Tiếng Việt)",
+   "description": "Nội dung điều khoản phụ huynh cần đọc và đồng ý (Tiếng Việt)"
+  },
+  {
+   "fieldname": "agreement_text_en",
+   "fieldtype": "Text Editor",
+   "label": "Nội dung cam kết (Tiếng Anh)",
+   "description": "Nội dung điều khoản phụ huynh cần đọc và đồng ý (Tiếng Anh)"
   },
   {
    "fieldname": "discounts_section",
@@ -182,7 +189,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2026-01-06 00:00:00.000000",
+ "modified": "2026-01-07 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Re-enrollment Config",

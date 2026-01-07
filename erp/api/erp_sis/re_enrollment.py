@@ -318,6 +318,7 @@ def get_config(config_id=None):
                 "service_document": config.service_document,
                 "service_document_images": json.loads(config.service_document_images) if config.service_document_images else [],
                 "agreement_text": config.agreement_text,
+                "agreement_text_en": config.agreement_text_en,
                 "discounts": discounts,
                 "questions": questions,
                 "created_by": config.created_by,
@@ -395,7 +396,8 @@ def create_config():
             "end_date": data['end_date'],
             "service_document": data.get('service_document'),
             "service_document_images": service_document_images,
-            "agreement_text": data.get('agreement_text')
+            "agreement_text": data.get('agreement_text'),
+            "agreement_text_en": data.get('agreement_text_en')
         })
         
         # Thêm bảng ưu đãi nếu có
@@ -508,7 +510,7 @@ def update_config():
         
         # Update các trường
         update_fields = ['title', 'source_school_year_id', 'school_year_id', 'campus_id', 'is_active', 
-                        'start_date', 'end_date', 'service_document', 'agreement_text']
+                        'start_date', 'end_date', 'service_document', 'agreement_text', 'agreement_text_en']
         
         for field in update_fields:
             if field in data:

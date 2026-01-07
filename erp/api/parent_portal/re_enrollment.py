@@ -158,7 +158,7 @@ def get_active_config():
                 "campus_id": campus_id
             },
             ["name", "title", "school_year_id", "campus_id", "start_date", "end_date",
-             "service_document", "agreement_text"],
+             "service_document", "agreement_text", "agreement_text_en"],
             as_dict=True
         )
         
@@ -255,7 +255,8 @@ def get_active_config():
                     "start_date": str(config.start_date),
                     "end_date": str(config.end_date),
                     "service_document": config.service_document,
-                    "agreement_text": config.agreement_text
+                    "agreement_text": config.agreement_text,
+                    "agreement_text_en": config.agreement_text_en
                 },
                 "discounts": discounts,
                 "current_discount": current_discount,
