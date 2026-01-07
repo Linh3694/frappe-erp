@@ -1063,6 +1063,7 @@ def update_submission():
         
         # Tạo log hệ thống về thay đổi của admin
         changes = []
+        important_changes = []  # Các thay đổi quan trọng cần gửi notification (Trạng thái, Khảo sát)
         decision_map = {
             're_enroll': 'Tái ghi danh',
             'considering': 'Cân nhắc', 
@@ -1071,36 +1072,47 @@ def update_submission():
         payment_type_map = {'annual': 'Đóng theo năm', 'semester': 'Đóng theo kỳ'}
         payment_status_map = {'unpaid': 'Chưa đóng', 'paid': 'Đã đóng', 'refunded': 'Hoàn tiền'}
         
-        # So sánh decision
+        # So sánh decision (QUAN TRỌNG - gửi notification)
         new_decision = data.get('decision') or submission.decision
         if old_values['decision'] != new_decision:
             old_display = decision_map.get(old_values['decision'], old_values['decision'] or 'Chưa có')
             new_display = decision_map.get(new_decision, new_decision)
             changes.append(f"• Quyết định: {old_display} → {new_display}")
+            important_changes.append('decision')
         
-        # So sánh payment_type
+        # So sánh payment_type (QUAN TRỌNG - gửi notification)
         new_payment_type = data.get('payment_type') or submission.payment_type
         if old_values['payment_type'] != new_payment_type and new_decision == 're_enroll':
             old_display = payment_type_map.get(old_values['payment_type'], old_values['payment_type'] or 'Chưa có')
             new_display = payment_type_map.get(new_payment_type, new_payment_type)
             changes.append(f"• Phương thức: {old_display} → {new_display}")
+            important_changes.append('payment_type')
         
-        # So sánh payment_status
+        # So sánh payment_status (KHÔNG gửi notification - chỉ log)
         new_payment_status = data.get('payment_status') or submission.payment_status
         if old_values['payment_status'] != new_payment_status:
             old_display = payment_status_map.get(old_values['payment_status'], old_values['payment_status'] or 'Chưa có')
             new_display = payment_status_map.get(new_payment_status, new_payment_status)
             changes.append(f"• Thanh toán: {old_display} → {new_display}")
+            # Không thêm vào important_changes
         
-        # So sánh discount
+        # So sánh discount (QUAN TRỌNG - gửi notification)
         new_discount_id = data.get('selected_discount_id') or submission.selected_discount_id
         if old_values['selected_discount_id'] != new_discount_id:
             changes.append(f"• Ưu đãi: Đã cập nhật")
+            important_changes.append('discount')
         
-        # So sánh lý do
+        # So sánh lý do (QUAN TRỌNG - gửi notification)
         new_reason = data.get('not_re_enroll_reason') or submission.not_re_enroll_reason
         if old_values['not_re_enroll_reason'] != new_reason and new_decision in ['considering', 'not_re_enroll']:
             changes.append(f"• Lý do: Đã cập nhật")
+            important_changes.append('reason')
+        
+        # So sánh answers (QUAN TRỌNG - gửi notification)
+        old_answers_count = len(submission.answers) if submission.answers else 0
+        new_answers_data = data.get('answers', [])
+        if new_answers_data and len(new_answers_data) != old_answers_count:
+            important_changes.append('answers')
         
         # Nếu có thay đổi thì tạo log
         if changes:
@@ -1126,42 +1138,46 @@ def update_submission():
         
         logs.append(f"Đã cập nhật đơn: {submission_id}")
         
-        # Gửi thông báo cho phụ huynh về việc cập nhật đơn
-        try:
-            from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
-            
-            # Lấy thông tin năm học
-            school_year = ""
+        # Chỉ gửi thông báo khi có thay đổi quan trọng (Trạng thái hoặc Khảo sát)
+        # KHÔNG gửi khi chỉ thay đổi payment_status hoặc thêm note
+        if important_changes:
             try:
-                config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
-                school_year_info = frappe.db.get_value(
-                    "SIS School Year",
-                    config_doc.school_year_id,
-                    ["name_vn", "name_en"],
-                    as_dict=True
+                from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
+                
+                # Lấy thông tin năm học
+                school_year = ""
+                try:
+                    config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
+                    school_year_info = frappe.db.get_value(
+                        "SIS School Year",
+                        config_doc.school_year_id,
+                        ["name_vn", "name_en"],
+                        as_dict=True
+                    )
+                    if school_year_info:
+                        school_year = school_year_info.name_vn or school_year_info.name_en or ""
+                except:
+                    pass
+                
+                _create_re_enrollment_announcement(
+                    student_id=submission.student_id,
+                    student_name=submission.student_name,
+                    student_code=submission.student_code,
+                    submission_data={
+                        'decision': submission.decision,
+                        'payment_type': submission.payment_type,
+                        'school_year': school_year,
+                        'submitted_at': str(now()),
+                        'status': submission.status or 'pending'
+                    },
+                    is_update=True
                 )
-                if school_year_info:
-                    school_year = school_year_info.name_vn or school_year_info.name_en or ""
-            except:
-                pass
-            
-            _create_re_enrollment_announcement(
-                student_id=submission.student_id,
-                student_name=submission.student_name,
-                student_code=submission.student_code,
-                submission_data={
-                    'decision': submission.decision,
-                    'payment_type': submission.payment_type,
-                    'school_year': school_year,
-                    'submitted_at': str(now()),
-                    'status': submission.status or 'pending'
-                },
-                is_update=True
-            )
-            logs.append("Đã gửi thông báo cập nhật cho phụ huynh")
-        except Exception as notif_err:
-            logs.append(f"Lỗi gửi thông báo: {str(notif_err)}")
-            frappe.logger().error(f"Error sending admin update notification: {str(notif_err)}")
+                logs.append(f"Đã gửi thông báo cập nhật cho phụ huynh (thay đổi: {', '.join(important_changes)})")
+            except Exception as notif_err:
+                logs.append(f"Lỗi gửi thông báo: {str(notif_err)}")
+                frappe.logger().error(f"Error sending admin update notification: {str(notif_err)}")
+        else:
+            logs.append("Không gửi thông báo (chỉ thay đổi thanh toán/ghi chú)")
         
         return success_response(
             data={"name": submission.name},
