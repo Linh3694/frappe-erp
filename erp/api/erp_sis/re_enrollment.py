@@ -417,21 +417,26 @@ def create_config():
             questions = json.loads(questions)
         
         for idx, question in enumerate(questions):
-            q_row = config_doc.append("questions", {
-                "question_vn": question.get('question_vn'),
-                "question_en": question.get('question_en'),
-                "question_type": question.get('question_type', 'single_choice'),
-                "is_required": question.get('is_required', 1),
-                "sort_order": question.get('sort_order', idx)
-            })
-            # Thêm options cho câu hỏi
-            options = question.get('options', [])
-            for opt_idx, option in enumerate(options):
-                q_row.append("options", {
+            options_data = question.get('options', [])
+            
+            # Tạo options list cho question
+            options_list = []
+            for opt_idx, option in enumerate(options_data):
+                options_list.append({
                     "option_vn": option.get('option_vn'),
                     "option_en": option.get('option_en'),
                     "sort_order": option.get('sort_order', opt_idx)
                 })
+            
+            # Append question với options đã include
+            config_doc.append("questions", {
+                "question_vn": question.get('question_vn'),
+                "question_en": question.get('question_en'),
+                "question_type": question.get('question_type', 'single_choice'),
+                "is_required": question.get('is_required', 1),
+                "sort_order": question.get('sort_order', idx),
+                "options": options_list
+            })
         
         config_doc.insert()
         frappe.db.commit()
@@ -548,26 +553,34 @@ def update_config():
             if isinstance(questions, str):
                 questions = json.loads(questions)
             
-            # Xóa questions cũ
+            logs.append(f"Updating {len(questions)} questions")
+            
+            # Xóa questions cũ (và options sẽ bị cascade delete)
             config_doc.questions = []
             
             # Thêm questions mới
             for idx, question in enumerate(questions):
-                q_row = config_doc.append("questions", {
-                    "question_vn": question.get('question_vn'),
-                    "question_en": question.get('question_en'),
-                    "question_type": question.get('question_type', 'single_choice'),
-                    "is_required": question.get('is_required', 1),
-                    "sort_order": question.get('sort_order', idx)
-                })
-                # Thêm options cho câu hỏi
-                options = question.get('options', [])
-                for opt_idx, option in enumerate(options):
-                    q_row.append("options", {
+                options_data = question.get('options', [])
+                logs.append(f"Question {idx}: {len(options_data)} options")
+                
+                # Tạo options list cho question
+                options_list = []
+                for opt_idx, option in enumerate(options_data):
+                    options_list.append({
                         "option_vn": option.get('option_vn'),
                         "option_en": option.get('option_en'),
                         "sort_order": option.get('sort_order', opt_idx)
                     })
+                
+                # Append question với options đã include
+                config_doc.append("questions", {
+                    "question_vn": question.get('question_vn'),
+                    "question_en": question.get('question_en'),
+                    "question_type": question.get('question_type', 'single_choice'),
+                    "is_required": question.get('is_required', 1),
+                    "sort_order": question.get('sort_order', idx),
+                    "options": options_list
+                })
         
         config_doc.save()
         frappe.db.commit()
