@@ -630,24 +630,15 @@ def batch_get_homeroom_class_logs():
         # ⏱️ PROFILING: Track time for each step
         step_times = {}
         
-        # Step 1: Get all students in the homeroom class (single query)
+        # Step 1: Lấy TẤT CẢ học sinh trong homeroom class (không filter class_type)
+        # Lý do: Frontend hiển thị tất cả học sinh, backend cũng phải trả về tất cả
+        # để tránh trường hợp một số học sinh hiện "N/A" dù đã được điểm danh
         step_start = time.time()
         homeroom_students = frappe.get_all(
             "SIS Class Student",
-            filters={
-                "class_id": homeroom_class_id,
-                "class_type": "regular"
-            },
+            filters={"class_id": homeroom_class_id},
             fields=["name as class_student_id", "student_id"]
         )
-        
-        if not homeroom_students:
-            # Fallback: try without class_type filter (older data may not have this)
-            homeroom_students = frappe.get_all(
-                "SIS Class Student",
-                filters={"class_id": homeroom_class_id},
-                fields=["name as class_student_id", "student_id"]
-            )
         
         student_ids = [s['student_id'] for s in homeroom_students if s.get('student_id')]
         
