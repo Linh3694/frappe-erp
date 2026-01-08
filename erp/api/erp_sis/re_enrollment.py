@@ -2197,3 +2197,122 @@ def import_payment_status():
             logs=logs
         )
 
+
+# ==================== SEND REMINDER NOTIFICATION API ====================
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def send_reminder_notification():
+    """
+    Gửi push notification nhắc phụ huynh làm đơn tái ghi danh.
+    
+    POST body:
+    {
+        "submission_ids": ["SIS-REENROLL-00001", ...],  # Danh sách ID đơn cần nhắc
+        "message": "Nội dung tin nhắn tùy chỉnh"       # Nội dung do user nhập
+    }
+    
+    Trả về:
+    {
+        "success": true,
+        "data": {
+            "success_count": 10,
+            "failed_count": 2,
+            "total_students": 12
+        }
+    }
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        submission_ids = data.get('submission_ids', [])
+        message = data.get('message', '')
+        
+        if isinstance(submission_ids, str):
+            submission_ids = json.loads(submission_ids)
+        
+        if not submission_ids:
+            return validation_error_response(
+                "Thiếu danh sách đơn",
+                {"submission_ids": ["Danh sách đơn là bắt buộc"]}
+            )
+        
+        if not message or not message.strip():
+            return validation_error_response(
+                "Thiếu nội dung tin nhắn",
+                {"message": ["Nội dung tin nhắn là bắt buộc"]}
+            )
+        
+        # Giới hạn độ dài message (150 ký tự để hiển thị tốt trên mobile)
+        message = message.strip()[:150]
+        
+        logs.append(f"Gửi nhắc nhở cho {len(submission_ids)} đơn")
+        logs.append(f"Message: {message}")
+        
+        # Lấy danh sách student_id từ submission_ids
+        student_ids = []
+        for sub_id in submission_ids:
+            student_id = frappe.db.get_value("SIS Re-enrollment", sub_id, "student_id")
+            if student_id:
+                student_ids.append(student_id)
+        
+        if not student_ids:
+            return error_response("Không tìm thấy học sinh nào", logs=logs)
+        
+        logs.append(f"Tìm thấy {len(student_ids)} học sinh")
+        
+        # Gửi push notification
+        try:
+            from erp.utils.notification_handler import send_bulk_parent_notifications
+            
+            result = send_bulk_parent_notifications(
+                recipient_type="re_enrollment_reminder",
+                recipients_data={
+                    "student_ids": student_ids
+                },
+                title="Tái ghi danh",
+                body=message,
+                icon="/icon.png",
+                data={
+                    "type": "re_enrollment_reminder",
+                    "url": "/re-enrollment"  # URL trên parent-portal
+                }
+            )
+            
+            logs.append(f"Kết quả gửi: {result}")
+            
+            return success_response(
+                data={
+                    "success_count": result.get("success_count", 0),
+                    "failed_count": result.get("failed_count", 0),
+                    "total_students": len(student_ids),
+                    "total_parents": result.get("total_parents", 0)
+                },
+                message=f"Đã gửi thông báo đến {result.get('success_count', 0)} phụ huynh",
+                logs=logs
+            )
+            
+        except Exception as notif_err:
+            logs.append(f"Lỗi gửi notification: {str(notif_err)}")
+            frappe.log_error(frappe.get_traceback(), "Send Re-enrollment Reminder Error")
+            return error_response(
+                message=f"Lỗi khi gửi thông báo: {str(notif_err)}",
+                logs=logs
+            )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Send Reminder Notification Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
