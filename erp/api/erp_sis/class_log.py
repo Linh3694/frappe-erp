@@ -685,6 +685,10 @@ def batch_get_homeroom_class_logs():
         period_class_students = {}  # period -> {class_id -> [student_ids]}
         all_classes_to_query = set()
         
+        # QUAN TRỌNG: Luôn thêm homeroom class vào danh sách query
+        # Vì attendance có thể được lưu ở homeroom class dù timetable nói học sinh học ở mixed class
+        all_classes_to_query.add(homeroom_class_id)
+        
         for period in periods:
             period_class_students[period] = {}
             for student_id in student_ids:
@@ -796,13 +800,28 @@ def batch_get_homeroom_class_logs():
             "class_ids": list(all_classes_to_query)
         }, as_dict=True)
         
-        # Build map: (student_id, period) -> attendance status (only for correct class)
+        # Build map: (student_id, period) -> attendance status
+        # Logic: Ưu tiên attendance từ expected_class (timetable), fallback về homeroom class
+        # Lý do: Attendance có thể được lưu ở homeroom class dù timetable nói học sinh học ở mixed class
         class_attendance_map = {}
+        homeroom_attendance_map = {}  # Fallback map cho homeroom class
+        
         for record in class_attendance_records:
             key = (record['student_id'], record['period'])
             expected_class = student_period_class.get(key, homeroom_class_id)
+            
+            # Lưu attendance từ homeroom class vào fallback map
+            if record['class_id'] == homeroom_class_id:
+                homeroom_attendance_map[key] = record['status']
+            
+            # Nếu class_id match với expected_class, ưu tiên dùng
             if record['class_id'] == expected_class:
                 class_attendance_map[key] = record['status']
+        
+        # Merge: Dùng homeroom fallback nếu không có từ expected_class
+        for key, status in homeroom_attendance_map.items():
+            if key not in class_attendance_map:
+                class_attendance_map[key] = status
         
         step_times['7a_class_attendance'] = (time.time() - step_start) * 1000
         frappe.logger().info(f"📊 [Backend] Loaded {len(class_attendance_map)} class attendance records ({step_times['7a_class_attendance']:.0f}ms)")

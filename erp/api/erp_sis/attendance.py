@@ -1665,6 +1665,8 @@ def batch_get_homeroom_class_attendance():
 			attendance_map[key] = record
 		
 		# Step 5: Build result - for each period, get attendance from correct class
+		# Logic: Ưu tiên attendance từ actual_class (timetable), fallback về homeroom class
+		# Lý do: Attendance có thể được lưu ở homeroom class dù timetable nói học sinh học ở mixed class
 		step_start = time.time()
 		result = {}
 		
@@ -1679,6 +1681,13 @@ def batch_get_homeroom_class_attendance():
 				# Get attendance from the actual class
 				attendance_key = (student_id, period, actual_class)
 				attendance_record = attendance_map.get(attendance_key)
+				
+				# Fallback: Nếu không có từ actual_class, thử lấy từ homeroom class
+				if not attendance_record and actual_class != homeroom_class_id:
+					homeroom_key = (student_id, period, homeroom_class_id)
+					attendance_record = attendance_map.get(homeroom_key)
+					if attendance_record:
+						actual_class = homeroom_class_id  # Update source class
 				
 				if attendance_record:
 					period_attendance.append({
