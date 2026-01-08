@@ -2273,8 +2273,9 @@ def send_reminder_notification():
         try:
             from erp.utils.notification_handler import send_bulk_parent_notifications
             
+            # Sử dụng notification_type = "reminder" (là giá trị hợp lệ trong ERP Notification)
             result = send_bulk_parent_notifications(
-                recipient_type="re_enrollment_reminder",
+                recipient_type="reminder",
                 recipients_data={
                     "student_ids": student_ids
                 },
@@ -2282,7 +2283,8 @@ def send_reminder_notification():
                 body=message,
                 icon="/icon.png",
                 data={
-                    "type": "re_enrollment_reminder",
+                    "type": "reminder",
+                    "subtype": "re_enrollment",
                     "url": "/re-enrollment"  # URL trên parent-portal
                 }
             )
