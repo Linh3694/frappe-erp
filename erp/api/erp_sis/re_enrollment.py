@@ -1947,3 +1947,251 @@ def update_submission_decision():
             logs=logs
         )
 
+
+# ==================== IMPORT PAYMENT STATUS API ====================
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def import_payment_status():
+    """
+    Import trạng thái thanh toán từ file Excel.
+    
+    File Excel gồm 2 cột:
+    - Cột A: "Mã Học Sinh" (student_code, VD: WS02024251)
+    - Cột B: "Tình Trạng" (Đã đóng tiền / Chưa đóng tiền / Hoàn tiền)
+    
+    POST body (multipart/form-data):
+    {
+        "config_id": "SIS-REENROLL-CFG-00001",
+        "file": <Excel file>
+    }
+    
+    Trả về:
+    {
+        "success": true,
+        "data": {
+            "success_count": 10,
+            "error_count": 2,
+            "total_count": 12,
+            "errors": ["Dòng 3: Mã học sinh WS12345 không tồn tại", ...]
+        }
+    }
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy config_id từ form data
+        data = frappe.request.form
+        config_id = data.get('config_id')
+        
+        if not config_id:
+            return validation_error_response(
+                "Thiếu config_id",
+                {"config_id": ["Config ID là bắt buộc"]}
+            )
+        
+        logs.append(f"Import payment status cho config: {config_id}")
+        
+        # Kiểm tra config tồn tại
+        if not frappe.db.exists("SIS Re-enrollment Config", config_id):
+            return not_found_response("Không tìm thấy cấu hình tái ghi danh")
+        
+        # Kiểm tra có file không
+        if not frappe.request.files:
+            return validation_error_response(
+                "Thiếu file Excel",
+                {"file": ["Vui lòng chọn file Excel để upload"]}
+            )
+        
+        # Lấy file từ request
+        file_obj = None
+        for file_key, f in frappe.request.files.items():
+            if file_key == 'file':
+                file_obj = f
+                break
+        
+        if not file_obj:
+            return validation_error_response(
+                "Thiếu file Excel",
+                {"file": ["Vui lòng chọn file Excel để upload"]}
+            )
+        
+        # Kiểm tra file là Excel
+        filename = file_obj.filename
+        if not (filename.lower().endswith('.xlsx') or filename.lower().endswith('.xls')):
+            return validation_error_response(
+                "Chỉ chấp nhận file Excel",
+                {"file": ["Vui lòng upload file có định dạng .xlsx hoặc .xls"]}
+            )
+        
+        logs.append(f"File: {filename}")
+        
+        # Đọc file Excel bằng openpyxl
+        try:
+            from openpyxl import load_workbook
+            from io import BytesIO
+            
+            file_content = file_obj.stream.read()
+            workbook = load_workbook(filename=BytesIO(file_content))
+            sheet = workbook.active
+            
+        except Exception as e:
+            logs.append(f"Lỗi đọc file Excel: {str(e)}")
+            return error_response(
+                message=f"Không thể đọc file Excel: {str(e)}",
+                logs=logs
+            )
+        
+        # Mapping trạng thái tiếng Việt sang giá trị database
+        status_map = {
+            'đã đóng tiền': 'paid',
+            'đã đóng': 'paid',
+            'paid': 'paid',
+            'chưa đóng tiền': 'unpaid',
+            'chưa đóng': 'unpaid',
+            'unpaid': 'unpaid',
+            'hoàn tiền': 'refunded',
+            'refunded': 'refunded',
+        }
+        
+        success_count = 0
+        error_count = 0
+        errors = []
+        errors_preview = []  # Chi tiết lỗi với số dòng
+        
+        # Lấy user hiện tại để ghi log
+        current_user = frappe.session.user
+        current_user_name = frappe.db.get_value("User", current_user, "full_name") or current_user
+        
+        # Đọc từng dòng (bỏ qua header dòng 1)
+        for row_idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+            # Bỏ qua dòng trống
+            if not row or not row[0]:
+                continue
+            
+            student_code = str(row[0]).strip() if row[0] else ''
+            status_text = str(row[1]).strip().lower() if row[1] else ''
+            
+            # Validate dữ liệu
+            if not student_code:
+                error_msg = f"Dòng {row_idx}: Thiếu mã học sinh"
+                errors.append(error_msg)
+                errors_preview.append({
+                    "row": row_idx,
+                    "error": "Thiếu mã học sinh",
+                    "data": {"Mã Học Sinh": student_code, "Tình Trạng": row[1] if len(row) > 1 else ''}
+                })
+                error_count += 1
+                continue
+            
+            if not status_text:
+                error_msg = f"Dòng {row_idx}: Thiếu tình trạng thanh toán cho {student_code}"
+                errors.append(error_msg)
+                errors_preview.append({
+                    "row": row_idx,
+                    "error": f"Thiếu tình trạng thanh toán",
+                    "data": {"Mã Học Sinh": student_code, "Tình Trạng": ''}
+                })
+                error_count += 1
+                continue
+            
+            # Map trạng thái
+            payment_status = status_map.get(status_text)
+            if not payment_status:
+                error_msg = f"Dòng {row_idx}: Tình trạng '{row[1]}' không hợp lệ cho {student_code}. Chỉ chấp nhận: Đã đóng tiền, Chưa đóng tiền, Hoàn tiền"
+                errors.append(error_msg)
+                errors_preview.append({
+                    "row": row_idx,
+                    "error": f"Tình trạng '{row[1]}' không hợp lệ. Chỉ chấp nhận: Đã đóng tiền, Chưa đóng tiền, Hoàn tiền",
+                    "data": {"Mã Học Sinh": student_code, "Tình Trạng": row[1] if len(row) > 1 else ''}
+                })
+                error_count += 1
+                continue
+            
+            # Tìm submission theo student_code trong config hiện tại
+            submission = frappe.db.get_value(
+                "SIS Re-enrollment",
+                {"config_id": config_id, "student_code": student_code},
+                ["name", "payment_status"],
+                as_dict=True
+            )
+            
+            if not submission:
+                error_msg = f"Dòng {row_idx}: Mã học sinh {student_code} không tồn tại trong đợt tái ghi danh này"
+                errors.append(error_msg)
+                errors_preview.append({
+                    "row": row_idx,
+                    "error": f"Mã học sinh {student_code} không tồn tại trong đợt tái ghi danh này",
+                    "data": {"Mã Học Sinh": student_code, "Tình Trạng": row[1] if len(row) > 1 else ''}
+                })
+                error_count += 1
+                continue
+            
+            # Cập nhật payment_status
+            try:
+                old_status = submission.payment_status
+                
+                # Chỉ cập nhật nếu khác trạng thái cũ
+                if old_status != payment_status:
+                    submission_doc = frappe.get_doc("SIS Re-enrollment", submission.name)
+                    submission_doc.payment_status = payment_status
+                    
+                    # Ghi log thay đổi
+                    payment_status_map = {'unpaid': 'Chưa đóng', 'paid': 'Đã đóng', 'refunded': 'Hoàn tiền'}
+                    old_display = payment_status_map.get(old_status, old_status or 'Chưa có')
+                    new_display = payment_status_map.get(payment_status, payment_status)
+                    
+                    log_content = f"Admin {current_user_name} đã cập nhật từ file Excel:\n• Thanh toán: {old_display} → {new_display}"
+                    
+                    submission_doc.append("notes", {
+                        "note_type": "system_log",
+                        "note": log_content,
+                        "created_by_user": current_user,
+                        "created_by_name": current_user_name,
+                        "created_at": now()
+                    })
+                    
+                    submission_doc.modified_by_admin = current_user
+                    submission_doc.admin_modified_at = now()
+                    submission_doc.save(ignore_permissions=True)
+                
+                success_count += 1
+                
+            except Exception as e:
+                error_msg = f"Dòng {row_idx}: Lỗi cập nhật {student_code}: {str(e)}"
+                errors.append(error_msg)
+                errors_preview.append({
+                    "row": row_idx,
+                    "error": f"Lỗi cập nhật: {str(e)}",
+                    "data": {"Mã Học Sinh": student_code, "Tình Trạng": row[1] if len(row) > 1 else ''}
+                })
+                error_count += 1
+                continue
+        
+        frappe.db.commit()
+        
+        total_count = success_count + error_count
+        logs.append(f"Kết quả: {success_count}/{total_count} thành công, {error_count} lỗi")
+        
+        return success_response(
+            data={
+                "success_count": success_count,
+                "error_count": error_count,
+                "total_count": total_count,
+                "errors": errors,
+                "errors_preview": errors_preview[:20]  # Chỉ trả về 20 lỗi đầu tiên
+            },
+            message=f"Import hoàn tất: {success_count}/{total_count} thành công" + (f", {error_count} lỗi" if error_count > 0 else ""),
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Import Payment Status Error")
+        return error_response(
+            message=f"Lỗi khi import: {str(e)}",
+            logs=logs
+        )
+
