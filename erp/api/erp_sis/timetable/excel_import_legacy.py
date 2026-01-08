@@ -1759,9 +1759,15 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                                         start_date: str, end_date: str, 
                                         campus_id: str, logs: list) -> tuple:
     """
-    Sync SIS Teacher Timetable và SIS Student Timetable từ SIS Timetable Instance Rows
+    Sync SIS Teacher Timetable từ SIS Timetable Instance Rows
     
-    Returns: (teacher_timetable_count, student_timetable_count)
+    ⚡ DISABLED (2026-01-08): Student Timetable sync đã được disable vì:
+    1. Data được tạo ra SAI (gán students vào class không thuộc về họ)
+    2. Performance: Giảm 50% thời gian sync
+    3. Không cần thiết: Parent Portal derive thời khóa biểu từ SIS Class Student + Timetable Instance
+    4. Backend APIs đã có fallback logic về homeroom class
+    
+    Returns: (teacher_timetable_count, 0)  # student_timetable_count luôn = 0
     """
     try:
         # 🔍 CRITICAL: Clear cache to ensure fresh data after PASS 2A updates
@@ -1842,20 +1848,19 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
 
         # 2. Generate Teacher Timetable entries
         teacher_timetable_count = 0
-        student_timetable_count = 0
+        student_timetable_count = 0  # ⚡ DISABLED: Luôn = 0, không tạo Student Timetable
         
+        # ⚡ DISABLED (2026-01-08): Không cần lấy students vì không tạo Student Timetable
+        # Lý do: Data SAI - gán students vào class không thuộc về họ
         # Get students in this class - use CRM Student IDs directly
-        students_in_class = frappe.get_all(
-            "SIS Class Student",
-            fields=["student_id"],
-            filters={"class_id": class_id}
-        )
-        student_ids = [s.student_id for s in students_in_class if s.student_id]
-        logs.append(f"Found {len(student_ids)} CRM students in class {class_id}")
-
-        if not student_ids:
-            logs.append(f"⚠️ [sync] No students found in class {class_id} - student timetable entries will not be created")
-            # Continue anyway for teacher entries
+        # students_in_class = frappe.get_all(
+        #     "SIS Class Student",
+        #     fields=["student_id"],
+        #     filters={"class_id": class_id}
+        # )
+        # student_ids = [s.student_id for s in students_in_class if s.student_id]
+        student_ids = []  # Empty - không tạo student timetable
+        logs.append(f"⚡ [sync] Student Timetable sync DISABLED - skipping student entries")
         
         # Generate dates for the timetable period (simplified - use week dates)
         from datetime import datetime, timedelta
@@ -1907,23 +1912,9 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
         except Exception as load_error:
             logs.append(f"⚠️  Error loading existing teacher entries: {str(load_error)}")
         
-        logs.append(f"🔍 Loading existing student timetable entries...")
-        existing_student_entries = set()
-        try:
-            student_entries = frappe.get_all(
-                "SIS Student Timetable",
-                fields=["student_id", "class_id", "day_of_week", "timetable_column_id", "date"],
-                filters={
-                    "class_id": class_id,
-                    "date": ["between", [start_dt, end_dt]]
-                }
-            )
-            for entry in student_entries:
-                key = f"{entry.student_id}|{entry.class_id}|{entry.day_of_week}|{entry.timetable_column_id}|{entry.date}"
-                existing_student_entries.add(key)
-            logs.append(f"✅ Loaded {len(existing_student_entries)} existing student entries")
-        except Exception as load_error:
-            logs.append(f"⚠️  Error loading existing student entries: {str(load_error)}")
+        # ⚡ DISABLED (2026-01-08): Không cần load existing student entries vì không tạo Student Timetable
+        # logs.append(f"🔍 Loading existing student timetable entries...")
+        existing_student_entries = set()  # Empty - không dùng
         
         # 🎯 Separate pattern vs override rows
         pattern_rows = []
@@ -2149,64 +2140,10 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         logs.append(f"Error creating teacher timetable for {teacher_id}: {str(te_error)}")
                         continue
                         
-                # 4. Create Student Timetable entries for this specific date (only if teacher has assignment)
-                # Map SIS Subject ID to Actual Subject ID
-                actual_subject_id_for_student = subject_map.get(row.subject_id)
-                has_teacher_assignment = False
-                if actual_subject_id_for_student:
-                    has_teacher_assignment = any(
-                        frappe.db.exists("SIS Subject Assignment", {
-                            "teacher_id": t,
-                            "class_id": class_id,
-                            "actual_subject_id": actual_subject_id_for_student,
-                            "docstatus": ["!=", 2]  # Allow draft and submitted
-                        }) for t in teachers if t
-                    )
-
-                if not has_teacher_assignment:
-                    logs.append(f"⚠️ [sync] No teacher assignment for subject {row.subject_id} in class {class_id} - skipping student entries")
-                    continue
-
-                for student_id in student_ids:
-                    try:
-                        # Validate student exists first
-                        if not student_id:
-                            continue
-
-                        # Check if entry already exists (in-memory check)
-                        student_key = f"{student_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
-
-                        if student_key not in existing_student_entries:
-                            # Create student timetable with error handling
-                            try:
-                                student_timetable = frappe.get_doc({
-                                    "doctype": "SIS Student Timetable",
-                                    "student_id": student_id,
-                                    "class_id": class_id,
-                                    "day_of_week": normalized_day,
-                                    "timetable_column_id": row.timetable_column_id,
-                                    "subject_id": row.subject_id,
-                                    "teacher_1_id": row.teacher_1_id,
-                                    "teacher_2_id": row.teacher_2_id,
-                                    "room_id": row.room_id,
-                                    "date": specific_date,
-                                    "timetable_instance_id": instance_id
-                                })
-                                
-                                student_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
-                                student_timetable_count += 1
-                                existing_student_entries.add(student_key)  # Add to cache
-                                
-                            except frappe.DoesNotExistError:
-                                logs.append(f"Error creating student timetable for {student_id}: Tài liệu SIS Student không tìm thấy")
-                                continue
-                            except Exception as insert_error:
-                                logs.append(f"Error creating student timetable for {student_id}: {str(insert_error)}")
-                                continue
-                            
-                    except Exception as st_error:
-                        logs.append(f"Error creating student timetable for {student_id}: {str(st_error)}")
-                        continue
+                # ⚡ DISABLED (2026-01-08): Student Timetable sync đã bị disable
+                # Lý do: Data SAI - gán students vào class không thuộc về họ
+                # Xem docstring của function để biết thêm chi tiết
+                pass  # Không tạo Student Timetable entries
         
         # 🎯 Process override rows (date-specific)
         if override_rows:
@@ -2283,41 +2220,9 @@ def sync_materialized_views_for_instance(instance_id: str, class_id: str,
                         logs.append(f"Error creating teacher timetable (override): {str(t_error)}")
                         continue
                 
-                # Create student timetable entries (only if at least one teacher has assignment)
-                has_teacher_assignment = any(
-                    frappe.db.exists("SIS Subject Assignment", {
-                        "teacher_id": t,
-                        "class_id": class_id,
-                        "actual_subject_id": row.subject_id,
-                        "docstatus": 1
-                    }) for t in teachers if t
-                )
-
-                if not has_teacher_assignment:
-                    continue  # Skip creating student entries if no teacher assignment
-
-                for student_id in students_in_class:
-                    try:
-                        student_key = f"{student_id}|{class_id}|{normalized_day}|{row.timetable_column_id}|{specific_date}"
-
-                        if student_key not in existing_student_entries:
-                            student_timetable = frappe.get_doc({
-                                "doctype": "SIS Student Timetable",
-                                "student_id": student_id,
-                                "class_id": class_id,
-                                "day_of_week": normalized_day,
-                                "timetable_column_id": row.timetable_column_id,
-                                "subject_id": row.subject_id,
-                                "room_id": row.room_id,
-                                "date": specific_date,
-                                "timetable_instance_id": instance_id
-                            })
-                            student_timetable.insert(ignore_permissions=True, ignore_mandatory=True)
-                            existing_student_entries.add(student_key)
-                            student_timetable_count += 1
-                    except Exception as s_error:
-                        logs.append(f"Error creating student timetable (override): {str(s_error)}")
-                        continue
+                # ⚡ DISABLED (2026-01-08): Student Timetable sync trong override rows cũng bị disable
+                # Lý do: Data SAI - gán students vào class không thuộc về họ
+                pass  # Không tạo Student Timetable entries
             
             logs.append(f"✅ [sync_materialized_views] Processed override rows")
         
@@ -2421,32 +2326,9 @@ def sync_materialized_views_simplified(instance_id: str, class_id: str, campus_i
                     except Exception:
                         continue
             
-            # Create student entries (basic - only first 10 to avoid timeout)
-            for student_id in student_ids[:10]:  # Limit to avoid timeouts
-                try:
-                    exists = frappe.db.exists("SIS Student Timetable", {
-                        "student_id": student_id,
-                        "day_of_week": normalized_day,
-                        "timetable_column_id": row.timetable_column_id,
-                        "date": current_date
-                    })
-                    
-                    if not exists:
-                        frappe.get_doc({
-                            "doctype": "SIS Student Timetable", 
-                            "student_id": student_id,
-                            "class_id": class_id,
-                            "day_of_week": normalized_day,
-                            "timetable_column_id": row.timetable_column_id,
-                            "subject_id": row.subject_id,
-                            "teacher_1_id": row.teacher_1_id,
-                            "teacher_2_id": row.teacher_2_id,
-                            "date": current_date,
-                            "timetable_instance_id": instance_id
-                        }).insert(ignore_permissions=True, ignore_mandatory=True)
-                        student_count += 1
-                except Exception:
-                    continue
+            # ⚡ DISABLED (2026-01-08): Student Timetable sync đã bị disable
+            # Lý do: Data SAI - gán students vào class không thuộc về họ
+            pass  # Không tạo Student Timetable entries
         
         # DO NOT commit here - let the caller decide when to commit to avoid worker timeout
         logs.append(f"Simplified sync completed: {teacher_count} teacher entries, {student_count} student entries")

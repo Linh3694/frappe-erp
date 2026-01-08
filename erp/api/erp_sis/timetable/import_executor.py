@@ -1381,20 +1381,16 @@ class TimetableImportExecutor:
 			frappe.logger().info(f"📊 Syncing instance {instance_id}: class={instance_data['class_id']}, range={instance_data['start_date']} to {instance_data['end_date']}")
 			
 			try:
-				# Xóa Teacher & Student Timetable entries cũ cho instance này
+				# Xóa Teacher Timetable entries cũ cho instance này
 				# Để đảm bảo sync lại toàn bộ với range mới
+				# ⚡ DISABLED (2026-01-08): Không xóa Student Timetable vì đã disable sync
 				deleted_teacher = frappe.db.sql("""
 					DELETE FROM `tabSIS Teacher Timetable`
 					WHERE timetable_instance_id = %s
 				""", (instance_id,))
 				
-				deleted_student = frappe.db.sql("""
-					DELETE FROM `tabSIS Student Timetable`
-					WHERE timetable_instance_id = %s
-				""", (instance_id,))
-				
-				total_deleted += (deleted_teacher or 0) + (deleted_student or 0)
-				frappe.logger().info(f"🗑️ Deleted old entries for {instance_id}")
+				total_deleted += (deleted_teacher or 0)
+				frappe.logger().info(f"🗑️ Deleted old Teacher Timetable entries for {instance_id}")
 				
 				# Sync lại với range mới
 				teacher_count, student_count = sync_materialized_views_for_instance(
@@ -1417,13 +1413,14 @@ class TimetableImportExecutor:
 				import traceback
 				frappe.logger().error(traceback.format_exc())
 		
-		summary_msg = f"✅ Synced {total_teacher_entries} Teacher Timetable entries, {total_student_entries} Student Timetable entries"
+		# ⚡ DISABLED (2026-01-08): Student Timetable sync đã bị disable
+		summary_msg = f"✅ Synced {total_teacher_entries} Teacher Timetable entries (Student Timetable sync DISABLED)"
 		self.logs.append(summary_msg)
 		frappe.logger().info(summary_msg)
 		
 		# Update stats
 		self.stats["teacher_timetable_synced"] = total_teacher_entries
-		self.stats["student_timetable_synced"] = total_student_entries
+		self.stats["student_timetable_synced"] = 0  # Always 0 - disabled
 		self.stats["timetable_entries_deleted"] = total_deleted
 	
 	# ============= HELPER METHODS =============
