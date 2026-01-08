@@ -90,7 +90,8 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
     try:
         logs.append(f"Lấy học sinh từ năm học nguồn: {source_school_year_id}, Campus: {campus_id}")
         
-        # Lấy danh sách học sinh đã xếp lớp trong năm học nguồn tại campus này
+        # Lấy danh sách học sinh đã xếp lớp REGULAR trong năm học nguồn tại campus này
+        # Chỉ lấy lớp regular, không lấy lớp mixed
         students = frappe.db.sql("""
             SELECT DISTINCT 
                 cs.student_id,
@@ -103,6 +104,7 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
             INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
             WHERE c.school_year_id = %(school_year_id)s
               AND c.campus_id = %(campus_id)s
+              AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
         """, {
             "school_year_id": source_school_year_id,
             "campus_id": campus_id
