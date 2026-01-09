@@ -84,7 +84,8 @@ def _get_guardian_students(guardian_id, school_year_id=None):
             c.education_grade,
             eg.education_stage_id,
             es.title_vn as education_stage_name,
-            c.homeroom_teacher
+            c.homeroom_teacher,
+            t.full_name as homeroom_teacher_name
         FROM `tabCRM Student` s
         LEFT JOIN (
             SELECT cs1.student_id, MIN(cs1.class_id) as class_id
@@ -97,6 +98,7 @@ def _get_guardian_students(guardian_id, school_year_id=None):
         LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
         LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
         LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
+        LEFT JOIN `tabSIS Teacher` t ON c.homeroom_teacher = t.name
         WHERE s.name IN %(student_ids)s
         ORDER BY s.student_name
     """, params, as_dict=True)
@@ -211,6 +213,26 @@ def get_active_period():
                 as_dict=True
             )
             
+            # Lấy danh sách giáo viên bộ môn từ Timetable
+            subject_teachers = []
+            if student.class_id:
+                teachers = frappe.db.sql("""
+                    SELECT DISTINCT 
+                        t.name as teacher_id,
+                        t.full_name as teacher_name,
+                        t.employee_code
+                    FROM `tabSIS Teacher` t
+                    INNER JOIN `tabSIS Timetable Instance Row` tir ON t.name = tir.teacher_id
+                    INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
+                    WHERE ti.class_id = %(class_id)s
+                      AND t.name != %(homeroom_id)s
+                    ORDER BY t.full_name
+                """, {
+                    "class_id": student.class_id,
+                    "homeroom_id": student.homeroom_teacher or ""
+                }, as_dict=True)
+                subject_teachers = [{"teacher_id": t.teacher_id, "teacher_name": t.teacher_name} for t in teachers]
+            
             student_info = {
                 "name": student.student_id,
                 "student_name": student.student_name,
@@ -220,6 +242,8 @@ def get_active_period():
                 "education_stage_id": student.education_stage_id,
                 "education_stage_name": student.education_stage_name,
                 "homeroom_teacher": student.homeroom_teacher,
+                "homeroom_teacher_name": student.homeroom_teacher_name,
+                "subject_teachers": subject_teachers,
                 "has_submitted": existing_app is not None,
                 "submission": None
             }
