@@ -85,7 +85,7 @@ def _get_guardian_students(guardian_id, school_year_id=None):
             eg.education_stage_id,
             es.title_vn as education_stage_name,
             c.homeroom_teacher,
-            t.full_name as homeroom_teacher_name
+            u.full_name as homeroom_teacher_name
         FROM `tabCRM Student` s
         LEFT JOIN (
             SELECT cs1.student_id, MIN(cs1.class_id) as class_id
@@ -99,6 +99,7 @@ def _get_guardian_students(guardian_id, school_year_id=None):
         LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
         LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
         LEFT JOIN `tabSIS Teacher` t ON c.homeroom_teacher = t.name
+        LEFT JOIN `tabUser` u ON t.user_id = u.name
         WHERE s.name IN %(student_ids)s
         ORDER BY s.student_name
     """, params, as_dict=True)
@@ -219,14 +220,14 @@ def get_active_period():
                 teachers = frappe.db.sql("""
                     SELECT DISTINCT 
                         t.name as teacher_id,
-                        t.full_name as teacher_name,
-                        t.employee_code
+                        u.full_name as teacher_name
                     FROM `tabSIS Teacher` t
+                    INNER JOIN `tabUser` u ON t.user_id = u.name
                     INNER JOIN `tabSIS Timetable Instance Row` tir ON t.name = tir.teacher_id
                     INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
                     WHERE ti.class_id = %(class_id)s
                       AND t.name != %(homeroom_id)s
-                    ORDER BY t.full_name
+                    ORDER BY u.full_name
                 """, {
                     "class_id": student.class_id,
                     "homeroom_id": student.homeroom_teacher or ""
@@ -314,28 +315,30 @@ def get_teachers_for_class(class_id=None):
         teachers = frappe.db.sql("""
             SELECT DISTINCT 
                 t.name as teacher_id,
-                t.full_name as teacher_name,
-                t.employee_code
+                u.full_name as teacher_name
             FROM `tabSIS Teacher` t
+            INNER JOIN `tabUser` u ON t.user_id = u.name
             INNER JOIN `tabSIS Timetable Instance Row` tir ON t.name = tir.teacher_id
             INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
             WHERE ti.class_id = %(class_id)s
               AND t.name != %(homeroom_id)s
-            ORDER BY t.full_name
+            ORDER BY u.full_name
         """, {
             "class_id": class_id,
             "homeroom_id": homeroom_teacher_id or ""
         }, as_dict=True)
         
-        # Lấy thông tin GVCN
+        # Lấy thông tin GVCN từ User
         homeroom_info = None
         if homeroom_teacher_id:
-            homeroom_info = frappe.db.get_value(
-                "SIS Teacher",
-                homeroom_teacher_id,
-                ["name", "full_name", "employee_code"],
-                as_dict=True
-            )
+            homeroom_data = frappe.db.sql("""
+                SELECT t.name as teacher_id, u.full_name as teacher_name
+                FROM `tabSIS Teacher` t
+                INNER JOIN `tabUser` u ON t.user_id = u.name
+                WHERE t.name = %(teacher_id)s
+            """, {"teacher_id": homeroom_teacher_id}, as_dict=True)
+            if homeroom_data:
+                homeroom_info = homeroom_data[0]
         
         return success_response(
             data={
