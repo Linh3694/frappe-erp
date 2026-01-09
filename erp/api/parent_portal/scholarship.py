@@ -73,8 +73,9 @@ def _get_guardian_students(guardian_id, school_year_id=None):
         params["school_year_id"] = school_year_id
     
     # Lấy thông tin chi tiết học sinh với lớp
+    # Sử dụng subquery để lấy lớp chính (regular) đầu tiên của học sinh, tránh duplicate
     students = frappe.db.sql(f"""
-        SELECT DISTINCT 
+        SELECT 
             s.name as student_id,
             s.student_name,
             s.student_code,
@@ -85,10 +86,15 @@ def _get_guardian_students(guardian_id, school_year_id=None):
             es.title_vn as education_stage_name,
             c.homeroom_teacher
         FROM `tabCRM Student` s
-        LEFT JOIN `tabSIS Class Student` cs ON s.name = cs.student_id
-        LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name 
-            AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
-            {school_year_filter}
+        LEFT JOIN (
+            SELECT cs1.student_id, MIN(cs1.class_id) as class_id
+            FROM `tabSIS Class Student` cs1
+            INNER JOIN `tabSIS Class` c1 ON cs1.class_id = c1.name
+            WHERE (c1.class_type = 'regular' OR c1.class_type IS NULL OR c1.class_type = '')
+                {"AND c1.school_year_id = %(school_year_id)s" if school_year_id else ""}
+            GROUP BY cs1.student_id
+        ) cs ON s.name = cs.student_id
+        LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
         LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
         LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
         WHERE s.name IN %(student_ids)s
