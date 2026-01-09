@@ -43,10 +43,11 @@ def _get_current_guardian():
     return guardian
 
 
-def _get_guardian_students(guardian_id):
+def _get_guardian_students(guardian_id, school_year_id=None):
     """
     Lấy danh sách học sinh của phụ huynh.
     Sử dụng CRM Family Relationship giống re_enrollment.
+    Nếu có school_year_id thì chỉ lấy lớp của năm học đó.
     """
     if not guardian_id:
         return []
@@ -63,8 +64,16 @@ def _get_guardian_students(guardian_id):
     
     student_ids = [r.student for r in relationships]
     
+    # Build query với filter năm học nếu có
+    school_year_filter = ""
+    params = {"student_ids": student_ids}
+    
+    if school_year_id:
+        school_year_filter = "AND c.school_year_id = %(school_year_id)s"
+        params["school_year_id"] = school_year_id
+    
     # Lấy thông tin chi tiết học sinh với lớp
-    students = frappe.db.sql("""
+    students = frappe.db.sql(f"""
         SELECT DISTINCT 
             s.name as student_id,
             s.student_name,
@@ -77,12 +86,14 @@ def _get_guardian_students(guardian_id):
             c.homeroom_teacher
         FROM `tabCRM Student` s
         LEFT JOIN `tabSIS Class Student` cs ON s.name = cs.student_id
-        LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
+        LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name 
+            AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
+            {school_year_filter}
         LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
         LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
         WHERE s.name IN %(student_ids)s
         ORDER BY s.student_name
-    """, {"student_ids": student_ids}, as_dict=True)
+    """, params, as_dict=True)
     
     return students
 
@@ -173,8 +184,8 @@ def get_active_period():
             as_dict=True
         )
         
-        # Lấy danh sách học sinh của phụ huynh
-        all_students = _get_guardian_students(guardian_id)
+        # Lấy danh sách học sinh của phụ huynh (filter theo năm học của kỳ học bổng)
+        all_students = _get_guardian_students(guardian_id, period_data.academic_year_id)
         
         # Lọc học sinh theo cấp học được áp dụng và kiểm tra đã đăng ký chưa
         students = []
