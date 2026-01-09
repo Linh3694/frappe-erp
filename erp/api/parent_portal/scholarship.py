@@ -689,6 +689,9 @@ def submit_application_with_files():
         if semester2_report_url:
             report_links.append(f"Kì 2: {semester2_report_url}")
         
+        # Upload video giới thiệu
+        video_url = upload_file('video_file', 'Scholarship/Videos')
+        
         # Tạo đơn đăng ký
         app = frappe.get_doc({
             "doctype": "SIS Scholarship Application",
@@ -701,7 +704,7 @@ def submit_application_with_files():
             "second_teacher_id": frappe.form_dict.get('second_teacher_id'),
             "academic_report_type": 'upload' if report_links else 'existing',
             "academic_report_upload": ' | '.join(report_links) if report_links else None,
-            "video_url": frappe.form_dict.get('video_url'),
+            "video_url": video_url,
             "status": "Submitted"
         })
         
