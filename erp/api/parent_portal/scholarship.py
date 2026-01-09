@@ -81,7 +81,6 @@ def _get_guardian_students(guardian_id):
         LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
         LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
         WHERE s.name IN %(student_ids)s
-          AND s.student_status = 'Active'
         ORDER BY s.student_name
     """, {"student_ids": student_ids}, as_dict=True)
     
