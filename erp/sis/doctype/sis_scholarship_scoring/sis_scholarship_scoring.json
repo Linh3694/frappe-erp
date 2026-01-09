@@ -1,0 +1,236 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS-SCHOLAR-SCORE-{#####}",
+ "beta": 0,
+ "creation": "2026-01-09 00:00:00.000000",
+ "custom": 0,
+ "description": "Chấm điểm hồ sơ học bổng",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "application_id",
+  "approver_id",
+  "approver_name",
+  "column_break_basic",
+  "scored_at",
+  "academic_scores_section",
+  "ctvn_score",
+  "ctqt_score",
+  "column_break_academic",
+  "standardized_test_score",
+  "other_scores_section",
+  "quality_score",
+  "extracurricular_score",
+  "competition_score",
+  "column_break_other",
+  "recommendation_score",
+  "video_score",
+  "total_section",
+  "total_score",
+  "percentage",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "application_id",
+   "fieldtype": "Link",
+   "label": "Đơn đăng ký",
+   "options": "SIS Scholarship Application",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "approver_id",
+   "fieldtype": "Link",
+   "label": "Người chấm điểm",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "approver_name",
+   "fieldtype": "Data",
+   "label": "Tên người chấm",
+   "read_only": 1,
+   "fetch_from": "approver_id.full_name"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "scored_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian chấm",
+   "read_only": 1
+  },
+  {
+   "fieldname": "academic_scores_section",
+   "fieldtype": "Section Break",
+   "label": "I. Kết quả học tập (Tối đa: 14 điểm)"
+  },
+  {
+   "fieldname": "ctvn_score",
+   "fieldtype": "Float",
+   "label": "Chương trình Việt Nam (CTVN)",
+   "precision": 1,
+   "description": "Tối đa: 6 điểm",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "ctqt_score",
+   "fieldtype": "Float",
+   "label": "Chương trình Quốc tế (CTQT)",
+   "precision": 1,
+   "description": "Tối đa: 8 điểm",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_academic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "standardized_test_score",
+   "fieldtype": "Float",
+   "label": "II. Bài thi chuẩn hoá",
+   "precision": 1,
+   "description": "Tối đa: 6 điểm"
+  },
+  {
+   "fieldname": "other_scores_section",
+   "fieldtype": "Section Break",
+   "label": "Điểm khác"
+  },
+  {
+   "fieldname": "quality_score",
+   "fieldtype": "Float",
+   "label": "III. Rèn luyện/Phẩm chất/Năng lực",
+   "precision": 1,
+   "description": "Tối đa: 3 điểm"
+  },
+  {
+   "fieldname": "extracurricular_score",
+   "fieldtype": "Float",
+   "label": "IV. Hoạt động ngoại khoá/cộng đồng",
+   "precision": 1,
+   "description": "Tối đa: 5 điểm"
+  },
+  {
+   "fieldname": "competition_score",
+   "fieldtype": "Float",
+   "label": "V. Thành tích các cuộc thi",
+   "precision": 1,
+   "description": "Tối đa: 5 điểm"
+  },
+  {
+   "fieldname": "column_break_other",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "recommendation_score",
+   "fieldtype": "Float",
+   "label": "VI. Thư giới thiệu",
+   "precision": 1,
+   "description": "Tối đa: 5 điểm"
+  },
+  {
+   "fieldname": "video_score",
+   "fieldtype": "Float",
+   "label": "VII. Video",
+   "precision": 1,
+   "description": "Tối đa: 12 điểm"
+  },
+  {
+   "fieldname": "total_section",
+   "fieldtype": "Section Break",
+   "label": "Tổng kết"
+  },
+  {
+   "fieldname": "total_score",
+   "fieldtype": "Float",
+   "label": "Tổng điểm",
+   "precision": 1,
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Tối đa: 50 điểm"
+  },
+  {
+   "fieldname": "percentage",
+   "fieldtype": "Float",
+   "label": "Phần trăm (%)",
+   "precision": 1,
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú/Nhận xét",
+   "description": "Nhận xét chung về hồ sơ"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-09 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Scholarship Scoring",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

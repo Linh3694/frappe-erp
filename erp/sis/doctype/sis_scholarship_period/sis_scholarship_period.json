@@ -1,0 +1,210 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-SCHOLAR-PERIOD-{#####}",
+ "beta": 0,
+ "creation": "2026-01-09 00:00:00.000000",
+ "custom": 0,
+ "description": "Cấu hình kỳ đăng ký học bổng",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "title",
+  "academic_year_id",
+  "campus_id",
+  "column_break_basic",
+  "status",
+  "from_date",
+  "to_date",
+  "education_stages_section",
+  "education_stages",
+  "approvers_section",
+  "approvers",
+  "recommendation_form_section",
+  "form_sections",
+  "system_information",
+  "created_by",
+  "created_at",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tên kỳ học bổng",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "VD: Kỳ học bổng năm học 2026-2027"
+  },
+  {
+   "fieldname": "academic_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Năm học mà học sinh đăng ký học bổng"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "Draft\nOpen\nClosed",
+   "default": "Draft",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Draft: Nháp, Open: Đang mở đăng ký, Closed: Đã đóng"
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "Ngày bắt đầu",
+   "reqd": 1,
+   "description": "Ngày bắt đầu nhận đơn đăng ký"
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "Ngày kết thúc",
+   "reqd": 1,
+   "description": "Ngày kết thúc nhận đơn đăng ký"
+  },
+  {
+   "fieldname": "education_stages_section",
+   "fieldtype": "Section Break",
+   "label": "Cấp học áp dụng"
+  },
+  {
+   "fieldname": "education_stages",
+   "fieldtype": "Table",
+   "label": "Danh sách cấp học",
+   "options": "SIS Scholarship Education Stage",
+   "description": "Các cấp học được phép đăng ký học bổng trong kỳ này"
+  },
+  {
+   "fieldname": "approvers_section",
+   "fieldtype": "Section Break",
+   "label": "Người phê duyệt"
+  },
+  {
+   "fieldname": "approvers",
+   "fieldtype": "Table",
+   "label": "Danh sách người phê duyệt",
+   "options": "SIS Scholarship Approver",
+   "description": "Người phê duyệt hồ sơ theo từng cấp học"
+  },
+  {
+   "fieldname": "recommendation_form_section",
+   "fieldtype": "Section Break",
+   "label": "Cấu hình Form Thư giới thiệu"
+  },
+  {
+   "fieldname": "form_sections",
+   "fieldtype": "Table",
+   "label": "Các section trong form",
+   "options": "SIS Scholarship Form Section",
+   "description": "Cấu hình các section và câu hỏi trong form thư giới thiệu"
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "label": "Người tạo",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày cập nhật",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-09 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Scholarship Period",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

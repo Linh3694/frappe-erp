@@ -1,0 +1,425 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:SIS-SCHOLAR-APP-{#####}",
+ "beta": 0,
+ "creation": "2026-01-09 00:00:00.000000",
+ "custom": 0,
+ "description": "Đơn đăng ký học bổng của học sinh",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "scholarship_period_id",
+  "student_id",
+  "student_name",
+  "student_code",
+  "column_break_basic",
+  "class_id",
+  "class_name",
+  "education_stage_id",
+  "education_stage_name",
+  "status_section",
+  "status",
+  "column_break_status",
+  "submitted_at",
+  "guardian_id",
+  "guardian_name",
+  "academic_report_section",
+  "academic_report_type",
+  "academic_report_link",
+  "academic_report_upload",
+  "achievements_section",
+  "achievements",
+  "video_section",
+  "video_url",
+  "teacher_selection_section",
+  "main_teacher_id",
+  "main_teacher_name",
+  "column_break_teacher",
+  "second_teacher_id",
+  "second_teacher_name",
+  "recommendation_section",
+  "main_recommendation_id",
+  "main_recommendation_status",
+  "column_break_rec",
+  "second_recommendation_id",
+  "second_recommendation_status",
+  "scoring_section",
+  "scoring_id",
+  "total_score",
+  "total_percentage",
+  "approval_section",
+  "approved_by",
+  "approved_at",
+  "rejection_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin học sinh"
+  },
+  {
+   "fieldname": "scholarship_period_id",
+   "fieldtype": "Link",
+   "label": "Kỳ học bổng",
+   "options": "SIS Scholarship Period",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Tên học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Mã học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_code"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "label": "Lớp chính quy",
+   "options": "SIS Class",
+   "read_only": 1
+  },
+  {
+   "fieldname": "class_name",
+   "fieldtype": "Data",
+   "label": "Tên lớp",
+   "read_only": 1,
+   "fetch_from": "class_id.title"
+  },
+  {
+   "fieldname": "education_stage_id",
+   "fieldtype": "Link",
+   "label": "Cấp học",
+   "options": "SIS Education Stage",
+   "read_only": 1
+  },
+  {
+   "fieldname": "education_stage_name",
+   "fieldtype": "Data",
+   "label": "Tên cấp học",
+   "read_only": 1,
+   "fetch_from": "education_stage_id.title_vn"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "Submitted\nWaitingRecommendation\nRecommendationSubmitted\nInReview\nApproved\nRejected\nDeniedByTeacher",
+   "default": "Submitted",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Submitted: Đã nộp, WaitingRecommendation: Chờ thư giới thiệu, RecommendationSubmitted: Đã có thư GT, InReview: Đang xét duyệt, Approved: Đã duyệt, Rejected: Từ chối, DeniedByTeacher: GV từ chối"
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian nộp đơn",
+   "read_only": 1
+  },
+  {
+   "fieldname": "guardian_id",
+   "fieldtype": "Link",
+   "label": "Phụ huynh nộp đơn",
+   "options": "CRM Guardian"
+  },
+  {
+   "fieldname": "guardian_name",
+   "fieldtype": "Data",
+   "label": "Tên phụ huynh",
+   "read_only": 1,
+   "fetch_from": "guardian_id.guardian_name"
+  },
+  {
+   "fieldname": "academic_report_section",
+   "fieldtype": "Section Break",
+   "label": "Báo cáo học tập"
+  },
+  {
+   "fieldname": "academic_report_type",
+   "fieldtype": "Select",
+   "label": "Loại báo cáo",
+   "options": "existing\nupload",
+   "default": "existing",
+   "description": "existing: Chọn từ hệ thống, upload: Upload mới"
+  },
+  {
+   "fieldname": "academic_report_link",
+   "fieldtype": "Link",
+   "label": "Báo cáo học tập (từ hệ thống)",
+   "options": "SIS Student Report Card",
+   "depends_on": "eval:doc.academic_report_type=='existing'"
+  },
+  {
+   "fieldname": "academic_report_upload",
+   "fieldtype": "Attach",
+   "label": "Báo cáo học tập (upload)",
+   "depends_on": "eval:doc.academic_report_type=='upload'"
+  },
+  {
+   "fieldname": "achievements_section",
+   "fieldtype": "Section Break",
+   "label": "Thành tích"
+  },
+  {
+   "fieldname": "achievements",
+   "fieldtype": "Table",
+   "label": "Danh sách thành tích",
+   "options": "SIS Scholarship Achievement",
+   "description": "Bài thi chuẩn hoá, giải thưởng, hoạt động ngoại khoá, khác"
+  },
+  {
+   "fieldname": "video_section",
+   "fieldtype": "Section Break",
+   "label": "Video giới thiệu"
+  },
+  {
+   "fieldname": "video_url",
+   "fieldtype": "Attach",
+   "label": "Video",
+   "description": "Video giới thiệu bản thân (nếu có)"
+  },
+  {
+   "fieldname": "teacher_selection_section",
+   "fieldtype": "Section Break",
+   "label": "Giáo viên giới thiệu"
+  },
+  {
+   "fieldname": "main_teacher_id",
+   "fieldtype": "Link",
+   "label": "GVCN (Bắt buộc)",
+   "options": "SIS Teacher",
+   "reqd": 1,
+   "description": "Giáo viên chủ nhiệm của lớp chính quy"
+  },
+  {
+   "fieldname": "main_teacher_name",
+   "fieldtype": "Data",
+   "label": "Tên GVCN",
+   "read_only": 1,
+   "fetch_from": "main_teacher_id.full_name"
+  },
+  {
+   "fieldname": "column_break_teacher",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "second_teacher_id",
+   "fieldtype": "Link",
+   "label": "Giáo viên thứ 2",
+   "options": "SIS Teacher",
+   "description": "Chọn giáo viên bộ môn dạy lớp này"
+  },
+  {
+   "fieldname": "second_teacher_name",
+   "fieldtype": "Data",
+   "label": "Tên GV thứ 2",
+   "read_only": 1,
+   "fetch_from": "second_teacher_id.full_name"
+  },
+  {
+   "fieldname": "recommendation_section",
+   "fieldtype": "Section Break",
+   "label": "Thư giới thiệu"
+  },
+  {
+   "fieldname": "main_recommendation_id",
+   "fieldtype": "Link",
+   "label": "Thư GT của GVCN",
+   "options": "SIS Scholarship Recommendation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "main_recommendation_status",
+   "fieldtype": "Data",
+   "label": "Trạng thái thư GVCN",
+   "read_only": 1,
+   "description": "Pending/Submitted/Denied"
+  },
+  {
+   "fieldname": "column_break_rec",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "second_recommendation_id",
+   "fieldtype": "Link",
+   "label": "Thư GT của GV thứ 2",
+   "options": "SIS Scholarship Recommendation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "second_recommendation_status",
+   "fieldtype": "Data",
+   "label": "Trạng thái thư GV 2",
+   "read_only": 1,
+   "description": "Pending/Submitted/Denied"
+  },
+  {
+   "fieldname": "scoring_section",
+   "fieldtype": "Section Break",
+   "label": "Chấm điểm"
+  },
+  {
+   "fieldname": "scoring_id",
+   "fieldtype": "Link",
+   "label": "Bản chấm điểm",
+   "options": "SIS Scholarship Scoring",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_score",
+   "fieldtype": "Float",
+   "label": "Tổng điểm",
+   "read_only": 1,
+   "precision": 1,
+   "description": "Tổng điểm hồ sơ (tối đa 50)"
+  },
+  {
+   "fieldname": "total_percentage",
+   "fieldtype": "Float",
+   "label": "Tỷ lệ %",
+   "read_only": 1,
+   "precision": 1,
+   "description": "Phần trăm điểm"
+  },
+  {
+   "fieldname": "approval_section",
+   "fieldtype": "Section Break",
+   "label": "Phê duyệt",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Người phê duyệt",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian phê duyệt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do từ chối",
+   "read_only": 1,
+   "depends_on": "eval:doc.status=='Rejected'"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-09 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Scholarship Application",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Instructor",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}

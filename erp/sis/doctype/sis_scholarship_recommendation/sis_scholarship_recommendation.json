@@ -1,0 +1,174 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS-SCHOLAR-REC-{#####}",
+ "beta": 0,
+ "creation": "2026-01-09 00:00:00.000000",
+ "custom": 0,
+ "description": "Thư giới thiệu học bổng từ giáo viên",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "application_id",
+  "teacher_id",
+  "teacher_name",
+  "column_break_basic",
+  "recommendation_type",
+  "status",
+  "denied_reason",
+  "answers_section",
+  "answers",
+  "system_section",
+  "submitted_at",
+  "denied_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "application_id",
+   "fieldtype": "Link",
+   "label": "Đơn đăng ký",
+   "options": "SIS Scholarship Application",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "teacher_id",
+   "fieldtype": "Link",
+   "label": "Giáo viên",
+   "options": "SIS Teacher",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "teacher_name",
+   "fieldtype": "Data",
+   "label": "Tên giáo viên",
+   "read_only": 1,
+   "fetch_from": "teacher_id.full_name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "recommendation_type",
+   "fieldtype": "Select",
+   "label": "Loại thư",
+   "options": "main\nsecond",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "main: GVCN, second: Giáo viên thứ 2"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "Pending\nSubmitted\nDenied",
+   "default": "Pending",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Pending: Chờ viết, Submitted: Đã gửi, Denied: Từ chối"
+  },
+  {
+   "fieldname": "denied_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do từ chối",
+   "depends_on": "eval:doc.status=='Denied'",
+   "mandatory_depends_on": "eval:doc.status=='Denied'"
+  },
+  {
+   "fieldname": "answers_section",
+   "fieldtype": "Section Break",
+   "label": "Nội dung thư giới thiệu"
+  },
+  {
+   "fieldname": "answers",
+   "fieldtype": "Table",
+   "label": "Câu trả lời",
+   "options": "SIS Scholarship Recommendation Answer",
+   "description": "Nội dung thư giới thiệu theo form đã cấu hình"
+  },
+  {
+   "fieldname": "system_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian gửi",
+   "read_only": 1
+  },
+  {
+   "fieldname": "denied_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian từ chối",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-09 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Scholarship Recommendation",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 0,
+   "role": "Instructor",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
