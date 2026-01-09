@@ -587,3 +587,181 @@ def get_application_status(application_id=None):
             message=f"Lỗi: {str(e)}",
             logs=logs
         )
+
+
+@frappe.whitelist()
+def submit_application_with_files():
+    """
+    PHHS nộp đơn đăng ký học bổng với file uploads.
+    Hỗ trợ upload:
+    - Báo cáo học tập kì 1, kì 2
+    - Chứng chỉ cho từng loại thành tích
+    """
+    logs = []
+    
+    try:
+        # Lấy guardian
+        guardian_id = _get_current_guardian()
+        if not guardian_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        # Lấy data từ form
+        student_id = frappe.form_dict.get('student_id')
+        period_id = frappe.form_dict.get('period_id')
+        
+        if not student_id:
+            return validation_error_response(
+                "Thiếu student_id",
+                {"student_id": ["Student ID là bắt buộc"]}
+            )
+        
+        if not period_id:
+            return validation_error_response(
+                "Thiếu period_id",
+                {"period_id": ["Period ID là bắt buộc"]}
+            )
+        
+        logs.append(f"PHHS {guardian_id} đăng ký học bổng cho {student_id}")
+        
+        # Kiểm tra học sinh thuộc về phụ huynh này
+        students = _get_guardian_students(guardian_id)
+        student_ids = [s['student_id'] for s in students]
+        
+        if student_id not in student_ids:
+            return error_response("Học sinh này không thuộc quyền quản lý của bạn", logs=logs)
+        
+        # Lấy thông tin học sinh
+        student_info = next((s for s in students if s['student_id'] == student_id), None)
+        
+        # Kiểm tra đã đăng ký chưa
+        existing = frappe.db.exists("SIS Scholarship Application", {
+            "scholarship_period_id": period_id,
+            "student_id": student_id
+        })
+        
+        if existing:
+            return error_response("Học sinh này đã đăng ký học bổng rồi", logs=logs)
+        
+        # Kiểm tra kỳ học bổng
+        period = frappe.get_doc("SIS Scholarship Period", period_id)
+        if period.status != "Open":
+            return error_response("Kỳ học bổng này chưa mở hoặc đã đóng", logs=logs)
+        
+        if not period.is_within_period():
+            return error_response("Không trong thời gian đăng ký", logs=logs)
+        
+        # Helper function để upload file
+        def upload_file(file_key, folder="Scholarship"):
+            """Upload file và trả về file URL"""
+            if file_key not in frappe.request.files:
+                return None
+            
+            file = frappe.request.files[file_key]
+            if not file or not file.filename:
+                return None
+            
+            # Lưu file
+            file_doc = frappe.get_doc({
+                "doctype": "File",
+                "file_name": file.filename,
+                "folder": f"Home/{folder}",
+                "is_private": 0,
+                "content": file.read()
+            })
+            file_doc.insert(ignore_permissions=True)
+            
+            return file_doc.file_url
+        
+        # Upload báo cáo học tập
+        semester1_report_url = upload_file('semester1_report', 'Scholarship/Reports')
+        semester2_report_url = upload_file('semester2_report', 'Scholarship/Reports')
+        
+        # Gộp link báo cáo học tập
+        report_links = []
+        if semester1_report_url:
+            report_links.append(f"Kì 1: {semester1_report_url}")
+        if semester2_report_url:
+            report_links.append(f"Kì 2: {semester2_report_url}")
+        
+        # Tạo đơn đăng ký
+        app = frappe.get_doc({
+            "doctype": "SIS Scholarship Application",
+            "scholarship_period_id": period_id,
+            "student_id": student_id,
+            "class_id": student_info.get('class_id'),
+            "education_stage_id": student_info.get('education_stage_id'),
+            "guardian_id": guardian_id,
+            "main_teacher_id": frappe.form_dict.get('main_teacher_id') or student_info.get('homeroom_teacher'),
+            "second_teacher_id": frappe.form_dict.get('second_teacher_id'),
+            "academic_report_type": 'upload' if report_links else 'existing',
+            "academic_report_upload": ' | '.join(report_links) if report_links else None,
+            "video_url": frappe.form_dict.get('video_url'),
+            "status": "Submitted"
+        })
+        
+        # Parse và thêm thành tích - Bài thi chuẩn hóa
+        standardized_tests = frappe.form_dict.get('standardized_tests')
+        if standardized_tests:
+            try:
+                tests = json.loads(standardized_tests)
+                for idx, content in enumerate(tests):
+                    file_url = upload_file(f'standardized_test_file_{idx}', 'Scholarship/Certificates')
+                    app.append("achievements", {
+                        "achievement_type": "standardized_test",
+                        "title": content,
+                        "attachment": file_url
+                    })
+            except json.JSONDecodeError:
+                pass
+        
+        # Parse và thêm thành tích - Giải thưởng
+        awards_data = frappe.form_dict.get('awards')
+        if awards_data:
+            try:
+                awards_list = json.loads(awards_data)
+                for idx, content in enumerate(awards_list):
+                    file_url = upload_file(f'award_file_{idx}', 'Scholarship/Certificates')
+                    app.append("achievements", {
+                        "achievement_type": "award",
+                        "title": content,
+                        "attachment": file_url
+                    })
+            except json.JSONDecodeError:
+                pass
+        
+        # Parse và thêm thành tích - Hoạt động ngoại khóa
+        extracurriculars_data = frappe.form_dict.get('extracurriculars')
+        if extracurriculars_data:
+            try:
+                extracurriculars_list = json.loads(extracurriculars_data)
+                for idx, content in enumerate(extracurriculars_list):
+                    file_url = upload_file(f'extracurricular_file_{idx}', 'Scholarship/Certificates')
+                    app.append("achievements", {
+                        "achievement_type": "extracurricular",
+                        "title": content,
+                        "attachment": file_url
+                    })
+            except json.JSONDecodeError:
+                pass
+        
+        app.insert()
+        frappe.db.commit()
+        
+        logs.append(f"Đã tạo đơn đăng ký: {app.name}")
+        
+        return success_response(
+            data={
+                "name": app.name,
+                "status": app.status
+            },
+            message="Đăng ký học bổng thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Submit Scholarship With Files Error")
+        return error_response(
+            message=f"Lỗi khi đăng ký học bổng: {str(e)}",
+            logs=logs
+        )
