@@ -20,25 +20,50 @@ from erp.utils.api_response import (
 
 
 def _get_current_guardian():
-    """Lấy guardian_id của user hiện tại"""
-    user = frappe.session.user
+    """
+    Lấy guardian name của user hiện tại.
+    Email format: guardian_id@parent.wellspring.edu.vn
+    """
+    user_email = frappe.session.user
     
-    # Tìm guardian dựa trên email
-    guardian_id = frappe.db.get_value(
-        "CRM Guardian",
-        {"email": user},
-        "name"
-    )
+    if not user_email:
+        return None
     
-    return guardian_id
+    # Format email: guardian_id@parent.wellspring.edu.vn
+    if "@parent.wellspring.edu.vn" not in user_email:
+        # Fallback: thử tìm trực tiếp bằng email
+        guardian = frappe.db.get_value("CRM Guardian", {"email": user_email}, "name")
+        return guardian
+    
+    # Extract guardian_id từ email
+    guardian_id = user_email.split("@")[0]
+    
+    # Lấy guardian name từ guardian_id
+    guardian = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_id}, "name")
+    return guardian
 
 
 def _get_guardian_students(guardian_id):
-    """Lấy danh sách học sinh của phụ huynh"""
+    """
+    Lấy danh sách học sinh của phụ huynh.
+    Sử dụng CRM Family Relationship giống re_enrollment.
+    """
     if not guardian_id:
         return []
     
-    # Lấy từ family
+    # Lấy từ CRM Family Relationship
+    relationships = frappe.get_all(
+        "CRM Family Relationship",
+        filters={"guardian": guardian_id},
+        fields=["student"]
+    )
+    
+    if not relationships:
+        return []
+    
+    student_ids = [r.student for r in relationships]
+    
+    # Lấy thông tin chi tiết học sinh với lớp
     students = frappe.db.sql("""
         SELECT DISTINCT 
             s.name as student_id,
@@ -52,16 +77,14 @@ def _get_guardian_students(guardian_id):
             es.title_vn as education_stage_name,
             c.homeroom_teacher
         FROM `tabCRM Student` s
-        INNER JOIN `tabCRM Family` f ON s.family_id = f.name
-        INNER JOIN `tabCRM Guardian Family Member` gfm ON f.name = gfm.parent
         LEFT JOIN `tabSIS Class Student` cs ON s.name = cs.student_id
         LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
         LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
-        LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
-        WHERE gfm.guardian_id = %(guardian_id)s
+        LEFT JOIN `tabSIS Educational Stage` es ON eg.education_stage_id = es.name
+        WHERE s.name IN %(student_ids)s
           AND s.student_status = 'Active'
         ORDER BY s.student_name
-    """, {"guardian_id": guardian_id}, as_dict=True)
+    """, {"student_ids": student_ids}, as_dict=True)
     
     return students
 
