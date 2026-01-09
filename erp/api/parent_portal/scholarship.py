@@ -214,26 +214,6 @@ def get_active_period():
                 as_dict=True
             )
             
-            # Lấy danh sách giáo viên bộ môn từ Timetable
-            subject_teachers = []
-            if student.class_id:
-                teachers = frappe.db.sql("""
-                    SELECT DISTINCT 
-                        t.name as teacher_id,
-                        u.full_name as teacher_name
-                    FROM `tabSIS Teacher` t
-                    INNER JOIN `tabUser` u ON t.user_id = u.name
-                    INNER JOIN `tabSIS Timetable Instance Row` tir ON t.name = tir.teacher_id
-                    INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
-                    WHERE ti.class_id = %(class_id)s
-                      AND t.name != %(homeroom_id)s
-                    ORDER BY u.full_name
-                """, {
-                    "class_id": student.class_id,
-                    "homeroom_id": student.homeroom_teacher or ""
-                }, as_dict=True)
-                subject_teachers = [{"teacher_id": t.teacher_id, "teacher_name": t.teacher_name} for t in teachers]
-            
             student_info = {
                 "name": student.student_id,
                 "student_name": student.student_name,
@@ -244,7 +224,6 @@ def get_active_period():
                 "education_stage_name": student.education_stage_name,
                 "homeroom_teacher": student.homeroom_teacher,
                 "homeroom_teacher_name": student.homeroom_teacher_name,
-                "subject_teachers": subject_teachers,
                 "has_submitted": existing_app is not None,
                 "submission": None
             }
