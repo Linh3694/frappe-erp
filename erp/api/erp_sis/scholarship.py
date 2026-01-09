@@ -45,6 +45,41 @@ def _check_approver_permission(education_stage_id=None, period_id=None):
     return False
 
 
+def _resolve_campus_id(campus_id):
+    """
+    Chuyển đổi campus_id từ format frontend (campus-1) sang format database (CAMPUS-00001)
+    Giống cách xử lý trong re_enrollment.py
+    """
+    if not campus_id:
+        return None
+    
+    # Nếu đã đúng format CAMPUS-xxxxx thì return luôn
+    if campus_id.startswith("CAMPUS-"):
+        if frappe.db.exists("SIS Campus", campus_id):
+            return campus_id
+    
+    # Nếu là format campus-1, campus-2, etc.
+    if campus_id.startswith("campus-"):
+        try:
+            campus_index = int(campus_id.split("-")[1])
+            mapped_campus = f"CAMPUS-{campus_index:05d}"
+            if frappe.db.exists("SIS Campus", mapped_campus):
+                return mapped_campus
+        except (ValueError, IndexError):
+            pass
+    
+    # Thử tìm theo name trực tiếp
+    if frappe.db.exists("SIS Campus", campus_id):
+        return campus_id
+    
+    # Thử tìm campus đầu tiên
+    first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+    if first_campus:
+        return first_campus
+    
+    return None
+
+
 # ==================== PERIOD APIs ====================
 
 @frappe.whitelist()
@@ -244,12 +279,22 @@ def create_scholarship_period():
                     {field: [f"Trường {field} là bắt buộc"]}
                 )
         
+        # Resolve campus_id (chuyển đổi từ format frontend sang format database)
+        resolved_campus_id = _resolve_campus_id(data['campus_id'])
+        if not resolved_campus_id:
+            return validation_error_response(
+                f"Không tìm thấy Campus nào trong hệ thống",
+                {"campus_id": ["Vui lòng tạo Campus trước"]}
+            )
+        
+        logs.append(f"Campus resolved: {data['campus_id']} -> {resolved_campus_id}")
+        
         # Tạo document
         period_doc = frappe.get_doc({
             "doctype": "SIS Scholarship Period",
             "title": data['title'],
             "academic_year_id": data['academic_year_id'],
-            "campus_id": data['campus_id'],
+            "campus_id": resolved_campus_id,
             "status": data.get('status', 'Draft'),
             "from_date": data['from_date'],
             "to_date": data['to_date']
@@ -468,6 +513,69 @@ def toggle_period_status():
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
         frappe.log_error(frappe.get_traceback(), "Admin Toggle Period Status Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def delete_scholarship_period():
+    """
+    Xóa kỳ học bổng.
+    Chỉ có thể xóa kỳ chưa có đơn đăng ký.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy data
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        period_id = data.get('period_id')
+        
+        if not period_id:
+            return validation_error_response(
+                "Thiếu period_id",
+                {"period_id": ["Period ID là bắt buộc"]}
+            )
+        
+        # Kiểm tra tồn tại
+        if not frappe.db.exists("SIS Scholarship Period", period_id):
+            return not_found_response("Không tìm thấy kỳ học bổng")
+        
+        # Kiểm tra có đơn đăng ký hay không
+        application_count = frappe.db.count(
+            "SIS Scholarship Application",
+            {"scholarship_period_id": period_id}
+        )
+        
+        if application_count > 0:
+            return validation_error_response(
+                f"Không thể xóa kỳ học bổng vì đã có {application_count} đơn đăng ký",
+                {"period_id": ["Kỳ học bổng đã có đơn đăng ký"]}
+            )
+        
+        # Xóa kỳ học bổng
+        frappe.delete_doc("SIS Scholarship Period", period_id)
+        frappe.db.commit()
+        
+        logs.append(f"Đã xóa kỳ học bổng: {period_id}")
+        
+        return success_response(
+            data={"message": "Đã xóa kỳ học bổng thành công"},
+            message="Đã xóa kỳ học bổng thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Admin Delete Period Error")
         return error_response(
             message=f"Lỗi: {str(e)}",
             logs=logs
