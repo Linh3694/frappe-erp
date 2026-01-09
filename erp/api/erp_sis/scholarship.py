@@ -601,6 +601,7 @@ def get_applications():
         # Lấy filters từ query params
         period_id = frappe.request.args.get('period_id')
         education_stage_id = frappe.request.args.get('education_stage_id')
+        education_stage_name = frappe.request.args.get('education_stage_name')  # Filter theo tên cấp học
         status = frappe.request.args.get('status')
         search = frappe.request.args.get('search')
         page = int(frappe.request.args.get('page', 1))
@@ -617,6 +618,18 @@ def get_applications():
         if education_stage_id:
             conditions.append("app.education_stage_id = %(education_stage_id)s")
             values["education_stage_id"] = education_stage_id
+        
+        # Filter theo tên cấp học (Tiểu học, Trung học Cơ sở, Trung học Phổ thông)
+        if education_stage_name:
+            # Lấy education_stage_id từ tên
+            stage_id = frappe.db.get_value(
+                "SIS Educational Stage",
+                {"title_vn": education_stage_name},
+                "name"
+            )
+            if stage_id:
+                conditions.append("app.education_stage_id = %(education_stage_id_from_name)s")
+                values["education_stage_id_from_name"] = stage_id
         
         if status:
             conditions.append("app.status = %(status)s")
