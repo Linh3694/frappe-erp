@@ -80,7 +80,7 @@ def _get_guardian_students(guardian_id):
         LEFT JOIN `tabSIS Class Student` cs ON s.name = cs.student_id
         LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
         LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
-        LEFT JOIN `tabSIS Educational Stage` es ON eg.education_stage_id = es.name
+        LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
         WHERE s.name IN %(student_ids)s
           AND s.student_status = 'Active'
         ORDER BY s.student_name
