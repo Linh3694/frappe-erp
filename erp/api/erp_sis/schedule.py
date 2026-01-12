@@ -657,9 +657,14 @@ def get_school_years_for_schedule():
     try:
         school_years = frappe.get_all(
             "SIS School Year",
-            fields=["name", "title", "is_enable", "start_date", "end_date"],
+            fields=["name", "title_vn", "title_en", "is_enable", "start_date", "end_date"],
             order_by="start_date desc"
         )
+        
+        # Transform data để tương thích với frontend
+        # Frontend expect "title" field, tạo từ title_vn
+        for year in school_years:
+            year['title'] = year.get('title_vn', '') or year.get('title_en', '')
         
         return list_response(school_years, "School years fetched successfully")
         
