@@ -665,6 +665,31 @@ def submit_application_with_files():
         if not period.is_within_period():
             return error_response("Không trong thời gian đăng ký", logs=logs)
         
+        # Helper function để tạo folder nếu chưa tồn tại
+        def ensure_folder_exists(folder_path):
+            """Tạo folder nếu chưa tồn tại, hỗ trợ nested folders"""
+            parts = folder_path.split('/')
+            current_path = "Home"
+            
+            for part in parts:
+                if not part:
+                    continue
+                next_path = f"{current_path}/{part}"
+                if not frappe.db.exists("File", {"is_folder": 1, "file_name": next_path}):
+                    try:
+                        folder_doc = frappe.get_doc({
+                            "doctype": "File",
+                            "file_name": part,
+                            "is_folder": 1,
+                            "folder": current_path
+                        })
+                        folder_doc.insert(ignore_permissions=True)
+                    except frappe.DuplicateEntryError:
+                        pass  # Folder đã tồn tại
+                current_path = next_path
+            
+            return current_path
+        
         # Helper function để upload file
         def upload_file(file_key, folder="Scholarship"):
             """Upload file và trả về file URL"""
@@ -675,11 +700,14 @@ def submit_application_with_files():
             if not file or not file.filename:
                 return None
             
+            # Đảm bảo folder tồn tại
+            folder_path = ensure_folder_exists(folder)
+            
             # Lưu file
             file_doc = frappe.get_doc({
                 "doctype": "File",
                 "file_name": file.filename,
-                "folder": f"Home/{folder}",
+                "folder": folder_path,
                 "is_private": 0,
                 "content": file.read()
             })
