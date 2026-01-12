@@ -611,9 +611,18 @@ def submit_application_with_files():
         if not guardian_id:
             return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
         
-        # Lấy data từ form
-        student_id = frappe.form_dict.get('student_id')
-        period_id = frappe.form_dict.get('period_id')
+        # Lấy data từ form (hỗ trợ cả multipart/form-data)
+        # Ưu tiên frappe.request.form cho multipart, fallback sang frappe.form_dict
+        def get_form_value(key):
+            """Lấy giá trị từ form, hỗ trợ multipart/form-data"""
+            if hasattr(frappe.request, 'form') and frappe.request.form:
+                value = frappe.request.form.get(key)
+                if value:
+                    return value
+            return frappe.form_dict.get(key)
+        
+        student_id = get_form_value('student_id')
+        period_id = get_form_value('period_id')
         
         if not student_id:
             return validation_error_response(
@@ -700,8 +709,8 @@ def submit_application_with_files():
             "class_id": student_info.get('class_id'),
             "education_stage_id": student_info.get('education_stage_id'),
             "guardian_id": guardian_id,
-            "main_teacher_id": frappe.form_dict.get('main_teacher_id') or student_info.get('homeroom_teacher'),
-            "second_teacher_id": frappe.form_dict.get('second_teacher_id'),
+            "main_teacher_id": get_form_value('main_teacher_id') or student_info.get('homeroom_teacher'),
+            "second_teacher_id": get_form_value('second_teacher_id'),
             "academic_report_type": 'upload' if report_links else 'existing',
             "academic_report_upload": ' | '.join(report_links) if report_links else None,
             "video_url": video_url,
@@ -709,7 +718,7 @@ def submit_application_with_files():
         })
         
         # Parse và thêm thành tích - Bài thi chuẩn hóa
-        standardized_tests = frappe.form_dict.get('standardized_tests')
+        standardized_tests = get_form_value('standardized_tests')
         if standardized_tests:
             try:
                 tests = json.loads(standardized_tests)
@@ -724,7 +733,7 @@ def submit_application_with_files():
                 pass
         
         # Parse và thêm thành tích - Giải thưởng
-        awards_data = frappe.form_dict.get('awards')
+        awards_data = get_form_value('awards')
         if awards_data:
             try:
                 awards_list = json.loads(awards_data)
@@ -739,7 +748,7 @@ def submit_application_with_files():
                 pass
         
         # Parse và thêm thành tích - Hoạt động ngoại khóa
-        extracurriculars_data = frappe.form_dict.get('extracurriculars')
+        extracurriculars_data = get_form_value('extracurriculars')
         if extracurriculars_data:
             try:
                 extracurriculars_list = json.loads(extracurriculars_data)
