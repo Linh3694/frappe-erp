@@ -406,12 +406,15 @@ def get_teacher_week_optimized():
                 ts.title_en as timetable_subject_title_en,
                 c.title as class_title,
                 COALESCE(r.short_title, r.title_vn, r.title_en) as room_name,
-                r.room_type as room_type
+                r.room_type as room_type,
+                tc.period_priority,
+                tc.period_name
             FROM `tabSIS Teacher Timetable` tt
             LEFT JOIN `tabSIS Subject` s ON tt.subject_id = s.name
             LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
             LEFT JOIN `tabSIS Class` c ON tt.class_id = c.name
             LEFT JOIN `tabERP Administrative Room` r ON tt.room_id = r.name
+            LEFT JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
             WHERE {where_clause}
             ORDER BY tt.date ASC, tt.day_of_week ASC
         """.format(where_clause=" AND ".join(where_clauses))
