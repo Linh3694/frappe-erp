@@ -258,8 +258,43 @@ def _get_class_timetable_for_date(class_id, target_date):
             else:
                 study_columns_detail = []
             
-            # Combine study and non-study columns
-            all_day_columns = study_columns_detail + non_study_columns
+            # ⚡ FIX: Loại bỏ non-study periods nếu đã có study period ở cùng time slot
+            # Tạo set các time slots đã có study periods
+            study_time_slots = set()
+            for col in study_columns_detail:
+                start = col.get('start_time')
+                end = col.get('end_time')
+                if start and end:
+                    # Convert timedelta to string for comparison
+                    if hasattr(start, 'total_seconds'):
+                        total_seconds = int(start.total_seconds())
+                        start = f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}"
+                    if hasattr(end, 'total_seconds'):
+                        total_seconds = int(end.total_seconds())
+                        end = f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}"
+                    study_time_slots.add((start, end))
+            
+            # Filter non-study columns - loại bỏ nếu trùng time slot với study period
+            filtered_non_study = []
+            for col in non_study_columns:
+                start = col.get('start_time')
+                end = col.get('end_time')
+                if start and end:
+                    if hasattr(start, 'total_seconds'):
+                        total_seconds = int(start.total_seconds())
+                        start = f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}"
+                    if hasattr(end, 'total_seconds'):
+                        total_seconds = int(end.total_seconds())
+                        end = f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}"
+                    
+                    if (start, end) in study_time_slots:
+                        logs.append(f"⏭️ Skipping non-study '{col.get('period_name')}' - overlaps with study period at {start}-{end}")
+                        continue
+                
+                filtered_non_study.append(col)
+            
+            # Combine study and filtered non-study columns
+            all_day_columns = study_columns_detail + filtered_non_study
             # Sort by priority and time
             all_day_columns.sort(key=lambda x: (x.get('period_priority', 999), x.get('start_time', '')))
             
