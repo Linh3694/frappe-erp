@@ -16,6 +16,7 @@ class SISScholarshipApplication(Document):
 		"""Validate trước khi lưu"""
 		self.validate_period()
 		self.set_student_info()
+		self.set_teacher_names()
 	
 	def validate_period(self):
 		"""Kiểm tra kỳ học bổng có hợp lệ không"""
@@ -77,6 +78,20 @@ class SISScholarshipApplication(Document):
 			)
 			if class_info and class_info.homeroom_teacher:
 				self.main_teacher_id = class_info.homeroom_teacher
+	
+	def set_teacher_names(self):
+		"""Set tên giáo viên từ User (vì SIS Teacher không có full_name)"""
+		# Lấy tên GVCN
+		if self.main_teacher_id:
+			teacher_user = frappe.db.get_value("SIS Teacher", self.main_teacher_id, "user_id")
+			if teacher_user:
+				self.main_teacher_name = frappe.db.get_value("User", teacher_user, "full_name")
+		
+		# Lấy tên GV thứ 2
+		if self.second_teacher_id:
+			teacher_user = frappe.db.get_value("SIS Teacher", self.second_teacher_id, "user_id")
+			if teacher_user:
+				self.second_teacher_name = frappe.db.get_value("User", teacher_user, "full_name")
 	
 	def after_insert(self):
 		"""Sau khi tạo đơn mới"""

@@ -234,8 +234,7 @@
    "fieldname": "main_teacher_name",
    "fieldtype": "Data",
    "label": "Tên GVCN",
-   "read_only": 1,
-   "fetch_from": "main_teacher_id.full_name"
+   "read_only": 1
   },
   {
    "fieldname": "column_break_teacher",
@@ -252,8 +251,7 @@
    "fieldname": "second_teacher_name",
    "fieldtype": "Data",
    "label": "Tên GV thứ 2",
-   "read_only": 1,
-   "fetch_from": "second_teacher_id.full_name"
+   "read_only": 1
   },
   {
    "fieldname": "recommendation_section",
