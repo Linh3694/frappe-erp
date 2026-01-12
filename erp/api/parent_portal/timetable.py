@@ -290,6 +290,51 @@ def _get_class_timetable_for_date(class_id, target_date):
                 logs.append(f"✅ Using {len(study_columns_detail)} study + {len(filtered_non_study)} non-study from NEW schedule")
             else:
                 # Không có active schedule → dùng logic cũ: ưu tiên study từ legacy
+                # Lấy non-study columns từ legacy
+                non_study_columns_sql = """
+                    SELECT DISTINCT
+                        tc.name as timetable_column_id,
+                        tc.period_name,
+                        tc.start_time,
+                        tc.end_time,
+                        tc.period_type,
+                        tc.period_priority
+                    FROM `tabSIS Timetable Column` tc
+                    WHERE tc.education_stage_id = %(education_stage_id)s
+                    AND tc.campus_id = %(campus_id)s
+                    AND tc.period_type = 'non-study'
+                    AND (tc.schedule_id IS NULL OR tc.schedule_id = '')
+                    ORDER BY tc.period_priority ASC, tc.start_time ASC
+                """
+                non_study_columns = frappe.db.sql(non_study_columns_sql, {
+                    "education_stage_id": education_stage_id,
+                    "campus_id": campus_id
+                }, as_dict=True)
+                logs.append(f"✅ Found {len(non_study_columns)} legacy non-study columns")
+                
+                # ⚡ FIX: Query study_columns_detail cho legacy mode
+                study_columns_detail_sql = """
+                    SELECT DISTINCT
+                        tc.name as timetable_column_id,
+                        tc.period_name,
+                        tc.start_time,
+                        tc.end_time,
+                        tc.period_type,
+                        tc.period_priority
+                    FROM `tabSIS Timetable Column` tc
+                    WHERE tc.name IN %(column_ids)s
+                    ORDER BY tc.period_priority ASC, tc.start_time ASC
+                """
+                
+                if study_column_ids:
+                    study_columns_detail = frappe.db.sql(study_columns_detail_sql, {
+                        "column_ids": tuple(study_column_ids)
+                    }, as_dict=True)
+                else:
+                    study_columns_detail = []
+                
+                logs.append(f"✅ Found {len(study_columns_detail)} legacy study columns")
+                
                 # Tạo set các time slots đã có study periods
                 study_time_slots = set()
                 for col in study_columns_detail:
