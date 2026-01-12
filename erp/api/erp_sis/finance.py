@@ -122,8 +122,18 @@ def get_finance_years(campus_id=None):
                 fy['school_year_name_en'] = school_year_info.title_en
             
             # Lấy tên campus
-            campus_name = frappe.db.get_value("SIS Campus", fy.campus_id, "title")
-            fy['campus_name'] = campus_name
+            campus_info = frappe.db.get_value(
+                "SIS Campus", 
+                fy.campus_id, 
+                ["title_vn", "title_en"],
+                as_dict=True
+            )
+            if campus_info:
+                fy['campus_name'] = campus_info.title_vn
+                fy['campus_name_en'] = campus_info.title_en
+            else:
+                fy['campus_name'] = None
+                fy['campus_name_en'] = None
         
         logs.append(f"Tìm thấy {len(finance_years)} năm tài chính")
         
@@ -201,8 +211,18 @@ def get_finance_year(finance_year_id=None):
             data['school_year_name_en'] = school_year_info.title_en
         
         # Lấy tên campus
-        campus_name = frappe.db.get_value("SIS Campus", fy_doc.campus_id, "title")
-        data['campus_name'] = campus_name
+        campus_info = frappe.db.get_value(
+            "SIS Campus", 
+            fy_doc.campus_id, 
+            ["title_vn", "title_en"],
+            as_dict=True
+        )
+        if campus_info:
+            data['campus_name'] = campus_info.title_vn
+            data['campus_name_en'] = campus_info.title_en
+        else:
+            data['campus_name'] = None
+            data['campus_name_en'] = None
         
         return single_item_response(data, logs=logs)
         
