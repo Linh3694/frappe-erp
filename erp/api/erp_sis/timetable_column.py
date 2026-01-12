@@ -54,11 +54,20 @@ def format_time_for_html(time_value):
 
 @frappe.whitelist(allow_guest=False)
 def get_all_timetable_columns():
-    """Get all timetable columns with basic information - SIMPLE VERSION
+    """
+    Get all timetable columns with basic information
+    
+    Query params:
+        - education_stage: Filter theo cấp học
+        - schedule_id: Filter theo schedule cụ thể
+        - date: Lấy periods của schedule áp dụng cho ngày cụ thể (YYYY-MM-DD)
+        - include_legacy: Bao gồm cả periods không có schedule (default: true)
     
     ⚡ Performance: Cached for 15 minutes (shared cache - master data)
     """
     try:
+        from frappe.utils import getdate
+        
         # Get current user's campus information from roles
         campus_id = get_current_campus_from_context()
         
@@ -71,18 +80,26 @@ def get_all_timetable_columns():
         
         # Add education_stage filter if provided
         education_stage = frappe.local.form_dict.get("education_stage") or frappe.request.args.get("education_stage")
-        print(f"🎯 BACKEND: education_stage parameter received: {education_stage}")
+        schedule_id = frappe.local.form_dict.get("schedule_id") or frappe.request.args.get("schedule_id")
+        date_filter = frappe.local.form_dict.get("date") or frappe.request.args.get("date")
+        include_legacy = frappe.local.form_dict.get("include_legacy") or frappe.request.args.get("include_legacy")
+        
+        # Default include_legacy to true for backward compatibility
+        if include_legacy is None or include_legacy == "" or include_legacy == "1" or include_legacy == "true":
+            include_legacy = True
+        else:
+            include_legacy = False
+        
         if education_stage:
             filters["education_stage_id"] = education_stage
-            print(f"🎯 BACKEND: filters after adding education_stage: {filters}")
         
-        # ⚡ CACHE: Check Redis cache first (15 min TTL - shared cache for master data)
-        cache_key = f"schedules:{campus_id}:{education_stage or 'all'}"
+        # ⚡ CACHE: Build cache key based on all params
+        cache_key = f"schedules:{campus_id}:{education_stage or 'all'}:{schedule_id or 'none'}:{date_filter or 'none'}:{include_legacy}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
             if cached_data:
-                frappe.logger().info(f"✅ Cache HIT for schedules {campus_id}/{education_stage or 'all'}")
+                frappe.logger().info(f"✅ Cache HIT for timetable_columns {cache_key}")
                 return list_response(
                     data=cached_data,
                     message="Timetable columns fetched successfully (cached)"
@@ -90,25 +107,124 @@ def get_all_timetable_columns():
         except Exception as cache_error:
             frappe.logger().warning(f"Cache read failed: {cache_error}")
         
-        frappe.logger().info(f"❌ Cache MISS for schedules {campus_id}/{education_stage or 'all'} - fetching from DB")
+        frappe.logger().info(f"❌ Cache MISS for timetable_columns {cache_key} - fetching from DB")
+        
+        timetables = []
+        
+        # Case 1: Filter by specific schedule_id
+        if schedule_id:
+            filters["schedule_id"] = schedule_id
+            timetables = frappe.get_all(
+                "SIS Timetable Column",
+                fields=[
+                    "name",
+                    "schedule_id",
+                    "education_stage_id",
+                    "period_priority",
+                    "period_type", 
+                    "period_name",
+                    "start_time",
+                    "end_time",
+                    "campus_id",
+                    "creation",
+                    "modified"
+                ],
+                filters=filters,
+                order_by="education_stage_id asc, period_priority asc"
+            )
+        
+        # Case 2: Filter by date - find schedule for that date
+        elif date_filter:
+            target_date = getdate(date_filter)
             
-        timetables = frappe.get_all(
-            "SIS Timetable Column",
-            fields=[
-                "name",
-                "education_stage_id",
-                "period_priority",
-                "period_type", 
-                "period_name",
-                "start_time",
-                "end_time",
-                "campus_id",
-                "creation",
-                "modified"
-            ],
-            filters=filters,
-            order_by="education_stage_id asc, period_priority asc"
-        )
+            # Find active schedule for this date
+            schedule_filters = {
+                "campus_id": campus_id,
+                "is_active": 1,
+                "start_date": ["<=", target_date],
+                "end_date": [">=", target_date]
+            }
+            if education_stage:
+                schedule_filters["education_stage_id"] = education_stage
+            
+            schedules = frappe.get_all(
+                "SIS Schedule",
+                filters=schedule_filters,
+                fields=["name"],
+                order_by="start_date desc"
+            )
+            
+            if schedules:
+                # Get periods from matching schedules
+                schedule_ids = [s.name for s in schedules]
+                timetables = frappe.get_all(
+                    "SIS Timetable Column",
+                    fields=[
+                        "name",
+                        "schedule_id",
+                        "education_stage_id",
+                        "period_priority",
+                        "period_type", 
+                        "period_name",
+                        "start_time",
+                        "end_time",
+                        "campus_id",
+                        "creation",
+                        "modified"
+                    ],
+                    filters={
+                        **filters,
+                        "schedule_id": ["in", schedule_ids]
+                    },
+                    order_by="education_stage_id asc, period_priority asc"
+                )
+            
+            # Include legacy periods if needed
+            if include_legacy:
+                legacy_filters = {**filters, "schedule_id": ["is", "not set"]}
+                legacy_timetables = frappe.get_all(
+                    "SIS Timetable Column",
+                    fields=[
+                        "name",
+                        "schedule_id",
+                        "education_stage_id",
+                        "period_priority",
+                        "period_type", 
+                        "period_name",
+                        "start_time",
+                        "end_time",
+                        "campus_id",
+                        "creation",
+                        "modified"
+                    ],
+                    filters=legacy_filters,
+                    order_by="education_stage_id asc, period_priority asc"
+                )
+                
+                # Merge: nếu có schedule periods thì dùng, không thì fallback to legacy
+                if not timetables:
+                    timetables = legacy_timetables
+        
+        # Case 3: No specific filter - get all (legacy behavior)
+        else:
+            timetables = frappe.get_all(
+                "SIS Timetable Column",
+                fields=[
+                    "name",
+                    "schedule_id",
+                    "education_stage_id",
+                    "period_priority",
+                    "period_type", 
+                    "period_name",
+                    "start_time",
+                    "end_time",
+                    "campus_id",
+                    "creation",
+                    "modified"
+                ],
+                filters=filters,
+                order_by="education_stage_id asc, period_priority asc"
+            )
 
         # Format time fields for HTML time input (HH:MM format)
         for timetable in timetables:
@@ -118,11 +234,10 @@ def get_all_timetable_columns():
         # ⚡ CACHE: Store result in Redis (15 min = 900 sec)
         try:
             frappe.cache().set_value(cache_key, timetables, expires_in_sec=900)
-            frappe.logger().info(f"✅ Cached schedules for {campus_id}/{education_stage or 'all'}")
+            frappe.logger().info(f"✅ Cached timetable_columns for {cache_key}")
         except Exception as cache_error:
             frappe.logger().warning(f"Cache write failed: {cache_error}")
 
-        print(f"🎯 BACKEND: Returning {len(timetables)} timetable columns")
         return list_response(timetables, "Timetable columns fetched successfully")
         
     except Exception as e:
@@ -189,6 +304,7 @@ def get_timetable_column_by_id():
 
         timetable_column_data = {
             "name": timetable_column.name,
+            "schedule_id": timetable_column.schedule_id if hasattr(timetable_column, 'schedule_id') else None,
             "education_stage_id": timetable_column.education_stage_id,
             "period_priority": timetable_column.period_priority,
             "period_type": timetable_column.period_type,
@@ -292,9 +408,10 @@ def update_timetable_column():
         period_name = data.get("period_name")
         start_time = data.get("start_time")
         end_time = data.get("end_time")
+        schedule_id = data.get("schedule_id")  # Optional - can be updated
 
         # Debug logging - current values
-        frappe.logger().info(f"Update timetable column column - Current values: education_stage_id={timetable_column_doc.education_stage_id}, period_priority={timetable_column_doc.period_priority}, period_type={timetable_column_doc.period_type}, period_name={timetable_column_doc.period_name}")
+        frappe.logger().info(f"Update timetable column column - Current values: education_stage_id={timetable_column_doc.education_stage_id}, period_priority={timetable_column_doc.period_priority}, period_type={timetable_column_doc.period_type}, period_name={timetable_column_doc.period_name}, schedule_id={getattr(timetable_column_doc, 'schedule_id', None)}")
         current_start_time_raw = timetable_column_doc.start_time
         current_end_time_raw = timetable_column_doc.end_time
         frappe.logger().info(f"Update timetable column column - Current times raw: start_time={current_start_time_raw}, end_time={current_end_time_raw}")
@@ -304,6 +421,20 @@ def update_timetable_column():
 
         # Track if any updates were made
         updates_made = []
+
+        # Update schedule_id if provided (can be set or cleared)
+        if "schedule_id" in data:
+            current_schedule_id = getattr(timetable_column_doc, 'schedule_id', None)
+            if schedule_id != current_schedule_id:
+                # Verify schedule exists if not None
+                if schedule_id:
+                    schedule_exists = frappe.db.exists("SIS Schedule", {"name": schedule_id, "campus_id": campus_id})
+                    if not schedule_exists:
+                        return not_found_response("Selected schedule does not exist or access denied")
+                
+                frappe.logger().info(f"Update timetable column - Updating schedule_id: {current_schedule_id} -> {schedule_id}")
+                timetable_column_doc.schedule_id = schedule_id
+                updates_made.append(f"schedule_id: {schedule_id}")
 
         # Update fields if provided
         if education_stage_id and education_stage_id != timetable_column_doc.education_stage_id:
@@ -464,6 +595,7 @@ def update_timetable_column():
 
         timetable_data = {
             "name": timetable_column_doc.name,
+            "schedule_id": getattr(timetable_column_doc, 'schedule_id', None),
             "education_stage_id": timetable_column_doc.education_stage_id,
             "period_priority": timetable_column_doc.period_priority,
             "period_type": timetable_column_doc.period_type,
@@ -637,8 +769,9 @@ def create_timetable_column():
         period_name = data.get("period_name")
         start_time = data.get("start_time")
         end_time = data.get("end_time")
+        schedule_id = data.get("schedule_id")  # Optional - link to SIS Schedule
 
-        frappe.logger().info(f"Create timetable column - Raw extracted values: education_stage_id={repr(education_stage_id)}, period_priority={repr(period_priority)}, period_type={repr(period_type)}, period_name={repr(period_name)}, start_time={repr(start_time)}, end_time={repr(end_time)}")
+        frappe.logger().info(f"Create timetable column - Raw extracted values: education_stage_id={repr(education_stage_id)}, period_priority={repr(period_priority)}, period_type={repr(period_type)}, period_name={repr(period_name)}, start_time={repr(start_time)}, end_time={repr(end_time)}, schedule_id={repr(schedule_id)}")
 
         # Debug logging for extracted values
         frappe.logger().info(f"Create timetable column - Extracted values: education_stage_id={education_stage_id}, period_priority={period_priority}, period_type={period_type}, period_name={period_name}, start_time={start_time}, end_time={end_time}")
@@ -674,35 +807,46 @@ def create_timetable_column():
                 frappe.db.commit()
                 campus_id = default_campus.name
         
-        # Check if period priority already exists for this education stage
+        # Build duplicate check filters - include schedule_id if provided
+        duplicate_check_filters = {
+            "education_stage_id": education_stage_id,
+            "campus_id": campus_id
+        }
+        # Nếu có schedule_id, chỉ check trùng trong cùng schedule
+        # Nếu không có, check trong tất cả legacy columns (không có schedule)
+        if schedule_id:
+            duplicate_check_filters["schedule_id"] = schedule_id
+        else:
+            duplicate_check_filters["schedule_id"] = ["is", "not set"]
+        
+        # Check if period priority already exists for this education stage/schedule
         existing_priority = frappe.db.exists(
             "SIS Timetable Column",
             {
-                "education_stage_id": education_stage_id,
-                "period_priority": period_priority,
-                "campus_id": campus_id
+                **duplicate_check_filters,
+                "period_priority": period_priority
             }
         )
 
         if existing_priority:
-            frappe.throw(_(f"Period priority '{period_priority}' already exists for this education stage"))
+            frappe.throw(_(f"Period priority '{period_priority}' already exists for this education stage/schedule"))
 
-        # Check if period name already exists for this education stage
+        # Check if period name already exists for this education stage/schedule
         existing_name = frappe.db.exists(
             "SIS Timetable Column",
             {
-                "education_stage_id": education_stage_id,
-                "period_name": period_name,
-                "campus_id": campus_id
+                **duplicate_check_filters,
+                "period_name": period_name
             }
         )
 
         if existing_name:
-            frappe.throw(_(f"Period name '{period_name}' already exists for this education stage"))
+            frappe.throw(_(f"Period name '{period_name}' already exists for this education stage/schedule"))
         
         # Create new timetable column
         timetable_column_doc = frappe.get_doc({
             "doctype": "SIS Timetable Column",
+            "schedule_id": schedule_id if schedule_id else None,
             "education_stage_id": education_stage_id,
             "period_priority": period_priority,
             "period_type": period_type,
@@ -718,12 +862,15 @@ def create_timetable_column():
 
             frappe.logger().info(f"Create timetable column - Record created successfully: {timetable_column_doc.name}")
             
-            # ⚡ CACHE: Clear schedules cache after create
+            # ⚡ CACHE: Clear schedules cache after create (clear pattern-based keys)
             try:
-                cache_key_specific = f"schedules:{campus_id}:{education_stage_id}"
-                cache_key_all = f"schedules:{campus_id}:all"
-                frappe.cache().delete_key(cache_key_specific)
-                frappe.cache().delete_key(cache_key_all)
+                # Clear multiple cache patterns để đảm bảo fresh data
+                cache_patterns = [
+                    f"schedules:{campus_id}:{education_stage_id}:*",
+                    f"schedules:{campus_id}:all:*",
+                ]
+                for pattern in cache_patterns:
+                    frappe.cache().delete_keys(pattern)
                 frappe.logger().info(f"✅ Cleared schedules cache after create")
             except Exception as cache_error:
                 frappe.logger().warning(f"Cache clear failed: {cache_error}")
@@ -731,6 +878,7 @@ def create_timetable_column():
             # Return the created data - follow Education Stage pattern
             timetable_data = {
                 "name": timetable_column_doc.name,
+                "schedule_id": timetable_column_doc.schedule_id if hasattr(timetable_column_doc, 'schedule_id') else None,
                 "education_stage_id": timetable_column_doc.education_stage_id,
                 "period_priority": timetable_column_doc.period_priority,
                 "period_type": timetable_column_doc.period_type,

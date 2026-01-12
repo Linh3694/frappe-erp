@@ -9,7 +9,7 @@
  "beta": 0,
  "creation": "2024-08-20 09:00:00.000000",
  "custom": 0,
- "description": "SIS Timetable Column Management",
+ "description": "SIS Timetable Column Management - Quản lý các tiết học thuộc một thời gian biểu",
  "docstatus": 0,
  "doctype": "DocType",
  "document_type": "Document",
@@ -17,11 +17,14 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
+  "schedule_id",
   "campus_id",
   "education_stage_id",
+  "column_break_1",
   "period_priority",
   "period_type",
   "period_name",
+  "time_section",
   "start_time",
   "end_time"
  ],
@@ -30,6 +33,14 @@
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
    "label": "Basic Information"
+  },
+  {
+   "fieldname": "schedule_id",
+   "fieldtype": "Link",
+   "label": "Schedule",
+   "options": "SIS Schedule",
+   "description": "Thời gian biểu mà tiết học này thuộc về. Để trống nếu áp dụng cho cả năm học (legacy).",
+   "in_list_view": 1
   },
   {
    "fieldname": "campus_id",
@@ -45,6 +56,10 @@
    "label": "Education Stage",
    "options": "SIS Education Stage",
    "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "period_priority",
@@ -67,6 +82,11 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "time_section",
+   "fieldtype": "Section Break",
+   "label": "Time"
+  },
+  {
    "fieldname": "start_time",
    "fieldtype": "Time",
    "label": "Start Time",
@@ -82,7 +102,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-08-20 09:00:00.000000",
+ "modified": "2025-01-12 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Timetable Column",
