@@ -509,7 +509,7 @@ def get_my_applications():
         
         logs.append(f"Tìm thấy {len(applications)} đơn")
         
-        return list_response(applications, logs=logs)
+        return list_response(applications)
         
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
