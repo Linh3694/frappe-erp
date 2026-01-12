@@ -831,17 +831,7 @@ def create_timetable_column():
         if existing_priority:
             frappe.throw(_(f"Period priority '{period_priority}' already exists for this education stage/schedule"))
 
-        # Check if period name already exists for this education stage/schedule
-        existing_name = frappe.db.exists(
-            "SIS Timetable Column",
-            {
-                **duplicate_check_filters,
-                "period_name": period_name
-            }
-        )
-
-        if existing_name:
-            frappe.throw(_(f"Period name '{period_name}' already exists for this education stage/schedule"))
+        # Cho phép period_name trùng nhau (VD: "Tiết 1" có thể xuất hiện ở nhiều schedule khác nhau)
         
         # Create new timetable column
         timetable_column_doc = frappe.get_doc({
