@@ -294,6 +294,31 @@ def _get_class_timetable_for_date(class_id, target_date):
                 logs.append(f"✅ Using {len(study_columns_detail)} study + {len(filtered_non_study)} non-study from NEW schedule")
             else:
                 # Không có active schedule → dùng logic cũ: ưu tiên study từ legacy
+                # ⚡ FIX: Lấy TẤT CẢ legacy columns (cả study và non-study) cho education_stage
+                # Không dựa vào study_column_ids vì nó có thể reference columns từ schedule mới
+                
+                # Lấy TẤT CẢ legacy study columns
+                legacy_study_columns_sql = """
+                    SELECT DISTINCT
+                        tc.name as timetable_column_id,
+                        tc.period_name,
+                        tc.start_time,
+                        tc.end_time,
+                        tc.period_type,
+                        tc.period_priority
+                    FROM `tabSIS Timetable Column` tc
+                    WHERE tc.education_stage_id = %(education_stage_id)s
+                    AND tc.campus_id = %(campus_id)s
+                    AND tc.period_type = 'study'
+                    AND (tc.schedule_id IS NULL OR tc.schedule_id = '')
+                    ORDER BY tc.period_priority ASC, tc.start_time ASC
+                """
+                study_columns_detail = frappe.db.sql(legacy_study_columns_sql, {
+                    "education_stage_id": education_stage_id,
+                    "campus_id": campus_id
+                }, as_dict=True)
+                logs.append(f"✅ Found {len(study_columns_detail)} legacy study columns")
+                
                 # Lấy non-study columns từ legacy
                 non_study_columns_sql = """
                     SELECT DISTINCT
@@ -316,28 +341,32 @@ def _get_class_timetable_for_date(class_id, target_date):
                 }, as_dict=True)
                 logs.append(f"✅ Found {len(non_study_columns)} legacy non-study columns")
                 
-                # ⚡ FIX: Query study_columns_detail cho legacy mode
-                study_columns_detail_sql = """
-                    SELECT DISTINCT
-                        tc.name as timetable_column_id,
-                        tc.period_name,
-                        tc.start_time,
-                        tc.end_time,
-                        tc.period_type,
-                        tc.period_priority
-                    FROM `tabSIS Timetable Column` tc
-                    WHERE tc.name IN %(column_ids)s
-                    ORDER BY tc.period_priority ASC, tc.start_time ASC
-                """
-                
+                # ⚡ FIX: Build mapping từ columns trong existing_rows (có thể là new schedule columns)
+                # để map subjects qua period_name/period_priority
+                # Query info của columns được reference trong timetable instances
                 if study_column_ids:
-                    study_columns_detail = frappe.db.sql(study_columns_detail_sql, {
+                    referenced_columns_sql = """
+                        SELECT DISTINCT
+                            tc.name as timetable_column_id,
+                            tc.period_name,
+                            tc.period_priority
+                        FROM `tabSIS Timetable Column` tc
+                        WHERE tc.name IN %(column_ids)s
+                    """
+                    referenced_columns = frappe.db.sql(referenced_columns_sql, {
                         "column_ids": tuple(study_column_ids)
                     }, as_dict=True)
+                    
+                    # Build mapping: column_id -> {period_name, period_priority}
+                    legacy_column_info = {}
+                    for col in referenced_columns:
+                        legacy_column_info[col.get('timetable_column_id')] = {
+                            'period_name': col.get('period_name'),
+                            'period_priority': col.get('period_priority')
+                        }
+                    logs.append(f"📋 Built mapping for {len(legacy_column_info)} referenced columns (may include new schedule columns)")
                 else:
-                    study_columns_detail = []
-                
-                logs.append(f"✅ Found {len(study_columns_detail)} legacy study columns")
+                    legacy_column_info = {}
                 
                 # Tạo set các time slots đã có study periods
                 study_time_slots = set()
@@ -393,28 +422,27 @@ def _get_class_timetable_for_date(class_id, target_date):
 
             logs.append(f"✅ Found {len(existing_rows)} study period rows for {day_of_week}")
 
-            # ⚡ Khi có active_schedule, cần map existing_rows qua period_name/period_priority
-            # vì column_ids từ legacy khác với column_ids từ schedule mới
-            if active_schedule:
-                # Build mapping: existing_rows theo period_name và period_priority
-                # existing_row.timetable_column_id -> legacy_column_info -> period_name/priority
-                existing_by_period_name = {}
-                existing_by_priority = {}
-                
-                for row in existing_rows:
-                    legacy_col_id = row.get('timetable_column_id')
-                    if legacy_col_id and legacy_col_id in legacy_column_info:
-                        info = legacy_column_info[legacy_col_id]
-                        period_name = info.get('period_name')
-                        period_priority = info.get('period_priority')
-                        
-                        if period_name:
-                            existing_by_period_name[period_name] = row
-                        if period_priority is not None:
-                            existing_by_priority[period_priority] = row
-                
-                logs.append(f"📋 Mapped subjects by period_name: {list(existing_by_period_name.keys())}")
-                logs.append(f"📋 Mapped subjects by priority: {list(existing_by_priority.keys())}")
+            # ⚡ Cần map existing_rows qua period_name/period_priority
+            # vì column_ids từ timetable instances có thể khác với column_ids từ legacy/new schedule
+            # Build mapping: existing_rows theo period_name và period_priority
+            # existing_row.timetable_column_id -> legacy_column_info -> period_name/priority
+            existing_by_period_name = {}
+            existing_by_priority = {}
+            
+            for row in existing_rows:
+                col_id = row.get('timetable_column_id')
+                if col_id and col_id in legacy_column_info:
+                    info = legacy_column_info[col_id]
+                    period_name = info.get('period_name')
+                    period_priority = info.get('period_priority')
+                    
+                    if period_name:
+                        existing_by_period_name[period_name] = row
+                    if period_priority is not None:
+                        existing_by_priority[period_priority] = row
+            
+            logs.append(f"📋 Mapped subjects by period_name: {list(existing_by_period_name.keys())}")
+            logs.append(f"📋 Mapped subjects by priority: {list(existing_by_priority.keys())}")
 
             # Create rows for all columns, filling in data where available
             for col in all_day_columns:
@@ -424,18 +452,14 @@ def _get_class_timetable_for_date(class_id, target_date):
                 # ⚡ FIX: Chỉ map subject cho STUDY periods, non-study KHÔNG map
                 existing_row = None
                 if col_period_type == 'study':
-                    if active_schedule:
-                        # Map qua period_name trước, fallback qua period_priority
-                        col_period_name = col.get('period_name')
-                        col_priority = col.get('period_priority')
-                        
-                        if col_period_name and col_period_name in existing_by_period_name:
-                            existing_row = existing_by_period_name[col_period_name]
-                        elif col_priority is not None and col_priority in existing_by_priority:
-                            existing_row = existing_by_priority[col_priority]
-                    else:
-                        # Legacy mode: match bằng column_id
-                        existing_row = next((r for r in existing_rows if r.get('timetable_column_id') == column_id), None)
+                    # Map qua period_name trước, fallback qua period_priority
+                    col_period_name = col.get('period_name')
+                    col_priority = col.get('period_priority')
+                    
+                    if col_period_name and col_period_name in existing_by_period_name:
+                        existing_row = existing_by_period_name[col_period_name]
+                    elif col_priority is not None and col_priority in existing_by_priority:
+                        existing_row = existing_by_priority[col_priority]
 
                 # Convert timedelta to HH:MM format for start_time and end_time
                 start_time = None
