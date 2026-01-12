@@ -414,19 +414,74 @@ class TimetableImportValidator:
 				)
 	
 	def _validate_period_references(self, period_names: List[str], education_stage_id: str):
-		"""Validate period names exist"""
-		for name in period_names:
-			period_id = frappe.db.get_value(
-				"SIS Timetable Column",
+		"""
+		Validate period names exist.
+		
+		Supports both:
+		1. NEW: Schedule-based periods (schedule_id set, matching date range)
+		2. LEGACY: Periods without schedule_id
+		"""
+		# Lấy campus_id và date range từ metadata để tìm schedule phù hợp
+		campus_id = self.metadata.get("campus_id")
+		start_date = self.metadata.get("start_date")
+		
+		# Tìm schedule active cho date range này (nếu có)
+		active_schedule_id = None
+		if start_date and campus_id:
+			active_schedule = frappe.db.get_value(
+				"SIS Schedule",
 				{
 					"education_stage_id": education_stage_id,
-					"period_name": name
+					"campus_id": campus_id,
+					"is_active": 1,
+					"start_date": ["<=", start_date],
+					"end_date": [">=", start_date]
 				},
 				"name"
 			)
+			if active_schedule:
+				active_schedule_id = active_schedule
+				frappe.logger().info(f"📅 Found active schedule for import: {active_schedule_id}")
+		
+		for name in period_names:
+			period_id = None
 			
+			# 1. Ưu tiên tìm trong schedule active (nếu có)
+			if active_schedule_id:
+				period_id = frappe.db.get_value(
+					"SIS Timetable Column",
+					{
+						"schedule_id": active_schedule_id,
+						"period_name": name
+					},
+					"name"
+				)
+			
+			# 2. Fallback: Tìm theo education_stage_id (legacy periods)
 			if not period_id:
-				# Try without education stage filter
+				period_id = frappe.db.get_value(
+					"SIS Timetable Column",
+					{
+						"education_stage_id": education_stage_id,
+						"period_name": name,
+						"schedule_id": ["is", "not set"]  # Legacy periods only
+					},
+					"name"
+				)
+			
+			# 3. Final fallback: Tìm theo education_stage_id (bất kể schedule)
+			if not period_id:
+				period_id = frappe.db.get_value(
+					"SIS Timetable Column",
+					{
+						"education_stage_id": education_stage_id,
+						"period_name": name
+					},
+					"name"
+				)
+			
+			# 4. Last resort: Tìm chỉ theo period_name
+			if not period_id:
 				period_id = frappe.db.get_value(
 					"SIS Timetable Column",
 					{"period_name": name},
