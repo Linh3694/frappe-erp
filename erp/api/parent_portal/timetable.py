@@ -258,7 +258,6 @@ def _get_class_timetable_for_date(class_id, target_date):
             else:
                 study_columns_detail = []
             
-            # ⚡ FIX: Loại bỏ non-study periods nếu đã có study period ở cùng time slot
             # Helper function to convert time to string
             def time_to_str(t):
                 if t is None:
@@ -273,29 +272,66 @@ def _get_class_timetable_for_date(class_id, target_date):
                         return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
                 return str(t)
             
-            # Tạo set các time slots đã có study periods
-            study_time_slots = set()
-            for col in study_columns_detail:
-                start = time_to_str(col.get('start_time'))
-                end = time_to_str(col.get('end_time'))
-                if start and end:
-                    study_time_slots.add((start, end))
-            
-            logs.append(f"🔍 DEBUG: Study time slots = {study_time_slots}")
-            
-            # Filter non-study columns - loại bỏ nếu trùng time slot với study period
-            filtered_non_study = []
-            for col in non_study_columns:
-                start = time_to_str(col.get('start_time'))
-                end = time_to_str(col.get('end_time'))
+            # ⚡ FIX: Khi có active schedule MỚI, schedule là authoritative
+            # Nếu schedule định nghĩa time slot là non-study → LOẠI BỎ study entries từ legacy instances
+            if active_schedule:
+                # Tạo set các time slots được định nghĩa là non-study trong schedule MỚI
+                non_study_time_slots = set()
+                for col in non_study_columns:
+                    start = time_to_str(col.get('start_time'))
+                    end = time_to_str(col.get('end_time'))
+                    if start and end:
+                        non_study_time_slots.add((start, end))
                 
-                if start and end and (start, end) in study_time_slots:
-                    logs.append(f"⏭️ Skipping non-study '{col.get('period_name')}' - overlaps with study period at {start}-{end}")
-                    continue
+                logs.append(f"🔍 DEBUG: Non-study time slots from NEW schedule = {non_study_time_slots}")
                 
-                filtered_non_study.append(col)
-            
-            logs.append(f"🔍 DEBUG: Filtered non-study from {len(non_study_columns)} to {len(filtered_non_study)}")
+                # Filter study columns - loại bỏ nếu trùng time slot với non-study từ schedule MỚI
+                filtered_study = []
+                removed_study_column_ids = set()
+                for col in study_columns_detail:
+                    start = time_to_str(col.get('start_time'))
+                    end = time_to_str(col.get('end_time'))
+                    
+                    if start and end and (start, end) in non_study_time_slots:
+                        logs.append(f"⏭️ REMOVING legacy study '{col.get('period_name')}' - schedule defines {start}-{end} as non-study")
+                        removed_study_column_ids.add(col.get('timetable_column_id'))
+                        continue
+                    
+                    filtered_study.append(col)
+                
+                logs.append(f"🔍 DEBUG: Filtered study from {len(study_columns_detail)} to {len(filtered_study)}")
+                
+                # Update study_columns_detail và study_column_ids sau khi filter
+                study_columns_detail = filtered_study
+                study_column_ids = study_column_ids - removed_study_column_ids
+                
+                # Không cần filter non-study vì schedule mới là authoritative
+                filtered_non_study = non_study_columns
+            else:
+                # Không có active schedule → dùng logic cũ: ưu tiên study từ legacy
+                # Tạo set các time slots đã có study periods
+                study_time_slots = set()
+                for col in study_columns_detail:
+                    start = time_to_str(col.get('start_time'))
+                    end = time_to_str(col.get('end_time'))
+                    if start and end:
+                        study_time_slots.add((start, end))
+                
+                logs.append(f"🔍 DEBUG: Study time slots (legacy mode) = {study_time_slots}")
+                
+                # Filter non-study columns - loại bỏ nếu trùng time slot với study period
+                filtered_non_study = []
+                for col in non_study_columns:
+                    start = time_to_str(col.get('start_time'))
+                    end = time_to_str(col.get('end_time'))
+                    
+                    if start and end and (start, end) in study_time_slots:
+                        logs.append(f"⏭️ Skipping non-study '{col.get('period_name')}' - overlaps with study period at {start}-{end}")
+                        continue
+                    
+                    filtered_non_study.append(col)
+                
+                logs.append(f"🔍 DEBUG: Filtered non-study from {len(non_study_columns)} to {len(filtered_non_study)}")
             
             # Combine study and filtered non-study columns
             all_day_columns = study_columns_detail + filtered_non_study
