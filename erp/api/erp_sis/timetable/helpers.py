@@ -215,54 +215,103 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
             frappe.logger().warning(f"Failed to get education_stage for non-study periods: {str(e)}")
     
     # Load non-study columns for this education stage
+    # ⚡ FIX: Chỉ lấy từ 1 nguồn - ưu tiên schedule active, fallback về legacy
     non_study_columns = []
     
     # First try: Use education_stage_id and campus_id from class
     if education_stage_id and campus_id:
         try:
-            non_study_columns = frappe.get_all(
-                "SIS Timetable Column",
-                fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
-                filters={
+            from frappe.utils import getdate
+            
+            # ⚡ NEW: Tìm schedule active cho tuần này
+            ws_date = week_start.date() if hasattr(week_start, 'date') else week_start
+            active_schedule = frappe.db.get_value(
+                "SIS Schedule",
+                {
                     "education_stage_id": education_stage_id,
                     "campus_id": campus_id,
-                    "period_type": "non-study"
+                    "is_active": 1,
+                    "start_date": ["<=", ws_date],
+                    "end_date": [">=", ws_date]
                 },
-                order_by="period_priority asc, start_time asc"
+                "name"
             )
+            
+            if active_schedule:
+                # Có schedule active → chỉ lấy non-study từ schedule này
+                non_study_columns = frappe.get_all(
+                    "SIS Timetable Column",
+                    fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                    filters={
+                        "schedule_id": active_schedule,
+                        "period_type": "non-study"
+                    },
+                    order_by="period_priority asc, start_time asc"
+                )
+                frappe.logger().info(f"📊 Found {len(non_study_columns)} non-study columns from schedule {active_schedule}")
+            else:
+                # Không có schedule active → lấy legacy (schedule_id is not set)
+                non_study_columns = frappe.get_all(
+                    "SIS Timetable Column",
+                    fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                    filters={
+                        "education_stage_id": education_stage_id,
+                        "campus_id": campus_id,
+                        "period_type": "non-study",
+                        "schedule_id": ["is", "not set"]
+                    },
+                    order_by="period_priority asc, start_time asc"
+                )
+                frappe.logger().info(f"📊 Found {len(non_study_columns)} legacy non-study columns")
+            
             # Add to columns_map
             for col in non_study_columns:
                 columns_map[col.name] = col
-            frappe.logger().info(f"📊 Found {len(non_study_columns)} non-study columns for education_stage={education_stage_id}, campus={campus_id}")
         except Exception as e:
             frappe.logger().warning(f"Failed to load non-study columns: {str(e)}")
     
     # Fallback: Get non-study columns from same education_stage/campus as existing study columns
     if not non_study_columns and column_ids:
         try:
-            # Get education_stage_id and campus_id from the first study column
+            # Get education_stage_id, campus_id, và schedule_id từ study column đầu tiên
             first_col = frappe.db.get_value(
                 "SIS Timetable Column",
                 column_ids[0],
-                ["education_stage_id", "campus_id"],
+                ["education_stage_id", "campus_id", "schedule_id"],
                 as_dict=True
             )
             if first_col:
                 fallback_education_stage = first_col.get("education_stage_id")
                 fallback_campus = first_col.get("campus_id")
-                frappe.logger().info(f"📊 Fallback: Using education_stage={fallback_education_stage}, campus={fallback_campus} from study columns")
+                fallback_schedule = first_col.get("schedule_id")
+                frappe.logger().info(f"📊 Fallback: Using education_stage={fallback_education_stage}, campus={fallback_campus}, schedule={fallback_schedule}")
                 
                 if fallback_education_stage and fallback_campus:
-                    non_study_columns = frappe.get_all(
-                        "SIS Timetable Column",
-                        fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
-                        filters={
-                            "education_stage_id": fallback_education_stage,
-                            "campus_id": fallback_campus,
-                            "period_type": "non-study"
-                        },
-                        order_by="period_priority asc, start_time asc"
-                    )
+                    # ⚡ FIX: Match schedule của study columns
+                    if fallback_schedule:
+                        # Study columns từ schedule → lấy non-study từ cùng schedule
+                        non_study_columns = frappe.get_all(
+                            "SIS Timetable Column",
+                            fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                            filters={
+                                "schedule_id": fallback_schedule,
+                                "period_type": "non-study"
+                            },
+                            order_by="period_priority asc, start_time asc"
+                        )
+                    else:
+                        # Study columns là legacy → lấy legacy non-study
+                        non_study_columns = frappe.get_all(
+                            "SIS Timetable Column",
+                            fields=["name", "period_priority", "period_name", "start_time", "end_time", "period_type"],
+                            filters={
+                                "education_stage_id": fallback_education_stage,
+                                "campus_id": fallback_campus,
+                                "period_type": "non-study",
+                                "schedule_id": ["is", "not set"]
+                            },
+                            order_by="period_priority asc, start_time asc"
+                        )
                     for col in non_study_columns:
                         columns_map[col.name] = col
                     frappe.logger().info(f"📊 Fallback found {len(non_study_columns)} non-study columns")
