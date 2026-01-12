@@ -294,18 +294,23 @@ def create_guardian():
         email = data.get("email") or ""
         
         # Generate guardian_id if not provided
+        # Sử dụng timestamp milliseconds để đảm bảo unique khi nhiều guardian có cùng tên
         if not guardian_id and guardian_name:
             import re
+            import time
             # Create simple ID from name (remove spaces, Vietnamese chars, make lowercase)
-            guardian_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
-            guardian_id = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', guardian_id)
-            guardian_id = re.sub(r'[ìíịỉĩ]', 'i', guardian_id)
-            guardian_id = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', guardian_id)
-            guardian_id = re.sub(r'[ùúụủũưừứựửữ]', 'u', guardian_id)
-            guardian_id = re.sub(r'[ỳýỵỷỹ]', 'y', guardian_id)
-            guardian_id = guardian_id.replace('đ', 'd')
-            guardian_id = re.sub(r'[^a-z0-9]', '-', guardian_id)
-            guardian_id = re.sub(r'-+', '-', guardian_id).strip('-') + '-' + str(nowdate().replace('-', ''))[-4:]
+            base_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
+            base_id = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', base_id)
+            base_id = re.sub(r'[ìíịỉĩ]', 'i', base_id)
+            base_id = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', base_id)
+            base_id = re.sub(r'[ùúụủũưừứựửữ]', 'u', base_id)
+            base_id = re.sub(r'[ỳýỵỷỹ]', 'y', base_id)
+            base_id = base_id.replace('đ', 'd')
+            base_id = re.sub(r'[^a-z0-9]', '-', base_id)
+            base_id = re.sub(r'-+', '-', base_id).strip('-')
+            # Thêm timestamp milliseconds để đảm bảo unique
+            unique_suffix = str(int(time.time() * 1000) % 1000000)
+            guardian_id = f"{base_id}-{unique_suffix}"
         
         # Validate and format phone number if provided
         formatted_phone = None
@@ -1024,17 +1029,22 @@ def bulk_import_guardians():
                         email = ''  # Clear invalid email
                 
                 # Generate guardian_id if not provided
+                # Sử dụng timestamp + index để đảm bảo unique khi nhiều row có cùng tên
                 if not guardian_id and guardian_name:
                     import re
-                    guardian_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
-                    guardian_id = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', guardian_id)
-                    guardian_id = re.sub(r'[ìíịỉĩ]', 'i', guardian_id)
-                    guardian_id = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', guardian_id)
-                    guardian_id = re.sub(r'[ùúụủũưừứựửữ]', 'u', guardian_id)
-                    guardian_id = re.sub(r'[ỳýỵỷỹ]', 'y', guardian_id)
-                    guardian_id = guardian_id.replace('đ', 'd')
-                    guardian_id = re.sub(r'[^a-z0-9]', '-', guardian_id)
-                    guardian_id = re.sub(r'-+', '-', guardian_id).strip('-') + '-' + str(nowdate().replace('-', ''))[-4:]
+                    import time
+                    base_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
+                    base_id = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', base_id)
+                    base_id = re.sub(r'[ìíịỉĩ]', 'i', base_id)
+                    base_id = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', base_id)
+                    base_id = re.sub(r'[ùúụủũưừứựửữ]', 'u', base_id)
+                    base_id = re.sub(r'[ỳýỵỷỹ]', 'y', base_id)
+                    base_id = base_id.replace('đ', 'd')
+                    base_id = re.sub(r'[^a-z0-9]', '-', base_id)
+                    base_id = re.sub(r'-+', '-', base_id).strip('-')
+                    # Thêm timestamp milliseconds + row index để đảm bảo unique
+                    unique_suffix = f"{int(time.time() * 1000) % 100000}-{index}"
+                    guardian_id = f"{base_id}-{unique_suffix}"
                 
                 # Create guardian
                 guardian_doc = frappe.get_doc({
