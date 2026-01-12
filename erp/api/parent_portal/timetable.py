@@ -179,28 +179,63 @@ def _get_class_timetable_for_date(class_id, target_date):
             study_column_ids = {row['timetable_column_id'] for row in study_columns}
             logs.append(f"✅ Found {len(study_column_ids)} study columns for {day_of_week}")
             
-            # Get ALL non-study columns for this education stage (apply to all days)
-            non_study_columns_sql = """
-                SELECT DISTINCT
-                    tc.name as timetable_column_id,
-                    tc.period_name,
-                    tc.start_time,
-                    tc.end_time,
-                    tc.period_type,
-                    tc.period_priority
-                FROM `tabSIS Timetable Column` tc
-                WHERE tc.education_stage_id = %(education_stage_id)s
-                AND tc.campus_id = %(campus_id)s
-                AND tc.period_type = 'non-study'
-                ORDER BY tc.period_priority ASC, tc.start_time ASC
-            """
+            # ⚡ FIX: Lấy non-study columns theo schedule active cho ngày target
+            # Tìm schedule active cho ngày này
+            active_schedule = frappe.db.get_value(
+                "SIS Schedule",
+                {
+                    "education_stage_id": education_stage_id,
+                    "campus_id": campus_id,
+                    "is_active": 1,
+                    "start_date": ["<=", target_date_str],
+                    "end_date": [">=", target_date_str]
+                },
+                "name"
+            )
             
-            non_study_columns = frappe.db.sql(non_study_columns_sql, {
-                "education_stage_id": education_stage_id,
-                "campus_id": campus_id
-            }, as_dict=True)
+            if active_schedule:
+                # Có schedule active → chỉ lấy non-study từ schedule này
+                non_study_columns_sql = """
+                    SELECT DISTINCT
+                        tc.name as timetable_column_id,
+                        tc.period_name,
+                        tc.start_time,
+                        tc.end_time,
+                        tc.period_type,
+                        tc.period_priority
+                    FROM `tabSIS Timetable Column` tc
+                    WHERE tc.schedule_id = %(schedule_id)s
+                    AND tc.period_type = 'non-study'
+                    ORDER BY tc.period_priority ASC, tc.start_time ASC
+                """
+                non_study_columns = frappe.db.sql(non_study_columns_sql, {
+                    "schedule_id": active_schedule
+                }, as_dict=True)
+                logs.append(f"✅ Found {len(non_study_columns)} non-study columns from schedule {active_schedule}")
+            else:
+                # Không có schedule active → lấy legacy (schedule_id IS NULL)
+                non_study_columns_sql = """
+                    SELECT DISTINCT
+                        tc.name as timetable_column_id,
+                        tc.period_name,
+                        tc.start_time,
+                        tc.end_time,
+                        tc.period_type,
+                        tc.period_priority
+                    FROM `tabSIS Timetable Column` tc
+                    WHERE tc.education_stage_id = %(education_stage_id)s
+                    AND tc.campus_id = %(campus_id)s
+                    AND tc.period_type = 'non-study'
+                    AND (tc.schedule_id IS NULL OR tc.schedule_id = '')
+                    ORDER BY tc.period_priority ASC, tc.start_time ASC
+                """
+                non_study_columns = frappe.db.sql(non_study_columns_sql, {
+                    "education_stage_id": education_stage_id,
+                    "campus_id": campus_id
+                }, as_dict=True)
+                logs.append(f"✅ Found {len(non_study_columns)} legacy non-study columns")
             
-            logs.append(f"✅ Found {len(non_study_columns)} non-study columns (apply all days)")
+            # Log đã được thêm ở trên trong logic schedule
             
             # Get study column details
             study_columns_detail_sql = """
