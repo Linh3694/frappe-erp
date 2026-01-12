@@ -219,6 +219,10 @@ def _get_class_timetable_for_date(class_id, target_date):
                 non_study_columns = [c for c in all_schedule_columns if c.get('period_type') == 'non-study']
                 study_columns_from_schedule = [c for c in all_schedule_columns if c.get('period_type') == 'study']
                 logs.append(f"📊 Schedule has {len(study_columns_from_schedule)} study + {len(non_study_columns)} non-study periods")
+                
+                # ⚡ DEBUG: Log all non-study periods to verify
+                for ns in non_study_columns:
+                    logs.append(f"📋 Non-study: '{ns.get('period_name')}' priority={ns.get('period_priority')} time={ns.get('start_time')}-{ns.get('end_time')}")
             else:
                 # Không có schedule active → lấy legacy (schedule_id IS NULL)
                 non_study_columns_sql = """
