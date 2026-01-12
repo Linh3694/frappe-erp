@@ -232,6 +232,19 @@ def get_all_timetable_columns():
                 order_by="education_stage_id asc, period_priority asc"
             )
 
+        # 🔄 DEDUPE: Loại bỏ periods trùng theo education_stage_id + period_priority
+        # Ưu tiên schedule periods hơn legacy (có schedule_id)
+        seen = set()
+        deduped_timetables = []
+        for timetable in timetables:
+            key = (timetable.get("education_stage_id"), timetable.get("period_priority"))
+            if key not in seen:
+                seen.add(key)
+                deduped_timetables.append(timetable)
+        timetables = deduped_timetables
+        
+        frappe.logger().info(f"📊 Returning {len(timetables)} periods (after dedupe)")
+
         # Format time fields for HTML time input (HH:MM format)
         for timetable in timetables:
             timetable["start_time"] = format_time_for_html(timetable.get("start_time"))

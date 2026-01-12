@@ -561,6 +561,35 @@ def get_class_week():
             parent = r.get("parent")
             r["class_id"] = instances_map.get(parent, {}).get("class_id")
 
+        # 3.5) ⚡ NEW: Enrich period_priority và period_name từ SIS Timetable Column
+        # Để frontend có thể match entries với periods mới dựa trên priority
+        try:
+            timetable_column_ids = list({r.get("timetable_column_id") for r in rows if r.get("timetable_column_id")})
+            period_info_map = {}  # timetable_column_id -> {period_priority, period_name}
+            
+            if timetable_column_ids:
+                period_rows = frappe.get_all(
+                    "SIS Timetable Column",
+                    fields=["name", "period_priority", "period_name"],
+                    filters={"name": ["in", timetable_column_ids]},
+                )
+                for p in period_rows:
+                    period_info_map[p.name] = {
+                        "period_priority": p.period_priority,
+                        "period_name": p.period_name
+                    }
+            
+            # Enrich rows with period info
+            for r in rows:
+                col_id = r.get("timetable_column_id")
+                if col_id and col_id in period_info_map:
+                    r["period_priority"] = period_info_map[col_id].get("period_priority")
+                    r["period_name"] = period_info_map[col_id].get("period_name")
+                    
+            frappe.logger().info(f"📊 Enriched {len(period_info_map)} periods with priority info for entries")
+        except Exception as period_error:
+            frappe.logger().warning(f"Failed to enrich period info: {str(period_error)}")
+
         # 4) Enrich subject_title and teacher_names
         try:
             subject_ids = list({r.get("subject_id") for r in rows if r.get("subject_id")})
