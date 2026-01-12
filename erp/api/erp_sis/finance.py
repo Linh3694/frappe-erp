@@ -219,15 +219,14 @@ def get_finance_year(finance_year_id=None):
 def create_finance_year():
     """
     Tạo năm tài chính mới.
+    Mỗi năm học chỉ có 1 năm tài chính đi kèm.
+    Ngày bắt đầu/kết thúc được lấy tự động từ năm học.
     
     Body:
         title: Tên năm tài chính
         school_year_id: ID năm học
         campus_id: ID campus
-        start_date: Ngày bắt đầu
-        end_date: Ngày kết thúc
-        is_active: Trạng thái active
-        description: Mô tả
+        description: Mô tả (optional)
     
     Returns:
         Thông tin năm tài chính vừa tạo
@@ -247,7 +246,7 @@ def create_finance_year():
         logs.append(f"Tạo năm tài chính mới: {json.dumps(data, default=str)}")
         
         # Validate required fields
-        required_fields = ['title', 'school_year_id', 'campus_id', 'start_date', 'end_date']
+        required_fields = ['title', 'school_year_id', 'campus_id']
         for field in required_fields:
             if field not in data or not data[field]:
                 return validation_error_response(
@@ -260,15 +259,36 @@ def create_finance_year():
         if not campus_id:
             return error_response("Campus không hợp lệ", logs=logs)
         
-        # Tạo năm tài chính
+        # Kiểm tra năm học có tồn tại không
+        school_year = frappe.db.get_value(
+            "SIS School Year",
+            data['school_year_id'],
+            ["name", "start_date", "end_date", "title_vn"],
+            as_dict=True
+        )
+        if not school_year:
+            return error_response(f"Năm học không tồn tại: {data['school_year_id']}", logs=logs)
+        
+        # Kiểm tra xem đã có năm tài chính cho năm học này chưa
+        existing_fy = frappe.db.exists("SIS Finance Year", {
+            "school_year_id": data['school_year_id'],
+            "campus_id": campus_id
+        })
+        if existing_fy:
+            return validation_error_response(
+                f"Năm tài chính cho năm học {school_year.title_vn} đã tồn tại",
+                {"school_year_id": ["Mỗi năm học chỉ có 1 năm tài chính đi kèm"]}
+            )
+        
+        # Tạo năm tài chính với start_date/end_date từ năm học
         fy_doc = frappe.get_doc({
             "doctype": "SIS Finance Year",
             "title": data['title'],
             "school_year_id": data['school_year_id'],
             "campus_id": campus_id,
-            "start_date": data['start_date'],
-            "end_date": data['end_date'],
-            "is_active": data.get('is_active', 0),
+            "start_date": school_year.start_date,
+            "end_date": school_year.end_date,
+            "is_active": 1,  # Mặc định active khi tạo mới
             "description": data.get('description', '')
         })
         
@@ -299,10 +319,13 @@ def create_finance_year():
 def update_finance_year():
     """
     Cập nhật năm tài chính.
+    Chỉ cho phép cập nhật title và description.
+    school_year_id không thể thay đổi sau khi tạo.
     
     Body:
         finance_year_id: ID năm tài chính cần cập nhật
-        title, school_year_id, campus_id, start_date, end_date, is_active, description
+        title: Tên năm tài chính (optional)
+        description: Mô tả (optional)
     
     Returns:
         Thông tin năm tài chính sau cập nhật
@@ -333,21 +356,9 @@ def update_finance_year():
         
         fy_doc = frappe.get_doc("SIS Finance Year", finance_year_id)
         
-        # Cập nhật các trường
+        # Chỉ cho phép cập nhật title và description
         if 'title' in data:
             fy_doc.title = data['title']
-        if 'school_year_id' in data:
-            fy_doc.school_year_id = data['school_year_id']
-        if 'campus_id' in data:
-            campus_id = _resolve_campus_id(data['campus_id'])
-            if campus_id:
-                fy_doc.campus_id = campus_id
-        if 'start_date' in data:
-            fy_doc.start_date = data['start_date']
-        if 'end_date' in data:
-            fy_doc.end_date = data['end_date']
-        if 'is_active' in data:
-            fy_doc.is_active = data['is_active']
         if 'description' in data:
             fy_doc.description = data['description']
         
