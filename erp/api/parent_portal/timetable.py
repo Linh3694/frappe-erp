@@ -419,21 +419,23 @@ def _get_class_timetable_for_date(class_id, target_date):
             # Create rows for all columns, filling in data where available
             for col in all_day_columns:
                 column_id = col.get('timetable_column_id')
+                col_period_type = col.get('period_type', 'study')
                 
-                # Find existing row - logic khác nhau tùy thuộc active_schedule
+                # ⚡ FIX: Chỉ map subject cho STUDY periods, non-study KHÔNG map
                 existing_row = None
-                if active_schedule:
-                    # Map qua period_name trước, fallback qua period_priority
-                    col_period_name = col.get('period_name')
-                    col_priority = col.get('period_priority')
-                    
-                    if col_period_name and col_period_name in existing_by_period_name:
-                        existing_row = existing_by_period_name[col_period_name]
-                    elif col_priority is not None and col_priority in existing_by_priority:
-                        existing_row = existing_by_priority[col_priority]
-                else:
-                    # Legacy mode: match bằng column_id
-                    existing_row = next((r for r in existing_rows if r.get('timetable_column_id') == column_id), None)
+                if col_period_type == 'study':
+                    if active_schedule:
+                        # Map qua period_name trước, fallback qua period_priority
+                        col_period_name = col.get('period_name')
+                        col_priority = col.get('period_priority')
+                        
+                        if col_period_name and col_period_name in existing_by_period_name:
+                            existing_row = existing_by_period_name[col_period_name]
+                        elif col_priority is not None and col_priority in existing_by_priority:
+                            existing_row = existing_by_priority[col_priority]
+                    else:
+                        # Legacy mode: match bằng column_id
+                        existing_row = next((r for r in existing_rows if r.get('timetable_column_id') == column_id), None)
 
                 # Convert timedelta to HH:MM format for start_time and end_time
                 start_time = None
