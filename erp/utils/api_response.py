@@ -87,20 +87,28 @@ def paginated_response(
 
 def single_item_response(
     data: Any,
-    message: str = "Success"
+    message: str = "Success",
+    logs: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """Response cho single item (get by ID, create, update)"""
-    return {
+    response = {
         "success": True,
         "message": message,
         "data": data
     }
+    
+    # Add logs at top-level for frontend network access
+    if logs:
+        response["logs"] = logs
+    
+    return response
 
 
 def list_response(
     data: List[Any],
     message: str = "Success",
-    meta: Optional[Dict[str, Any]] = None
+    meta: Optional[Dict[str, Any]] = None,
+    logs: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """Response cho list data không phân trang"""
     response = {
@@ -111,6 +119,10 @@ def list_response(
 
     if meta:
         response["meta"] = meta
+    
+    # Add logs at top-level for frontend network access
+    if logs:
+        response["logs"] = logs
 
     return response
 
