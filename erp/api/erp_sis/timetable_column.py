@@ -81,7 +81,13 @@ def get_all_timetable_columns():
         # Add education_stage filter if provided
         education_stage = frappe.local.form_dict.get("education_stage") or frappe.request.args.get("education_stage")
         schedule_id = frappe.local.form_dict.get("schedule_id") or frappe.request.args.get("schedule_id")
-        date_filter = frappe.local.form_dict.get("date") or frappe.request.args.get("date")
+        # Support cả "date" và "date_filter" params cho backward compatibility
+        date_filter = (
+            frappe.local.form_dict.get("date") or 
+            frappe.request.args.get("date") or 
+            frappe.local.form_dict.get("date_filter") or 
+            frappe.request.args.get("date_filter")
+        )
         include_legacy = frappe.local.form_dict.get("include_legacy") or frappe.request.args.get("include_legacy")
         
         # Default include_legacy to true for backward compatibility
