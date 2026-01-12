@@ -194,8 +194,11 @@ def _get_class_timetable_for_date(class_id, target_date):
             )
             
             if active_schedule:
-                # Có schedule active → chỉ lấy non-study từ schedule này
-                non_study_columns_sql = """
+                # ⚡ NEW LOGIC: Khi có active schedule, lấy TẤT CẢ periods từ schedule MỚI
+                # Và map subjects từ legacy instances dựa trên period_name/period_priority
+                
+                # Lấy TẤT CẢ periods từ schedule mới (cả study và non-study)
+                all_schedule_columns_sql = """
                     SELECT DISTINCT
                         tc.name as timetable_column_id,
                         tc.period_name,
@@ -205,13 +208,17 @@ def _get_class_timetable_for_date(class_id, target_date):
                         tc.period_priority
                     FROM `tabSIS Timetable Column` tc
                     WHERE tc.schedule_id = %(schedule_id)s
-                    AND tc.period_type = 'non-study'
                     ORDER BY tc.period_priority ASC, tc.start_time ASC
                 """
-                non_study_columns = frappe.db.sql(non_study_columns_sql, {
+                all_schedule_columns = frappe.db.sql(all_schedule_columns_sql, {
                     "schedule_id": active_schedule
                 }, as_dict=True)
-                logs.append(f"✅ Found {len(non_study_columns)} non-study columns from schedule {active_schedule}")
+                logs.append(f"✅ Found {len(all_schedule_columns)} TOTAL columns from NEW schedule {active_schedule}")
+                
+                # Separate study và non-study từ schedule mới
+                non_study_columns = [c for c in all_schedule_columns if c.get('period_type') == 'non-study']
+                study_columns_from_schedule = [c for c in all_schedule_columns if c.get('period_type') == 'study']
+                logs.append(f"📊 Schedule has {len(study_columns_from_schedule)} study + {len(non_study_columns)} non-study periods")
             else:
                 # Không có schedule active → lấy legacy (schedule_id IS NULL)
                 non_study_columns_sql = """
@@ -235,29 +242,6 @@ def _get_class_timetable_for_date(class_id, target_date):
                 }, as_dict=True)
                 logs.append(f"✅ Found {len(non_study_columns)} legacy non-study columns")
             
-            # Log đã được thêm ở trên trong logic schedule
-            
-            # Get study column details
-            study_columns_detail_sql = """
-                SELECT DISTINCT
-                    tc.name as timetable_column_id,
-                    tc.period_name,
-                    tc.start_time,
-                    tc.end_time,
-                    tc.period_type,
-                    tc.period_priority
-                FROM `tabSIS Timetable Column` tc
-                WHERE tc.name IN %(column_ids)s
-                ORDER BY tc.period_priority ASC, tc.start_time ASC
-            """
-            
-            if study_column_ids:
-                study_columns_detail = frappe.db.sql(study_columns_detail_sql, {
-                    "column_ids": tuple(study_column_ids)
-                }, as_dict=True)
-            else:
-                study_columns_detail = []
-            
             # Helper function to convert time to string
             def time_to_str(t):
                 if t is None:
@@ -272,41 +256,38 @@ def _get_class_timetable_for_date(class_id, target_date):
                         return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
                 return str(t)
             
-            # ⚡ FIX: Khi có active schedule MỚI, schedule là authoritative
-            # Nếu schedule định nghĩa time slot là non-study → LOẠI BỎ study entries từ legacy instances
             if active_schedule:
-                # Tạo set các time slots được định nghĩa là non-study trong schedule MỚI
-                non_study_time_slots = set()
-                for col in non_study_columns:
-                    start = time_to_str(col.get('start_time'))
-                    end = time_to_str(col.get('end_time'))
-                    if start and end:
-                        non_study_time_slots.add((start, end))
+                # ⚡ NEW LOGIC: Dùng periods từ schedule MỚI làm base
+                # Lấy info từ legacy columns để build mapping cho subjects
+                legacy_columns_detail_sql = """
+                    SELECT DISTINCT
+                        tc.name as timetable_column_id,
+                        tc.period_name,
+                        tc.period_priority
+                    FROM `tabSIS Timetable Column` tc
+                    WHERE tc.name IN %(column_ids)s
+                """
                 
-                logs.append(f"🔍 DEBUG: Non-study time slots from NEW schedule = {non_study_time_slots}")
+                legacy_columns_detail = []
+                if study_column_ids:
+                    legacy_columns_detail = frappe.db.sql(legacy_columns_detail_sql, {
+                        "column_ids": tuple(study_column_ids)
+                    }, as_dict=True)
                 
-                # Filter study columns - loại bỏ nếu trùng time slot với non-study từ schedule MỚI
-                filtered_study = []
-                removed_study_column_ids = set()
-                for col in study_columns_detail:
-                    start = time_to_str(col.get('start_time'))
-                    end = time_to_str(col.get('end_time'))
-                    
-                    if start and end and (start, end) in non_study_time_slots:
-                        logs.append(f"⏭️ REMOVING legacy study '{col.get('period_name')}' - schedule defines {start}-{end} as non-study")
-                        removed_study_column_ids.add(col.get('timetable_column_id'))
-                        continue
-                    
-                    filtered_study.append(col)
+                # Build mapping: legacy_column_id -> {period_name, period_priority}
+                legacy_column_info = {}
+                for col in legacy_columns_detail:
+                    legacy_column_info[col.get('timetable_column_id')] = {
+                        'period_name': col.get('period_name'),
+                        'period_priority': col.get('period_priority')
+                    }
+                logs.append(f"📋 Built mapping for {len(legacy_column_info)} legacy columns")
                 
-                logs.append(f"🔍 DEBUG: Filtered study from {len(study_columns_detail)} to {len(filtered_study)}")
-                
-                # Update study_columns_detail và study_column_ids sau khi filter
-                study_columns_detail = filtered_study
-                study_column_ids = study_column_ids - removed_study_column_ids
-                
-                # Không cần filter non-study vì schedule mới là authoritative
+                # Dùng TẤT CẢ periods từ schedule MỚI
+                study_columns_detail = study_columns_from_schedule
                 filtered_non_study = non_study_columns
+                
+                logs.append(f"✅ Using {len(study_columns_detail)} study + {len(filtered_non_study)} non-study from NEW schedule")
             else:
                 # Không có active schedule → dùng logic cũ: ưu tiên study từ legacy
                 # Tạo set các time slots đã có study periods
@@ -363,12 +344,47 @@ def _get_class_timetable_for_date(class_id, target_date):
 
             logs.append(f"✅ Found {len(existing_rows)} study period rows for {day_of_week}")
 
+            # ⚡ Khi có active_schedule, cần map existing_rows qua period_name/period_priority
+            # vì column_ids từ legacy khác với column_ids từ schedule mới
+            if active_schedule:
+                # Build mapping: existing_rows theo period_name và period_priority
+                # existing_row.timetable_column_id -> legacy_column_info -> period_name/priority
+                existing_by_period_name = {}
+                existing_by_priority = {}
+                
+                for row in existing_rows:
+                    legacy_col_id = row.get('timetable_column_id')
+                    if legacy_col_id and legacy_col_id in legacy_column_info:
+                        info = legacy_column_info[legacy_col_id]
+                        period_name = info.get('period_name')
+                        period_priority = info.get('period_priority')
+                        
+                        if period_name:
+                            existing_by_period_name[period_name] = row
+                        if period_priority is not None:
+                            existing_by_priority[period_priority] = row
+                
+                logs.append(f"📋 Mapped subjects by period_name: {list(existing_by_period_name.keys())}")
+                logs.append(f"📋 Mapped subjects by priority: {list(existing_by_priority.keys())}")
+
             # Create rows for all columns, filling in data where available
             for col in all_day_columns:
                 column_id = col.get('timetable_column_id')
-
-                # Find if there's an existing row for this column and day
-                existing_row = next((r for r in existing_rows if r.get('timetable_column_id') == column_id), None)
+                
+                # Find existing row - logic khác nhau tùy thuộc active_schedule
+                existing_row = None
+                if active_schedule:
+                    # Map qua period_name trước, fallback qua period_priority
+                    col_period_name = col.get('period_name')
+                    col_priority = col.get('period_priority')
+                    
+                    if col_period_name and col_period_name in existing_by_period_name:
+                        existing_row = existing_by_period_name[col_period_name]
+                    elif col_priority is not None and col_priority in existing_by_priority:
+                        existing_row = existing_by_priority[col_priority]
+                else:
+                    # Legacy mode: match bằng column_id
+                    existing_row = next((r for r in existing_rows if r.get('timetable_column_id') == column_id), None)
 
                 # Convert timedelta to HH:MM format for start_time and end_time
                 start_time = None
