@@ -84,8 +84,7 @@ def _get_guardian_students(guardian_id, school_year_id=None):
             c.education_grade,
             eg.education_stage_id,
             es.title_vn as education_stage_name,
-            c.homeroom_teacher,
-            u.full_name as homeroom_teacher_name
+            c.homeroom_teacher
         FROM `tabCRM Student` s
         LEFT JOIN (
             SELECT cs1.student_id, MIN(cs1.class_id) as class_id
@@ -98,11 +97,22 @@ def _get_guardian_students(guardian_id, school_year_id=None):
         LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name
         LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
         LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
-        LEFT JOIN `tabSIS Teacher` t ON c.homeroom_teacher = t.name
-        LEFT JOIN `tabUser` u ON t.user_id = u.name
         WHERE s.name IN %(student_ids)s
         ORDER BY s.student_name
     """, params, as_dict=True)
+    
+    # Lấy tên GVCN riêng để tránh lỗi JOIN phức tạp
+    for student in students:
+        homeroom_teacher_name = None
+        if student.get('homeroom_teacher'):
+            try:
+                teacher = frappe.get_doc("SIS Teacher", student['homeroom_teacher'])
+                if teacher.user_id:
+                    user = frappe.get_doc("User", teacher.user_id)
+                    homeroom_teacher_name = user.full_name
+            except Exception:
+                pass
+        student['homeroom_teacher_name'] = homeroom_teacher_name
     
     return students
 
