@@ -1,0 +1,228 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:SIS-FIN-STU-{#####}",
+ "beta": 0,
+ "creation": "2026-01-12 00:00:00.000000",
+ "custom": 0,
+ "description": "Học sinh thuộc năm tài chính",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "finance_year_id",
+  "student_id",
+  "student_name",
+  "student_code",
+  "column_break_basic",
+  "campus_id",
+  "class_id",
+  "class_title",
+  "finance_summary",
+  "total_amount",
+  "paid_amount",
+  "column_break_finance",
+  "outstanding_amount",
+  "payment_status",
+  "system_information",
+  "synced_at",
+  "synced_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "finance_year_id",
+   "fieldtype": "Link",
+   "label": "Năm tài chính",
+   "options": "SIS Finance Year",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Tên học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Mã học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_code",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "read_only": 1
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "label": "Lớp",
+   "options": "SIS Class",
+   "read_only": 1,
+   "description": "Lớp của học sinh tại thời điểm đồng bộ"
+  },
+  {
+   "fieldname": "class_title",
+   "fieldtype": "Data",
+   "label": "Tên lớp",
+   "read_only": 1
+  },
+  {
+   "fieldname": "finance_summary",
+   "fieldtype": "Section Break",
+   "label": "Tổng hợp tài chính"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Tổng số tiền phải đóng",
+   "read_only": 1,
+   "default": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "paid_amount",
+   "fieldtype": "Currency",
+   "label": "Đã đóng",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "column_break_finance",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "outstanding_amount",
+   "fieldtype": "Currency",
+   "label": "Còn nợ",
+   "read_only": 1,
+   "default": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái thanh toán",
+   "options": "\nunpaid\npartial\npaid",
+   "default": "unpaid",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "unpaid: Chưa đóng, partial: Đóng một phần, paid: Đã đóng đủ"
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "synced_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian đồng bộ",
+   "read_only": 1,
+   "description": "Thời gian đồng bộ từ SIS Class Student"
+  },
+  {
+   "fieldname": "synced_from",
+   "fieldtype": "Data",
+   "label": "Nguồn đồng bộ",
+   "read_only": 1,
+   "description": "ID của SIS Class Student đã đồng bộ"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Student",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}
+

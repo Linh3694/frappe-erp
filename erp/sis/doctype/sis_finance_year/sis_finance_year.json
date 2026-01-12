@@ -1,0 +1,240 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-FIN-YEAR-{#####}",
+ "beta": 0,
+ "creation": "2026-01-12 00:00:00.000000",
+ "custom": 0,
+ "description": "Năm tài chính - quản lý các khoản phí theo năm học",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "title",
+  "school_year_id",
+  "campus_id",
+  "column_break_basic",
+  "is_active",
+  "start_date",
+  "end_date",
+  "description_section",
+  "description",
+  "statistics_section",
+  "total_students",
+  "total_orders",
+  "column_break_stats",
+  "total_amount",
+  "total_paid",
+  "system_information",
+  "created_by",
+  "created_at",
+  "column_break_system",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tên năm tài chính",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "VD: Năm tài chính 2025-2026"
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Năm học liên kết với năm tài chính này"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Đang hoạt động",
+   "default": 0,
+   "in_list_view": 1,
+   "description": "Bật/tắt năm tài chính"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Ngày bắt đầu",
+   "reqd": 1,
+   "description": "Ngày bắt đầu năm tài chính"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "Ngày kết thúc",
+   "reqd": 1,
+   "description": "Ngày kết thúc năm tài chính"
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": "Mô tả"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "Mô tả chi tiết"
+  },
+  {
+   "fieldname": "statistics_section",
+   "fieldtype": "Section Break",
+   "label": "Thống kê",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "total_students",
+   "fieldtype": "Int",
+   "label": "Tổng số học sinh",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "total_orders",
+   "fieldtype": "Int",
+   "label": "Tổng số đơn hàng",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "column_break_stats",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Tổng số tiền",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "total_paid",
+   "fieldtype": "Currency",
+   "label": "Đã thu",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "label": "Người tạo",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_system",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày cập nhật",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Year",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}
+

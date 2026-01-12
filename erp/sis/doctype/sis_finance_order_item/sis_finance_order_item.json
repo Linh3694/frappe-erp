@@ -1,0 +1,283 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:SIS-FIN-ITEM-{#####}",
+ "beta": 0,
+ "creation": "2026-01-12 00:00:00.000000",
+ "custom": 0,
+ "description": "Chi tiết khoản phí của từng học sinh",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "order_id",
+  "finance_student_id",
+  "student_name",
+  "student_code",
+  "column_break_basic",
+  "class_title",
+  "payment_configuration",
+  "amount",
+  "discount_amount",
+  "final_amount",
+  "column_break_amount",
+  "paid_amount",
+  "outstanding_amount",
+  "payment_status",
+  "deadline_section",
+  "deadline",
+  "late_fee",
+  "column_break_deadline",
+  "last_payment_date",
+  "installments_section",
+  "installments",
+  "notes_section",
+  "notes",
+  "system_information",
+  "created_at",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "order_id",
+   "fieldtype": "Link",
+   "label": "Đơn hàng",
+   "options": "SIS Finance Order",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "finance_student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh (Finance)",
+   "options": "SIS Finance Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Tên học sinh",
+   "read_only": 1,
+   "fetch_from": "finance_student_id.student_name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Mã học sinh",
+   "read_only": 1,
+   "fetch_from": "finance_student_id.student_code",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "class_title",
+   "fieldtype": "Data",
+   "label": "Lớp",
+   "read_only": 1,
+   "fetch_from": "finance_student_id.class_title"
+  },
+  {
+   "fieldname": "payment_configuration",
+   "fieldtype": "Section Break",
+   "label": "Thông tin thanh toán"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Số tiền gốc",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Số tiền gốc của khoản phí"
+  },
+  {
+   "fieldname": "discount_amount",
+   "fieldtype": "Currency",
+   "label": "Giảm giá",
+   "default": 0,
+   "description": "Số tiền giảm giá/ưu đãi"
+  },
+  {
+   "fieldname": "final_amount",
+   "fieldtype": "Currency",
+   "label": "Số tiền phải đóng",
+   "read_only": 1,
+   "description": "= Số tiền gốc - Giảm giá + Phí trễ hạn"
+  },
+  {
+   "fieldname": "column_break_amount",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "paid_amount",
+   "fieldtype": "Currency",
+   "label": "Đã đóng",
+   "default": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "outstanding_amount",
+   "fieldtype": "Currency",
+   "label": "Còn nợ",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "unpaid\npartial\npaid\nrefunded",
+   "default": "unpaid",
+   "in_list_view": 1,
+   "description": "unpaid: Chưa đóng, partial: Đóng một phần, paid: Đã đóng đủ, refunded: Đã hoàn tiền"
+  },
+  {
+   "fieldname": "deadline_section",
+   "fieldtype": "Section Break",
+   "label": "Hạn thanh toán"
+  },
+  {
+   "fieldname": "deadline",
+   "fieldtype": "Date",
+   "label": "Hạn thanh toán"
+  },
+  {
+   "fieldname": "late_fee",
+   "fieldtype": "Currency",
+   "label": "Phí trễ hạn",
+   "default": 0
+  },
+  {
+   "fieldname": "column_break_deadline",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_payment_date",
+   "fieldtype": "Date",
+   "label": "Ngày thanh toán gần nhất",
+   "read_only": 1
+  },
+  {
+   "fieldname": "installments_section",
+   "fieldtype": "Section Break",
+   "label": "Các kỳ thanh toán",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "installments",
+   "fieldtype": "Table",
+   "label": "Kỳ thanh toán",
+   "options": "SIS Finance Order Installment",
+   "description": "Chi tiết các kỳ thanh toán nếu là chia kỳ"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Ghi chú",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày cập nhật",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Order Item",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}
+

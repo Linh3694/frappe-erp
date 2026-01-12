@@ -1,0 +1,292 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-FIN-ORD-{#####}",
+ "beta": 0,
+ "creation": "2026-01-12 00:00:00.000000",
+ "custom": 0,
+ "description": "Đơn hàng/Khoản phí trong năm tài chính",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "finance_year_id",
+  "title",
+  "order_type",
+  "column_break_basic",
+  "is_active",
+  "is_required",
+  "sort_order",
+  "description_section",
+  "description",
+  "payment_configuration",
+  "total_amount",
+  "payment_type",
+  "installment_count",
+  "column_break_payment",
+  "deadline",
+  "late_fee_percent",
+  "statistics_section",
+  "total_students",
+  "total_collected",
+  "column_break_stats",
+  "total_outstanding",
+  "collection_rate",
+  "system_information",
+  "created_by",
+  "created_at",
+  "column_break_system",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "finance_year_id",
+   "fieldtype": "Link",
+   "label": "Năm tài chính",
+   "options": "SIS Finance Year",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tên khoản phí",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "VD: Học phí kỳ 1, Phí xe buýt, Phí đồng phục..."
+  },
+  {
+   "fieldname": "order_type",
+   "fieldtype": "Select",
+   "label": "Loại khoản phí",
+   "options": "\ntuition\nservice\nactivity\nother",
+   "default": "tuition",
+   "in_list_view": 1,
+   "description": "tuition: Học phí, service: Phí dịch vụ, activity: Phí hoạt động, other: Khác"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Đang hoạt động",
+   "default": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "is_required",
+   "fieldtype": "Check",
+   "label": "Bắt buộc",
+   "default": 1,
+   "description": "Khoản phí bắt buộc hay tùy chọn"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Thứ tự hiển thị",
+   "default": 0
+  },
+  {
+   "fieldname": "description_section",
+   "fieldtype": "Section Break",
+   "label": "Mô tả"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "Mô tả chi tiết"
+  },
+  {
+   "fieldname": "payment_configuration",
+   "fieldtype": "Section Break",
+   "label": "Cấu hình thanh toán"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Số tiền",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Số tiền mặc định cho khoản phí này"
+  },
+  {
+   "fieldname": "payment_type",
+   "fieldtype": "Select",
+   "label": "Loại thanh toán",
+   "options": "single\ninstallment",
+   "default": "single",
+   "reqd": 1,
+   "description": "single: Thanh toán 1 lần, installment: Chia kỳ"
+  },
+  {
+   "fieldname": "installment_count",
+   "fieldtype": "Int",
+   "label": "Số kỳ thanh toán",
+   "default": 1,
+   "depends_on": "eval:doc.payment_type=='installment'",
+   "description": "Số kỳ nếu là thanh toán chia kỳ"
+  },
+  {
+   "fieldname": "column_break_payment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "deadline",
+   "fieldtype": "Date",
+   "label": "Hạn thanh toán",
+   "description": "Hạn thanh toán mặc định"
+  },
+  {
+   "fieldname": "late_fee_percent",
+   "fieldtype": "Float",
+   "label": "Phí trễ hạn (%)",
+   "default": 0,
+   "description": "Phần trăm phí phạt nếu thanh toán trễ hạn"
+  },
+  {
+   "fieldname": "statistics_section",
+   "fieldtype": "Section Break",
+   "label": "Thống kê",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "total_students",
+   "fieldtype": "Int",
+   "label": "Số học sinh",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "total_collected",
+   "fieldtype": "Currency",
+   "label": "Đã thu",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "column_break_stats",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_outstanding",
+   "fieldtype": "Currency",
+   "label": "Còn phải thu",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "collection_rate",
+   "fieldtype": "Percent",
+   "label": "Tỷ lệ thu",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "label": "Người tạo",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_system",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày cập nhật",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Order",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}
+

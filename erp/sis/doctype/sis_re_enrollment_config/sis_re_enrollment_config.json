@@ -20,6 +20,7 @@
   "title",
   "source_school_year_id",
   "school_year_id",
+  "finance_year_id",
   "campus_id",
   "column_break_basic",
   "is_active",
@@ -70,6 +71,13 @@
    "reqd": 1,
    "in_list_view": 1,
    "description": "Năm học mà học sinh sẽ đăng ký (năm tiếp theo)"
+  },
+  {
+   "fieldname": "finance_year_id",
+   "fieldtype": "Link",
+   "label": "Năm tài chính",
+   "options": "SIS Finance Year",
+   "description": "Nếu chọn, hệ thống sẽ lấy danh sách học sinh từ Năm tài chính thay vì từ SIS Class Student"
   },
   {
    "fieldname": "campus_id",
