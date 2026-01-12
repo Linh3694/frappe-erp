@@ -95,7 +95,12 @@ class SISScholarshipApplication(Document):
 	
 	def after_insert(self):
 		"""Sau khi tạo đơn mới"""
-		self.create_recommendation_records()
+		try:
+			self.create_recommendation_records()
+		except Exception as e:
+			frappe.log_error(frappe.get_traceback(), "Scholarship Create Recommendation Error")
+		
+		# Luôn cập nhật status dù có lỗi tạo recommendation hay không
 		self.update_status_to_waiting()
 	
 	def create_recommendation_records(self):

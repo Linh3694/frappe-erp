@@ -1071,7 +1071,7 @@ def get_class_applications(class_id=None):
             FROM `tabSIS Scholarship Application` app
             WHERE app.class_id = %(class_id)s
               AND (app.main_teacher_id = %(teacher_id)s OR app.second_teacher_id = %(teacher_id)s)
-              AND app.status IN ('WaitingRecommendation', 'RecommendationSubmitted', 'InReview', 'Approved', 'Rejected', 'DeniedByTeacher')
+              AND app.status IN ('Submitted', 'WaitingRecommendation', 'RecommendationSubmitted', 'InReview', 'Approved', 'Rejected', 'DeniedByTeacher')
             ORDER BY app.submitted_at DESC
         """
         
