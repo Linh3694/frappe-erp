@@ -1757,8 +1757,12 @@ def create_order_with_structure():
             milestones = json.loads(milestones)
         
         for m in milestones:
+            # Đảm bảo payment_scheme không rỗng - dùng 'or' thay vì default dict.get
+            scheme = m.get('payment_scheme') or 'yearly'
+            logs.append(f"Milestone: scheme={repr(scheme)}, number={m.get('milestone_number')}")
+            
             order_doc.append("milestones", {
-                "payment_scheme": m.get('payment_scheme', 'yearly'),
+                "payment_scheme": scheme,
                 "milestone_number": m.get('milestone_number'),
                 "title": m.get('title'),
                 "deadline_date": m.get('deadline_date') or None,
