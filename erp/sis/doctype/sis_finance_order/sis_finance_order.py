@@ -39,14 +39,22 @@ class SISFinanceOrder(Document):
     def validate_milestones(self):
         """Kiểm tra các mốc deadline"""
         if self.milestones:
+            # Debug: Log chi tiết milestones
+            frappe.log(f"[validate_milestones] Total milestones: {len(self.milestones)}")
+            for idx, m in enumerate(self.milestones):
+                frappe.log(f"  [{idx}] scheme={repr(m.payment_scheme)}, number={m.milestone_number}, title={m.title}")
+            
             # Kiểm tra milestone_number không trùng trong cùng payment_scheme
             # VD: yearly có mốc 1,2 và semester cũng có mốc 1,2 là OK
             from collections import defaultdict
             scheme_numbers = defaultdict(list)
             
             for m in self.milestones:
-                scheme = m.payment_scheme or 'yearly'
+                # Đảm bảo payment_scheme không rỗng - default là 'yearly'
+                scheme = m.payment_scheme if m.payment_scheme else 'yearly'
                 scheme_numbers[scheme].append(m.milestone_number)
+            
+            frappe.log(f"[validate_milestones] Grouped: {dict(scheme_numbers)}")
             
             for scheme, numbers in scheme_numbers.items():
                 if len(numbers) != len(set(numbers)):

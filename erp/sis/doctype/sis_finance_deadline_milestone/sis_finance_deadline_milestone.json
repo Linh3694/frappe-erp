@@ -28,7 +28,7 @@
    "fieldname": "payment_scheme",
    "fieldtype": "Select",
    "label": "Dạng thanh toán",
-   "options": "\nyearly\nsemester",
+   "options": "yearly\nsemester",
    "default": "yearly",
    "reqd": 1,
    "in_list_view": 1,
