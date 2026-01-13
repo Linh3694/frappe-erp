@@ -787,6 +787,38 @@ def get_student_orders(finance_student_id=None):
             # Lấy thông tin order
             order_doc = frappe.get_doc("SIS Finance Order", os.order_id)
             
+            # Nếu total_amount = 0, tính lại từ fee_lines
+            total_amount = os.total_amount or 0
+            if total_amount == 0:
+                # Lấy order_student_doc để tính total từ fee_lines
+                order_student_doc = frappe.get_doc("SIS Finance Order Student", os.name)
+                for fee_line in order_student_doc.fee_lines:
+                    if fee_line.line_type == 'total' and fee_line.amounts_json:
+                        try:
+                            amounts = json.loads(fee_line.amounts_json)
+                            # Lấy giá trị milestone yearly_1 hoặc bất kỳ milestone nào có
+                            for key in ['yearly_1', 'semester_1']:
+                                if key in amounts and amounts[key]:
+                                    total_amount = amounts[key]
+                                    break
+                            if total_amount > 0:
+                                break
+                        except:
+                            pass
+            
+            outstanding_amount = total_amount - (os.paid_amount or 0)
+            
+            # Xác định payment_status
+            payment_status = os.payment_status
+            if total_amount == 0:
+                payment_status = 'no_fee'
+            elif (os.paid_amount or 0) >= total_amount:
+                payment_status = 'paid'
+            elif (os.paid_amount or 0) > 0:
+                payment_status = 'partial'
+            else:
+                payment_status = 'unpaid'
+            
             # Format order_type display
             order_type_display = {
                 'tuition': 'Học phí',
@@ -801,10 +833,10 @@ def get_student_orders(finance_student_id=None):
                 "order_title": order_doc.title,
                 "order_type": order_doc.order_type,
                 "order_type_display": order_type_display.get(order_doc.order_type, order_doc.order_type),
-                "total_amount": os.total_amount or 0,
+                "total_amount": total_amount,
                 "paid_amount": os.paid_amount or 0,
-                "outstanding_amount": os.outstanding_amount or 0,
-                "payment_status": os.payment_status,
+                "outstanding_amount": outstanding_amount,
+                "payment_status": payment_status,
                 "is_active": order_doc.is_active,
                 "deadline": str(order_doc.deadline) if order_doc.deadline else None
             })
@@ -2499,6 +2531,7 @@ def import_student_fee_data():
 def _calculate_totals_v2(order_student_doc, order_doc):
     """
     Tính toán các dòng total/subtotal dựa trên formula.
+    Đồng thời cập nhật total_amount trên order_student_doc.
     """
     import re
     
@@ -2518,6 +2551,7 @@ def _calculate_totals_v2(order_student_doc, order_doc):
     ]
     
     # Tính toán các dòng có formula
+    total_line_amounts = {}  # Lưu amounts của dòng total
     for fee_line in order_student_doc.fee_lines:
         order_line = order_doc.get_fee_line(fee_line.line_number)
         if not order_line or not order_line.formula:
@@ -2542,6 +2576,33 @@ def _calculate_totals_v2(order_student_doc, order_doc):
         
         fee_line.amounts_json = json.dumps(calculated_amounts)
         fee_line.is_calculated = 1
+        
+        # Lưu lại amounts của dòng total (line_type='total')
+        if fee_line.line_type == 'total':
+            total_line_amounts = calculated_amounts
+            line_amounts[fee_line.line_number] = calculated_amounts
+    
+    # Cập nhật total_amount cho order_student_doc
+    # total_amount = tổng tất cả các milestone của dòng total (lấy milestone đầu tiên làm đại diện)
+    if total_line_amounts:
+        # Lấy giá trị milestone đầu tiên của yearly (thường là tổng phải đóng)
+        first_yearly_key = None
+        for m_key in milestone_keys:
+            if m_key.startswith('yearly_'):
+                first_yearly_key = m_key
+                break
+        
+        if first_yearly_key and first_yearly_key in total_line_amounts:
+            order_student_doc.total_amount = total_line_amounts[first_yearly_key]
+            order_student_doc.outstanding_amount = total_line_amounts[first_yearly_key] - (order_student_doc.paid_amount or 0)
+            
+            # Cập nhật payment_status
+            if order_student_doc.paid_amount and order_student_doc.paid_amount >= order_student_doc.total_amount:
+                order_student_doc.payment_status = 'paid'
+            elif order_student_doc.paid_amount and order_student_doc.paid_amount > 0:
+                order_student_doc.payment_status = 'partial'
+            else:
+                order_student_doc.payment_status = 'unpaid'
 
 
 # ==================== SEND BATCH APIs ====================
