@@ -2181,16 +2181,27 @@ def export_order_excel_template(order_id=None):
         headers = ["student_code", "student_name", "class_title"]
         header_labels = ["Mã học sinh", "Tên học sinh", "Lớp"]
         
+        # Sắp xếp milestones theo payment_scheme rồi milestone_number
+        sorted_milestones = sorted(
+            order_doc.milestones, 
+            key=lambda m: (m.payment_scheme or 'yearly', m.milestone_number)
+        )
+        
         # Thêm các cột số tiền theo từng line và milestone
         for line in order_doc.fee_lines:
             # Bỏ qua dòng tự động tính (total, subtotal có formula)
             if line.line_type in ['total', 'subtotal'] and line.formula:
                 continue
             
-            for milestone in order_doc.milestones:
-                col_name = f"{line.line_number}_m{milestone.milestone_number}"
+            for milestone in sorted_milestones:
+                scheme = milestone.payment_scheme or 'yearly'
+                # Key format: {line_number}_{scheme}_{milestone_number}
+                col_name = f"{line.line_number}_{scheme}_{milestone.milestone_number}"
                 headers.append(col_name)
-                header_labels.append(f"{line.line_number} - {milestone.title}")
+                
+                # Label hiển thị
+                scheme_label = "Năm" if scheme == 'yearly' else "Kỳ"
+                header_labels.append(f"{line.line_number} - {scheme_label} {milestone.milestone_number}: {milestone.title}")
         
         headers.append("note")
         header_labels.append("Ghi chú")
@@ -2216,8 +2227,9 @@ def export_order_excel_template(order_id=None):
             for line in order_doc.fee_lines:
                 if line.line_type in ['total', 'subtotal'] and line.formula:
                     continue
-                for milestone in order_doc.milestones:
-                    col_name = f"{line.line_number}_m{milestone.milestone_number}"
+                for milestone in sorted_milestones:
+                    scheme = milestone.payment_scheme or 'yearly'
+                    col_name = f"{line.line_number}_{scheme}_{milestone.milestone_number}"
                     row[col_name] = ""
             
             rows.append(row)
@@ -2228,7 +2240,14 @@ def export_order_excel_template(order_id=None):
                 "header_labels": header_labels,
                 "rows": rows,
                 "order_title": order_doc.title,
-                "milestones": [{"number": m.milestone_number, "title": m.title} for m in order_doc.milestones],
+                "milestones": [
+                    {
+                        "payment_scheme": m.payment_scheme or 'yearly',
+                        "number": m.milestone_number, 
+                        "title": m.title,
+                        "key": f"{m.payment_scheme or 'yearly'}_{m.milestone_number}"
+                    } for m in sorted_milestones
+                ],
                 "fee_lines": [{"number": l.line_number, "title_vn": l.title_vn, "title_en": l.title_en} for l in order_doc.fee_lines]
             },
             logs=logs
@@ -2304,10 +2323,13 @@ def import_student_fee_data():
                     
                     amounts = {}
                     for milestone in order_doc.milestones:
-                        col_name = f"{fee_line.line_number}_m{milestone.milestone_number}"
+                        scheme = milestone.payment_scheme or 'yearly'
+                        # Dùng key format mới: {line_number}_{scheme}_{milestone_number}
+                        col_name = f"{fee_line.line_number}_{scheme}_{milestone.milestone_number}"
                         if col_name in row and pd.notna(row[col_name]):
                             try:
-                                amounts[f"m{milestone.milestone_number}"] = float(row[col_name])
+                                # Key trong amounts_json: {scheme}_{milestone_number}
+                                amounts[f"{scheme}_{milestone.milestone_number}"] = float(row[col_name])
                             except (ValueError, TypeError):
                                 pass
                     
@@ -2368,8 +2390,11 @@ def _calculate_totals_v2(order_student_doc, order_doc):
             except:
                 line_amounts[fee_line.line_number] = {}
     
-    # Lấy danh sách milestones
-    milestone_keys = [f"m{m.milestone_number}" for m in order_doc.milestones]
+    # Lấy danh sách milestone keys với format mới: {scheme}_{number}
+    milestone_keys = [
+        f"{m.payment_scheme or 'yearly'}_{m.milestone_number}" 
+        for m in order_doc.milestones
+    ]
     
     # Tính toán các dòng có formula
     for fee_line in order_student_doc.fee_lines:
@@ -2575,9 +2600,14 @@ def get_unpaid_students(order_id=None):
 # ==================== DEBIT NOTE APIs ====================
 
 @frappe.whitelist()
-def get_debit_note_preview(order_student_id=None, milestone_number=None):
+def get_debit_note_preview(order_student_id=None, milestone_key=None):
     """
-    Lấy data để preview Debit Note cho học sinh và mốc cụ thể.
+    Lấy data để preview Debit Note cho học sinh.
+    Trả về số tiền cho TẤT CẢ các mốc (4 cột).
+    
+    Args:
+        order_student_id: ID của SIS Finance Order Student
+        milestone_key: Optional - key của mốc highlight (VD: yearly_1, semester_2)
     """
     logs = []
     
@@ -2587,8 +2617,8 @@ def get_debit_note_preview(order_student_id=None, milestone_number=None):
         
         if not order_student_id:
             order_student_id = frappe.request.args.get('order_student_id')
-        if not milestone_number:
-            milestone_number = frappe.request.args.get('milestone_number')
+        if not milestone_key:
+            milestone_key = frappe.request.args.get('milestone_key')
         
         if not order_student_id:
             return validation_error_response("Thiếu order_student_id", {"order_student_id": ["Bắt buộc"]})
@@ -2596,12 +2626,16 @@ def get_debit_note_preview(order_student_id=None, milestone_number=None):
         order_student = frappe.get_doc("SIS Finance Order Student", order_student_id)
         order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
         
-        if not milestone_number:
-            milestone_number = order_doc.milestones[0].milestone_number if order_doc.milestones else 1
-        else:
-            milestone_number = int(milestone_number)
+        # Sắp xếp milestones theo payment_scheme rồi milestone_number
+        sorted_milestones = sorted(
+            order_doc.milestones,
+            key=lambda m: (m.payment_scheme or 'yearly', m.milestone_number)
+        )
         
-        milestone_key = f"m{milestone_number}"
+        # Nếu không có milestone_key, dùng milestone đầu tiên
+        if not milestone_key and sorted_milestones:
+            first_m = sorted_milestones[0]
+            milestone_key = f"{first_m.payment_scheme or 'yearly'}_{first_m.milestone_number}"
         
         lines = []
         for fee_line in order_student.fee_lines:
@@ -2622,18 +2656,30 @@ def get_debit_note_preview(order_student_id=None, milestone_number=None):
                 "is_compulsory": order_line.is_compulsory if order_line else 0,
                 "is_deduction": order_line.is_deduction if order_line else 0,
                 "note": fee_line.note or (order_line.note if order_line else ""),
-                "amounts": amounts,
-                "amount_for_milestone": amounts.get(milestone_key, 0)
+                "amounts": amounts  # Tất cả amounts: {yearly_1: X, yearly_2: Y, semester_1: Z, semester_2: W}
             })
         
-        milestones_data = []
-        for m in order_doc.milestones:
-            milestones_data.append({
+        # Nhóm milestones theo payment_scheme
+        yearly_milestones = []
+        semester_milestones = []
+        
+        for m in sorted_milestones:
+            scheme = m.payment_scheme or 'yearly'
+            m_key = f"{scheme}_{m.milestone_number}"
+            m_data = {
+                "key": m_key,
+                "payment_scheme": scheme,
                 "milestone_number": m.milestone_number,
                 "title": m.title,
+                "column_header_en": m.column_header_en or m.title,
+                "column_header_vn": m.column_header_vn or m.title,
                 "deadline_date": str(m.deadline_date) if m.deadline_date else None,
-                "is_current": m.milestone_number == milestone_number
-            })
+                "is_current": m_key == milestone_key
+            }
+            if scheme == 'yearly':
+                yearly_milestones.append(m_data)
+            else:
+                semester_milestones.append(m_data)
         
         return success_response(
             data={
@@ -2647,8 +2693,9 @@ def get_debit_note_preview(order_student_id=None, milestone_number=None):
                     "name": order_doc.name,
                     "title": order_doc.title
                 },
-                "current_milestone": milestone_number,
-                "milestones": milestones_data,
+                "current_milestone_key": milestone_key,
+                "yearly_milestones": yearly_milestones,    # Đóng cả năm
+                "semester_milestones": semester_milestones, # Đóng theo kỳ
                 "lines": lines
             },
             logs=logs
