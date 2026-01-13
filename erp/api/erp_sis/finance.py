@@ -740,6 +740,110 @@ def get_finance_students(finance_year_id=None, search=None, page=1, page_size=20
         )
 
 
+@frappe.whitelist()
+def get_student_orders(finance_student_id=None):
+    """
+    Lấy danh sách các order mà một học sinh có trong năm tài chính.
+    
+    Args:
+        finance_student_id: ID của SIS Finance Student
+    
+    Returns:
+        Danh sách orders với thông tin chi tiết số tiền
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not finance_student_id:
+            finance_student_id = frappe.request.args.get('finance_student_id')
+        
+        if not finance_student_id:
+            return validation_error_response(
+                "Thiếu finance_student_id",
+                {"finance_student_id": ["Bắt buộc"]}
+            )
+        
+        logs.append(f"Lấy orders cho học sinh: {finance_student_id}")
+        
+        # Lấy thông tin học sinh
+        finance_student = frappe.get_doc("SIS Finance Student", finance_student_id)
+        
+        # Lấy tất cả order student records
+        order_students = frappe.get_all(
+            "SIS Finance Order Student",
+            filters={"finance_student_id": finance_student_id},
+            fields=[
+                "name", "order_id", "total_amount", "paid_amount", "outstanding_amount",
+                "payment_status", "student_code", "student_name", "class_title"
+            ],
+            order_by="creation asc"
+        )
+        
+        orders = []
+        for os in order_students:
+            # Lấy thông tin order
+            order_doc = frappe.get_doc("SIS Finance Order", os.order_id)
+            
+            # Format order_type display
+            order_type_display = {
+                'tuition': 'Học phí',
+                'service': 'Phí dịch vụ',
+                'activity': 'Phí hoạt động',
+                'other': 'Khác'
+            }
+            
+            orders.append({
+                "order_student_id": os.name,
+                "order_id": os.order_id,
+                "order_title": order_doc.title,
+                "order_type": order_doc.order_type,
+                "order_type_display": order_type_display.get(order_doc.order_type, order_doc.order_type),
+                "total_amount": os.total_amount or 0,
+                "paid_amount": os.paid_amount or 0,
+                "outstanding_amount": os.outstanding_amount or 0,
+                "payment_status": os.payment_status,
+                "is_active": order_doc.is_active,
+                "deadline": str(order_doc.deadline) if order_doc.deadline else None
+            })
+        
+        # Tính tổng
+        total_amount = sum(o['total_amount'] for o in orders)
+        total_paid = sum(o['paid_amount'] for o in orders)
+        total_outstanding = sum(o['outstanding_amount'] for o in orders)
+        
+        logs.append(f"Tìm thấy {len(orders)} orders")
+        
+        return success_response(
+            data={
+                "student": {
+                    "name": finance_student.name,
+                    "student_code": finance_student.student_code,
+                    "student_name": finance_student.student_name,
+                    "class_title": finance_student.class_title
+                },
+                "orders": orders,
+                "summary": {
+                    "total_orders": len(orders),
+                    "total_amount": total_amount,
+                    "total_paid": total_paid,
+                    "total_outstanding": total_outstanding
+                }
+            },
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Get Student Orders Error")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách orders: {str(e)}",
+            logs=logs
+        )
+
+
 # ==================== FINANCE ORDER APIs ====================
 
 @frappe.whitelist()
@@ -2643,6 +2747,14 @@ def get_debit_note_preview(order_student_id=None, milestone_key=None):
         order_student = frappe.get_doc("SIS Finance Order Student", order_student_id)
         order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
         
+        # Lấy ngày sinh từ CRM Student thông qua SIS Finance Student
+        student_dob = None
+        if order_student.finance_student_id:
+            finance_student = frappe.get_doc("SIS Finance Student", order_student.finance_student_id)
+            if finance_student.student_id:
+                crm_student = frappe.get_doc("CRM Student", finance_student.student_id)
+                student_dob = str(crm_student.dob) if crm_student.dob else None
+        
         # Sắp xếp milestones theo payment_scheme rồi milestone_number
         sorted_milestones = sorted(
             order_doc.milestones,
@@ -2704,7 +2816,8 @@ def get_debit_note_preview(order_student_id=None, milestone_key=None):
                     "name": order_student.name,
                     "student_code": order_student.student_code,
                     "student_name": order_student.student_name,
-                    "class_title": order_student.class_title
+                    "class_title": order_student.class_title,
+                    "date_of_birth": student_dob
                 },
                 "order": {
                     "name": order_doc.name,
