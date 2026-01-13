@@ -2298,13 +2298,18 @@ def import_student_fee_data():
         
         logs.append(f"Import số tiền cho đơn hàng: {order_id}")
         
-        # Đọc Excel
+        # Đọc Excel - skip dòng 1 (label tiếng Việt), dùng dòng 2 làm header
         import pandas as pd
-        df = pd.read_excel(file)
+        df = pd.read_excel(file, header=1)  # header=1 nghĩa là dòng thứ 2 (0-indexed)
+        
+        logs.append(f"Columns in Excel: {list(df.columns)}")
         
         # Validate cột student_code
         if 'student_code' not in df.columns:
-            return validation_error_response("Thiếu cột student_code", {"file": ["Cần có cột student_code"]})
+            return validation_error_response(
+                "Thiếu cột student_code", 
+                {"file": [f"Cần có cột student_code. Các cột hiện tại: {list(df.columns)[:5]}..."]}
+            )
         
         success_count = 0
         error_count = 0
