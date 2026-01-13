@@ -28,7 +28,8 @@ PDF_SERVICE_URL = frappe.conf.get("pdf_service_url", "http://172.16.20.113:5020"
 def _check_admin_permission():
     """Kiểm tra quyền admin"""
     user_roles = frappe.get_roles(frappe.session.user)
-    allowed_roles = ['System Manager', 'SIS Manager', 'Registrar', 'SIS BOD']
+    # SIS Sale có full quyền trên module Re-enrollment
+    allowed_roles = ['System Manager', 'SIS BOD', 'SIS Sale']
     
     if not any(role in user_roles for role in allowed_roles):
         return False
