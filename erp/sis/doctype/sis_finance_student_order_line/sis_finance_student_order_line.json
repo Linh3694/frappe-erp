@@ -1,0 +1,89 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "beta": 0,
+ "creation": "2026-01-13 00:00:00.000000",
+ "custom": 0,
+ "description": "Số tiền cụ thể của từng học sinh theo từng dòng và từng mốc deadline",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "order_line_idx",
+  "line_number",
+  "line_type",
+  "amounts_json",
+  "note",
+  "is_calculated"
+ ],
+ "fields": [
+  {
+   "fieldname": "order_line_idx",
+   "fieldtype": "Int",
+   "label": "Index dòng gốc",
+   "reqd": 1,
+   "description": "Index của dòng trong Order.fee_lines để map"
+  },
+  {
+   "fieldname": "line_number",
+   "fieldtype": "Data",
+   "label": "STT",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Copy từ Order Line: 1, 1.1, 2, 3..."
+  },
+  {
+   "fieldname": "line_type",
+   "fieldtype": "Select",
+   "label": "Loại dòng",
+   "options": "category\nitem\nsubtotal\ntotal",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Copy từ Order Line"
+  },
+  {
+   "fieldname": "amounts_json",
+   "fieldtype": "JSON",
+   "label": "Số tiền (JSON)",
+   "in_list_view": 1,
+   "columns": 5,
+   "description": "Số tiền theo từng mốc: {\"m1\": 15000000, \"m2\": 16000000, ...}"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Data",
+   "label": "Ghi chú",
+   "in_list_view": 1,
+   "columns": 2,
+   "description": "Ghi chú riêng cho học sinh này ở dòng này"
+  },
+  {
+   "fieldname": "is_calculated",
+   "fieldtype": "Check",
+   "label": "Tự động tính",
+   "default": 0,
+   "description": "Đánh dấu dòng này được tính tự động từ formula"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-01-13 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Student Order Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "order_line_idx",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

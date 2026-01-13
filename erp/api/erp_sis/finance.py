@@ -1702,3 +1702,984 @@ def export_finance_data(finance_year_id=None):
         logs.append(f"Lỗi: {str(e)}")
         return error_response(f"Lỗi: {str(e)}", logs=logs)
 
+
+# ==================== NEW ORDER APIs (with milestones & fee_lines) ====================
+
+@frappe.whitelist()
+def create_order_with_structure():
+    """
+    Tạo đơn hàng mới với cấu trúc milestones và fee_lines.
+    
+    Body:
+        finance_year_id: ID năm tài chính
+        title: Tên đơn hàng
+        order_type: Loại (tuition/service/activity/other)
+        milestones: List[{milestone_number, title, deadline_date, description}]
+        fee_lines: List[{line_number, line_type, title_en, title_vn, is_compulsory, is_deduction, formula, note}]
+    
+    Returns:
+        Thông tin đơn hàng vừa tạo
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền tạo đơn hàng", logs=logs)
+        
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        logs.append(f"Tạo đơn hàng với cấu trúc mới: {data.get('title')}")
+        
+        # Validate required fields
+        if not data.get('finance_year_id'):
+            return validation_error_response("Thiếu finance_year_id", {"finance_year_id": ["Bắt buộc"]})
+        if not data.get('title'):
+            return validation_error_response("Thiếu title", {"title": ["Bắt buộc"]})
+        
+        # Tạo đơn hàng
+        order_doc = frappe.get_doc({
+            "doctype": "SIS Finance Order",
+            "finance_year_id": data['finance_year_id'],
+            "title": data['title'],
+            "order_type": data.get('order_type', 'tuition'),
+            "status": "draft",
+            "is_active": data.get('is_active', 1),
+            "is_required": data.get('is_required', 1),
+            "description": data.get('description', '')
+        })
+        
+        # Thêm milestones
+        milestones = data.get('milestones', [])
+        if isinstance(milestones, str):
+            milestones = json.loads(milestones)
+        
+        for m in milestones:
+            order_doc.append("milestones", {
+                "milestone_number": m.get('milestone_number'),
+                "title": m.get('title'),
+                "deadline_date": m.get('deadline_date'),
+                "description": m.get('description', '')
+            })
+        
+        # Thêm fee_lines
+        fee_lines = data.get('fee_lines', [])
+        if isinstance(fee_lines, str):
+            fee_lines = json.loads(fee_lines)
+        
+        for idx, line in enumerate(fee_lines):
+            order_doc.append("fee_lines", {
+                "line_number": line.get('line_number'),
+                "line_type": line.get('line_type', 'item'),
+                "title_en": line.get('title_en'),
+                "title_vn": line.get('title_vn'),
+                "is_compulsory": line.get('is_compulsory', 0),
+                "is_deduction": line.get('is_deduction', 0),
+                "formula": line.get('formula', ''),
+                "note": line.get('note', ''),
+                "sort_order": idx
+            })
+        
+        order_doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        logs.append(f"Đã tạo đơn hàng: {order_doc.name}")
+        
+        return success_response(
+            data={
+                "name": order_doc.name,
+                "title": order_doc.title,
+                "status": order_doc.status,
+                "milestones_count": len(order_doc.milestones),
+                "fee_lines_count": len(order_doc.fee_lines)
+            },
+            message="Tạo đơn hàng thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Create Order With Structure Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_order_with_structure(order_id=None):
+    """
+    Lấy chi tiết đơn hàng kèm milestones và fee_lines.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not order_id:
+            order_id = frappe.request.args.get('order_id')
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        if not frappe.db.exists("SIS Finance Order", order_id):
+            return not_found_response(f"Không tìm thấy đơn hàng: {order_id}")
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        
+        # Build response
+        data = {
+            "name": order_doc.name,
+            "finance_year_id": order_doc.finance_year_id,
+            "title": order_doc.title,
+            "order_type": order_doc.order_type,
+            "status": order_doc.status,
+            "is_active": order_doc.is_active,
+            "is_required": order_doc.is_required,
+            "description": order_doc.description,
+            "total_students": order_doc.total_students,
+            "data_completed_count": order_doc.data_completed_count,
+            "total_collected": order_doc.total_collected,
+            "total_outstanding": order_doc.total_outstanding,
+            "collection_rate": order_doc.collection_rate,
+            "milestones": [],
+            "fee_lines": []
+        }
+        
+        # Add milestones
+        for m in order_doc.milestones:
+            data["milestones"].append({
+                "milestone_number": m.milestone_number,
+                "title": m.title,
+                "deadline_date": str(m.deadline_date) if m.deadline_date else None,
+                "description": m.description
+            })
+        
+        # Add fee_lines
+        for line in order_doc.fee_lines:
+            data["fee_lines"].append({
+                "idx": line.idx,
+                "line_number": line.line_number,
+                "line_type": line.line_type,
+                "title_en": line.title_en,
+                "title_vn": line.title_vn,
+                "is_compulsory": line.is_compulsory,
+                "is_deduction": line.is_deduction,
+                "formula": line.formula,
+                "note": line.note,
+                "sort_order": line.sort_order
+            })
+        
+        return single_item_response(data, logs=logs)
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def update_order_structure():
+    """
+    Cập nhật cấu trúc milestones và fee_lines của đơn hàng.
+    Chỉ cho phép khi status = draft hoặc students_added.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền cập nhật", logs=logs)
+        
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        order_id = data.get('order_id')
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        if not frappe.db.exists("SIS Finance Order", order_id):
+            return not_found_response(f"Không tìm thấy: {order_id}")
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        
+        # Chỉ cho phép cập nhật khi status phù hợp
+        if order_doc.status not in ['draft', 'students_added']:
+            return error_response(f"Không thể cập nhật khi status = {order_doc.status}")
+        
+        # Cập nhật milestones
+        if 'milestones' in data:
+            milestones = data['milestones']
+            if isinstance(milestones, str):
+                milestones = json.loads(milestones)
+            
+            order_doc.milestones = []
+            for m in milestones:
+                order_doc.append("milestones", {
+                    "milestone_number": m.get('milestone_number'),
+                    "title": m.get('title'),
+                    "deadline_date": m.get('deadline_date'),
+                    "description": m.get('description', '')
+                })
+        
+        # Cập nhật fee_lines
+        if 'fee_lines' in data:
+            fee_lines = data['fee_lines']
+            if isinstance(fee_lines, str):
+                fee_lines = json.loads(fee_lines)
+            
+            order_doc.fee_lines = []
+            for idx, line in enumerate(fee_lines):
+                order_doc.append("fee_lines", {
+                    "line_number": line.get('line_number'),
+                    "line_type": line.get('line_type', 'item'),
+                    "title_en": line.get('title_en'),
+                    "title_vn": line.get('title_vn'),
+                    "is_compulsory": line.get('is_compulsory', 0),
+                    "is_deduction": line.get('is_deduction', 0),
+                    "formula": line.get('formula', ''),
+                    "note": line.get('note', ''),
+                    "sort_order": idx
+                })
+        
+        order_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        logs.append(f"Đã cập nhật cấu trúc đơn hàng: {order_id}")
+        
+        return success_response(
+            data={"name": order_doc.name},
+            message="Cập nhật thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+# ==================== STUDENT POOL APIs ====================
+
+@frappe.whitelist()
+def add_students_to_order_v2():
+    """
+    Thêm học sinh vào đơn hàng (version mới).
+    Tạo Order Student và Student Order Lines (rỗng, chưa có số tiền).
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền thêm học sinh", logs=logs)
+        
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        order_id = data.get('order_id')
+        student_ids = data.get('student_ids', [])
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        if not student_ids:
+            return validation_error_response("Thiếu student_ids", {"student_ids": ["Bắt buộc"]})
+        
+        if isinstance(student_ids, str):
+            student_ids = json.loads(student_ids)
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        
+        if not order_doc.can_add_students():
+            return error_response(f"Không thể thêm học sinh khi status = {order_doc.status}")
+        
+        logs.append(f"Thêm {len(student_ids)} học sinh vào đơn hàng {order_id}")
+        
+        created_count = 0
+        skipped_count = 0
+        
+        for student_id in student_ids:
+            try:
+                # Kiểm tra đã có chưa
+                existing = frappe.db.exists("SIS Finance Order Student", {
+                    "order_id": order_id,
+                    "finance_student_id": student_id
+                })
+                
+                if existing:
+                    skipped_count += 1
+                    continue
+                
+                # Tạo Order Student
+                order_student = frappe.get_doc({
+                    "doctype": "SIS Finance Order Student",
+                    "order_id": order_id,
+                    "finance_student_id": student_id,
+                    "data_status": "pending",
+                    "payment_status": "unpaid"
+                })
+                
+                # Tạo Student Order Lines từ fee_lines của order
+                for line in order_doc.fee_lines:
+                    order_student.append("fee_lines", {
+                        "order_line_idx": line.idx,
+                        "line_number": line.line_number,
+                        "line_type": line.line_type,
+                        "amounts_json": "{}",
+                        "is_calculated": 1 if line.formula else 0
+                    })
+                
+                order_student.insert(ignore_permissions=True)
+                created_count += 1
+                
+            except Exception as e:
+                logs.append(f"Lỗi khi thêm học sinh {student_id}: {str(e)}")
+                continue
+        
+        frappe.db.commit()
+        
+        # Cập nhật thống kê
+        order_doc.update_statistics()
+        order_doc.update_status_based_on_students()
+        
+        logs.append(f"Đã thêm {created_count} học sinh, bỏ qua {skipped_count}")
+        
+        return success_response(
+            data={
+                "created_count": created_count,
+                "skipped_count": skipped_count,
+                "total": len(student_ids),
+                "order_id": order_id
+            },
+            message=f"Thêm thành công {created_count} học sinh",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Add Students To Order V2 Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_order_students_v2(order_id=None, search=None, data_status=None, payment_status=None, page=1, page_size=20):
+    """
+    Lấy danh sách học sinh trong đơn hàng (version mới với Order Student).
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not order_id:
+            order_id = frappe.request.args.get('order_id')
+        if not search:
+            search = frappe.request.args.get('search')
+        if not data_status:
+            data_status = frappe.request.args.get('data_status')
+        if not payment_status:
+            payment_status = frappe.request.args.get('payment_status')
+        
+        page = int(frappe.request.args.get('page', page))
+        page_size = int(frappe.request.args.get('page_size', page_size))
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        # Build where clause
+        where_clauses = ["os.order_id = %(order_id)s"]
+        params = {"order_id": order_id}
+        
+        if search:
+            where_clauses.append("(os.student_name LIKE %(search)s OR os.student_code LIKE %(search)s)")
+            params["search"] = f"%{search}%"
+        
+        if data_status:
+            where_clauses.append("os.data_status = %(data_status)s")
+            params["data_status"] = data_status
+        
+        if payment_status:
+            where_clauses.append("os.payment_status = %(payment_status)s")
+            params["payment_status"] = payment_status
+        
+        where_sql = " AND ".join(where_clauses)
+        
+        # Count total
+        total = frappe.db.sql(f"""
+            SELECT COUNT(*) as count
+            FROM `tabSIS Finance Order Student` os
+            WHERE {where_sql}
+        """, params, as_dict=True)[0].count
+        
+        # Pagination
+        offset = (page - 1) * page_size
+        total_pages = (total + page_size - 1) // page_size
+        
+        # Get students
+        students = frappe.db.sql(f"""
+            SELECT 
+                os.name, os.order_id, os.finance_student_id,
+                os.student_name, os.student_code, os.class_title,
+                os.data_status, os.total_amount, os.paid_amount,
+                os.outstanding_amount, os.payment_status,
+                os.latest_debit_note_version, os.latest_debit_note_url
+            FROM `tabSIS Finance Order Student` os
+            WHERE {where_sql}
+            ORDER BY os.student_name ASC
+            LIMIT %(page_size)s OFFSET %(offset)s
+        """, {**params, "page_size": page_size, "offset": offset}, as_dict=True)
+        
+        return success_response(
+            data={
+                "items": students,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages
+            },
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+# ==================== EXCEL IMPORT/EXPORT APIs ====================
+
+@frappe.whitelist()
+def export_order_excel_template(order_id=None):
+    """
+    Export Excel template để admin điền số tiền.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền xuất template", logs=logs)
+        
+        if not order_id:
+            order_id = frappe.request.args.get('order_id')
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        
+        # Build headers
+        headers = ["student_code", "student_name", "class_title"]
+        header_labels = ["Mã học sinh", "Tên học sinh", "Lớp"]
+        
+        # Thêm các cột số tiền theo từng line và milestone
+        for line in order_doc.fee_lines:
+            # Bỏ qua dòng tự động tính (total, subtotal có formula)
+            if line.line_type in ['total', 'subtotal'] and line.formula:
+                continue
+            
+            for milestone in order_doc.milestones:
+                col_name = f"{line.line_number}_m{milestone.milestone_number}"
+                headers.append(col_name)
+                header_labels.append(f"{line.line_number} - {milestone.title}")
+        
+        headers.append("note")
+        header_labels.append("Ghi chú")
+        
+        # Get students
+        students = frappe.get_all(
+            "SIS Finance Order Student",
+            filters={"order_id": order_id},
+            fields=["name", "student_code", "student_name", "class_title", "notes"]
+        )
+        
+        # Build rows
+        rows = []
+        for student in students:
+            row = {
+                "student_code": student.student_code,
+                "student_name": student.student_name,
+                "class_title": student.class_title,
+                "note": student.notes or ""
+            }
+            
+            # Thêm các cột số tiền (rỗng)
+            for line in order_doc.fee_lines:
+                if line.line_type in ['total', 'subtotal'] and line.formula:
+                    continue
+                for milestone in order_doc.milestones:
+                    col_name = f"{line.line_number}_m{milestone.milestone_number}"
+                    row[col_name] = ""
+            
+            rows.append(row)
+        
+        return success_response(
+            data={
+                "headers": headers,
+                "header_labels": header_labels,
+                "rows": rows,
+                "order_title": order_doc.title,
+                "milestones": [{"number": m.milestone_number, "title": m.title} for m in order_doc.milestones],
+                "fee_lines": [{"number": l.line_number, "title_vn": l.title_vn, "title_en": l.title_en} for l in order_doc.fee_lines]
+            },
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def import_student_fee_data():
+    """
+    Import số tiền từ Excel.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền import", logs=logs)
+        
+        files = frappe.request.files
+        if 'file' not in files:
+            return validation_error_response("Thiếu file", {"file": ["File Excel là bắt buộc"]})
+        
+        file = files['file']
+        order_id = frappe.form_dict.get('order_id')
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        
+        if not order_doc.can_import_data():
+            return error_response(f"Không thể import khi status = {order_doc.status}")
+        
+        logs.append(f"Import số tiền cho đơn hàng: {order_id}")
+        
+        # Đọc Excel
+        import pandas as pd
+        df = pd.read_excel(file)
+        
+        # Validate cột student_code
+        if 'student_code' not in df.columns:
+            return validation_error_response("Thiếu cột student_code", {"file": ["Cần có cột student_code"]})
+        
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            try:
+                student_code = str(row['student_code']).strip()
+                
+                # Tìm Order Student
+                order_student = frappe.db.get_value(
+                    "SIS Finance Order Student",
+                    {"order_id": order_id, "student_code": student_code},
+                    "name"
+                )
+                
+                if not order_student:
+                    errors.append({"row": idx + 2, "error": f"Không tìm thấy học sinh: {student_code}"})
+                    error_count += 1
+                    continue
+                
+                order_student_doc = frappe.get_doc("SIS Finance Order Student", order_student)
+                
+                # Cập nhật số tiền cho từng line
+                for fee_line in order_student_doc.fee_lines:
+                    if fee_line.is_calculated:
+                        continue
+                    
+                    amounts = {}
+                    for milestone in order_doc.milestones:
+                        col_name = f"{fee_line.line_number}_m{milestone.milestone_number}"
+                        if col_name in row and pd.notna(row[col_name]):
+                            try:
+                                amounts[f"m{milestone.milestone_number}"] = float(row[col_name])
+                            except (ValueError, TypeError):
+                                pass
+                    
+                    if amounts:
+                        fee_line.amounts_json = json.dumps(amounts)
+                
+                # Tính toán các dòng total/subtotal
+                _calculate_totals_v2(order_student_doc, order_doc)
+                
+                # Cập nhật note
+                if 'note' in row and pd.notna(row['note']):
+                    order_student_doc.notes = str(row['note'])
+                
+                order_student_doc.save(ignore_permissions=True)
+                success_count += 1
+                
+            except Exception as e:
+                errors.append({"row": idx + 2, "error": str(e), "student_code": row.get('student_code', '')})
+                error_count += 1
+        
+        frappe.db.commit()
+        
+        # Cập nhật statistics
+        order_doc.update_statistics()
+        order_doc.update_status_based_on_students()
+        
+        logs.append(f"Import xong: {success_count} thành công, {error_count} lỗi")
+        
+        return success_response(
+            data={
+                "success_count": success_count,
+                "error_count": error_count,
+                "total_count": len(df),
+                "errors": errors[:20]
+            },
+            message=f"Import thành công {success_count}/{len(df)} dòng",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Import Student Fee Data Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+def _calculate_totals_v2(order_student_doc, order_doc):
+    """
+    Tính toán các dòng total/subtotal dựa trên formula.
+    """
+    import re
+    
+    # Lấy tất cả amounts theo line_number
+    line_amounts = {}
+    for fee_line in order_student_doc.fee_lines:
+        if fee_line.amounts_json:
+            try:
+                line_amounts[fee_line.line_number] = json.loads(fee_line.amounts_json)
+            except:
+                line_amounts[fee_line.line_number] = {}
+    
+    # Lấy danh sách milestones
+    milestone_keys = [f"m{m.milestone_number}" for m in order_doc.milestones]
+    
+    # Tính toán các dòng có formula
+    for fee_line in order_student_doc.fee_lines:
+        order_line = order_doc.get_fee_line(fee_line.line_number)
+        if not order_line or not order_line.formula:
+            continue
+        
+        formula = order_line.formula
+        calculated_amounts = {}
+        
+        for m_key in milestone_keys:
+            eval_formula = formula
+            matches = re.findall(r'\(([0-9.]+)\)', formula)
+            
+            for match in matches:
+                value = line_amounts.get(match, {}).get(m_key, 0) or 0
+                eval_formula = eval_formula.replace(f"({match})", str(value))
+            
+            try:
+                result = eval(eval_formula)
+                calculated_amounts[m_key] = result
+            except:
+                calculated_amounts[m_key] = 0
+        
+        fee_line.amounts_json = json.dumps(calculated_amounts)
+        fee_line.is_calculated = 1
+
+
+# ==================== SEND BATCH APIs ====================
+
+@frappe.whitelist()
+def create_send_batch():
+    """
+    Tạo đợt gửi thông báo mới.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền tạo đợt gửi", logs=logs)
+        
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        order_id = data.get('order_id')
+        milestone_number = data.get('milestone_number')
+        student_ids = data.get('student_ids', [])
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        if not milestone_number:
+            return validation_error_response("Thiếu milestone_number", {"milestone_number": ["Bắt buộc"]})
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        
+        if not order_doc.can_create_send_batch():
+            return error_response(f"Không thể tạo đợt gửi khi status = {order_doc.status}")
+        
+        if isinstance(student_ids, str):
+            student_ids = json.loads(student_ids)
+        
+        # Nếu không chỉ định student_ids, lấy tất cả chưa đóng
+        if not student_ids:
+            students = frappe.get_all(
+                "SIS Finance Order Student",
+                filters={"order_id": order_id, "payment_status": ["!=", "paid"]},
+                fields=["name"]
+            )
+            student_ids = [s.name for s in students]
+        
+        if not student_ids:
+            return error_response("Không có học sinh nào để gửi")
+        
+        logs.append(f"Tạo đợt gửi cho {len(student_ids)} học sinh, mốc {milestone_number}")
+        
+        # Tạo Send Batch
+        batch_doc = frappe.get_doc({
+            "doctype": "SIS Finance Send Batch",
+            "order_id": order_id,
+            "milestone_number": int(milestone_number),
+            "total_students": len(student_ids),
+            "status": "draft",
+            "notification_template": data.get('notification_template', ''),
+            "notification_channel": data.get('notification_channel', 'app')
+        })
+        batch_doc.insert(ignore_permissions=True)
+        
+        # Tạo Debit Note History cho từng học sinh
+        for student_id in student_ids:
+            try:
+                order_student = frappe.get_doc("SIS Finance Order Student", student_id)
+                
+                # Tạo snapshot số tiền
+                amount_snapshot = {}
+                for fee_line in order_student.fee_lines:
+                    if fee_line.amounts_json:
+                        amount_snapshot[fee_line.line_number] = json.loads(fee_line.amounts_json)
+                
+                # Tạo Debit Note History
+                history_doc = frappe.get_doc({
+                    "doctype": "SIS Finance Debit Note History",
+                    "order_student_id": student_id,
+                    "send_batch_id": batch_doc.name,
+                    "milestone_number": int(milestone_number),
+                    "amount_snapshot": json.dumps(amount_snapshot)
+                })
+                history_doc.insert(ignore_permissions=True)
+                
+            except Exception as e:
+                logs.append(f"Lỗi tạo history cho {student_id}: {str(e)}")
+        
+        frappe.db.commit()
+        
+        return success_response(
+            data={
+                "name": batch_doc.name,
+                "batch_number": batch_doc.batch_number,
+                "milestone_number": batch_doc.milestone_number,
+                "total_students": batch_doc.total_students,
+                "status": batch_doc.status
+            },
+            message=f"Tạo đợt gửi #{batch_doc.batch_number} thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Create Send Batch Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_send_batches(order_id=None):
+    """
+    Lấy danh sách các đợt gửi của đơn hàng.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not order_id:
+            order_id = frappe.request.args.get('order_id')
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        batches = frappe.get_all(
+            "SIS Finance Send Batch",
+            filters={"order_id": order_id},
+            fields=[
+                "name", "batch_number", "milestone_number", "milestone_title",
+                "status", "total_students", "sent_at", "sent_by",
+                "sent_count", "failed_count", "read_count"
+            ],
+            order_by="batch_number desc"
+        )
+        
+        return list_response(batches, logs=logs)
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_unpaid_students(order_id=None):
+    """
+    Lấy danh sách học sinh chưa đóng tiền.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not order_id:
+            order_id = frappe.request.args.get('order_id')
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        students = frappe.get_all(
+            "SIS Finance Order Student",
+            filters={
+                "order_id": order_id,
+                "payment_status": ["!=", "paid"],
+                "data_status": "complete"
+            },
+            fields=["name", "student_code", "student_name", "class_title", "total_amount", "paid_amount", "outstanding_amount", "payment_status"]
+        )
+        
+        return list_response(students, logs=logs)
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+# ==================== DEBIT NOTE APIs ====================
+
+@frappe.whitelist()
+def get_debit_note_preview(order_student_id=None, milestone_number=None):
+    """
+    Lấy data để preview Debit Note cho học sinh và mốc cụ thể.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not order_student_id:
+            order_student_id = frappe.request.args.get('order_student_id')
+        if not milestone_number:
+            milestone_number = frappe.request.args.get('milestone_number')
+        
+        if not order_student_id:
+            return validation_error_response("Thiếu order_student_id", {"order_student_id": ["Bắt buộc"]})
+        
+        order_student = frappe.get_doc("SIS Finance Order Student", order_student_id)
+        order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
+        
+        if not milestone_number:
+            milestone_number = order_doc.milestones[0].milestone_number if order_doc.milestones else 1
+        else:
+            milestone_number = int(milestone_number)
+        
+        milestone_key = f"m{milestone_number}"
+        
+        lines = []
+        for fee_line in order_student.fee_lines:
+            order_line = order_doc.get_fee_line(fee_line.line_number)
+            
+            amounts = {}
+            if fee_line.amounts_json:
+                try:
+                    amounts = json.loads(fee_line.amounts_json)
+                except:
+                    pass
+            
+            lines.append({
+                "line_number": fee_line.line_number,
+                "line_type": fee_line.line_type,
+                "title_en": order_line.title_en if order_line else "",
+                "title_vn": order_line.title_vn if order_line else "",
+                "is_compulsory": order_line.is_compulsory if order_line else 0,
+                "is_deduction": order_line.is_deduction if order_line else 0,
+                "note": fee_line.note or (order_line.note if order_line else ""),
+                "amounts": amounts,
+                "amount_for_milestone": amounts.get(milestone_key, 0)
+            })
+        
+        milestones_data = []
+        for m in order_doc.milestones:
+            milestones_data.append({
+                "milestone_number": m.milestone_number,
+                "title": m.title,
+                "deadline_date": str(m.deadline_date) if m.deadline_date else None,
+                "is_current": m.milestone_number == milestone_number
+            })
+        
+        return success_response(
+            data={
+                "student": {
+                    "name": order_student.name,
+                    "student_code": order_student.student_code,
+                    "student_name": order_student.student_name,
+                    "class_title": order_student.class_title
+                },
+                "order": {
+                    "name": order_doc.name,
+                    "title": order_doc.title
+                },
+                "current_milestone": milestone_number,
+                "milestones": milestones_data,
+                "lines": lines
+            },
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_debit_note_history(order_student_id=None):
+    """
+    Lấy lịch sử các phiên bản Debit Note của học sinh.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not order_student_id:
+            order_student_id = frappe.request.args.get('order_student_id')
+        
+        if not order_student_id:
+            return validation_error_response("Thiếu order_student_id", {"order_student_id": ["Bắt buộc"]})
+        
+        histories = frappe.get_all(
+            "SIS Finance Debit Note History",
+            filters={"order_student_id": order_student_id},
+            fields=[
+                "name", "version", "milestone_number", "milestone_title",
+                "generated_at", "pdf_url", "sent_via", "sent_at", "read_at"
+            ],
+            order_by="version desc"
+        )
+        
+        return list_response(histories, logs=logs)
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+

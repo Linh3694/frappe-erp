@@ -1,0 +1,206 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS-FIN-DNH-{#####}",
+ "beta": 0,
+ "creation": "2026-01-13 00:00:00.000000",
+ "custom": 0,
+ "description": "Lịch sử các phiên bản Debit Note của học sinh - v1, v2, v3...",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "order_student_id",
+  "send_batch_id",
+  "version",
+  "column_break_basic",
+  "milestone_number",
+  "milestone_title",
+  "generated_at",
+  "pdf_section",
+  "pdf_url",
+  "amount_snapshot",
+  "notification_section",
+  "sent_via",
+  "sent_at",
+  "column_break_notification",
+  "read_at",
+  "read_by_device"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "order_student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh",
+   "options": "SIS Finance Order Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "send_batch_id",
+   "fieldtype": "Link",
+   "label": "Đợt gửi",
+   "options": "SIS Finance Send Batch",
+   "in_list_view": 1,
+   "description": "Đợt gửi tạo ra Debit Note này"
+  },
+  {
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Phiên bản",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Số phiên bản: 1, 2, 3..."
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "milestone_number",
+   "fieldtype": "Int",
+   "label": "Mốc áp dụng",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Mốc deadline được áp dụng cho Debit Note này"
+  },
+  {
+   "fieldname": "milestone_title",
+   "fieldtype": "Data",
+   "label": "Tên mốc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "generated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "pdf_section",
+   "fieldtype": "Section Break",
+   "label": "File PDF"
+  },
+  {
+   "fieldname": "pdf_url",
+   "fieldtype": "Data",
+   "label": "URL PDF",
+   "description": "URL file PDF Debit Note"
+  },
+  {
+   "fieldname": "amount_snapshot",
+   "fieldtype": "JSON",
+   "label": "Snapshot số tiền",
+   "description": "Snapshot số tiền tại thời điểm generate - để lưu lịch sử"
+  },
+  {
+   "fieldname": "notification_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin gửi"
+  },
+  {
+   "fieldname": "sent_via",
+   "fieldtype": "Select",
+   "label": "Kênh gửi",
+   "options": "\napp\nemail\nsms",
+   "description": "Kênh đã gửi thông báo"
+  },
+  {
+   "fieldname": "sent_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian gửi",
+   "description": "Thời gian gửi thực tế"
+  },
+  {
+   "fieldname": "column_break_notification",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "read_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian xem",
+   "description": "Thời gian phụ huynh xem thông báo"
+  },
+  {
+   "fieldname": "read_by_device",
+   "fieldtype": "Data",
+   "label": "Thiết bị xem",
+   "description": "Thông tin thiết bị đã xem (nếu tracking)"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-13 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Debit Note History",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "generated_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

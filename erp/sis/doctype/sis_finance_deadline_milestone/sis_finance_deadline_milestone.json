@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "beta": 0,
+ "creation": "2026-01-13 00:00:00.000000",
+ "custom": 0,
+ "description": "Mốc deadline thanh toán trong đơn hàng - hỗ trợ nhiều mốc ưu đãi khác nhau",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "milestone_number",
+  "title",
+  "deadline_date",
+  "description"
+ ],
+ "fields": [
+  {
+   "fieldname": "milestone_number",
+   "fieldtype": "Int",
+   "label": "Số mốc",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Số thứ tự mốc: 1, 2, 3... (mốc 1 là ưu đãi cao nhất)"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tên mốc",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 3,
+   "description": "VD: Ưu đãi đầu năm, Ưu đãi tháng 2, Giá gốc..."
+  },
+  {
+   "fieldname": "deadline_date",
+   "fieldtype": "Date",
+   "label": "Hạn chót",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 2,
+   "description": "Ngày hạn chót để được hưởng mức giá của mốc này"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Mô tả",
+   "in_list_view": 1,
+   "columns": 4,
+   "description": "Mô tả chi tiết về mốc deadline"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-01-13 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Deadline Milestone",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "milestone_number",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

@@ -1,0 +1,226 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS-FIN-BATCH-{#####}",
+ "beta": 0,
+ "creation": "2026-01-13 00:00:00.000000",
+ "custom": 0,
+ "description": "Đợt gửi thông báo phí - mỗi lần gửi là một batch với mốc deadline cụ thể",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "order_id",
+  "batch_number",
+  "milestone_number",
+  "milestone_title",
+  "column_break_basic",
+  "status",
+  "total_students",
+  "sent_at",
+  "sent_by",
+  "notification_section",
+  "notification_template",
+  "notification_channel",
+  "statistics_section",
+  "sent_count",
+  "failed_count",
+  "column_break_stats",
+  "read_count",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "order_id",
+   "fieldtype": "Link",
+   "label": "Đơn hàng",
+   "options": "SIS Finance Order",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "batch_number",
+   "fieldtype": "Int",
+   "label": "Đợt gửi số",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Số thứ tự đợt gửi: 1, 2, 3..."
+  },
+  {
+   "fieldname": "milestone_number",
+   "fieldtype": "Int",
+   "label": "Mốc áp dụng",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Số mốc deadline áp dụng cho đợt gửi này"
+  },
+  {
+   "fieldname": "milestone_title",
+   "fieldtype": "Data",
+   "label": "Tên mốc",
+   "read_only": 1,
+   "description": "Tên mốc deadline (fetch từ Order.milestones)"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "draft\npreparing\nsending\nsent\nfailed",
+   "default": "draft",
+   "in_list_view": 1,
+   "reqd": 1,
+   "description": "draft: Nháp | preparing: Đang chuẩn bị | sending: Đang gửi | sent: Đã gửi | failed: Thất bại"
+  },
+  {
+   "fieldname": "total_students",
+   "fieldtype": "Int",
+   "label": "Số học sinh",
+   "read_only": 1,
+   "default": 0,
+   "in_list_view": 1,
+   "description": "Tổng số học sinh trong đợt gửi này"
+  },
+  {
+   "fieldname": "sent_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian gửi",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sent_by",
+   "fieldtype": "Link",
+   "label": "Người gửi",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notification_section",
+   "fieldtype": "Section Break",
+   "label": "Nội dung thông báo"
+  },
+  {
+   "fieldname": "notification_template",
+   "fieldtype": "Text Editor",
+   "label": "Nội dung thông báo",
+   "description": "Nội dung thông báo gửi đến phụ huynh"
+  },
+  {
+   "fieldname": "notification_channel",
+   "fieldtype": "Select",
+   "label": "Kênh gửi",
+   "options": "app\nemail\nsms\nall",
+   "default": "app",
+   "description": "app: Chỉ App | email: Chỉ Email | sms: Chỉ SMS | all: Tất cả"
+  },
+  {
+   "fieldname": "statistics_section",
+   "fieldtype": "Section Break",
+   "label": "Thống kê gửi",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "sent_count",
+   "fieldtype": "Int",
+   "label": "Đã gửi",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "failed_count",
+   "fieldtype": "Int",
+   "label": "Thất bại",
+   "read_only": 1,
+   "default": 0
+  },
+  {
+   "fieldname": "column_break_stats",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "read_count",
+   "fieldtype": "Int",
+   "label": "Đã xem",
+   "read_only": 1,
+   "default": 0,
+   "description": "Số phụ huynh đã xem thông báo"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Ghi chú",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-13 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Send Batch",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "batch_number",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

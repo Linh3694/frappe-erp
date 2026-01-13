@@ -1,0 +1,269 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:SIS-FIN-OSTD-{#####}",
+ "beta": 0,
+ "creation": "2026-01-13 00:00:00.000000",
+ "custom": 0,
+ "description": "Học sinh trong đơn hàng - chứa thông tin và các dòng số tiền riêng",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "order_id",
+  "finance_student_id",
+  "student_name",
+  "student_code",
+  "column_break_basic",
+  "class_title",
+  "data_status",
+  "fee_lines_section",
+  "fee_lines",
+  "payment_summary",
+  "total_amount",
+  "paid_amount",
+  "column_break_payment",
+  "outstanding_amount",
+  "payment_status",
+  "debit_note_section",
+  "latest_debit_note_version",
+  "latest_debit_note_url",
+  "column_break_debit",
+  "latest_debit_note_milestone",
+  "latest_debit_note_generated_at",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "order_id",
+   "fieldtype": "Link",
+   "label": "Đơn hàng",
+   "options": "SIS Finance Order",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "finance_student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh (Finance)",
+   "options": "SIS Finance Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Tên học sinh",
+   "read_only": 1,
+   "fetch_from": "finance_student_id.student_name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Mã học sinh",
+   "read_only": 1,
+   "fetch_from": "finance_student_id.student_code",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "class_title",
+   "fieldtype": "Data",
+   "label": "Lớp",
+   "read_only": 1,
+   "fetch_from": "finance_student_id.class_title"
+  },
+  {
+   "fieldname": "data_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái dữ liệu",
+   "options": "pending\ncomplete",
+   "default": "pending",
+   "in_list_view": 1,
+   "description": "pending: Chưa có số tiền | complete: Đã import đầy đủ số tiền"
+  },
+  {
+   "fieldname": "fee_lines_section",
+   "fieldtype": "Section Break",
+   "label": "Chi tiết khoản phí"
+  },
+  {
+   "fieldname": "fee_lines",
+   "fieldtype": "Table",
+   "label": "Các dòng khoản phí",
+   "options": "SIS Finance Student Order Line",
+   "description": "Số tiền cụ thể của học sinh này theo từng mốc deadline"
+  },
+  {
+   "fieldname": "payment_summary",
+   "fieldtype": "Section Break",
+   "label": "Tổng hợp thanh toán"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Tổng số tiền",
+   "read_only": 1,
+   "default": 0,
+   "in_list_view": 1,
+   "description": "Tổng số tiền phải đóng (theo mốc hiện tại)"
+  },
+  {
+   "fieldname": "paid_amount",
+   "fieldtype": "Currency",
+   "label": "Đã đóng",
+   "default": 0,
+   "description": "Số tiền đã thanh toán"
+  },
+  {
+   "fieldname": "column_break_payment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "outstanding_amount",
+   "fieldtype": "Currency",
+   "label": "Còn nợ",
+   "read_only": 1,
+   "default": 0,
+   "description": "= Tổng số tiền - Đã đóng"
+  },
+  {
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái thanh toán",
+   "options": "unpaid\npartial\npaid",
+   "default": "unpaid",
+   "in_list_view": 1,
+   "description": "unpaid: Chưa đóng | partial: Đóng một phần | paid: Đã đóng đủ"
+  },
+  {
+   "fieldname": "debit_note_section",
+   "fieldtype": "Section Break",
+   "label": "Debit Note",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "latest_debit_note_version",
+   "fieldtype": "Int",
+   "label": "Phiên bản Debit Note",
+   "read_only": 1,
+   "default": 0,
+   "description": "Số phiên bản Debit Note mới nhất (v1, v2, v3...)"
+  },
+  {
+   "fieldname": "latest_debit_note_url",
+   "fieldtype": "Data",
+   "label": "URL Debit Note",
+   "read_only": 1,
+   "description": "URL file PDF Debit Note mới nhất"
+  },
+  {
+   "fieldname": "column_break_debit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "latest_debit_note_milestone",
+   "fieldtype": "Int",
+   "label": "Mốc áp dụng",
+   "read_only": 1,
+   "description": "Mốc deadline được áp dụng cho Debit Note mới nhất"
+  },
+  {
+   "fieldname": "latest_debit_note_generated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo Debit Note",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Ghi chú",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-13 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Order Student",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}

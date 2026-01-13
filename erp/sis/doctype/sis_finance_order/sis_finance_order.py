@@ -9,7 +9,12 @@ from frappe.utils import now
 class SISFinanceOrder(Document):
     """
     Doctype quản lý đơn hàng/khoản phí trong năm tài chính.
-    Mỗi đơn hàng đại diện cho một loại khoản phí (học phí, phí dịch vụ, etc.)
+    
+    Cấu trúc mới:
+    - Hỗ trợ nhiều mốc deadline (milestones)
+    - Cấu trúc các dòng khoản phí (fee_lines) - không có số tiền mặc định
+    - Số tiền được lưu riêng cho từng học sinh trong SIS Finance Order Student
+    - Hỗ trợ gửi nhiều đợt thông báo (Send Batch)
     """
     
     def before_insert(self):
@@ -18,6 +23,8 @@ class SISFinanceOrder(Document):
             self.created_by = frappe.session.user
         if not self.created_at:
             self.created_at = now()
+        if not self.status:
+            self.status = 'draft'
     
     def before_save(self):
         """Cập nhật thời gian sửa đổi"""
@@ -25,36 +32,69 @@ class SISFinanceOrder(Document):
     
     def validate(self):
         """Validate dữ liệu trước khi lưu"""
-        self.validate_installment_count()
-        self.validate_amount()
+        self.validate_milestones()
+        self.validate_fee_lines()
+        self.validate_status_transition()
     
-    def validate_installment_count(self):
-        """Kiểm tra số kỳ thanh toán"""
-        if self.payment_type == 'installment':
-            if not self.installment_count or self.installment_count < 2:
-                frappe.throw("Số kỳ thanh toán phải >= 2 nếu chọn thanh toán chia kỳ")
-        else:
-            self.installment_count = 1
+    def validate_milestones(self):
+        """Kiểm tra các mốc deadline"""
+        if self.milestones:
+            # Kiểm tra milestone_number không trùng
+            numbers = [m.milestone_number for m in self.milestones]
+            if len(numbers) != len(set(numbers)):
+                frappe.throw("Số mốc không được trùng nhau")
+            
+            # Sắp xếp theo milestone_number
+            self.milestones.sort(key=lambda x: x.milestone_number)
     
-    def validate_amount(self):
-        """Kiểm tra số tiền hợp lệ"""
-        if self.total_amount and self.total_amount < 0:
-            frappe.throw("Số tiền không được âm")
+    def validate_fee_lines(self):
+        """Kiểm tra các dòng khoản phí"""
+        if self.fee_lines:
+            # Kiểm tra line_number không trùng
+            numbers = [l.line_number for l in self.fee_lines]
+            if len(numbers) != len(set(numbers)):
+                frappe.throw("Số thứ tự dòng không được trùng nhau")
+    
+    def validate_status_transition(self):
+        """Kiểm tra chuyển đổi trạng thái hợp lệ"""
+        if self.is_new():
+            return
+        
+        old_status = frappe.db.get_value("SIS Finance Order", self.name, "status")
+        
+        # Các trạng thái cho phép chuyển đổi
+        valid_transitions = {
+            'draft': ['students_added', 'closed'],
+            'students_added': ['draft', 'data_imported', 'closed'],
+            'data_imported': ['students_added', 'published', 'closed'],
+            'published': ['closed'],
+            'closed': []  # Không thể chuyển từ closed
+        }
+        
+        if old_status and self.status != old_status:
+            if self.status not in valid_transitions.get(old_status, []):
+                frappe.throw(f"Không thể chuyển từ trạng thái '{old_status}' sang '{self.status}'")
     
     def update_statistics(self):
         """Cập nhật thống kê cho đơn hàng"""
-        # Đếm số học sinh trong đơn hàng
+        # Đếm số học sinh trong đơn hàng (dùng Order Student mới)
         self.total_students = frappe.db.count(
-            "SIS Finance Order Item",
+            "SIS Finance Order Student",
             {"order_id": self.name}
+        )
+        
+        # Đếm số học sinh đã có đầy đủ số tiền
+        self.data_completed_count = frappe.db.count(
+            "SIS Finance Order Student",
+            {"order_id": self.name, "data_status": "complete"}
         )
         
         # Tính tổng đã thu và còn phải thu
         summary = frappe.db.sql("""
             SELECT 
-                COALESCE(SUM(amount), 0) as total_amount,
+                COALESCE(SUM(total_amount), 0) as total_amount,
                 COALESCE(SUM(paid_amount), 0) as total_paid
-            FROM `tabSIS Finance Order Item`
+            FROM `tabSIS Finance Order Student`
             WHERE order_id = %s
         """, (self.name,), as_dict=True)
         
@@ -71,6 +111,49 @@ class SISFinanceOrder(Document):
         
         self.db_update()
     
+    def update_status_based_on_students(self):
+        """Cập nhật status dựa trên trạng thái học sinh"""
+        if self.status == 'draft' and self.total_students > 0:
+            self.status = 'students_added'
+            self.db_update()
+        elif self.status == 'students_added' and self.data_completed_count == self.total_students and self.total_students > 0:
+            self.status = 'data_imported'
+            self.db_update()
+    
+    def get_milestone(self, milestone_number):
+        """Lấy thông tin mốc deadline theo số mốc"""
+        for milestone in self.milestones:
+            if milestone.milestone_number == milestone_number:
+                return milestone
+        return None
+    
+    def get_fee_line(self, line_number):
+        """Lấy thông tin dòng khoản phí theo STT"""
+        for line in self.fee_lines:
+            if line.line_number == line_number:
+                return line
+        return None
+    
+    def can_add_students(self):
+        """Kiểm tra có thể thêm học sinh không"""
+        return self.status in ['draft', 'students_added']
+    
+    def can_import_data(self):
+        """Kiểm tra có thể import số tiền không"""
+        return self.status in ['students_added', 'data_imported'] and self.total_students > 0
+    
+    def can_publish(self):
+        """Kiểm tra có thể publish không"""
+        return (
+            self.status == 'data_imported' and 
+            self.total_students > 0 and 
+            self.data_completed_count == self.total_students
+        )
+    
+    def can_create_send_batch(self):
+        """Kiểm tra có thể tạo đợt gửi không"""
+        return self.status in ['data_imported', 'published']
+    
     def after_insert(self):
         """Cập nhật thống kê năm tài chính sau khi thêm đơn hàng"""
         self.update_finance_year_statistics()
@@ -86,4 +169,3 @@ class SISFinanceOrder(Document):
             finance_year.update_statistics()
         except Exception:
             pass
-
