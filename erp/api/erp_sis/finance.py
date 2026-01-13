@@ -2278,7 +2278,15 @@ def import_student_fee_data():
             return validation_error_response("Thiếu file", {"file": ["File Excel là bắt buộc"]})
         
         file = files['file']
-        order_id = frappe.form_dict.get('order_id')
+        
+        # Lấy order_id từ form data - thử nhiều cách vì multipart form khác với JSON
+        order_id = (
+            frappe.form_dict.get('order_id') or 
+            frappe.request.form.get('order_id') or
+            frappe.request.values.get('order_id')
+        )
+        
+        logs.append(f"Debug: form_dict={frappe.form_dict}, request.form={dict(frappe.request.form)}")
         
         if not order_id:
             return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
