@@ -27,6 +27,11 @@
   "sent_count",
   "received_count",
   "column_break_1",
+  "announcement_type",
+  "finance_order_id",
+  "finance_student_id",
+  "order_student_id",
+  "include_debit_note_link",
   "recipient_type",
   "recipients",
   "content_section",
@@ -113,6 +118,47 @@
    "fieldtype": "Column Break"
   },
   {
+   "fieldname": "announcement_type",
+   "fieldtype": "Select",
+   "label": "Announcement Type",
+   "options": "general\nfee_notification",
+   "default": "general",
+   "in_list_view": 1,
+   "description": "Type of announcement: general or fee notification"
+  },
+  {
+   "fieldname": "finance_order_id",
+   "fieldtype": "Link",
+   "label": "Finance Order",
+   "options": "SIS Finance Order",
+   "depends_on": "eval:doc.announcement_type=='fee_notification'",
+   "description": "Link to finance order for fee notifications"
+  },
+  {
+   "fieldname": "finance_student_id",
+   "fieldtype": "Link",
+   "label": "Finance Student",
+   "options": "SIS Finance Student",
+   "depends_on": "eval:doc.announcement_type=='fee_notification'",
+   "description": "Student this fee notification is for (after mail merge)"
+  },
+  {
+   "fieldname": "order_student_id",
+   "fieldtype": "Link",
+   "label": "Order Student",
+   "options": "SIS Finance Order Student",
+   "depends_on": "eval:doc.announcement_type=='fee_notification'",
+   "description": "Link to order-student record for Debit Note access"
+  },
+  {
+   "fieldname": "include_debit_note_link",
+   "fieldtype": "Check",
+   "label": "Include Debit Note Link",
+   "default": 0,
+   "depends_on": "eval:doc.announcement_type=='fee_notification'",
+   "description": "Include link to view Debit Note in Parent Portal"
+  },
+  {
    "fieldname": "recipient_type",
    "fieldtype": "Select",
    "label": "Recipient Type",
@@ -178,7 +224,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-11-03 10:00:00.000000",
+ "modified": "2026-01-13 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Announcement",
