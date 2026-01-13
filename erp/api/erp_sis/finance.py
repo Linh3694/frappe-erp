@@ -1758,9 +1758,12 @@ def create_order_with_structure():
         
         for m in milestones:
             order_doc.append("milestones", {
+                "payment_scheme": m.get('payment_scheme', 'yearly'),
                 "milestone_number": m.get('milestone_number'),
                 "title": m.get('title'),
-                "deadline_date": m.get('deadline_date'),
+                "deadline_date": m.get('deadline_date') or None,
+                "column_header_en": m.get('column_header_en', ''),
+                "column_header_vn": m.get('column_header_vn', ''),
                 "description": m.get('description', '')
             })
         
@@ -1849,9 +1852,12 @@ def get_order_with_structure(order_id=None):
         # Add milestones
         for m in order_doc.milestones:
             data["milestones"].append({
+                "payment_scheme": m.payment_scheme or 'yearly',
                 "milestone_number": m.milestone_number,
                 "title": m.title,
                 "deadline_date": str(m.deadline_date) if m.deadline_date else None,
+                "column_header_en": m.column_header_en or '',
+                "column_header_vn": m.column_header_vn or '',
                 "description": m.description
             })
         
@@ -1916,9 +1922,12 @@ def update_order_structure():
             order_doc.milestones = []
             for m in milestones:
                 order_doc.append("milestones", {
+                    "payment_scheme": m.get('payment_scheme', 'yearly'),
                     "milestone_number": m.get('milestone_number'),
                     "title": m.get('title'),
-                    "deadline_date": m.get('deadline_date'),
+                    "deadline_date": m.get('deadline_date') or None,
+                    "column_header_en": m.get('column_header_en', ''),
+                    "column_header_vn": m.get('column_header_vn', ''),
                     "description": m.get('description', '')
                 })
         

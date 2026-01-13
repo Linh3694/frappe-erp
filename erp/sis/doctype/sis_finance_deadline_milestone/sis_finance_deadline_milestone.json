@@ -15,12 +15,26 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "payment_scheme",
   "milestone_number",
   "title",
   "deadline_date",
+  "column_header_en",
+  "column_header_vn",
   "description"
  ],
  "fields": [
+  {
+   "fieldname": "payment_scheme",
+   "fieldtype": "Select",
+   "label": "Dạng thanh toán",
+   "options": "\nyearly\nsemester",
+   "default": "yearly",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "yearly: Đóng cả năm | semester: Đóng theo kỳ"
+  },
   {
    "fieldname": "milestone_number",
    "fieldtype": "Int",
@@ -28,7 +42,7 @@
    "reqd": 1,
    "in_list_view": 1,
    "columns": 1,
-   "description": "Số thứ tự mốc: 1, 2, 3... (mốc 1 là ưu đãi cao nhất)"
+   "description": "Số thứ tự mốc trong cùng dạng thanh toán: 1, 2..."
   },
   {
    "fieldname": "title",
@@ -36,25 +50,39 @@
    "label": "Tên mốc",
    "reqd": 1,
    "in_list_view": 1,
-   "columns": 3,
-   "description": "VD: Ưu đãi đầu năm, Ưu đãi tháng 2, Giá gốc..."
+   "columns": 2,
+   "description": "VD: Trước 05/02, Kỳ 1, Ưu đãi đầu năm..."
   },
   {
    "fieldname": "deadline_date",
    "fieldtype": "Date",
    "label": "Hạn chót",
-   "reqd": 1,
+   "reqd": 0,
    "in_list_view": 1,
    "columns": 2,
-   "description": "Ngày hạn chót để được hưởng mức giá của mốc này"
+   "description": "Ngày hạn chót"
+  },
+  {
+   "fieldname": "column_header_en",
+   "fieldtype": "Data",
+   "label": "Header EN",
+   "in_list_view": 1,
+   "columns": 2,
+   "description": "Tiêu đề cột tiếng Anh trong Debit Note"
+  },
+  {
+   "fieldname": "column_header_vn",
+   "fieldtype": "Data",
+   "label": "Header VN",
+   "in_list_view": 1,
+   "columns": 2,
+   "description": "Tiêu đề cột tiếng Việt trong Debit Note"
   },
   {
    "fieldname": "description",
    "fieldtype": "Small Text",
    "label": "Mô tả",
-   "in_list_view": 1,
-   "columns": 4,
-   "description": "Mô tả chi tiết về mốc deadline"
+   "description": "Mô tả chi tiết"
   }
  ],
  "index_web_pages_for_search": 0,

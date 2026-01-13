@@ -39,13 +39,22 @@ class SISFinanceOrder(Document):
     def validate_milestones(self):
         """Kiểm tra các mốc deadline"""
         if self.milestones:
-            # Kiểm tra milestone_number không trùng
-            numbers = [m.milestone_number for m in self.milestones]
-            if len(numbers) != len(set(numbers)):
-                frappe.throw("Số mốc không được trùng nhau")
+            # Kiểm tra milestone_number không trùng trong cùng payment_scheme
+            # VD: yearly có mốc 1,2 và semester cũng có mốc 1,2 là OK
+            from collections import defaultdict
+            scheme_numbers = defaultdict(list)
             
-            # Sắp xếp theo milestone_number
-            self.milestones.sort(key=lambda x: x.milestone_number)
+            for m in self.milestones:
+                scheme = m.payment_scheme or 'yearly'
+                scheme_numbers[scheme].append(m.milestone_number)
+            
+            for scheme, numbers in scheme_numbers.items():
+                if len(numbers) != len(set(numbers)):
+                    scheme_label = 'Đóng cả năm' if scheme == 'yearly' else 'Đóng theo kỳ'
+                    frappe.throw(f"Số mốc trong '{scheme_label}' không được trùng nhau")
+            
+            # Sắp xếp theo payment_scheme rồi milestone_number
+            self.milestones.sort(key=lambda x: (x.payment_scheme or 'yearly', x.milestone_number))
     
     def validate_fee_lines(self):
         """Kiểm tra các dòng khoản phí"""
